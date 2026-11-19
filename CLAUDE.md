@@ -77,6 +77,8 @@ The workspace has two crates, in `crates/*`.
 - Covers are GPUI `Asset`s loaded with `window.use_asset`:
   - `CoverThumbnail` is 144 px and `CoverImage` is 480 px.
   - Decoding happens on one dedicated `cover-decoder` thread, not the background pool. Decoding on GPUI's 16 pool threads bloated glibc's per-thread malloc arenas: 62 MB versus 495 MB on a 442-cover benchmark. Keep large image decodes on that thread.
+  - Scaling uses `fast_image_resize` (bilinear, the same Triangle filter `image` used). `cover_quality_tests.rs` checks the output against `image`'s resize; set `COVER_QUALITY_DIR` to run it over a real cover cache.
+  - Each scaled cover is saved in `covers/scaled/v<N>/`: thumbnails as lossless QOI, opaque detail covers as JPEG q92. A relaunch reads these copies and decodes nothing. Bump `SCALED_VERSION` when the decode output changes; older versions are deleted at startup.
 - `library/model.rs`: `LibraryModel` is the one entity every library view reads.
   - It loads the cache first, then syncs page by page.
   - Writes return the full entry, which replaces the local one and is upserted into the cache.
