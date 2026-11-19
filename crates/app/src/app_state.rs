@@ -8,6 +8,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 use async_lock::Semaphore;
 use gpui_kit::component::{Theme, ThemeMode};
@@ -134,10 +135,11 @@ const THUMBNAIL_HEIGHT: u32 = 144;
 /// tall, so this is sharp up to 2.5x scale with the default rem.
 const COVER_HEIGHT: u32 = 480;
 
-/// The cover cache and the download limiter.
+/// The cover cache, the download limiter and the decoder thread.
 pub struct CoverService {
     cache: Option<Arc<CoverCache>>,
     downloads: Arc<Semaphore>,
+    decoder: CoverDecoder,
     /// URLs whose download failed, so they can be retried after a later sync.
     failed: Arc<Mutex<HashSet<String>>>,
 }
@@ -157,6 +159,7 @@ impl CoverService {
         Self {
             cache,
             downloads: Arc::new(Semaphore::new(COVER_DOWNLOADS)),
+            decoder: CoverDecoder::spawn(),
             failed: Arc::default(),
         }
     }
@@ -182,6 +185,7 @@ impl CoverService {
         Some(CoverLoader {
             cache: service.cache.clone()?,
             downloads: service.downloads.clone(),
+            decoder: service.decoder.clone(),
             failed: service.failed.clone(),
         })
     }
@@ -190,7 +194,64 @@ impl CoverService {
 struct CoverLoader {
     cache: Arc<CoverCache>,
     downloads: Arc<Semaphore>,
+    decoder: CoverDecoder,
     failed: Arc<Mutex<HashSet<String>>>,
+}
+
+/// One request to [`CoverDecoder`]: the file, the target height and where to
+/// send the result.
+struct DecodeJob {
+    path: Arc<Path>,
+    max_height: u32,
+    reply: async_channel::Sender<Option<Arc<RenderImage>>>,
+}
+
+/// Decodes covers on one dedicated thread.
+///
+/// Decoding a large cover allocates tens of megabytes that are freed right
+/// after scaling. glibc keeps freed memory in the arena of the thread that
+/// allocated it, so decoding on GPUI's many background threads left one
+/// bloated arena per thread: hundreds of megabytes of resident memory after
+/// browsing a few hundred covers. One thread means one arena, which is reused
+/// for every decode. A cover takes a few milliseconds, so one thread keeps up.
+#[derive(Clone)]
+struct CoverDecoder {
+    jobs: async_channel::Sender<DecodeJob>,
+}
+
+impl CoverDecoder {
+    fn spawn() -> Self {
+        let (jobs, queue) = async_channel::unbounded::<DecodeJob>();
+        let spawned = thread::Builder::new()
+            .name("cover-decoder".into())
+            .spawn(move || {
+                while let Ok(job) = queue.recv_blocking() {
+                    // The requester may have gone away; nothing to do then.
+                    let _ = job
+                        .reply
+                        .send_blocking(decode_scaled(&job.path, job.max_height));
+                }
+            });
+        if let Err(e) = spawned {
+            // Without the thread every decode below resolves to `None`, which
+            // the views show as the placeholder cover.
+            eprintln!("hardcover: cover decoder unavailable: {e}");
+        }
+        Self { jobs }
+    }
+
+    async fn decode(&self, path: Arc<Path>, max_height: u32) -> Option<Arc<RenderImage>> {
+        let (reply, result) = async_channel::bounded(1);
+        self.jobs
+            .send(DecodeJob {
+                path,
+                max_height,
+                reply,
+            })
+            .await
+            .ok()?;
+        result.recv().await.ok().flatten()
+    }
 }
 
 impl CoverLoader {
@@ -260,7 +321,7 @@ async fn load_scaled(
 ) -> Option<Arc<RenderImage>> {
     let loader = loader?;
     let path = loader.file(&url).await?;
-    let image = decode_scaled(&path, max_height);
+    let image = loader.decoder.decode(path, max_height).await;
     if image.is_none() {
         loader
             .failed
