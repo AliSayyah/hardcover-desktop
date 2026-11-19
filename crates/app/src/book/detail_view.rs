@@ -4,8 +4,8 @@
 //! book that is not in the library (with `Add to library`). Controls reflect the
 //! entry in the [`LibraryModel`]; a write disables them, and on success the
 //! returned entry replaces the model's. On failure a notification explains it
-//! and the controls are reset to the model's (unchanged) values. A notes draft
-//! is the exception: it is kept until saved or discarded.
+//! and the controls are reset to the model's (unchanged) values. A notes or
+//! review draft is the exception: it is kept until saved or discarded.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,13 +33,15 @@ use gpui_kit::{
     RenderImage, SharedString, Styled as _, StyledImage as _, Subscription, Task, Window, div, img,
     prelude::FluentBuilder as _, rems,
 };
-use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY};
+use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY, WRITE_REVIEWS};
 use hardcover_core::{
     BookDetails, BookId, BookSummary, Client, Date, EditionChange, EditionSummary, Error, Length,
-    LibraryEntry, Privacy, ProgressUpdate, Rating, ReadId, ReadSession, ReadingStatus, UserBookId,
+    LibraryEntry, Privacy, ProgressUpdate, Rating, ReadId, ReadSession, ReadingStatus, Review,
+    ReviewedEntry, UserBookId,
 };
 
 use self::catalog_sections::Similar;
+use self::review_section::ReviewEditor;
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
 use super::star_rating::StarRating;
@@ -51,6 +53,7 @@ use crate::format::{
 use crate::library::model::{LibraryModel, WriteKind};
 
 mod catalog_sections;
+mod review_section;
 
 /// What the pane shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -203,6 +206,7 @@ pub struct BookDetailView {
     _similar_task: Option<Task<()>>,
     /// "Show all tags" was pressed for the book shown.
     tags_expanded: bool,
+    review: ReviewEditor,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -227,7 +231,8 @@ impl BookDetailView {
         let started = cx.new(|cx| DatePickerState::new(window, cx).date_format("%b %-d, %Y"));
         let finished = cx.new(|cx| DatePickerState::new(window, cx).date_format("%b %-d, %Y"));
 
-        let subscriptions =
+        let (review, review_subscriptions) = ReviewEditor::new(window, cx);
+        let mut subscriptions =
             vec![
                 cx.observe_in(&model, window, |this, _, window, cx| {
                     this.sync_controls(window, cx);
@@ -289,6 +294,7 @@ impl BookDetailView {
                     },
                 ),
             ];
+        subscriptions.extend(review_subscriptions);
 
         Self {
             model,
@@ -317,6 +323,7 @@ impl BookDetailView {
             similar_loading: None,
             _similar_task: None,
             tags_expanded: false,
+            review,
             _subscriptions: subscriptions,
         }
     }
@@ -366,6 +373,7 @@ impl BookDetailView {
         let notes = entry.map(|e| (e.user_book_id, e.private_notes.clone()));
         let next = entry.map(Shown::of);
         self.sync_notes(notes, window, cx);
+        self.sync_review(window, cx);
         let Some(next) = next else {
             self.shown = None;
             return;
@@ -530,12 +538,17 @@ impl BookDetailView {
     ) {
         let model = self.model.clone();
         if !model.update(cx, |m, cx| m.begin_write(id, kind, cx)) {
-            if kind == WriteKind::Notes {
+            let title = match kind {
+                WriteKind::Notes => Some("Notes not saved yet"),
+                WriteKind::Review => Some("Review not saved yet"),
+                _ => None,
+            };
+            if let Some(title) = title {
                 window.push_notification(
                     Notification::info(
                         "Another change to this book is still being saved. Try again in a moment.",
                     )
-                    .title("Notes not saved yet"),
+                    .title(title),
                     cx,
                 );
             }
@@ -551,8 +564,15 @@ impl BookDetailView {
                 m.end_write(id, cx);
                 match &result {
                     Ok(Written {
-                        entry: Some(entry), ..
-                    }) => m.apply_written(entry.clone(), cx),
+                        entry: Some(entry),
+                        review,
+                        ..
+                    }) => {
+                        m.apply_written(entry.clone(), cx);
+                        if let Some(review) = review {
+                            m.apply_review(id, review.clone(), cx);
+                        }
+                    }
                     Ok(Written { entry: None, .. }) => m.apply_removed(id, cx),
                     Err(_) => {}
                 }
@@ -566,12 +586,18 @@ impl BookDetailView {
                         this.notes_saved = Some(id);
                         cx.notify();
                     }
+                    if kind == WriteKind::Review {
+                        this.review_written(id, cx);
+                    }
                 }
                 Err(error) => {
                     window.push_notification(
                         Notification::error(Services::error_message(
                             &error,
-                            Some(WRITE_LIBRARY),
+                            Some(match kind {
+                                WriteKind::Review => WRITE_REVIEWS,
+                                _ => WRITE_LIBRARY,
+                            }),
                             cx,
                         ))
                         .title(failure_title),
@@ -1718,9 +1744,11 @@ fn saving(cx: &App) -> impl IntoElement {
 
 /// A titled region of the pane.
 /// The outcome of a write, for [`BookDetailView::run_write`]: the entry to
-/// apply (`None` when it was removed) and a warning to show despite success.
+/// apply (`None` when it was removed), its review if the write returned one,
+/// and a warning to show despite success.
 struct Written {
     entry: Option<LibraryEntry>,
+    review: Option<Review>,
     warning: Option<(&'static str, String)>,
 }
 
@@ -1728,6 +1756,17 @@ impl From<Option<LibraryEntry>> for Written {
     fn from(entry: Option<LibraryEntry>) -> Self {
         Self {
             entry,
+            review: None,
+            warning: None,
+        }
+    }
+}
+
+impl From<ReviewedEntry> for Written {
+    fn from(written: ReviewedEntry) -> Self {
+        Self {
+            entry: Some(written.entry),
+            review: Some(written.review),
             warning: None,
         }
     }
@@ -1737,6 +1776,7 @@ impl From<EditionChange> for Written {
     fn from(change: EditionChange) -> Self {
         Self {
             entry: Some(change.entry),
+            review: None,
             warning: change.read_left_behind.map(|error| {
                 (
                     "Edition changed, progress not moved",
@@ -1807,7 +1847,8 @@ impl Render for BookDetailView {
                             .when(entry.current_read().is_some(), |this| {
                                 this.child(self.render_dates(entry, label_width, cx))
                             })
-                            .child(self.render_reads(entry, cx)),
+                            .child(self.render_reads(entry, cx))
+                            .child(self.render_review(entry, cx)),
                         None => this.child(self.render_add(&book, cx)),
                     })
                     .child(self.render_description(&book, cx))

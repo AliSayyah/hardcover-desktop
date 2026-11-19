@@ -11,7 +11,9 @@ use std::sync::Arc;
 use gpui_kit::{AppContext as _, Context, SharedString, Task};
 use hardcover_core::auth::scopes::READ_LIBRARY;
 use hardcover_core::store::LibraryCache;
-use hardcover_core::{BookId, Error, LibraryEntry, ReadingStatus, Timestamp, User, UserBookId};
+use hardcover_core::{
+    BookId, Error, LibraryEntry, ReadingStatus, Review, Timestamp, User, UserBookId,
+};
 
 use super::collection::{LocalChange, merge_sync, status_counts};
 use crate::app_state::{CoverService, Services};
@@ -26,9 +28,24 @@ pub enum WriteKind {
     Edition,
     Privacy,
     Notes,
+    Review,
     /// Adding, changing or deleting a read in the reading history.
     Reads,
     Remove,
+}
+
+/// An entry's review as far as this run knows it. Reviews are fetched when a
+/// book page shows the entry, not by the sync, and kept for the run.
+#[derive(Debug, Clone, Default)]
+pub struct ReviewSlot {
+    /// The last review known, kept while it is fetched again.
+    pub review: Option<Review>,
+    pub fetching: bool,
+    /// Why the last fetch failed.
+    pub error: Option<SharedString>,
+    /// False until fetched or written, and again after each sync, which may
+    /// bring changes made elsewhere.
+    current: bool,
 }
 
 /// Where the last sync stands.
@@ -66,6 +83,7 @@ pub struct LibraryModel {
     changes_during_sync: Option<Vec<LocalChange>>,
     writes: HashMap<UserBookId, WriteKind>,
     adding: HashSet<BookId>,
+    reviews: HashMap<UserBookId, ReviewSlot>,
     _sync_task: Option<Task<()>>,
 }
 
@@ -86,6 +104,7 @@ impl LibraryModel {
             changes_during_sync: None,
             writes: HashMap::new(),
             adding: HashSet::new(),
+            reviews: HashMap::new(),
             _sync_task: None,
         }
     }
@@ -138,6 +157,18 @@ impl LibraryModel {
 
     pub fn is_adding(&self, book: BookId) -> bool {
         self.adding.contains(&book)
+    }
+
+    pub fn review(&self, id: UserBookId) -> Option<&ReviewSlot> {
+        self.reviews.get(&id)
+    }
+
+    /// True if the entry's review should be fetched: never fetched, or not
+    /// since the last sync. A failed fetch waits for [`Self::fetch_review`].
+    pub fn wants_review(&self, id: UserBookId) -> bool {
+        self.reviews
+            .get(&id)
+            .is_none_or(|s| !s.current && !s.fetching && s.error.is_none())
     }
 
     // ----- loading and syncing -----
@@ -247,6 +278,11 @@ impl LibraryModel {
                 self.loaded = true;
                 self.sync = SyncStatus::Synced;
                 self.last_synced_at = Some(chrono::Utc::now());
+                // Fetched again when next shown, also after a failure.
+                for slot in self.reviews.values_mut() {
+                    slot.current = false;
+                    slot.error = None;
+                }
                 CoverService::retry_failed(cx);
                 cx.notify();
                 Some((user, merged))
@@ -313,7 +349,56 @@ impl LibraryModel {
         }
     }
 
+    /// Fetches the entry's review in the background. The review shown, if
+    /// any, stays until the new one arrives.
+    pub fn fetch_review(&mut self, id: UserBookId, cx: &mut Context<Self>) {
+        let slot = self.reviews.entry(id).or_default();
+        if slot.fetching {
+            return;
+        }
+        slot.fetching = true;
+        slot.error = None;
+        cx.notify();
+        let client = Services::global(cx).client().clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { client.review(id) }).await;
+            let _ = this.update(cx, |this, cx| {
+                let error = match &result {
+                    Err(e) => Some(Services::error_message(e, Some(READ_LIBRARY), cx).into()),
+                    Ok(_) => None,
+                };
+                let Some(slot) = this.reviews.get_mut(&id) else {
+                    // The entry was removed meanwhile.
+                    return;
+                };
+                slot.fetching = false;
+                // A review write that landed meanwhile is newer.
+                if !slot.current {
+                    match result {
+                        Ok(review) => {
+                            slot.review = Some(review);
+                            slot.current = true;
+                        }
+                        Err(_) => slot.error = error,
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The review a review write returned.
+    pub fn apply_review(&mut self, id: UserBookId, review: Review, cx: &mut Context<Self>) {
+        let slot = self.reviews.entry(id).or_default();
+        slot.review = Some(review);
+        slot.current = true;
+        slot.error = None;
+        cx.notify();
+    }
+
     pub fn apply_removed(&mut self, id: UserBookId, cx: &mut Context<Self>) {
+        self.reviews.remove(&id);
         if let Some(changes) = &mut self.changes_during_sync {
             changes.push(LocalChange::Removed(id));
         }
