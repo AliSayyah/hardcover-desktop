@@ -68,16 +68,17 @@ impl Preferences {
     }
 }
 
-/// The main window's size, in logical pixels, and whether it was maximized.
+/// The main window's size, in logical pixels.
 ///
 /// There is no position: Wayland doesn't tell clients where their windows
-/// are, nor let them choose, so the window opens centred.
+/// are, nor let them choose, so the window opens centred. There is no
+/// maximized state either: tiling compositors report tiled windows as
+/// maximized, and asking them to maximize a new window covers the others.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WindowState {
     pub width: f32,
     pub height: f32,
-    pub maximized: bool,
 }
 
 impl Default for WindowState {
@@ -85,7 +86,6 @@ impl Default for WindowState {
         Self {
             width: 1200.,
             height: 800.,
-            maximized: false,
         }
     }
 }
@@ -129,7 +129,6 @@ impl WindowState {
         Self {
             width: side(self.width, Self::MIN_WIDTH, default.width),
             height: side(self.height, Self::MIN_HEIGHT, default.height),
-            maximized: self.maximized,
         }
     }
 }
@@ -248,7 +247,6 @@ mod tests {
         let state = WindowState {
             width: 1440.,
             height: 900.,
-            maximized: true,
         };
         state.save(&path).unwrap();
         assert_eq!(WindowState::load(&path), state);
@@ -256,11 +254,7 @@ mod tests {
 
     #[test]
     fn window_sizes_are_clamped_to_something_openable() {
-        let state = |width, height| WindowState {
-            width,
-            height,
-            maximized: false,
-        };
+        let state = |width, height| WindowState { width, height };
         assert_eq!(state(100., 100.).sanitized(), state(800., 560.));
         assert_eq!(state(1e9, 900.).sanitized(), state(16_384., 900.));
         assert_eq!(

@@ -59,7 +59,7 @@ The workspace has two crates, in `crates/*`.
   - `StaticToken` is the `HARDCOVER_TOKEN` path.
 - `store`: `LibraryCache`, a SQLite database at `~/.local/share/hardcover-desktop/library.sqlite3`.
 - `covers`: `CoverCache`, on disk at `~/.cache/hardcover-desktop/covers`.
-- `prefs`: `Preferences` (theme, automatic update checks) in `~/.config/hardcover-desktop/settings.json`, and `WindowState` (size, maximized) in `~/.local/state/hardcover-desktop/window.json`. Loading never fails: a missing or garbled file gives the defaults, and every field has `#[serde(default)]`, because a self-updated app reads the file an older version wrote. Writes are atomic (temporary file, then rename). Both survive signing out.
+- `prefs`: `Preferences` (theme, automatic update checks) in `~/.config/hardcover-desktop/settings.json`, and `WindowState` (the window size) in `~/.local/state/hardcover-desktop/window.json`. Loading never fails: a missing or garbled file gives the defaults, and every field has `#[serde(default)]`, because a self-updated app reads the file an older version wrote. Writes are atomic (temporary file, then rename). Both survive signing out.
 
 **`app`** (the package is named `hardcover-desktop`) is the GPUI UI.
 - `main.rs` sets up actions, keybindings and the window.
@@ -77,7 +77,7 @@ The workspace has two crates, in `crates/*`.
   - A sync that started before a write re-applies that write when the sync lands (`collection::merge_sync`).
   - `begin_write`/`end_write` track the writes in flight, per control.
 - `preferences.rs`: the `AppPreferences` global (`PreferencesModel`) and the theme. `follow_theme` re-applies the theme when the desktop's appearance or the preference changes. `UpdateModel` observes the model to start or stop automatic checks.
-- `window_state.rs`: `WindowStateSaver`, owned by `Shell`, saves the window size 500 ms after the last change, and again on close and quit. The window always opens centred, because Wayland neither reports nor sets window positions. Hyprland reports tiled and floating windows as maximized, so a window counts as maximized only when it fills its display.
+- `window_state.rs`: `WindowStateSaver`, owned by `Shell`, saves the window size 500 ms after the last change, and again on close and quit. The window always opens centred, because Wayland neither reports nor sets window positions. It doesn't restore the maximized state either: Hyprland reports tiled windows as maximized, and a window that asks to be maximized there opens fullscreen over the others. A maximized window saves its restore size; Hyprland keeps reporting maximized after a window is floated, so a window counts as maximized only when it fills its display.
 - `settings_view.rs` (Settings dialog, `Ctrl+,`) and `about.rs` (About dialog). Both open from the account menu.
 - `shell.rs`: `Shell` switches between Starting, SignIn and Workspace. `Workspace` contains the sidebar (shelves by status) plus the current destination (library, search or book detail).
 

@@ -20,7 +20,10 @@ pub struct PreferencesModel {
     preferences: Preferences,
     /// `None` when there is no home directory; changes then last for this run.
     path: Option<Arc<Path>>,
-    /// Keeps background writes in order.
+    /// The newest preferences, for the background writes to pick up.
+    unsaved: Arc<Mutex<Preferences>>,
+    /// Held while writing: each write saves whatever is newest when it gets
+    /// the lock, so the last write to finish always saves the newest.
     write_lock: Arc<Mutex<()>>,
 }
 
@@ -48,6 +51,7 @@ pub fn load() -> (Preferences, Option<PathBuf>) {
 
 pub fn init(preferences: Preferences, path: Option<PathBuf>, cx: &mut App) {
     let model = cx.new(|_| PreferencesModel {
+        unsaved: Arc::new(Mutex::new(preferences.clone())),
         preferences,
         path: path.map(Arc::from),
         write_lock: Arc::default(),
@@ -82,16 +86,22 @@ impl PreferencesModel {
         let Some(path) = self.path.clone() else {
             return;
         };
-        let preferences = self.preferences.clone();
-        let lock = self.write_lock.clone();
+        *lock(&self.unsaved) = self.preferences.clone();
+        let unsaved = self.unsaved.clone();
+        let write_lock = self.write_lock.clone();
         cx.background_spawn(async move {
-            let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
+            let _writing = lock(&write_lock);
+            let preferences = lock(&unsaved).clone();
             if let Err(e) = preferences.save(&path) {
                 eprintln!("hardcover: could not save preferences: {e}");
             }
         })
         .detach();
     }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// The theme forced by `HARDCOVER_THEME`, if any.

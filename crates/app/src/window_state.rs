@@ -1,4 +1,4 @@
-//! Remembers the main window's size and whether it was maximized.
+//! Remembers the main window's size.
 //!
 //! The window opens centred: Wayland neither reports a window's position nor
 //! lets a client place it. [`WindowStateSaver`] watches the window's bounds,
@@ -35,12 +35,7 @@ pub fn initial_bounds(state: WindowState, cx: &App) -> WindowBounds {
         size.width = size.width.min(available.width);
         size.height = size.height.min(available.height);
     }
-    let bounds = Bounds::centered(None, size, cx);
-    if state.maximized {
-        WindowBounds::Maximized(bounds)
-    } else {
-        WindowBounds::Windowed(bounds)
-    }
+    WindowBounds::Windowed(Bounds::centered(None, size, cx))
 }
 
 /// The smallest window the layout supports.
@@ -52,8 +47,9 @@ pub fn min_size() -> Size<Pixels> {
 /// session rather than a size to come back to.
 ///
 /// `bounds` is GPUI's view (the restore size when maximized), `current` the
-/// window's actual size and `display` the size of its display. Some
-/// compositors report a window as maximized when it isn't (Hyprland keeps the
+/// window's actual size and `display` the size of its display. A maximized
+/// window saves its restore size, so it reopens as the window it was before.
+/// Some compositors report a window as maximized when it isn't (Hyprland keeps the
 /// maximized state on tiled windows, even after floating them), so a
 /// "maximized" window counts as one only when it fills its display.
 fn state_for(
@@ -64,17 +60,15 @@ fn state_for(
     let fills_display = display.is_none_or(|display| {
         current.width >= display.width * 0.9 && current.height >= display.height * 0.8
     });
-    let (size, maximized) = match bounds {
+    let size = match bounds {
         WindowBounds::Fullscreen(_) => return None,
-        // The restore size, so un-maximizing next time gives a sensible window.
-        WindowBounds::Maximized(restore) if fills_display => (restore.size, true),
-        WindowBounds::Maximized(_) | WindowBounds::Windowed(_) => (current, false),
+        WindowBounds::Maximized(restore) if fills_display => restore.size,
+        WindowBounds::Maximized(_) | WindowBounds::Windowed(_) => current,
     };
     Some(
         WindowState {
             width: f32::from(size.width),
             height: f32::from(size.height),
-            maximized,
         }
         .sanitized(),
     )
@@ -148,12 +142,8 @@ mod tests {
         Bounds::new(point(px(0.), px(0.)), size(width, height))
     }
 
-    fn state(width: f32, height: f32, maximized: bool) -> Option<WindowState> {
-        Some(WindowState {
-            width,
-            height,
-            maximized,
-        })
+    fn state(width: f32, height: f32) -> Option<WindowState> {
+        Some(WindowState { width, height })
     }
 
     const DISPLAY: Option<Size<Pixels>> = Some(Size {
@@ -169,7 +159,7 @@ mod tests {
                 size(1000., 700.),
                 DISPLAY
             ),
-            state(1000., 700., false)
+            state(1000., 700.)
         );
     }
 
@@ -181,19 +171,19 @@ mod tests {
                 size(2536., 1390.),
                 DISPLAY
             ),
-            state(1300., 900., true)
+            state(1300., 900.)
         );
     }
 
     #[test]
-    fn a_window_reported_maximized_but_smaller_than_the_display_is_not() {
+    fn a_window_reported_maximized_that_does_not_fill_the_display_saves_its_size() {
         assert_eq!(
             state_for(
                 WindowBounds::Maximized(bounds(2560., 1440.)),
                 size(1400., 900.),
                 DISPLAY
             ),
-            state(1400., 900., false)
+            state(1400., 900.)
         );
     }
 
@@ -217,7 +207,7 @@ mod tests {
                 size(10., 10.),
                 None
             ),
-            state(WindowState::MIN_WIDTH, WindowState::MIN_HEIGHT, false)
+            state(WindowState::MIN_WIDTH, WindowState::MIN_HEIGHT)
         );
     }
 }
