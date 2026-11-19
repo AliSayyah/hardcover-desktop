@@ -892,8 +892,9 @@ impl BookDetailView {
             |text| format!("The {text} edition"),
         );
         let description: SharedString = format!(
-            "{which} goes on your Owned list on Hardcover and appears in your activity. \
-             To take it off the list, use the Hardcover website."
+            "{which} goes on your Owned list on Hardcover and appears in your activity, \
+             which others may see even if this book is private. To take it off the list, \
+             use the Hardcover website."
         )
         .into();
         let view = cx.entity().downgrade();
