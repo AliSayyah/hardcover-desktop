@@ -3,6 +3,8 @@
 mod about;
 mod app_state;
 mod book;
+#[cfg(test)]
+mod cover_quality_tests;
 mod format;
 mod library;
 mod preferences;

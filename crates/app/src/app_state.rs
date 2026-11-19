@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use async_lock::Semaphore;
+use fast_image_resize::{self as fir, PixelType};
 use gpui_kit::{App, Asset, Global, RenderImage, Window};
 use hardcover_core::auth::{KeyringTokenStore, OAuthConfig, Session, StaticToken};
 use hardcover_core::covers::CoverCache;
@@ -343,23 +344,68 @@ async fn load_scaled(
 }
 
 /// Decodes an image file, scaled down to at most `max_height` pixels tall.
-fn decode_scaled(path: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
+pub(crate) fn decode_scaled(path: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
     let image = image::ImageReader::open(path)
         .ok()?
         .with_guessed_format()
         .ok()?
         .decode()
         .ok()?;
-    let height = max_height.min(image.height().max(1));
-    let width = (image.width() as u64 * height as u64 / image.height().max(1) as u64).max(1) as u32;
-    let mut rgba = image
-        .resize(width, height, image::imageops::FilterType::Triangle)
-        .into_rgba8();
+    let (src_width, src_height) = (image.width(), image.height());
+    let (width, height) = scaled_size(src_width, src_height, max_height);
+    // Covers are mostly JPEG, which decodes to RGB; resize that without
+    // adding an alpha channel first.
+    let (pixel_type, pixels) = match image {
+        image::DynamicImage::ImageRgb8(rgb) => (PixelType::U8x3, rgb.into_raw()),
+        other => (PixelType::U8x4, other.into_rgba8().into_raw()),
+    };
+    let pixels = if (width, height) == (src_width, src_height) {
+        pixels
+    } else {
+        let src =
+            fir::images::Image::from_vec_u8(src_width, src_height, pixels, pixel_type).ok()?;
+        let mut dst = fir::images::Image::new(width, height, pixel_type);
+        // Bilinear convolution is the Triangle filter `image` uses, with SIMD.
+        let options = fir::ResizeOptions::new()
+            .resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::Bilinear))
+            .use_alpha(false);
+        fir::Resizer::new().resize(&src, &mut dst, &options).ok()?;
+        dst.into_vec()
+    };
     // GPUI's sprite atlas expects BGRA.
-    for pixel in rgba.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
-    Some(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)])))
+    let bgra = match pixel_type {
+        PixelType::U8x3 => pixels
+            .chunks_exact(3)
+            .flat_map(|p| [p[2], p[1], p[0], u8::MAX])
+            .collect(),
+        _ => {
+            let mut pixels = pixels;
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+            pixels
+        }
+    };
+    let frame = image::RgbaImage::from_raw(width, height, bgra)?;
+    Some(Arc::new(RenderImage::new(vec![image::Frame::new(frame)])))
+}
+
+/// The size a `src_width` x `src_height` cover is shown at: at most
+/// `max_height` tall, never enlarged.
+///
+/// This is the size `DynamicImage::resize` picked when it did the scaling: the
+/// width is rounded down, then the result is fitted inside that box, so the
+/// height can come out a pixel short. Kept so covers look exactly as before.
+fn scaled_size(src_width: u32, src_height: u32, max_height: u32) -> (u32, u32) {
+    let src_height = src_height.max(1);
+    let height = max_height.min(src_height);
+    let width = (u64::from(src_width) * u64::from(height) / u64::from(src_height)).max(1) as u32;
+    let ratio = f64::min(
+        f64::from(width) / f64::from(src_width.max(1)),
+        f64::from(height) / f64::from(src_height),
+    );
+    let fit = |side: u32| ((f64::from(side) * ratio).round() as u32).max(1);
+    (fit(src_width), fit(src_height))
 }
 
 /// The cover file for `url`, starting a background load on first use. The
