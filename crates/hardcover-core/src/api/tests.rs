@@ -107,7 +107,13 @@ fn me_parses_and_sends_bearer_token() {
 #[test]
 fn library_paginates_by_keyset() {
     let (c, http) = client(TestTokens::new(false));
-    let first: Vec<Value> = (1..=100).map(|i| user_book(i, 1 + i % 5)).collect();
+    let mut first: Vec<Value> = (1..=100).map(|i| user_book(i, 1 + i % 5)).collect();
+    // One book is in two series, one of them listed twice; the others list none.
+    first[1]["book"]["book_series"] = json!([
+        {"position": 2.0, "featured": true, "series": {"id": 31, "name": "Synthetic Saga", "slug": "synthetic-saga"}},
+        {"position": null, "featured": false, "series": {"id": 32, "name": "Omnibus", "slug": null}},
+        {"position": 7.0, "featured": false, "series": {"id": 31, "name": "Synthetic Saga", "slug": "synthetic-saga"}}
+    ]);
     // Second page holds one shelf entry and one with a status id we don't know.
     let second = vec![user_book(150, 3), user_book(151, 42)];
     http.push(200, &data(json!({ "user_books": first })));
@@ -154,6 +160,18 @@ fn library_paginates_by_keyset() {
     assert_eq!(read.started_at.unwrap().to_string(), "2024-02-01");
     assert_eq!(e.date_added.unwrap().to_string(), "2024-01-02");
     assert!(e.updated_at.is_some());
+    assert!(e.series.is_empty(), "a book without book_series has none");
+
+    let series = &lib[1].series;
+    assert_eq!(series.len(), 2);
+    assert_eq!(series[0].name, "Synthetic Saga");
+    assert_eq!(series[0].id, Some(SeriesId::new(31)));
+    assert_eq!(series[0].position, Some(2.0));
+    assert!(series[0].featured);
+    assert_eq!(
+        (series[1].name.as_str(), series[1].position),
+        ("Omnibus", None)
+    );
 }
 
 #[test]

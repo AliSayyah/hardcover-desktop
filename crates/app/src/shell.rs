@@ -40,6 +40,7 @@ use crate::catalog::series_view::SeriesView;
 use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
 use crate::goals::model::GoalsModel;
 use crate::goals::sidebar::GoalsSection;
+use crate::home::home_view::HomeView;
 use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
 use crate::lists::list_view::ListView;
@@ -53,7 +54,7 @@ use crate::stats::stats_view::StatsView;
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
 use crate::{
     FocusSearch, GoBack, OpenSettings, Refresh, ShowAbout, ShowCurrentlyReading, ShowDidNotFinish,
-    ShowDiscover, ShowIgnored, ShowPaused, ShowRead, ShowStats, ShowWantToRead,
+    ShowDiscover, ShowHome, ShowIgnored, ShowPaused, ShowRead, ShowStats, ShowWantToRead,
 };
 
 /// Key context of a catalogue page, where Escape goes back.
@@ -167,6 +168,8 @@ impl Render for Shell {
 /// Where the workspace's main area points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Destination {
+    /// Shown at launch.
+    Home,
     Search,
     Discover,
     Stats,
@@ -181,6 +184,7 @@ pub struct Workspace {
     focus_handle: FocusHandle,
     model: Entity<LibraryModel>,
     destination: Destination,
+    home: Entity<HomeView>,
     library: Entity<LibraryView>,
     search: Entity<SearchView>,
     discover: Entity<DiscoverView>,
@@ -235,6 +239,7 @@ impl Workspace {
         let reauthorize = cx.new(|_| Reauthorize::new(model.clone()));
         let goals = cx.new(|cx| GoalsModel::new(model.clone(), cx));
         let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
+        let home = cx.new(|cx| HomeView::new(model.clone(), goals.clone(), cx));
         model.update(cx, |m, cx| m.start(cx));
         goals.update(cx, |g, cx| g.load(cx));
         lists.update(cx, |l, cx| l.load(cx));
@@ -294,7 +299,8 @@ impl Workspace {
         Self {
             focus_handle: cx.focus_handle(),
             model,
-            destination: Destination::Shelf(ReadingStatus::CurrentlyReading),
+            destination: Destination::Home,
+            home,
             library,
             search,
             discover,
@@ -319,7 +325,7 @@ impl Workspace {
     }
 
     fn focus_initial(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.library.update(cx, |l, cx| l.focus_list(window, cx));
+        self.home.update(cx, |h, cx| h.focus(window, cx));
     }
 
     /// Focuses the current destination's primary control.
@@ -329,6 +335,7 @@ impl Workspace {
             return;
         }
         match self.destination {
+            Destination::Home => self.home.update(cx, |h, cx| h.focus(window, cx)),
             Destination::Search => self.search.update(cx, |s, cx| s.focus_input(window, cx)),
             Destination::Discover => self.discover.update(cx, |d, cx| d.focus(window, cx)),
             Destination::Stats => self.stats.update(cx, |s, cx| s.focus(window, cx)),
@@ -342,6 +349,7 @@ impl Workspace {
         self.pages.clear();
         self.destination = destination;
         match destination {
+            Destination::Home => self.home.update(cx, |h, cx| h.focus(window, cx)),
             Destination::Search => self.search.update(cx, |s, cx| s.focus_input(window, cx)),
             Destination::Discover => self.discover.update(cx, |d, cx| {
                 d.show(window, cx);
@@ -613,6 +621,12 @@ impl Workspace {
             )
             .child(NavSection::Menu(Box::new(
                 SidebarMenu::new()
+                    .child(nav_item(
+                        "Home",
+                        IconName::LayoutDashboard,
+                        Destination::Home,
+                        &ShowHome,
+                    ))
                     .child(nav_item(
                         "Search",
                         IconName::Search,
@@ -1036,10 +1050,14 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ShowStats, window, cx| {
                 this.show(Destination::Stats, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &ShowHome, window, cx| {
+                this.show(Destination::Home, window, cx)
+            }))
             .child(self.render_sidebar(window, cx))
             .child(div().flex_1().min_w_0().h_full().map(|this| {
                 match (self.pages.current(), self.destination) {
                     (Some(page), _) => this.child(self.render_page(page, cx)),
+                    (None, Destination::Home) => this.child(self.home.clone()),
                     (None, Destination::Search) => this.child(self.search.clone()),
                     (None, Destination::Discover) => this.child(self.discover.clone()),
                     (None, Destination::Stats) => this.child(self.stats.clone()),

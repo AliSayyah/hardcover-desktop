@@ -329,25 +329,31 @@ impl RawBookDetails {
         d.content_warnings = tags_in(tags, "Content Warning");
         d.editions_count = opt_u32(self.editions_count);
         d.ratings_count = opt_u32(self.ratings_count);
-        let mut seen = Vec::new();
-        for bs in self.book_series {
-            let Some(series) = bs.series else { continue };
-            let Some(name) = non_empty(series.name) else {
-                continue;
-            };
-            if seen.contains(&name) {
-                continue;
-            }
-            seen.push(name.clone());
-            let mut s = SeriesRef::new(name);
-            s.id = series.id.map(SeriesId::new);
-            s.slug = non_empty(series.slug);
-            s.position = bs.position.filter(|p| p.is_finite()).map(|p| p as f32);
-            s.featured = bs.featured;
-            d.series.push(s);
-        }
+        d.series = series_refs(self.book_series);
         d
     }
+}
+
+/// A book's `book_series` rows, in the order asked for (featured first). A
+/// series listed twice, or without a name, is left out.
+fn series_refs(rows: Vec<RawBookSeries>) -> Vec<SeriesRef> {
+    let mut refs: Vec<SeriesRef> = Vec::new();
+    for bs in rows {
+        let Some(series) = bs.series else { continue };
+        let Some(name) = non_empty(series.name) else {
+            continue;
+        };
+        if refs.iter().any(|s| s.name == name) {
+            continue;
+        }
+        let mut s = SeriesRef::new(name);
+        s.id = series.id.map(SeriesId::new);
+        s.slug = non_empty(series.slug);
+        s.position = bs.position.filter(|p| p.is_finite()).map(|p| p as f32);
+        s.featured = bs.featured;
+        refs.push(s);
+    }
+    refs
 }
 
 // ---------- series and authors ----------
@@ -608,10 +614,19 @@ pub(crate) struct RawUserBook {
     pub updated_at: Option<String>,
     pub privacy_setting_id: Option<i64>,
     pub private_notes: Option<String>,
-    pub book: RawBook,
+    pub book: RawUserBookBook,
     pub edition: Option<RawEdition>,
     #[serde(default)]
     pub user_book_reads: Vec<RawRead>,
+}
+
+/// An entry's book: its summary and its series.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawUserBookBook {
+    #[serde(flatten)]
+    pub book: RawBook,
+    #[serde(default)]
+    pub book_series: Vec<RawBookSeries>,
 }
 
 impl RawUserBook {
@@ -621,9 +636,10 @@ impl RawUserBook {
         let mut e = LibraryEntry::new(
             UserBookId::new(self.id),
             UserId::new(self.user_id),
-            self.book.into_summary(),
+            self.book.book.into_summary(),
             status,
         );
+        e.series = series_refs(self.book.book_series);
         e.rating = self
             .rating
             .as_ref()

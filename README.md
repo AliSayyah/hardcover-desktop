@@ -26,6 +26,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 
 ## Features
 
+- **Home:** the books you're reading, with your pace and when each should be done at it, your reading goal and whether you're on track, and what to read next, such as the next book in a series you've started.
 - **Your library by shelf:** Currently Reading, Want to Read, Read, Paused and Did Not Finish, with counts in the sidebar, plus the books you ignored.
 - **Search:** find any book, author or series on Hardcover, and add books to a shelf.
 - **Discover:** the books the most readers finished on Hardcover this week, month, three months, year or of all time, each with its shelf.
@@ -52,6 +53,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 
   | Shortcut | Action |
   | --- | --- |
+  | <kbd>Ctrl</kbd>+<kbd>0</kbd> | Home |
   | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search |
   | <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>6</kbd> | Go to a shelf |
   | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> | Discover |

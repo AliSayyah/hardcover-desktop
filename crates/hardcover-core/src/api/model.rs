@@ -497,6 +497,10 @@ pub struct LibraryEntry {
     /// Who can see the entry. `None` in caches written before it was stored.
     #[serde(default)]
     pub privacy: Option<Privacy>,
+    /// The book's series, featured first. Empty in caches written before it
+    /// was stored, until the next sync.
+    #[serde(default)]
+    pub series: Vec<SeriesRef>,
 }
 
 impl LibraryEntry {
@@ -518,6 +522,7 @@ impl LibraryEntry {
             updated_at: None,
             private_notes: None,
             privacy: None,
+            series: Vec::new(),
         }
     }
 
