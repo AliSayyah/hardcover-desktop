@@ -7,6 +7,7 @@ mod library;
 mod search;
 mod shell;
 mod sign_in;
+mod update;
 
 use gpui_kit::{
     App, AppContext as _, KeyBinding, Size, TitlebarOptions, WindowBounds, WindowOptions, actions,
@@ -80,11 +81,25 @@ fn bind_keys(cx: &mut App) {
 }
 
 fn main() {
+    if std::env::args()
+        .skip(1)
+        .any(|a| a == "--version" || a == "-V")
+    {
+        println!("hardcover-desktop {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    // Resolved before anything else: once an update replaces the binary,
+    // /proc/self/exe names the deleted file, and restarting must use this path.
+    let exe = std::env::current_exe().ok();
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
-        .run(|cx| {
+        .run(move |cx| {
             gpui_kit::init(cx);
             bind_keys(cx);
+            if let Some(exe) = &exe {
+                cx.set_restart_path(exe.clone());
+            }
+            update::init(exe.clone(), cx);
 
             // Window geometry is a platform boundary: logical pixels, not rems.
             let size = Size::new(gpui_kit::px(1200.), gpui_kit::px(800.));

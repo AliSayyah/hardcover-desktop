@@ -33,6 +33,7 @@ Environment variables (see `.env.example`; `.env` is gitignored and must never b
 - `HARDCOVER_TOKEN`: a personal access token. For development only: it bypasses OAuth in the app, and the examples and live tests use it.
 - `HARDCOVER_CLIENT_ID`: overrides the compiled-in OAuth client id, `auth::DEFAULT_CLIENT_ID`.
 - `HARDCOVER_THEME=light`: forces the light theme.
+- `HARDCOVER_NO_UPDATE_CHECK=1`: turns off automatic update checks. Debug builds never check on their own; "Check for updates" in the account menu always works.
 - `live_writes` example: `HARDCOVER_LIVE_WRITES=yes`, `HARDCOVER_LIVE_PHASE`, `HARDCOVER_TEST_BOOK_ID`.
 
 Live write tests run against a real account. Restore everything afterwards. Removing a book does not delete its `reading_journals` rows; clean those up separately, which needs a token with journal scope.
@@ -106,3 +107,20 @@ Use the bundled `gpui-kit` and `gpui-kit-design-guides` skills, in `.claude/skil
   3. Push a `vX.Y.Z` tag.
 
   `release.yml` checks that the three versions agree, builds with `--profile dist` (thin LTO, stripped), packs a tarball (`packaging/linux/package.sh`) and creates the GitHub release. Running it by hand builds the tarball as an artifact without publishing anything.
+
+## Self-update
+
+The core side is `hardcover_core::update`; the app side is `crates/app/src/update.rs` plus the sidebar row in `shell.rs`.
+- **When it installs:** the app checks `releases/latest` on GitHub. It installs a release only when it runs from an unpacked release tarball (`<prefix>/bin/hardcover-desktop` with the desktop entry under `<prefix>/share`) in a writable prefix. Other installs only announce new releases.
+- **Trust chain:**
+  - The minisign signature must verify against `packaging/minisign.pub`.
+  - The signature's `file:` comment must be the tarball name for the advertised version and architecture, which stops replays of older signed releases.
+  - The version must be newer than the running one.
+  - The archive's top-level directory must match the tarball name.
+  - Only regular files under `bin/hardcover-desktop` and `share/` are unpacked. They are staged in the prefix and renamed into place, the binary last.
+- **Restarting:** `main` resolves the executable path before anything else and passes it to `set_restart_path`. After an update, `/proc/self/exe` points to the deleted old binary.
+- **Signing:**
+  - `release.yml` signs in the publish job, with the `MINISIGN_SECRET_KEY` repository secret exposed to that one step only, then verifies with `packaging/minisign.pub`.
+  - Never replace the key: installed copies trust only this one.
+  - Never re-publish different bytes under an existing version. If a release goes wrong, release a new patch version.
+- **Release notes:** generated changes come first, followed by `<!-- install -->` and `packaging/linux/release-notes.md`. The app's update dialog shows only the part before the marker.
