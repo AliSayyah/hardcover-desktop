@@ -107,6 +107,112 @@ pub(crate) fn authors_from_contributors(v: &Value) -> Vec<String> {
     dedup(authors)
 }
 
+/// Everyone in `cached_contributors`, in credit order, with their author id
+/// (`author.id`) and role. The same person in the same role once.
+pub(crate) fn contributors_from_cached(v: &Value) -> Vec<Contributor> {
+    let Some(list) = v.as_array() else {
+        return Vec::new();
+    };
+    let mut out: Vec<Contributor> = Vec::new();
+    for c in list {
+        let author = c.get("author");
+        let Some(name) = author.and_then(|a| a.get("name")).and_then(as_string) else {
+            continue;
+        };
+        let mut contributor = Contributor::new(name);
+        contributor.author_id = author
+            .and_then(|a| a.get("id"))
+            .and_then(as_i64)
+            .map(AuthorId::new);
+        contributor.role = c.get("contribution").and_then(as_string);
+        let duplicate = out.iter().any(|o| {
+            o.name == contributor.name
+                && o.is_author() == contributor.is_author()
+                && (contributor.is_author() || o.role == contributor.role)
+        });
+        if !duplicate {
+            out.push(contributor);
+        }
+    }
+    out
+}
+
+/// `ratings_distribution`, highest rating first. Accepts a list of
+/// `{rating, count}` objects or an object keyed by rating (`{"4.5": 12}`);
+/// zero counts and ratings outside 0.5..=5 are dropped.
+pub(crate) fn ratings_distribution(v: &Value) -> Vec<RatingBucket> {
+    let pairs: Vec<(Option<f64>, Option<i64>)> = match v {
+        Value::Array(items) => items
+            .iter()
+            .map(|i| {
+                (
+                    i.get("rating").and_then(as_f64),
+                    i.get("count").and_then(as_i64),
+                )
+            })
+            .collect(),
+        Value::Object(map) => map
+            .iter()
+            .map(|(k, n)| (k.trim().parse::<f64>().ok(), as_i64(n)))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let mut buckets: Vec<RatingBucket> = Vec::new();
+    for (rating, count) in pairs {
+        let (Some(rating), Some(count)) = (rating, count.and_then(|c| u32::try_from(c).ok()))
+        else {
+            continue;
+        };
+        if !(0.5..=5.0).contains(&rating) || count == 0 {
+            continue;
+        }
+        let rating = ((rating * 2.0).round() / 2.0) as f32;
+        match buckets.iter_mut().find(|b| b.rating == rating) {
+            Some(b) => b.count = b.count.saturating_add(count),
+            None => buckets.push(RatingBucket::new(rating, count)),
+        }
+    }
+    buckets.sort_by(|a, b| b.rating.total_cmp(&a.rating));
+    buckets
+}
+
+/// `alternative_titles`: strings, or objects with a `title`. Leaves out the
+/// book's own title and repeats.
+fn alternative_titles(v: &Value, own: &str) -> Vec<String> {
+    let Some(list) = v.as_array() else {
+        return Vec::new();
+    };
+    let mut titles: Vec<String> = Vec::new();
+    for title in list
+        .iter()
+        .filter_map(|t| as_string(t).or_else(|| t.get("title").and_then(as_string)))
+    {
+        let repeat = title.eq_ignore_ascii_case(own)
+            || titles.iter().any(|t| t.eq_ignore_ascii_case(&title));
+        if !repeat {
+            titles.push(title);
+        }
+    }
+    titles
+}
+
+/// `cached_similar_book_ids`: ids (numbers or strings), or objects with an `id`.
+fn book_ids(v: &Value) -> Vec<BookId> {
+    let Some(list) = v.as_array() else {
+        return Vec::new();
+    };
+    let mut ids: Vec<BookId> = Vec::new();
+    for item in list {
+        let id = as_i64(item).or_else(|| item.get("id").and_then(as_i64));
+        if let Some(id) = id.filter(|id| *id > 0).map(BookId::new)
+            && !ids.contains(&id)
+        {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
 fn dedup(items: Vec<String>) -> Vec<String> {
     let mut out: Vec<String> = Vec::with_capacity(items.len());
     for i in items {
@@ -182,6 +288,12 @@ pub(crate) struct RawBookDetails {
     #[serde(default)]
     pub cached_tags: Value,
     #[serde(default)]
+    pub ratings_distribution: Value,
+    #[serde(default)]
+    pub alternative_titles: Value,
+    #[serde(default)]
+    pub cached_similar_book_ids: Value,
+    #[serde(default)]
     pub book_series: Vec<RawBookSeries>,
 }
 
@@ -195,6 +307,7 @@ pub(crate) struct RawBookSeries {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct RawSeries {
+    pub id: Option<i64>,
     pub name: Option<String>,
     pub slug: Option<String>,
 }
@@ -202,7 +315,12 @@ pub(crate) struct RawSeries {
 impl RawBookDetails {
     pub fn into_details(self) -> BookDetails {
         let tags = &self.cached_tags;
+        let contributors = contributors_from_cached(&self.book.cached_contributors);
         let mut d = BookDetails::new(self.book.into_summary());
+        d.contributors = contributors;
+        d.ratings_distribution = ratings_distribution(&self.ratings_distribution);
+        d.alternative_titles = alternative_titles(&self.alternative_titles, &d.summary.title);
+        d.similar_book_ids = book_ids(&self.cached_similar_book_ids);
         d.description = non_empty(self.description);
         d.release_date = self.release_date.as_deref().and_then(parse_date);
         d.genres = tags_in(tags, "Genre");
@@ -222,10 +340,179 @@ impl RawBookDetails {
             }
             seen.push(name.clone());
             let mut s = SeriesRef::new(name);
+            s.id = series.id.map(SeriesId::new);
             s.slug = non_empty(series.slug);
             s.position = bs.position.filter(|p| p.is_finite()).map(|p| p as f32);
             s.featured = bs.featured;
             d.series.push(s);
+        }
+        d
+    }
+}
+
+// ---------- series and authors ----------
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawAuthorRef {
+    pub id: i64,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawSeriesPage {
+    pub id: i64,
+    pub name: Option<String>,
+    pub slug: Option<String>,
+    pub description: Option<String>,
+    pub primary_books_count: Option<i64>,
+    pub is_completed: Option<bool>,
+    pub author: Option<RawAuthorRef>,
+    #[serde(default)]
+    pub book_series: Vec<RawSeriesEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawSeriesEntry {
+    pub position: Option<f64>,
+    #[serde(default)]
+    pub compilation: bool,
+    pub book: Option<RawPartialBook>,
+}
+
+/// A book with the `is_partial_book` flag the catalogue pages filter on.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawPartialBook {
+    #[serde(flatten)]
+    pub book: RawBook,
+    pub is_partial_book: Option<bool>,
+}
+
+impl RawSeriesPage {
+    pub fn into_details(self) -> SeriesDetails {
+        let mut d = SeriesDetails::new(
+            SeriesId::new(self.id),
+            non_empty(self.name).unwrap_or_else(|| "Untitled series".to_owned()),
+        );
+        d.slug = non_empty(self.slug);
+        d.description = non_empty(self.description);
+        d.primary_books_count = opt_u32(self.primary_books_count);
+        d.is_completed = self.is_completed;
+        d.author = self
+            .author
+            .and_then(|a| Some(AuthorRef::new(AuthorId::new(a.id), non_empty(a.name)?)));
+        let entries = self.book_series.into_iter().filter_map(|e| {
+            let book = e.book?;
+            if e.compilation || book.is_partial_book == Some(true) {
+                return None;
+            }
+            let mut b = SeriesBook::new(book.book.into_summary());
+            b.position = e
+                .position
+                .filter(|p| p.is_finite() && *p >= 0.0)
+                .map(|p| p as f32);
+            Some(b)
+        });
+        d.books = series_reading_order(entries.collect());
+        d
+    }
+}
+
+/// Numbered books by position, keeping the most-read book for each position
+/// (unmerged duplicates and translations share it), then unnumbered books by
+/// popularity with repeated titles dropped. A book appears once.
+pub(crate) fn series_reading_order(books: Vec<SeriesBook>) -> Vec<SeriesBook> {
+    let users = |b: &SeriesBook| b.book.users_count.unwrap_or(0);
+    let mut numbered: Vec<SeriesBook> = Vec::new();
+    let mut unnumbered: Vec<SeriesBook> = Vec::new();
+    for b in books {
+        let seen = numbered
+            .iter()
+            .chain(unnumbered.iter())
+            .any(|o| o.book.id == b.book.id);
+        if seen {
+            continue;
+        }
+        match b.position {
+            Some(p) => match numbered.iter_mut().find(|o| o.position == Some(p)) {
+                Some(o) if users(&b) > users(o) => *o = b,
+                Some(_) => {}
+                None => numbered.push(b),
+            },
+            None => unnumbered.push(b),
+        }
+    }
+    numbered.sort_by(|a, b| {
+        a.position
+            .unwrap_or_default()
+            .total_cmp(&b.position.unwrap_or_default())
+    });
+    unnumbered.sort_by_key(|b| std::cmp::Reverse(users(b)));
+    let mut out = numbered;
+    for b in unnumbered {
+        let repeat = out
+            .iter()
+            .any(|o| o.book.title.eq_ignore_ascii_case(&b.book.title));
+        if !repeat {
+            out.push(b);
+        }
+    }
+    out
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawAuthorPage {
+    pub id: i64,
+    pub name: Option<String>,
+    pub slug: Option<String>,
+    pub bio: Option<String>,
+    #[serde(default)]
+    pub cached_image: Value,
+    pub born_year: Option<i64>,
+    pub death_year: Option<i64>,
+    pub books_count: Option<i64>,
+    #[serde(default)]
+    pub contributions: Vec<RawAuthorContribution>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawAuthorContribution {
+    pub contribution: Option<String>,
+    pub book: Option<RawPartialBook>,
+}
+
+impl RawAuthorPage {
+    pub fn into_details(self) -> AuthorDetails {
+        let year = |y: Option<i64>| y.and_then(|y| i32::try_from(y).ok()).filter(|y| *y != 0);
+        let mut d = AuthorDetails::new(
+            AuthorId::new(self.id),
+            non_empty(self.name).unwrap_or_else(|| "Unknown author".to_owned()),
+        );
+        d.slug = non_empty(self.slug);
+        d.bio = non_empty(self.bio);
+        d.photo = cover_from_value(&self.cached_image);
+        d.born_year = year(self.born_year);
+        d.death_year = year(self.death_year);
+        d.books_count = opt_u32(self.books_count);
+        for c in self.contributions {
+            let Some(book) = c.book else { continue };
+            if book.is_partial_book == Some(true) {
+                continue;
+            }
+            let role = non_empty(c.contribution).filter(|r| !r.eq_ignore_ascii_case("author"));
+            let summary = book.book.into_summary();
+            match d.books.iter_mut().find(|b| b.book.id == summary.id) {
+                // Credited twice (e.g. author and illustrator): authorship wins.
+                Some(existing) => {
+                    if role.is_none() {
+                        existing.role = None;
+                    }
+                }
+                None => {
+                    let mut b = AuthorBook::new(summary);
+                    b.role = role;
+                    d.books.push(b);
+                }
+            }
         }
         d
     }
@@ -582,7 +869,102 @@ mod tests {
             vec!["Ada Writer", "Bea Coauthor"]
         );
         let only_editor = json!([{"author": {"name": "Ed Itor"}, "contribution": "Editor"}]);
+        assert_eq!(
+            contributors_from_cached(&only_editor)[0].role.as_deref(),
+            Some("Editor")
+        );
         assert_eq!(authors_from_contributors(&only_editor), vec!["Ed Itor"]);
         assert!(authors_from_contributors(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn contributors_keep_ids_roles_and_order() {
+        let v = json!([
+            {"author": {"id": 9, "name": "Ada Writer"}, "contribution": null},
+            {"author": {"id": "10", "name": "Tom Translator"}, "contribution": "Translator"},
+            {"author": {"name": "No Id"}, "contribution": "Illustrator"},
+            {"author": {"id": 9, "name": "Ada Writer"}, "contribution": "Author"},
+            {"author": {"id": 11}, "contribution": "Narrator"}
+        ]);
+        let c = contributors_from_cached(&v);
+        assert_eq!(c.len(), 3);
+        assert_eq!(c[0].author_id, Some(AuthorId::new(9)));
+        assert!(c[0].is_author());
+        assert_eq!(c[1].author_id, Some(AuthorId::new(10)));
+        assert_eq!(c[1].role.as_deref(), Some("Translator"));
+        assert_eq!(c[2].author_id, None);
+        assert!(!c[2].is_author());
+        assert!(contributors_from_cached(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn ratings_distribution_accepts_both_shapes() {
+        let list = json!([
+            {"rating": 0.5, "count": 3},
+            {"rating": 5, "count": 40},
+            {"rating": "4.5", "count": 12},
+            {"rating": 4.5, "count": 1},
+            {"rating": 3, "count": 0},
+            {"rating": 7, "count": 9},
+            {"count": 2}
+        ]);
+        let b = ratings_distribution(&list);
+        assert_eq!(
+            b.iter().map(|b| (b.rating, b.count)).collect::<Vec<_>>(),
+            vec![(5.0, 40), (4.5, 13), (0.5, 3)]
+        );
+        let map = json!({"1": 2, "2.5": "4", "5": 8, "bad": 1});
+        let b = ratings_distribution(&map);
+        assert_eq!(
+            b.iter().map(|b| (b.rating, b.count)).collect::<Vec<_>>(),
+            vec![(5.0, 8), (2.5, 4), (1.0, 2)]
+        );
+        assert!(ratings_distribution(&Value::Null).is_empty());
+        assert!(ratings_distribution(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn alternative_titles_and_similar_ids_are_lenient() {
+        let titles = json!(["Le Livre", {"title": "Das Buch"}, "le livre", "The Book", "", 3]);
+        assert_eq!(
+            alternative_titles(&titles, "The Book"),
+            vec!["Le Livre", "Das Buch"]
+        );
+        assert!(alternative_titles(&json!({}), "x").is_empty());
+        let ids = json!([3, "4", {"id": 5}, 3, -1, null]);
+        assert_eq!(
+            book_ids(&ids),
+            vec![BookId::new(3), BookId::new(4), BookId::new(5)]
+        );
+        assert!(book_ids(&json!({})).is_empty());
+    }
+
+    fn series_book(id: i64, title: &str, position: Option<f32>, users: u32) -> SeriesBook {
+        let mut book = BookSummary::new(BookId::new(id), title);
+        book.users_count = Some(users);
+        let mut b = SeriesBook::new(book);
+        b.position = position;
+        b
+    }
+
+    #[test]
+    fn series_reading_order_dedupes_positions_and_titles() {
+        let books = vec![
+            series_book(1, "Two", Some(2.0), 50),
+            series_book(2, "One", Some(1.0), 90),
+            series_book(3, "One (translated)", Some(1.0), 10),
+            series_book(4, "Novella", Some(1.5), 5),
+            series_book(5, "One more", Some(1.0), 200),
+            series_book(6, "Extra", None, 3),
+            series_book(7, "Guide", None, 30),
+            series_book(8, "two", None, 1),
+            series_book(1, "Two", Some(2.0), 50),
+        ];
+        let ordered = series_reading_order(books);
+        let ids: Vec<i64> = ordered.iter().map(|b| b.book.id.get()).collect();
+        assert_eq!(ids, vec![5, 4, 1, 7, 6]);
+        assert!(ordered[0].is_main());
+        assert!(!ordered[1].is_main());
+        assert!(!ordered[3].is_main());
     }
 }

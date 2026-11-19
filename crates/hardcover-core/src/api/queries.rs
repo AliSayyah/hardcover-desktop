@@ -105,10 +105,62 @@ pub(crate) const BOOK_DETAILS: &str = concat!(
   books_by_pk(id: $id) {
     ...BookSummaryFields
     description release_date editions_count ratings_count cached_tags
+    ratings_distribution alternative_titles cached_similar_book_ids
     book_series(order_by: [{featured: desc}, {position: asc_nulls_last}]) {
-      position featured series { name slug }
+      position featured series { id name slug }
     }
   }
+}
+",
+    book_summary_fields!()
+);
+
+/// A series and its books. Merged duplicates are filtered here; the client keeps
+/// the most-read book per position and drops partial books and compilations,
+/// as Hardcover's "Getting All Books in a Series" guide describes.
+pub(crate) const SERIES_PAGE: &str = concat!(
+    "query SeriesPage($id: Int!, $limit: Int!) {
+  series_by_pk(id: $id) {
+    id name slug description primary_books_count is_completed
+    author { id name }
+    book_series(
+      where: {book: {canonical_id: {_is_null: true}}}
+      order_by: [{position: asc_nulls_last}, {book: {users_count: desc}}]
+      limit: $limit
+    ) {
+      position compilation
+      book { ...BookSummaryFields is_partial_book }
+    }
+  }
+}
+",
+    book_summary_fields!()
+);
+
+/// An author and their most-read books, filtered as in Hardcover's guide to an
+/// author's books. Partial books are dropped by the client.
+pub(crate) const AUTHOR_PAGE: &str = concat!(
+    "query AuthorPage($id: Int!, $limit: Int!) {
+  authors_by_pk(id: $id) {
+    id name slug bio cached_image born_year death_year books_count
+    contributions(
+      where: {contributable_type: {_eq: \"Book\"}, book: {canonical_id: {_is_null: true}}}
+      order_by: {book: {users_count: desc}}
+      limit: $limit
+    ) {
+      contribution
+      book { ...BookSummaryFields is_partial_book }
+    }
+  }
+}
+",
+    book_summary_fields!()
+);
+
+/// A few books by id, e.g. a book's similar books.
+pub(crate) const BOOKS_BY_IDS: &str = concat!(
+    "query BooksByIds($ids: [Int!]!, $limit: Int!) {
+  books(where: {id: {_in: $ids}}, limit: $limit) { ...BookSummaryFields }
 }
 ",
     book_summary_fields!()
@@ -232,6 +284,9 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("USER_BOOK_FOR_BOOK", USER_BOOK_FOR_BOOK),
     ("SEARCH_BOOKS", SEARCH_BOOKS),
     ("BOOK_DETAILS", BOOK_DETAILS),
+    ("SERIES_PAGE", SERIES_PAGE),
+    ("AUTHOR_PAGE", AUTHOR_PAGE),
+    ("BOOKS_BY_IDS", BOOKS_BY_IDS),
     ("PROGRESS_CONTEXT", PROGRESS_CONTEXT),
     ("INSERT_USER_BOOK", INSERT_USER_BOOK),
     ("UPDATE_USER_BOOK", UPDATE_USER_BOOK),

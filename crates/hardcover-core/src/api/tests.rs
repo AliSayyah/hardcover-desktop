@@ -256,7 +256,7 @@ fn book_details_parse() {
             "Content Warning": [{"tag": "Violence", "count": 1}]
         },
         "book_series": [
-            {"position": 1.0, "featured": true, "series": {"name": "Synthetic Saga", "slug": "synthetic-saga"}},
+            {"position": 1.0, "featured": true, "series": {"id": 31, "name": "Synthetic Saga", "slug": "synthetic-saga"}},
             {"position": null, "featured": false, "series": {"name": "Synthetic Saga", "slug": "dup"}},
             {"position": 2.5, "featured": false, "series": {"name": "Omnibus Order", "slug": null}},
             {"position": 1.0, "featured": false, "series": null}
@@ -278,9 +278,160 @@ fn book_details_parse() {
     assert!(d.series[0].featured);
     assert_eq!(d.series[1].position, Some(2.5));
     assert_eq!((d.editions_count, d.ratings_count), (Some(12), Some(34)));
+    assert_eq!(d.series[0].id, Some(SeriesId::new(31)));
+    assert_eq!(d.series[1].id, None);
+    // The fixture's cached_contributors: an author and a translator, with ids.
+    assert_eq!(d.contributors.len(), 2);
+    assert_eq!(d.contributors[0].author_id, Some(AuthorId::new(9)));
+    assert!(d.contributors[0].is_author());
+    assert_eq!(d.contributors[1].role.as_deref(), Some("Translator"));
+    // Not in the fixture: empty, not an error.
+    assert!(d.ratings_distribution.is_empty());
+    assert!(d.alternative_titles.is_empty());
+    assert!(d.similar_book_ids.is_empty());
 
     http.push(200, &data(json!({ "books_by_pk": null })));
     assert!(matches!(c.book_details(BookId::new(8)), Err(Error::Api(_))));
+}
+
+#[test]
+fn book_details_parse_catalogue_blobs() {
+    let (c, http) = client(TestTokens::new(false));
+    let mut b = book(7, "Detailed");
+    let extra = json!({
+        "ratings_distribution": [{"rating": 5, "count": 9}, {"rating": 4.5, "count": 3}],
+        "alternative_titles": ["Detailliert", "Detailed"],
+        "cached_similar_book_ids": [11, 12, 11],
+        "cached_tags": {},
+        "book_series": []
+    });
+    b.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    http.push(200, &data(json!({ "books_by_pk": b })));
+    let d = c.book_details(BookId::new(7)).unwrap();
+    assert_eq!(d.ratings_distribution.len(), 2);
+    assert_eq!(d.ratings_distribution[0].rating, 5.0);
+    assert_eq!(d.alternative_titles, vec!["Detailliert"]);
+    assert_eq!(d.similar_book_ids, vec![BookId::new(11), BookId::new(12)]);
+}
+
+#[test]
+fn series_page_orders_and_filters_books() {
+    let (c, http) = client(TestTokens::new(false));
+    let with = |mut b: Value, users: i64, partial: Option<bool>| {
+        b["users_count"] = json!(users);
+        b["is_partial_book"] = json!(partial);
+        b
+    };
+    http.push(
+        200,
+        &data(json!({ "series_by_pk": {
+            "id": 31,
+            "name": "Synthetic Saga",
+            "slug": "synthetic-saga",
+            "description": null,
+            "primary_books_count": 3,
+            "is_completed": true,
+            "author": {"id": 9, "name": "Jane Quill"},
+            "book_series": [
+                {"position": 1.0, "compilation": false, "book": with(book(101, "First"), 500, Some(false))},
+                {"position": 1.0, "compilation": false, "book": with(book(102, "First, translated"), 20, None)},
+                {"position": 1.5, "compilation": false, "book": with(book(103, "Interlude"), 40, Some(false))},
+                {"position": 2.0, "compilation": false, "book": with(book(104, "Second"), 300, Some(false))},
+                {"position": 1.0, "compilation": true, "book": with(book(105, "Omnibus"), 900, Some(false))},
+                {"position": 3.0, "compilation": false, "book": with(book(106, "Part of Third"), 100, Some(true))},
+                {"position": 3.0, "compilation": false, "book": with(book(107, "Third"), 200, Some(false))},
+                {"position": null, "compilation": false, "book": with(book(108, "Companion"), 10, None)},
+                {"position": 4.0, "compilation": false, "book": null}
+            ]
+        }})),
+    );
+    let s = c.series(SeriesId::new(31)).unwrap();
+    let req = &http.requests()[0];
+    assert_eq!(req.json.as_ref().unwrap()["operationName"], "SeriesPage");
+    assert_eq!(req.json.as_ref().unwrap()["variables"]["id"], 31);
+    assert_eq!(s.name, "Synthetic Saga");
+    assert_eq!(s.author.as_ref().unwrap().id, AuthorId::new(9));
+    assert_eq!(s.is_completed, Some(true));
+    assert_eq!(s.primary_books_count, Some(3));
+    assert_eq!(
+        s.web_url().as_deref(),
+        Some("https://hardcover.app/series/synthetic-saga")
+    );
+    let ids: Vec<i64> = s.books.iter().map(|b| b.book.id.get()).collect();
+    assert_eq!(ids, vec![101, 103, 104, 107, 108]);
+    assert_eq!(s.books.iter().filter(|b| b.is_main()).count(), 3);
+    assert_eq!(s.books[1].position, Some(1.5));
+    assert_eq!(s.books[4].position, None);
+
+    http.push(200, &data(json!({ "series_by_pk": null })));
+    assert!(matches!(c.series(SeriesId::new(32)), Err(Error::Api(_))));
+}
+
+#[test]
+fn author_page_merges_roles_and_drops_partial_books() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({ "authors_by_pk": {
+            "id": 9,
+            "name": "Jane Quill",
+            "slug": "jane-quill",
+            "bio": "  A made-up writer.  ",
+            "cached_image": {"url": "https://assets.hardcover.app/authors/9.jpg", "width": 200, "height": 300},
+            "born_year": 1950,
+            "death_year": null,
+            "books_count": 4,
+            "contributions": [
+                {"contribution": null, "book": book(201, "Own Novel")},
+                {"contribution": "Translator", "book": book(202, "Translated Novel")},
+                {"contribution": "Illustrator", "book": book(203, "Picture Book")},
+                {"contribution": "Author", "book": book(203, "Picture Book")},
+                {"contribution": null, "book": {"id": 204, "title": "Excerpt", "is_partial_book": true}},
+                {"contribution": null, "book": null}
+            ]
+        }})),
+    );
+    let a = c.author(AuthorId::new(9)).unwrap();
+    let req = &http.requests()[0];
+    assert_eq!(req.json.as_ref().unwrap()["operationName"], "AuthorPage");
+    assert_eq!(a.name, "Jane Quill");
+    assert_eq!(a.bio.as_deref(), Some("A made-up writer."));
+    assert_eq!(a.photo.as_ref().unwrap().width, Some(200));
+    assert_eq!((a.born_year, a.death_year), (Some(1950), None));
+    assert_eq!(a.books_count, Some(4));
+    let books: Vec<(i64, Option<&str>)> = a
+        .books
+        .iter()
+        .map(|b| (b.book.id.get(), b.role.as_deref()))
+        .collect();
+    assert_eq!(
+        books,
+        vec![(201, None), (202, Some("Translator")), (203, None)]
+    );
+
+    http.push(200, &data(json!({ "authors_by_pk": null })));
+    assert!(matches!(c.author(AuthorId::new(10)), Err(Error::Api(_))));
+}
+
+#[test]
+fn books_by_ids_keeps_the_given_order() {
+    let (c, http) = client(TestTokens::new(false));
+    assert!(c.books_by_ids(&[]).unwrap().is_empty());
+    assert_eq!(http.requests().len(), 0, "no ids, no request");
+
+    http.push(
+        200,
+        &data(json!({ "books": [book(3, "Three"), book(1, "One")] })),
+    );
+    let ids: Vec<BookId> = (1..=40).map(BookId::new).collect();
+    let books = c.books_by_ids(&ids).unwrap();
+    let titles: Vec<&str> = books.iter().map(|b| b.title.as_str()).collect();
+    assert_eq!(titles, vec!["One", "Three"]);
+    let vars = http.requests()[0].json.clone().unwrap()["variables"].clone();
+    assert_eq!(vars["ids"].as_array().unwrap().len(), BOOKS_BY_IDS_LIMIT);
+    assert_eq!(vars["limit"], BOOKS_BY_IDS_LIMIT);
 }
 
 #[test]

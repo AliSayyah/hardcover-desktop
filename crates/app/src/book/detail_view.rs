@@ -38,15 +38,18 @@ use hardcover_core::{
     LibraryEntry, Privacy, ProgressUpdate, Rating, ReadId, ReadSession, ReadingStatus, UserBookId,
 };
 
+use self::catalog_sections::Similar;
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
 use super::star_rating::StarRating;
 use crate::app_state::{Services, cover_image, release_cover_image};
 use crate::format::{
-    authors_text, average_rating_text, duration_text, edition_text, error_message, parse_position,
-    position_text, progress_summary, read_dates_text, series_position_text, status_label,
+    average_rating_text, duration_text, edition_text, error_message, parse_position, position_text,
+    progress_summary, read_dates_text, series_position_text, status_label,
 };
 use crate::library::model::{LibraryModel, WriteKind};
+
+mod catalog_sections;
 
 /// What the pane shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -194,6 +197,11 @@ pub struct BookDetailView {
     /// The cover URL last requested and its image once loaded, released when
     /// the pane moves to another cover.
     cover: Option<(String, Option<Arc<RenderImage>>)>,
+    similar: HashMap<BookId, Similar>,
+    similar_loading: Option<BookId>,
+    _similar_task: Option<Task<()>>,
+    /// "Show all tags" was pressed for the book shown.
+    tags_expanded: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -304,6 +312,10 @@ impl BookDetailView {
             owning: None,
             shown: None,
             cover: None,
+            similar: HashMap::new(),
+            similar_loading: None,
+            _similar_task: None,
+            tags_expanded: false,
             _subscriptions: subscriptions,
         }
     }
@@ -322,6 +334,11 @@ impl BookDetailView {
         self.shown = None;
         self.sync_controls(window, cx);
         self.load_details(cx);
+        self.tags_expanded = false;
+        // Drops a pending similar-books fetch for the book left behind.
+        self._similar_task = None;
+        self.similar_loading = None;
+        self.load_similar(cx);
         cx.notify();
     }
 
@@ -480,6 +497,7 @@ impl BookDetailView {
                     Err(e) => Details::Failed(error_message(&e).into()),
                 };
                 this.details.insert(id, details);
+                this.load_similar(cx);
                 cx.notify();
             });
         }));
@@ -1075,7 +1093,9 @@ impl BookDetailView {
         let cover = self.load_cover(cover_url, window, cx);
 
         let mut facts: Vec<String> = Vec::new();
-        if let Some(series) = details.and_then(|d| d.series.first()) {
+        let series = details.and_then(|d| d.series.first());
+        let series_link = series.and_then(|s| self.render_series_link(s));
+        if let Some(series) = series.filter(|_| series_link.is_none()) {
             facts.push(match series.position {
                 Some(p) => format!("{} {}", series.name, series_position_text(p)),
                 None => series.name.clone(),
@@ -1145,10 +1165,21 @@ impl BookDetailView {
                             .when_some(book.subtitle.clone(), |this, subtitle| {
                                 this.child(div().text_lg().text_color(muted).child(subtitle))
                             })
-                            .child(div().text_base().child(authors_text(&book.authors)))
-                            .when(!facts.is_empty(), |this| {
+                            .child(self.render_contributors(book, details, cx))
+                            .when(series_link.is_some() || !facts.is_empty(), |this| {
                                 this.child(
-                                    div().text_sm().text_color(muted).child(facts.join(" · ")),
+                                    h_flex()
+                                        .flex_wrap()
+                                        .gap_1()
+                                        .text_sm()
+                                        .text_color(muted)
+                                        .when_some(series_link, |this, link| {
+                                            this.child(link)
+                                                .when(!facts.is_empty(), |this| this.child("·"))
+                                        })
+                                        .when(!facts.is_empty(), |this| {
+                                            this.child(facts.join(" · "))
+                                        }),
                                 )
                             })
                             .when_some(average, |this, avg| {
@@ -1743,7 +1774,8 @@ impl Render for BookDetailView {
         let label_width = window.rem_size() * 6.;
         let header = self.render_header(&book, entry.as_ref(), details.as_deref(), window, cx);
         v_flex()
-            .id("book-detail")
+            // Keyed by book, so another book (e.g. a similar one) opens at the top.
+            .id(("book-detail", book.id.get() as u64))
             .size_full()
             .overflow_y_scrollbar()
             .child(
@@ -1765,7 +1797,8 @@ impl Render for BookDetailView {
                             .child(self.render_reads(entry, cx)),
                         None => this.child(self.render_add(&book, cx)),
                     })
-                    .child(self.render_description(&book, cx)),
+                    .child(self.render_description(&book, cx))
+                    .children(self.render_catalog_sections(&book, details.as_deref(), window, cx)),
             )
             .into_any_element()
     }
