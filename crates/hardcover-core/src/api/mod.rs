@@ -42,6 +42,9 @@ const SERIES_ROWS_LIMIT: u32 = 200;
 pub const AUTHOR_BOOKS_LIMIT: u32 = 100;
 /// Most books [`Client::books_by_ids`] asks for in one request.
 pub const BOOKS_BY_IDS_LIMIT: usize = 25;
+/// Books [`Client::trending_books`] asks for: all of them fit one
+/// [`Client::books_by_ids`] request.
+pub const TRENDING_LIMIT: usize = BOOKS_BY_IDS_LIMIT;
 
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
@@ -241,13 +244,59 @@ impl Client {
         if query.is_empty() {
             return Ok(SearchPage::new(Vec::new(), page, SEARCH_PER_PAGE));
         }
+        let raw = self.raw_search("SearchBooks", queries::SEARCH_BOOKS, query, page)?;
+        Ok(search_page(raw, page, SEARCH_PER_PAGE))
+    }
+
+    /// Author search, ranked as on the website. Like [`Client::search_books`]
+    /// otherwise.
+    pub fn search_authors(&self, query: &str, page: u32) -> Result<SearchHits<AuthorHit>> {
+        self.search_hits(
+            "SearchAuthors",
+            queries::SEARCH_AUTHORS,
+            query,
+            page,
+            author_from_search_document,
+        )
+    }
+
+    /// Series search, ranked as on the website. Like [`Client::search_books`]
+    /// otherwise.
+    pub fn search_series(&self, query: &str, page: u32) -> Result<SearchHits<SeriesHit>> {
+        self.search_hits(
+            "SearchSeries",
+            queries::SEARCH_SERIES,
+            query,
+            page,
+            series_from_search_document,
+        )
+    }
+
+    fn search_hits<T>(
+        &self,
+        op: &str,
+        doc: &str,
+        query: &str,
+        page: u32,
+        parse: impl Fn(&Value, Option<i64>) -> Option<T>,
+    ) -> Result<SearchHits<T>> {
+        let query = query.trim();
+        let page = page.max(1);
+        if query.is_empty() {
+            return Ok(SearchHits::new(Vec::new(), page, SEARCH_PER_PAGE));
+        }
+        let raw = self.raw_search(op, doc, query, page)?;
+        Ok(search_hits(raw, page, SEARCH_PER_PAGE, parse))
+    }
+
+    fn raw_search(&self, op: &str, doc: &str, query: &str, page: u32) -> Result<RawSearch> {
         #[derive(Deserialize)]
         struct Data {
             search: Option<RawSearch>,
         }
         let data: Data = self.query(
-            "SearchBooks",
-            queries::SEARCH_BOOKS,
+            op,
+            doc,
             json!({ "query": query, "page": page, "perPage": SEARCH_PER_PAGE }),
             SEARCH_TIMEOUT,
         )?;
@@ -257,7 +306,29 @@ impl Client {
         if let Some(e) = raw.error.as_deref().filter(|e| !e.is_empty()) {
             return Err(Error::Api(e.to_owned()));
         }
-        Ok(search_page(raw, page, SEARCH_PER_PAGE))
+        Ok(raw)
+    }
+
+    /// The books the most readers finished in `period`, in Hardcover's order,
+    /// at most [`TRENDING_LIMIT`]. Two requests: the ranked ids, then the books.
+    pub fn trending_books(&self, period: TrendingPeriod) -> Result<Vec<BookSummary>> {
+        #[derive(Deserialize)]
+        struct Data {
+            books_trending: Option<RawTrending>,
+        }
+        let data: Data = self.query(
+            "BooksTrending",
+            queries::BOOKS_TRENDING,
+            json!({ "duration": period.api_name(), "limit": TRENDING_LIMIT }),
+            QUERY_TIMEOUT,
+        )?;
+        let raw = data
+            .books_trending
+            .ok_or_else(|| Error::Decode("`books_trending` returned null".into()))?;
+        if let Some(e) = raw.error.as_deref().filter(|e| !e.is_empty()) {
+            return Err(Error::Api(e.to_owned()));
+        }
+        self.books_by_ids(&raw.into_ids())
     }
 
     /// Full details for the book page. `Error::Api` if the book does not exist.

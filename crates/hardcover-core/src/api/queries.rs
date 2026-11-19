@@ -110,6 +110,31 @@ pub(crate) const SEARCH_BOOKS: &str =
 }
 ";
 
+/// Author search. `ids` lists the hits' ids in order, for documents without one.
+pub(crate) const SEARCH_AUTHORS: &str =
+    "query SearchAuthors($query: String!, $page: Int!, $perPage: Int!) {
+  search(query: $query, query_type: \"author\", page: $page, per_page: $perPage) {
+    error page per_page ids results
+  }
+}
+";
+
+/// Series search. `ids` lists the hits' ids in order, for documents without one.
+pub(crate) const SEARCH_SERIES: &str =
+    "query SearchSeries($query: String!, $page: Int!, $perPage: Int!) {
+  search(query: $query, query_type: \"series\", page: $page, per_page: $perPage) {
+    error page per_page ids results
+  }
+}
+";
+
+/// Ids of the books the most readers finished in `$duration`, in ranked order.
+pub(crate) const BOOKS_TRENDING: &str =
+    "query BooksTrending($duration: TrendingDuration!, $limit: Int!) {
+  books_trending(duration: $duration, limit: $limit, offset: 0) { error ids }
+}
+";
+
 pub(crate) const BOOK_DETAILS: &str = concat!(
     "query BookDetails($id: Int!) {
   books_by_pk(id: $id) {
@@ -336,6 +361,9 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("USER_BOOK_FOR_USER", USER_BOOK_FOR_USER),
     ("USER_BOOK_FOR_BOOK", USER_BOOK_FOR_BOOK),
     ("SEARCH_BOOKS", SEARCH_BOOKS),
+    ("SEARCH_AUTHORS", SEARCH_AUTHORS),
+    ("SEARCH_SERIES", SEARCH_SERIES),
+    ("BOOKS_TRENDING", BOOKS_TRENDING),
     ("BOOK_DETAILS", BOOK_DETAILS),
     ("SERIES_PAGE", SERIES_PAGE),
     ("AUTHOR_PAGE", AUTHOR_PAGE),

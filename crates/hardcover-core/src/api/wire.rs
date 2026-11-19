@@ -671,6 +671,9 @@ pub(crate) struct RawSearch {
     pub error: Option<String>,
     pub page: Option<i64>,
     pub per_page: Option<i64>,
+    /// The hits' ids in order; only author and series searches ask for them.
+    #[serde(default)]
+    pub ids: Value,
     #[serde(default)]
     pub results: Value,
 }
@@ -788,6 +791,112 @@ impl GoalPayload {
             .filter(|e| !e.is_empty())
             .collect();
         (!errors.is_empty()).then(|| errors.join("; "))
+    }
+}
+
+/// `results` as for books, with a `parse` for one hit's document. The
+/// document's own `id` is preferred; `ids[i]` stands in only when `ids` lines up
+/// with the hits. Hits without a usable id or name are skipped.
+pub(crate) fn search_hits<T>(
+    raw: RawSearch,
+    page: u32,
+    per_page: u32,
+    parse: impl Fn(&Value, Option<i64>) -> Option<T>,
+) -> SearchHits<T> {
+    let results = &raw.results;
+    let hits: Vec<&Value> = results
+        .get("hits")
+        .and_then(Value::as_array)
+        .map(|hits| hits.iter().filter_map(|h| h.get("document")).collect())
+        .unwrap_or_default();
+    let ids: Vec<Option<i64>> = raw
+        .ids
+        .as_array()
+        .map(|ids| ids.iter().map(as_i64).collect())
+        .unwrap_or_default();
+    let fallback = |i: usize| {
+        if ids.len() == hits.len() {
+            ids[i]
+        } else {
+            None
+        }
+    };
+    let items = hits
+        .iter()
+        .enumerate()
+        .filter_map(|(i, doc)| parse(doc, doc.get("id").and_then(as_i64).or(fallback(i))))
+        .collect();
+    let mut p = SearchHits::new(
+        items,
+        raw.page.and_then(|n| u32::try_from(n).ok()).unwrap_or(page),
+        raw.per_page
+            .and_then(|n| u32::try_from(n).ok())
+            .unwrap_or(per_page),
+    );
+    p.total = results.get("found").and_then(as_u32);
+    p
+}
+
+/// Titles from a list of strings or of objects with a `title`.
+fn titles(v: Option<&Value>) -> Vec<String> {
+    v.and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| as_string(t).or_else(|| t.get("title").and_then(as_string)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// An author search document: `name`, `slug`, `image`, `books_count` and
+/// `books` (titles of the top five books).
+pub(crate) fn author_from_search_document(doc: &Value, id: Option<i64>) -> Option<AuthorHit> {
+    let name = doc.get("name").and_then(as_string)?;
+    let mut a = AuthorHit::new(AuthorId::new(id?), name);
+    a.slug = doc.get("slug").and_then(as_string);
+    a.photo = doc.get("image").and_then(cover_from_value);
+    a.books_count = doc.get("books_count").and_then(as_u32);
+    a.top_books = dedup(titles(doc.get("books")));
+    Some(a)
+}
+
+/// A series search document: `name`, `slug`, `author_name` (or an `author`
+/// object), `books_count`, `primary_books_count` and `books`.
+pub(crate) fn series_from_search_document(doc: &Value, id: Option<i64>) -> Option<SeriesHit> {
+    let name = doc.get("name").and_then(as_string)?;
+    let mut s = SeriesHit::new(SeriesId::new(id?), name);
+    s.slug = doc.get("slug").and_then(as_string);
+    s.author = doc.get("author_name").and_then(as_string).or_else(|| {
+        doc.get("author")
+            .and_then(|a| a.get("name"))
+            .and_then(as_string)
+    });
+    s.books_count = doc.get("books_count").and_then(as_u32);
+    s.primary_books_count = doc.get("primary_books_count").and_then(as_u32);
+    s.books = dedup(titles(doc.get("books")));
+    Some(s)
+}
+
+// ---------- trending ----------
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawTrending {
+    pub error: Option<String>,
+    #[serde(default)]
+    pub ids: Value,
+}
+
+impl RawTrending {
+    /// The ranked ids, without nulls or repeats.
+    pub fn into_ids(self) -> Vec<BookId> {
+        let mut out: Vec<BookId> = Vec::new();
+        for id in self.ids.as_array().into_iter().flatten().filter_map(as_i64) {
+            let id = BookId::new(id);
+            if !out.contains(&id) {
+                out.push(id);
+            }
+        }
+        out
     }
 }
 

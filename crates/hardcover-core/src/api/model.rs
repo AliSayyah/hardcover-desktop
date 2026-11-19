@@ -1024,6 +1024,129 @@ pub struct NewGoal {
     pub description: String,
 }
 
+/// An author in search results.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct AuthorHit {
+    pub id: AuthorId,
+    pub name: String,
+    pub slug: Option<String>,
+    pub photo: Option<Cover>,
+    /// Books Hardcover credits to the author.
+    pub books_count: Option<u32>,
+    /// Titles of the author's most popular books, at most five.
+    pub top_books: Vec<String>,
+}
+
+impl AuthorHit {
+    pub fn new(id: AuthorId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            slug: None,
+            photo: None,
+            books_count: None,
+            top_books: Vec::new(),
+        }
+    }
+}
+
+/// A series in search results.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct SeriesHit {
+    pub id: SeriesId,
+    pub name: String,
+    pub slug: Option<String>,
+    /// The series' primary author.
+    pub author: Option<String>,
+    pub books_count: Option<u32>,
+    /// Books with a whole-number position (1, 2, 3), as the series page counts them.
+    pub primary_books_count: Option<u32>,
+    /// Titles of books in the series, as many as the search returns.
+    pub books: Vec<String>,
+}
+
+impl SeriesHit {
+    pub fn new(id: SeriesId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            slug: None,
+            author: None,
+            books_count: None,
+            primary_books_count: None,
+            books: Vec::new(),
+        }
+    }
+}
+
+/// One page of search results of any kind. Book search returns a
+/// [`SearchPage`], which converts into this.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct SearchHits<T> {
+    pub hits: Vec<T>,
+    /// 1-based.
+    pub page: u32,
+    pub per_page: u32,
+    /// Total matches (`found`), when Typesense reports it.
+    pub total: Option<u32>,
+}
+
+impl<T> SearchHits<T> {
+    pub fn new(hits: Vec<T>, page: u32, per_page: u32) -> Self {
+        Self {
+            hits,
+            page,
+            per_page,
+            total: None,
+        }
+    }
+
+    pub fn has_more(&self) -> bool {
+        match self.total {
+            Some(total) => u64::from(self.page) * u64::from(self.per_page) < u64::from(total),
+            None => self.hits.len() as u32 >= self.per_page,
+        }
+    }
+}
+
+impl From<SearchPage> for SearchHits<BookSummary> {
+    fn from(page: SearchPage) -> Self {
+        Self {
+            hits: page.books,
+            page: page.page,
+            per_page: page.per_page,
+            total: page.total,
+        }
+    }
+}
+
+/// How far back [`crate::api::Client::trending_books`] looks: Hardcover ranks
+/// the books the most readers finished in this window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TrendingPeriod {
+    Week,
+    Month,
+    ThreeMonths,
+    Year,
+    AllTime,
+}
+
+impl TrendingPeriod {
+    /// `TrendingDuration` in the schema.
+    pub fn api_name(self) -> &'static str {
+        match self {
+            Self::Week => "week",
+            Self::Month => "month",
+            Self::ThreeMonths => "three_month",
+            Self::Year => "one_year",
+            Self::AllTime => "all",
+        }
+    }
+}
+
 /// How far the reader is, for [`crate::api::Client::update_progress`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProgressUpdate {

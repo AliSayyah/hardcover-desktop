@@ -14,6 +14,12 @@
 //! Hardcover's picks, and books have no ratings distribution or alternative
 //! titles: the catalogue does not record them.
 //!
+//! Author and series search match the catalogue's names and titles and leave
+//! out the counts the catalogue cannot know. "Trending" ranks the catalogue by
+//! its own Hardcover numbers, not by recent reads, a different number for
+//! each period: newest release for a week, average rating for a month, number
+//! of ratings for three months, and number of readers for a year or all time.
+//!
 //! [`cover_cache`] downloads the catalogue's covers from Hardcover, the demo's
 //! only network access; any other URL is refused. Reads work; every write
 //! fails with a "read-only" error. Only built with the `demo` feature (and in
@@ -574,6 +580,9 @@ fn answer(op: &str, vars: &Value) -> Value {
             json!({ "user_books": found.into_iter().collect::<Vec<_>>() })
         }
         "SearchBooks" => search(catalogue, vars),
+        "SearchAuthors" => search_authors(catalogue, vars),
+        "SearchSeries" => search_series(catalogue, vars),
+        "BooksTrending" => trending(catalogue, vars),
         "BookDetails" => json!({
             "books_by_pk": catalogue.book(int("id")).map(book_details),
         }),
@@ -675,6 +684,156 @@ fn search(catalogue: &Catalogue, vars: &Value) -> Value {
         "per_page": per_page,
         "results": { "found": matches.len(), "page": page, "hits": hits },
     }})
+}
+
+/// `query` split into lowercase words, and the page asked for.
+fn search_terms(vars: &Value) -> (Vec<String>, usize, usize) {
+    let words = vars["query"]
+        .as_str()
+        .unwrap_or_default()
+        .to_lowercase()
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    let page = vars["page"].as_u64().unwrap_or(1).max(1) as usize;
+    let per_page = vars["perPage"].as_u64().unwrap_or(25).max(1) as usize;
+    (words, page, per_page)
+}
+
+/// A `search` response for one page of `(id, document)` matches, with `ids`.
+fn search_response(matches: Vec<(i64, Value)>, page: usize, per_page: usize) -> Value {
+    let found = matches.len();
+    let shown: Vec<(i64, Value)> = matches
+        .into_iter()
+        .skip((page - 1) * per_page)
+        .take(per_page)
+        .collect();
+    let ids: Vec<i64> = shown.iter().map(|(id, _)| *id).collect();
+    let hits: Vec<Value> = shown
+        .into_iter()
+        .map(|(_, doc)| json!({ "document": doc }))
+        .collect();
+    json!({ "search": {
+        "error": null,
+        "page": page,
+        "per_page": per_page,
+        "ids": ids,
+        "results": { "found": found, "page": page, "hits": hits },
+    }})
+}
+
+/// Catalogue authors whose name or books contain every word, most read first.
+fn search_authors(catalogue: &Catalogue, vars: &Value) -> Value {
+    let (words, page, per_page) = search_terms(vars);
+    let mut matches: Vec<(i64, i64, Value)> = catalogue
+        .authors()
+        .into_iter()
+        .filter_map(|(id, name)| {
+            let mut books: Vec<&Book> = catalogue
+                .books
+                .iter()
+                .filter(|b| b.author == name)
+                .collect();
+            books.sort_by_key(|b| std::cmp::Reverse(b.users_count));
+            let haystack = std::iter::once(name)
+                .chain(books.iter().map(|b| b.title.as_str()))
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            if !words.iter().all(|w| haystack.contains(w.as_str())) {
+                return None;
+            }
+            let readers = books.iter().map(|b| b.users_count).sum();
+            let titles: Vec<&str> = books.iter().take(5).map(|b| b.title.as_str()).collect();
+            Some((
+                id,
+                readers,
+                json!({
+                    "id": id.to_string(),
+                    "name": name,
+                    "slug": slug(name),
+                    "image": null,
+                    // The catalogue holds a few of their books, not their count.
+                    "books_count": null,
+                    "books": titles,
+                }),
+            ))
+        })
+        .collect();
+    matches.sort_by_key(|(_, readers, _)| std::cmp::Reverse(*readers));
+    search_response(
+        matches.into_iter().map(|(id, _, doc)| (id, doc)).collect(),
+        page,
+        per_page,
+    )
+}
+
+/// Catalogue series whose name, books or author contain every word, most read
+/// first.
+fn search_series(catalogue: &Catalogue, vars: &Value) -> Value {
+    let (words, page, per_page) = search_terms(vars);
+    let mut matches: Vec<(i64, i64, Value)> = catalogue
+        .series()
+        .into_iter()
+        .filter_map(|(id, name)| {
+            let mut books: Vec<&Book> = catalogue
+                .books
+                .iter()
+                .filter(|b| b.series.as_ref().is_some_and(|s| s.name == name))
+                .collect();
+            books.sort_by(|a, b| {
+                let position = |b: &Book| b.series.as_ref().map_or(0.0, |s| s.position);
+                position(a).total_cmp(&position(b))
+            });
+            let author = books.first().map(|b| b.author.as_str());
+            let haystack = std::iter::once(name)
+                .chain(books.iter().map(|b| b.title.as_str()))
+                .chain(author)
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            if !words.iter().all(|w| haystack.contains(w.as_str())) {
+                return None;
+            }
+            let readers = books.iter().map(|b| b.users_count).sum();
+            let titles: Vec<&str> = books.iter().map(|b| b.title.as_str()).collect();
+            Some((
+                id,
+                readers,
+                json!({
+                    "id": id.to_string(),
+                    "name": name,
+                    "slug": slug(name),
+                    "author_name": author,
+                    // The catalogue holds some of the series, not its size.
+                    "books_count": null,
+                    "primary_books_count": null,
+                    "readers_count": null,
+                    "books": titles,
+                }),
+            ))
+        })
+        .collect();
+    matches.sort_by_key(|(_, readers, _)| std::cmp::Reverse(*readers));
+    search_response(
+        matches.into_iter().map(|(id, _, doc)| (id, doc)).collect(),
+        page,
+        per_page,
+    )
+}
+
+/// `books_trending`: the catalogue ranked by one of its numbers per period.
+fn trending(catalogue: &Catalogue, vars: &Value) -> Value {
+    let limit = usize::try_from(vars["limit"].as_i64().unwrap_or(25)).unwrap_or_default();
+    let mut books: Vec<&Book> = catalogue.books.iter().collect();
+    match vars["duration"].as_str().unwrap_or("month") {
+        "week" => books.sort_by(|a, b| b.release_date.cmp(&a.release_date)),
+        "three_month" => books.sort_by_key(|b| std::cmp::Reverse(b.ratings_count)),
+        "one_year" | "all" => books.sort_by_key(|b| std::cmp::Reverse(b.users_count)),
+        _ => books.sort_by(|a, b| b.rating.total_cmp(&a.rating)),
+    }
+    let ids: Vec<i64> = books.into_iter().take(limit).map(|b| b.id).collect();
+    json!({ "books_trending": { "error": null, "ids": ids } })
 }
 
 #[cfg(test)]
@@ -900,6 +1059,62 @@ mod tests {
         assert_eq!(books.len(), dune.similar_book_ids.len());
         assert_eq!(books[0].id, dune.similar_book_ids[0]);
         assert!(dune.ratings_distribution.is_empty());
+    }
+
+    #[test]
+    fn author_and_series_hits_open_their_pages() {
+        let client = client();
+        let authors = client.search_authors("herbert", 1).unwrap();
+        assert_eq!(authors.hits.len(), 1);
+        let herbert = &authors.hits[0];
+        assert_eq!(herbert.name, "Frank Herbert");
+        assert_eq!(herbert.top_books[0], "Dune");
+        assert_eq!(herbert.books_count, None);
+        assert_eq!(client.author(herbert.id).unwrap().name, "Frank Herbert");
+
+        let series = client.search_series("dune", 1).unwrap();
+        assert_eq!(series.hits.len(), 1);
+        let dune = &series.hits[0];
+        assert_eq!(dune.author.as_deref(), Some("Frank Herbert"));
+        assert_eq!(dune.books.first().map(String::as_str), Some("Dune"));
+        assert_eq!(client.series(dune.id).unwrap().name, "Dune");
+
+        // Every author and series in the catalogue can be found and opened.
+        for (id, name) in CATALOGUE.authors() {
+            let hits = client.search_authors(name, 1).unwrap().hits;
+            let hit = hits.iter().find(|a| a.id.get() == id).expect(name);
+            assert_eq!(client.author(hit.id).unwrap().name, name);
+        }
+        for (id, name) in CATALOGUE.series() {
+            let hits = client.search_series(name, 1).unwrap().hits;
+            let hit = hits.iter().find(|s| s.id.get() == id).expect(name);
+            assert_eq!(client.series(hit.id).unwrap().name, name);
+        }
+        assert!(
+            client
+                .search_series("no such series", 1)
+                .unwrap()
+                .hits
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn trending_resolves_every_id_for_every_period() {
+        use crate::TrendingPeriod::*;
+        let client = client();
+        let mut firsts = Vec::new();
+        for period in [Week, Month, ThreeMonths, Year, AllTime] {
+            let books = client.trending_books(period).unwrap();
+            assert_eq!(
+                books.len(),
+                crate::api::TRENDING_LIMIT.min(CATALOGUE.books.len())
+            );
+            firsts.push(books[0].id);
+        }
+        // Periods rank differently, so switching shows a change.
+        assert_ne!(firsts[0], firsts[1]);
+        assert_ne!(firsts[1], firsts[3]);
     }
 
     #[test]
