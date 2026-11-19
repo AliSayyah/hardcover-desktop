@@ -21,7 +21,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/library-dark.png">
-  <img src="docs/screenshots/library-light.png" alt="Hardcover Desktop showing the Currently reading shelf, with a book's details and reading progress beside it">
+  <img src="docs/screenshots/library-light.png" alt="Hardcover Desktop showing the Currently reading shelf, with a book's page beside it: its status, rating, edition, privacy, notes and reading progress">
 </picture>
 
 ## Features
@@ -45,7 +45,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/search-dark.png">
-  <img src="docs/screenshots/search-light.png" alt="Searching for an author, with one of the results open beside the list">
+  <img src="docs/screenshots/search-light.png" alt="Searching books for Dune, with the Books, Authors and Series switch above the results and the first result's page open beside the list">
 </picture>
 
 - **Keyboard first:**
@@ -58,8 +58,13 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
   | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Stats |
   | <kbd>Ctrl</kbd>+<kbd>R</kbd> | Refresh the library |
   | <kbd>Esc</kbd> or <kbd>Alt</kbd>+<kbd>←</kbd> | Back from a series, author or book page |
-| <kbd>Ctrl</kbd>+<kbd>,</kbd> | Settings |
+  | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Settings |
   | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/discover-dark.png">
+  <img src="docs/screenshots/discover-light.png" alt="Discover, listing the books the most readers finished on Hardcover in the last month, each with its shelf">
+</picture>
 
 ## Install
 
