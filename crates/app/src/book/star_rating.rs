@@ -10,13 +10,15 @@
 
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName, h_flex};
+use gpui_kit::component::{ActiveTheme as _, h_flex};
 use gpui_kit::{
     App, ElementId, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _,
     RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, actions, div,
     prelude::FluentBuilder as _, relative,
 };
 use hardcover_core::Rating;
+
+use crate::star;
 
 /// Key context of the control; its bindings live in `main`.
 pub const KEY_CONTEXT: &str = "StarRating";
@@ -133,8 +135,13 @@ impl RenderOnce for StarRating {
             }
         };
 
-        let filled_color = cx.theme().yellow;
-        let empty_color = cx.theme().muted_foreground;
+        // A hover previews the value it would set, lighter than a set one.
+        let filled_color = if hovered.is_some() {
+            star::color(cx).opacity(0.55)
+        } else {
+            star::color(cx)
+        };
+        let empty_color = star::empty_color(cx);
         let label = match value {
             Some(r) => format!("Rating: {} of 5 stars", r.value()),
             None => "Rating: not rated".to_owned(),
@@ -178,14 +185,14 @@ impl RenderOnce for StarRating {
                             }
                         }
                     })
-                    .children((1..=STARS).map(|star| {
+                    .children((1..=STARS).map(|n| {
                         let half = |trailing: bool| {
-                            let target = f32::from(star) - if trailing { 0.0 } else { 0.5 };
+                            let target = f32::from(n) - if trailing { 0.0 } else { 0.5 };
                             let hover = hover.clone();
                             let request = request.clone();
                             div()
                                 .id(ElementId::from(SharedString::from(format!(
-                                    "{star}-{}",
+                                    "{n}-{}",
                                     if trailing { "end" } else { "start" }
                                 ))))
                                 .absolute()
@@ -215,15 +222,14 @@ impl RenderOnce for StarRating {
                                     }
                                 })
                         };
-                        render_star(star, shown, filled_color, empty_color)
+                        render_star(n, shown, filled_color, empty_color)
                             .child(half(false))
                             .child(half(true))
                     }))
             })
             .when(disabled, |this| {
-                this.opacity(0.5).children(
-                    (1..=STARS).map(|star| render_star(star, shown, filled_color, empty_color)),
-                )
+                this.opacity(0.5)
+                    .children((1..=STARS).map(|n| render_star(n, shown, filled_color, empty_color)))
             })
             .when(is_focused, |this| {
                 this.child(
@@ -239,37 +245,31 @@ impl RenderOnce for StarRating {
 }
 
 fn render_star(
-    star: u8,
+    position: u8,
     value: f32,
     filled: gpui_kit::Hsla,
     empty: gpui_kit::Hsla,
 ) -> gpui_kit::Div {
-    let fill = star_fill(value, star);
+    let fill = star_fill(value, position);
     div()
         .relative()
         .flex_shrink_0()
         .size_5()
         .map(|this| match fill {
-            StarFill::Full => this.child(Icon::new(IconName::StarFill).size_5().text_color(filled)),
-            StarFill::Empty => this.child(Icon::new(IconName::Star).size_5().text_color(empty)),
-            // An outline star with its leading half filled.
-            StarFill::Half => this
-                .child(Icon::new(IconName::Star).size_5().text_color(empty))
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .h_full()
-                        .w(relative(0.5))
-                        .overflow_hidden()
-                        .child(
-                            Icon::new(IconName::StarFill)
-                                .size_5()
-                                .flex_shrink_0()
-                                .text_color(filled),
-                        ),
-                ),
+            StarFill::Full => this.child(star::icon().size_5().text_color(filled)),
+            StarFill::Empty => this.child(star::icon().size_5().text_color(empty)),
+            // An empty star with its leading half filled. Both are the same
+            // solid shape, so the split is clean.
+            StarFill::Half => this.child(star::icon().size_5().text_color(empty)).child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .h_full()
+                    .w(relative(0.5))
+                    .overflow_hidden()
+                    .child(star::icon().size_5().flex_shrink_0().text_color(filled)),
+            ),
         })
 }
 

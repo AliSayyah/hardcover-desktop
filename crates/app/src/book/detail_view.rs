@@ -1189,7 +1189,7 @@ impl BookDetailView {
                                         .gap_1()
                                         .text_sm()
                                         .text_color(muted)
-                                        .child(Icon::new(IconName::StarFill).xsmall())
+                                        .child(crate::star::icon().xsmall())
                                         .child(format!(
                                             "{} average on Hardcover",
                                             average_rating_text(avg)
@@ -1301,7 +1301,7 @@ impl BookDetailView {
                                 this.child(
                                     div()
                                         .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
+                                        .font_semibold()
                                         .child(crate::format::rating_text(r)),
                                 )
                             })
@@ -1310,7 +1310,8 @@ impl BookDetailView {
                                     Button::new("clear-rating")
                                         .ghost()
                                         .xsmall()
-                                        .label("Clear")
+                                        .icon(IconName::Close)
+                                        .tooltip("Clear rating")
                                         .disabled(busy)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.change_rating(None, window, cx)
