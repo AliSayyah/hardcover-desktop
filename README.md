@@ -27,13 +27,15 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 ## Features
 
 - **Your library by shelf:** Currently Reading, Want to Read, Read, Paused and Did Not Finish, with counts in the sidebar, plus the books you ignored.
-- **Search:** find any book on Hardcover and add it to a shelf.
+- **Search:** find any book, author or series on Hardcover, and add books to a shelf.
+- **Discover:** the books the most readers finished on Hardcover this week, month, three months, year or of all time, each with its shelf.
 - **Book details:** the authors and other contributors, series, page count, average rating, description, ratings breakdown, genres, moods and content warnings, and similar books.
 - **Series and authors:** open a book's series to see its books in reading order and how many you've read, or an author to see their most-read books, each with its shelf.
 - **Your reading:** set the status and rating, update your progress in pages (or time, for an audiobook), set the dates you started and finished, or remove a book.
 - **Your copy:** choose the edition you read, keep private notes, choose who can see the book, and add the edition to your Owned list.
 - **Every read:** see each time you read a book, add a re-read or an earlier read, change its dates, or delete it.
 - **Reading goals:** see this year's goal and your pace in the sidebar, and set, change or delete a goal of books, pages or hours.
+- **Stats:** books and pages you finished each year, re-reads included, how long a book takes you, how you rate and what is on each shelf, worked out from your library without going online.
 - **Offline access:** your library and covers are cached on your computer, so they open instantly and stay readable without a connection.
 - **Secure sign-in:** you sign in through Hardcover in your browser (OAuth with PKCE). The app never sees your password, and the session is stored in your system keyring.
 - **Self-updating:** the app offers each new release and installs it in one click, after verifying its signature.
@@ -50,6 +52,8 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
   | --- | --- |
   | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search |
   | <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>6</kbd> | Go to a shelf |
+  | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> | Discover |
+  | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Stats |
   | <kbd>Ctrl</kbd>+<kbd>R</kbd> | Refresh the library |
   | <kbd>Esc</kbd> or <kbd>Alt</kbd>+<kbd>←</kbd> | Back from a series, author or book page |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Settings |

@@ -31,6 +31,7 @@ use crate::about::open_about;
 use crate::app_state::{CoverService, Services, Startup, cover_file, startup};
 use crate::book::detail_view::{BookDetailView, Subject};
 use crate::catalog::author_view::AuthorView;
+use crate::catalog::discover_view::DiscoverView;
 use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
 use crate::catalog::series_view::SeriesView;
 use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
@@ -42,10 +43,11 @@ use crate::search::search_view::SearchView;
 use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
+use crate::stats::stats_view::StatsView;
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
 use crate::{
     FocusSearch, GoBack, OpenSettings, Refresh, ShowAbout, ShowCurrentlyReading, ShowDidNotFinish,
-    ShowIgnored, ShowPaused, ShowRead, ShowWantToRead,
+    ShowDiscover, ShowIgnored, ShowPaused, ShowRead, ShowStats, ShowWantToRead,
 };
 
 /// Key context of a catalogue page, where Escape goes back.
@@ -155,6 +157,8 @@ impl Render for Shell {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Destination {
     Search,
+    Discover,
+    Stats,
     Shelf(ReadingStatus),
 }
 
@@ -167,6 +171,8 @@ pub struct Workspace {
     destination: Destination,
     library: Entity<LibraryView>,
     search: Entity<SearchView>,
+    discover: Entity<DiscoverView>,
+    stats: Entity<StatsView>,
     /// Catalogue pages opened from the destination; the top one is shown.
     pages: PageStack,
     series_page: Entity<SeriesView>,
@@ -198,6 +204,8 @@ impl Workspace {
         let model = cx.new(|_| LibraryModel::new());
         let library = cx.new(|cx| LibraryView::new(model.clone(), window, cx));
         let search = cx.new(|cx| SearchView::new(model.clone(), window, cx));
+        let discover = cx.new(|cx| DiscoverView::new(model.clone(), window, cx));
+        let stats = cx.new(|cx| StatsView::new(model.clone(), cx));
         let series_page = cx.new(|cx| SeriesView::new(model.clone(), window, cx));
         let author_page = cx.new(|cx| AuthorView::new(model.clone(), window, cx));
         let book_page = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
@@ -249,6 +257,8 @@ impl Workspace {
             destination: Destination::Shelf(ReadingStatus::CurrentlyReading),
             library,
             search,
+            discover,
+            stats,
             pages: PageStack::default(),
             series_page,
             author_page,
@@ -276,6 +286,8 @@ impl Workspace {
         }
         match self.destination {
             Destination::Search => self.search.update(cx, |s, cx| s.focus_input(window, cx)),
+            Destination::Discover => self.discover.update(cx, |d, cx| d.focus(window, cx)),
+            Destination::Stats => self.stats.update(cx, |s, cx| s.focus(window, cx)),
             Destination::Shelf(_) => self.library.update(cx, |l, cx| l.focus_list(window, cx)),
         }
     }
@@ -286,6 +298,11 @@ impl Workspace {
         self.destination = destination;
         match destination {
             Destination::Search => self.search.update(cx, |s, cx| s.focus_input(window, cx)),
+            Destination::Discover => self.discover.update(cx, |d, cx| {
+                d.show(window, cx);
+                d.focus(window, cx);
+            }),
+            Destination::Stats => self.stats.update(cx, |s, cx| s.focus(window, cx)),
             Destination::Shelf(status) => {
                 self.library
                     .update(cx, |l, cx| l.show_shelf(status, window, cx));
@@ -499,9 +516,12 @@ impl Workspace {
                     .child(Icon::new(IconName::BookOpen))
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Hardcover")),
             )
-            .child(NavSection::Menu(Box::new(SidebarMenu::new().child(
-                nav_item("Search", IconName::Search, Destination::Search),
-            ))))
+            .child(NavSection::Menu(Box::new(
+                SidebarMenu::new()
+                    .child(nav_item("Search", IconName::Search, Destination::Search))
+                    .child(nav_item("Discover", IconName::Globe, Destination::Discover))
+                    .child(nav_item("Stats", IconName::ChartPie, Destination::Stats)),
+            )))
             .child(NavSection::Group(
                 SidebarGroup::new("Library").child(SidebarMenu::new().children(shelves)),
             ))
@@ -861,20 +881,28 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ShowIgnored, window, cx| {
                 this.show_shelf(ReadingStatus::Ignored, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &ShowDiscover, window, cx| {
+                this.show(Destination::Discover, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ShowStats, window, cx| {
+                this.show(Destination::Stats, window, cx)
+            }))
             .child(self.render_sidebar(window, cx))
             .child(div().flex_1().min_w_0().h_full().map(|this| {
                 match (self.pages.current(), self.destination) {
                     (Some(page), _) => this.child(self.render_page(page, cx)),
                     (None, Destination::Search) => this.child(self.search.clone()),
+                    (None, Destination::Discover) => this.child(self.discover.clone()),
+                    (None, Destination::Stats) => this.child(self.stats.clone()),
                     (None, Destination::Shelf(_)) => this.child(self.library.clone()),
                 }
             }))
     }
 }
 
-/// The sidebar's sections. `Sidebar` takes one item type, and Search sits
-/// above the Library group without a group of its own. A view draws a section
-/// that keeps its own state (the reading goals).
+/// The sidebar's sections. `Sidebar` takes one item type, and Search,
+/// Discover and Stats sit above the Library group without a group of their
+/// own. A view draws a section that keeps its own state (the reading goals).
 #[derive(Clone)]
 enum NavSection {
     Menu(Box<SidebarMenu>),
