@@ -40,13 +40,28 @@ fn notify_failure(
     window: &mut Window,
     cx: &mut App,
 ) {
+    notify_result(task, title, None, window, cx);
+}
+
+/// Shows a list change's outcome: always a failure, and success when
+/// `success` says what to show.
+fn notify_result(
+    task: Task<Result<(), SharedString>>,
+    title: &'static str,
+    success: Option<&'static str>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     window
         .spawn(cx, async move |cx| {
-            if let Err(message) = task.await {
-                let _ = cx.update(|window, cx| {
-                    window.push_notification(Notification::error(message).title(title), cx);
-                });
-            }
+            let note = match task.await {
+                Err(message) => Notification::error(message).title(title),
+                Ok(()) => match success {
+                    Some(text) => Notification::success(text),
+                    None => return,
+                },
+            };
+            let _ = cx.update(|window, cx| window.push_notification(note, cx));
         })
         .detach();
 }
@@ -123,6 +138,20 @@ fn edition_phrase(edition: &EditionSummary) -> String {
         )
 }
 
+/// The confirmation's text. `one_way`: the app can't read the list, so it
+/// can't show the book as owned or take it off again.
+fn owned_description(edition: &EditionSummary, one_way: bool) -> String {
+    let mut text = format!(
+        "{} goes on your Owned list on Hardcover and appears in your activity, \
+         which others may see even if this book is private.",
+        edition_phrase(edition)
+    );
+    if one_way {
+        text.push_str(" To take it off the list, use the Hardcover website.");
+    }
+    text
+}
+
 /// Asks before marking the entry's edition owned: Hardcover announces it.
 pub fn confirm_owned(entry: &LibraryEntry, window: &mut Window, cx: &mut App) {
     let Some(lists) = ListsModel::global(cx) else {
@@ -132,13 +161,10 @@ pub fn confirm_owned(entry: &LibraryEntry, window: &mut Window, cx: &mut App) {
         return;
     };
     let book = entry.book.id;
+    // Without the switch, the notification is the only sign it worked.
+    let one_way = offers_one_way_owned(cx);
     let title: SharedString = format!("Add “{}” to your Owned list?", entry.book.title).into();
-    let description: SharedString = format!(
-        "{} goes on your Owned list on Hardcover and appears in your activity, \
-         which others may see even if this book is private.",
-        edition_phrase(&edition)
-    )
-    .into();
+    let description: SharedString = owned_description(&edition, one_way).into();
     window.open_alert_dialog(cx, move |alert, _, _| {
         let lists = lists.clone();
         let edition = edition.id;
@@ -149,7 +175,14 @@ pub fn confirm_owned(entry: &LibraryEntry, window: &mut Window, cx: &mut App) {
             .ok_text("Add")
             .on_ok(move |_, window, cx| {
                 let task = lists.update(cx, |m, cx| m.set_owned(book, Some(edition), true, cx));
-                notify_failure(task, "Couldn't add it to your Owned list", window, cx);
+                let success = one_way.then_some("Added to your Owned list on Hardcover.");
+                notify_result(
+                    task,
+                    "Couldn't add it to your Owned list",
+                    success,
+                    window,
+                    cx,
+                );
                 true
             })
     });
@@ -241,5 +274,14 @@ mod tests {
         assert_eq!(edition_phrase(&edition), "This edition");
         edition.format = Some("Paperback".into());
         assert_eq!(edition_phrase(&edition), "The paperback edition");
+    }
+
+    #[test]
+    fn only_the_one_way_confirmation_says_how_to_undo() {
+        let edition = EditionSummary::new(EditionId::new(1));
+        let hint = "To take it off the list, use the Hardcover website.";
+        assert!(owned_description(&edition, true).ends_with(hint));
+        assert!(!owned_description(&edition, false).contains(hint));
+        assert!(owned_description(&edition, false).starts_with("This edition goes on"));
     }
 }

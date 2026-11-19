@@ -28,7 +28,7 @@ use crate::catalog::book_list::row_details;
 use crate::catalog::navigation::{self, Page};
 use crate::format::{authors_text, needs_permission};
 use crate::library::book_row::BookRow;
-use crate::library::library_view::empty_state;
+use crate::library::library_view::{empty_state, empty_state_with_action};
 use crate::library::model::LibraryModel;
 
 /// Key context of a list's page, where Delete takes the selected book off.
@@ -42,6 +42,26 @@ struct BooksPage {
     more: bool,
     loading: bool,
     error: Option<SharedString>,
+}
+
+impl BooksPage {
+    /// Showing the list should fetch: nothing loaded yet, or the last fetch
+    /// failed. (`fetch` itself stops at the end of the list.)
+    fn needs_fetch(&self) -> bool {
+        self.books.is_empty() || self.error.is_some()
+    }
+
+    /// Takes one row off. True if a fetch in flight must start again: it
+    /// asked from an offset that now skips a book.
+    fn remove(&mut self, row: ListBookId) -> bool {
+        let before = self.books.len();
+        self.books.retain(|b| b.id != row);
+        let restart = self.loading && self.books.len() != before;
+        if restart {
+            self.loading = false;
+        }
+        restart
+    }
 }
 
 pub struct ListBooks {
@@ -114,12 +134,24 @@ impl ListBooks {
             self._fetch = None;
             self.current = Some(id);
         }
-        if self
-            .page()
-            .is_none_or(|p| p.books.is_empty() && p.error.is_none())
-        {
+        if self.page().is_none_or(BooksPage::needs_fetch) {
             self.fetch(window, cx);
         }
+    }
+
+    /// Fetches again after a failure: the first page, or the next one.
+    fn retry(&mut self, window: &mut Window, cx: &mut Context<ListState<Self>>) {
+        if let Some(page) = self.current.and_then(|id| self.pages.get_mut(&id)) {
+            page.error = None;
+        }
+        self.fetch(window, cx);
+    }
+
+    /// Forgets every list's books (Refresh), loading the one shown again.
+    fn reload(&mut self, window: &mut Window, cx: &mut Context<ListState<Self>>) {
+        self.pages.clear();
+        self._fetch = None;
+        self.fetch(window, cx);
     }
 
     /// Forgets a list's books, so it loads again when shown.
@@ -130,9 +162,17 @@ impl ListBooks {
         }
     }
 
-    fn removed(&mut self, list: ListId, row: ListBookId) {
-        if let Some(page) = self.pages.get_mut(&list) {
-            page.books.retain(|b| b.id != row);
+    fn removed(
+        &mut self,
+        list: ListId,
+        row: ListBookId,
+        window: &mut Window,
+        cx: &mut Context<ListState<Self>>,
+    ) {
+        let restart = self.pages.get_mut(&list).is_some_and(|p| p.remove(row));
+        if restart && self.current == Some(list) {
+            self._fetch = None;
+            self.fetch(window, cx);
         }
     }
 
@@ -235,19 +275,27 @@ impl ListDelegate for ListBooks {
     fn render_empty(
         &mut self,
         _: &mut Window,
-        _: &mut Context<ListState<Self>>,
+        cx: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
         match self.page().and_then(|p| p.error.clone()) {
-            Some(message) => empty_state(
+            Some(message) => empty_state_with_action(
                 IconName::CircleAlert,
                 "Couldn't load this list".into(),
                 message,
-            ),
+                Button::new("retry-list-empty")
+                    .small()
+                    .label("Try again")
+                    .on_click(cx.listener(|state, _, window, cx| {
+                        state.delegate_mut().retry(window, cx);
+                    })),
+            )
+            .into_any_element(),
             None => empty_state(
                 IconName::BookOpen,
                 "No books on this list".into(),
                 "Add one from a book's page with Lists.".into(),
-            ),
+            )
+            .into_any_element(),
         }
     }
 
@@ -312,8 +360,11 @@ impl ListView {
                                 delegate.fetch(window, cx);
                             }
                         }
-                        ListsEvent::BookRemoved { list, row } => delegate.removed(*list, *row),
+                        ListsEvent::BookRemoved { list, row } => {
+                            delegate.removed(*list, *row, window, cx)
+                        }
                         ListsEvent::Deleted(id) => delegate.forget(*id),
+                        ListsEvent::Reloaded => delegate.reload(window, cx),
                     }
                     cx.notify();
                 });
@@ -359,13 +410,8 @@ impl ListView {
     }
 
     fn retry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.list.update(cx, |state, cx| {
-            let delegate = state.delegate_mut();
-            if let Some(page) = delegate.current.and_then(|id| delegate.pages.get_mut(&id)) {
-                page.error = None;
-            }
-            delegate.fetch(window, cx);
-        });
+        self.list
+            .update(cx, |state, cx| state.delegate_mut().retry(window, cx));
     }
 
     fn remove_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -574,5 +620,48 @@ impl Render for ListView {
                         .child(List::new(&self.list).size_full().p_1()),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hardcover_core::{BookId, BookSummary};
+
+    fn book(row: i64) -> ListBook {
+        ListBook::new(
+            ListBookId::new(row),
+            BookSummary::new(BookId::new(row + 1000), format!("Book {row}")),
+        )
+    }
+
+    #[test]
+    fn a_failed_or_empty_page_fetches_when_shown() {
+        let mut page = BooksPage::default();
+        assert!(page.needs_fetch());
+        page.books.push(book(1));
+        assert!(!page.needs_fetch());
+        page.error = Some("offline".into());
+        assert!(page.needs_fetch());
+    }
+
+    #[test]
+    fn removing_a_row_restarts_a_fetch_in_flight() {
+        let mut page = BooksPage {
+            books: vec![book(1), book(2)],
+            more: true,
+            loading: false,
+            error: None,
+        };
+        assert!(!page.remove(ListBookId::new(1)));
+        assert_eq!(page.books.len(), 1);
+
+        page.loading = true;
+        // A row not on this page changes no offset.
+        assert!(!page.remove(ListBookId::new(9)));
+        assert!(page.loading);
+        assert!(page.remove(ListBookId::new(2)));
+        assert!(page.books.is_empty());
+        assert!(!page.loading);
     }
 }

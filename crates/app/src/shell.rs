@@ -41,7 +41,7 @@ use crate::goals::sidebar::GoalsSection;
 use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
 use crate::lists::list_view::ListView;
-use crate::lists::model::{ListsEvent, ListsModel, ListsStatus};
+use crate::lists::model::{ListsEvent, ListsModel};
 use crate::lists::sidebar::lists_group;
 use crate::search::search_view::SearchView;
 use crate::settings_view::{SettingsView, SignOutRequested};
@@ -123,6 +123,7 @@ impl Shell {
         if cx.has_global::<Services>() {
             cx.remove_global::<Services>();
         }
+        ListsModel::release(cx);
         let sign_in = cx.new(|cx| SignInView::new(window, cx));
         self._subscription =
             Some(
@@ -242,11 +243,11 @@ impl Workspace {
             cx.observe(&updates, |_, _, cx| cx.notify()),
             cx.observe(&reauthorize, |_, _, cx| cx.notify()),
             cx.observe(&goals, |_, _, cx| cx.notify()),
-            // A list shown that is gone after a reload hands over to a shelf.
+            // A list shown that is gone after a reload, or no longer
+            // readable, hands over to a shelf.
             cx.observe_in(&lists, window, |this, lists, window, cx| {
                 if let Destination::List(id) = this.destination
-                    && *lists.read(cx).status() == ListsStatus::Loaded
-                    && lists.read(cx).list(id).is_none()
+                    && lists.read(cx).is_gone(id)
                 {
                     this.show_shelf(ReadingStatus::CurrentlyReading, window, cx);
                 }

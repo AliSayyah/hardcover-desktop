@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use gpui_kit::component::empty::{
-    Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle,
+    Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle,
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
@@ -118,18 +118,38 @@ pub fn empty_state(
         .flex()
         .items_center()
         .justify_center()
+        .child(Empty::new().header(empty_header(icon, title, description)))
+}
+
+/// [`empty_state`] with an action below, such as "Try again".
+pub fn empty_state_with_action(
+    icon: IconName,
+    title: SharedString,
+    description: SharedString,
+    action: impl IntoElement,
+) -> impl IntoElement {
+    div()
+        .size_full()
+        .p_6()
+        .flex()
+        .items_center()
+        .justify_center()
         .child(
-            Empty::new().header(
-                EmptyHeader::new()
-                    .media(
-                        EmptyMedia::new()
-                            .with_variant(EmptyMediaVariant::Icon)
-                            .child(Icon::new(icon)),
-                    )
-                    .title(EmptyTitle::new().child(title))
-                    .description(EmptyDescription::new().child(description)),
-            ),
+            Empty::new()
+                .header(empty_header(icon, title, description))
+                .content(EmptyContent::new().child(action)),
         )
+}
+
+fn empty_header(icon: IconName, title: SharedString, description: SharedString) -> EmptyHeader {
+    EmptyHeader::new()
+        .media(
+            EmptyMedia::new()
+                .with_variant(EmptyMediaVariant::Icon)
+                .child(Icon::new(icon)),
+        )
+        .title(EmptyTitle::new().child(title))
+        .description(EmptyDescription::new().child(description))
 }
 
 pub struct LibraryView {
