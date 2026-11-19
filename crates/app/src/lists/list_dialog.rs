@@ -64,7 +64,9 @@ struct ListDialog {
     mode: Mode,
     name: Entity<InputState>,
     description: Entity<TextareaState>,
-    privacy: Privacy,
+    /// `None` for a list whose setting this version doesn't know: it is
+    /// sent back unchanged unless one is chosen.
+    privacy: Option<Privacy>,
     ranked: bool,
     error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
@@ -119,10 +121,10 @@ impl ListDialog {
             name,
             description,
             // A new list is public, as on hardcover.app.
-            privacy: existing
-                .as_ref()
-                .and_then(|l| l.privacy())
-                .unwrap_or(Privacy::Public),
+            privacy: match &existing {
+                Some(list) => list.privacy(),
+                None => Some(Privacy::Public),
+            },
             ranked: existing.as_ref().is_some_and(|l| l.ranked),
             error: None,
             _subscriptions: subscriptions,
@@ -195,11 +197,11 @@ impl Render for ListDialog {
         let view = cx.entity().downgrade();
         let privacy = RadioGroup::horizontal("list-privacy")
             .children(PRIVACY.map(|p| Radio::new(SharedString::from(p.label())).label(p.label())))
-            .selected_index(PRIVACY.iter().position(|p| *p == self.privacy))
+            .selected_index(PRIVACY.iter().position(|p| Some(*p) == self.privacy))
             .disabled(writing)
             .on_change(move |ix, _, cx| {
                 let _ = view.update(cx, |this, cx| {
-                    this.privacy = PRIVACY[*ix];
+                    this.privacy = Some(PRIVACY[*ix]);
                     cx.notify();
                 });
             });

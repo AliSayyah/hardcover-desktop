@@ -1222,7 +1222,9 @@ pub struct ListDraft {
     pub name: String,
     /// Blank clears it.
     pub description: String,
-    pub privacy: Privacy,
+    /// `None` keeps the list's setting as read (one this version may not
+    /// know), or gives a new list the account's default.
+    pub privacy: Option<Privacy>,
     pub ranked: bool,
 }
 

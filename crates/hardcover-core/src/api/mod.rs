@@ -1168,12 +1168,14 @@ impl Client {
     /// Creates a list. Needs `write:lists`.
     pub fn create_list(&self, draft: &ListDraft) -> Result<UserList> {
         let name = list_name(&draft.name)?;
-        let object = json!({
+        let mut object = json!({
             "name": name,
             "description": draft.description.trim(),
-            "privacy_setting_id": draft.privacy.id(),
             "ranked": draft.ranked,
         });
+        if let Some(privacy) = draft.privacy {
+            object["privacy_setting_id"] = json!(privacy.id());
+        }
         #[derive(Deserialize)]
         struct Data {
             insert_list: Option<ListPayload>,
@@ -1204,8 +1206,11 @@ impl Client {
             "name": name,
             "description": draft.description.trim(),
             "ranked": draft.ranked,
-            "privacy_setting_id": draft.privacy.id(),
         });
+        // Sent back as read when unchanged, even an id this version doesn't know.
+        if let Some(privacy) = draft.privacy.map(Privacy::id).or(list.privacy_id) {
+            object["privacy_setting_id"] = json!(privacy);
+        }
         if let Some(view) = &list.default_view {
             object["default_view"] = json!(view);
         }

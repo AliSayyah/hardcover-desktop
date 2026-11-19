@@ -17,6 +17,7 @@ use hardcover_core::{BookId, BookSummary, EditionSummary, LibraryEntry};
 use super::list_dialog::open_new_list;
 use super::model::ListsModel;
 use crate::app_state::Services;
+use crate::format::needs_permission;
 
 /// The model, when the session can read lists.
 fn readable(cx: &App) -> Option<Entity<ListsModel>> {
@@ -64,7 +65,8 @@ pub fn lists_button(book: &BookSummary, cx: &App) -> Option<AnyElement> {
                 let can_write = Services::global(cx).has_scope(WRITE_LISTS);
                 let busy = model.is_busy(book.id);
                 let known = model.rows_for(book.id).is_some();
-                let mut menu = menu;
+                // Capped at half the window; many lists scroll.
+                let mut menu = menu.scrollable(true);
                 if !known {
                     menu = menu.item(PopupMenuItem::label("Loading your lists…"));
                 }
@@ -93,7 +95,7 @@ pub fn lists_button(book: &BookSummary, cx: &App) -> Option<AnyElement> {
                     menu = menu.item(PopupMenuItem::label("No lists yet"));
                 }
                 if !can_write {
-                    menu = menu.item(PopupMenuItem::label("No permission to change lists"));
+                    menu = menu.item(PopupMenuItem::label(needs_permission(WRITE_LISTS)));
                 }
                 let (new_lists, new_book) = (lists.clone(), book.clone());
                 menu.separator().item(
@@ -174,14 +176,12 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
     // a list change (write:lists).
     let (allowed, reason): (bool, Option<SharedString>) = match (&rows, owned) {
         (None, _) => (false, Some("Checking your Owned list…".into())),
-        (Some(_), true) if !services.has_scope(WRITE_LISTS) => (
-            false,
-            Some(crate::format::needs_permission(WRITE_LISTS).into()),
-        ),
-        (Some(_), false) if !services.has_scope(WRITE_LIBRARY) => (
-            false,
-            Some(crate::format::needs_permission(WRITE_LIBRARY).into()),
-        ),
+        (Some(_), true) if !services.has_scope(WRITE_LISTS) => {
+            (false, Some(needs_permission(WRITE_LISTS).into()))
+        }
+        (Some(_), false) if !services.has_scope(WRITE_LIBRARY) => {
+            (false, Some(needs_permission(WRITE_LIBRARY).into()))
+        }
         (Some(_), false) if edition.is_none() => (false, Some("Choose an edition first.".into())),
         _ => (true, None),
     };

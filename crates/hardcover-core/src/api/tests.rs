@@ -1906,7 +1906,7 @@ fn create_list_sends_the_draft_and_reports_errors() {
     let draft = ListDraft {
         name: "  Synthetic picks ".into(),
         description: " For testing. ".into(),
-        privacy: Privacy::FollowersOnly,
+        privacy: Some(Privacy::FollowersOnly),
         ranked: false,
     };
     http.push(
@@ -1967,7 +1967,7 @@ fn update_list_resends_the_list_as_read() {
     let draft = ListDraft {
         name: "New name".into(),
         description: String::new(),
-        privacy: Privacy::Private,
+        privacy: Some(Privacy::Private),
         ranked: true,
     };
     http.push(
@@ -1983,13 +1983,25 @@ fn update_list_resends_the_list_as_read() {
             "default_view": "grid", "featured_profile": true, "url": "https://example.com/synthetic",
         }})
     );
+    // Privacy left alone goes back as read, even an id this version doesn't know.
+    list.privacy_id = Some(9);
+    http.push(
+        200,
+        &data(json!({"update_list": {"errors": [], "id": 50, "list": list_row(50, "New name", "new-name")}})),
+    );
+    let unchanged = ListDraft {
+        privacy: None,
+        ..draft.clone()
+    };
+    c.update_list(&list, &unchanged).unwrap();
+    assert_eq!(vars(&http, 1)["object"]["privacy_setting_id"], 9);
     // The Owned list is the server's: no request.
     list.slug = Some(OWNED_LIST_SLUG.into());
     assert!(matches!(
         c.update_list(&list, &draft),
         Err(Error::InvalidInput(_))
     ));
-    assert_eq!(http.requests().len(), 1);
+    assert_eq!(http.requests().len(), 2);
 }
 
 #[test]

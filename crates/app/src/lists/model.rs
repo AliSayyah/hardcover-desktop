@@ -46,6 +46,9 @@ pub struct ListsModel {
     status: ListsStatus,
     /// A load has finished (or failed) at least once.
     loaded_once: bool,
+    /// A load has succeeded: `lists` is the user's, so a missing Owned list
+    /// means there is none yet.
+    lists_known: bool,
     /// Which books are on which list; `None` until first needed.
     memberships: Option<ListMemberships>,
     memberships_loading: bool,
@@ -88,6 +91,7 @@ impl ListsModel {
             lists: Vec::new(),
             status: ListsStatus::Idle,
             loaded_once: false,
+            lists_known: false,
             memberships: None,
             memberships_loading: false,
             book_rows: HashMap::new(),
@@ -162,7 +166,7 @@ impl ListsModel {
     /// The Owned list's rows for `book` (one per owned edition), or `None`
     /// while that is unknown. Empty when there is no Owned list yet.
     pub fn owned_rows(&self, book: BookId) -> Option<Vec<ListMembership>> {
-        if !self.loaded_once {
+        if !self.lists_known {
             return None;
         }
         let rows = self.rows_for(book)?;
@@ -196,6 +200,7 @@ impl ListsModel {
                         sort(&mut this.lists);
                         this.status = ListsStatus::Loaded;
                         this.loaded_once = true;
+                        this.lists_known = true;
                     }
                     Err(e) => this.failed(e, cx),
                 }
@@ -213,6 +218,7 @@ impl ListsModel {
                 if scope.is_none() || requested_scope(scope.as_deref()).is_some() =>
             {
                 self.lists.clear();
+                self.lists_known = false;
                 self.memberships = None;
                 self.book_rows.clear();
                 self.status = ListsStatus::Idle;
@@ -226,14 +232,13 @@ impl ListsModel {
         }
     }
 
-    /// Reloads the lists and, if it was loaded, the index (the Refresh command).
+    /// Reloads the lists and the index (Refresh, or a new grant). The old
+    /// index answers until the new one arrives; this also retries one that
+    /// failed.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         self.load(cx);
         self.book_rows.clear();
-        if self.memberships.is_some() {
-            self.memberships = None;
-            self.load_memberships(cx);
-        }
+        self.load_memberships(cx);
     }
 
     /// Loads the index of the user's books on lists, if it isn't loaded yet.
@@ -366,6 +371,8 @@ impl ListsModel {
             let result = cx.background_spawn(async move { run(&client) }).await;
             this.update(cx, |this, cx| {
                 this.writing = false;
+                // A load that started while the write ran may predate it too.
+                this.generation += 1;
                 cx.notify();
                 match result {
                     Ok(value) => Ok(apply(this, value, cx)),
@@ -488,6 +495,7 @@ impl ListsModel {
             let result = cx.background_spawn(async move { run(&client) }).await;
             this.update(cx, |this, cx| {
                 this.busy_books.remove(&book);
+                this.generation += 1;
                 cx.notify();
                 match result {
                     Ok(value) => apply(this, value, cx),
@@ -663,6 +671,7 @@ mod tests {
     fn membership_is_unknown_until_the_index_says() {
         let mut m = ListsModel::new();
         m.loaded_once = true;
+        m.lists_known = true;
         m.status = ListsStatus::Loaded;
         m.lists = vec![list(1, "Owned", "owned"), list(2, "Picks", "picks")];
         let book = BookId::new(10);

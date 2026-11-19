@@ -440,7 +440,7 @@ impl Workspace {
     fn on_reauthorized(&mut self, event: &Reauthorized, cx: &mut Context<Self>) {
         Services::set_scopes(event.scopes.clone(), cx);
         self.goals.update(cx, |g, cx| g.load(cx));
-        self.lists.update(cx, |l, cx| l.load(cx));
+        self.lists.update(cx, |l, cx| l.reload(cx));
         cx.notify();
     }
 
