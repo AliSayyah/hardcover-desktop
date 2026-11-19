@@ -9,6 +9,7 @@ mod cover_quality_tests;
 mod format;
 mod goals;
 mod library;
+mod lists;
 mod preferences;
 mod search;
 mod settings_view;
@@ -40,6 +41,7 @@ actions!(
         GoBack,
         ShowDiscover,
         ShowStats,
+        RemoveFromList,
     ]
 );
 
@@ -67,6 +69,11 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-left", GoBack, Some("Workspace")),
         // On a catalogue page; lists, menus and fields inside it use Escape first.
         KeyBinding::new("escape", GoBack, Some(shell::PAGE_CONTEXT)),
+        KeyBinding::new(
+            "delete",
+            RemoveFromList,
+            Some(lists::list_view::KEY_CONTEXT),
+        ),
         KeyBinding::new(
             "right",
             star_rating::IncreaseRating,
