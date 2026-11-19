@@ -175,7 +175,12 @@ impl RenderOnce for BookRow {
                         .gap_1()
                         .text_xs()
                         .text_color(muted)
-                        .child(Icon::new(IconName::StarFill).xsmall())
+                        // Gold: the user's own rating, as on the book page.
+                        .child(
+                            crate::star::icon()
+                                .xsmall()
+                                .text_color(crate::star::color(cx)),
+                        )
                         .child(text),
                 ),
                 Trailing::Status(text) => this.child(

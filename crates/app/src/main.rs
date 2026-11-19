@@ -17,6 +17,7 @@ mod search;
 mod settings_view;
 mod shell;
 mod sign_in;
+mod star;
 mod stats;
 mod update;
 

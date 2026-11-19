@@ -225,7 +225,7 @@ impl BookDetailView {
                                 .gap_0p5()
                                 .text_color(muted)
                                 .child(rating_label(rating))
-                                .child(Icon::new(IconName::StarFill).xsmall()),
+                                .child(crate::star::icon().xsmall()),
                         )
                         .child(
                             div()
