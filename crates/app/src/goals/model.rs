@@ -33,6 +33,9 @@ pub enum GoalsStatus {
 pub struct GoalsModel {
     goals: Vec<Goal>,
     status: GoalsStatus,
+    /// A load has finished (or failed) at least once. Reloads keep the old
+    /// goals on screen, so the sidebar doesn't flicker while they run.
+    loaded_once: bool,
     /// A write is in flight; the controls that write are disabled meanwhile.
     writing: bool,
     /// The library revision the goals were last loaded after.
@@ -57,6 +60,7 @@ impl GoalsModel {
             seen_revision: library.read(cx).revision(),
             goals: Vec::new(),
             status: GoalsStatus::Idle,
+            loaded_once: false,
             writing: false,
             _load: None,
             _reload: None,
@@ -81,6 +85,10 @@ impl GoalsModel {
 
     pub fn status(&self) -> &GoalsStatus {
         &self.status
+    }
+
+    pub fn has_loaded(&self) -> bool {
+        self.loaded_once
     }
 
     pub fn is_writing(&self) -> bool {
@@ -127,9 +135,14 @@ impl GoalsModel {
                 Ok(goals) => {
                     this.goals = goals;
                     this.status = GoalsStatus::Loaded;
+                    this.loaded_once = true;
                     cx.notify();
                 }
-                Err(Error::InsufficientScope { scope }) => {
+                // A scope the app never requests falls through to the
+                // generic message: signing in again could not grant it.
+                Err(Error::InsufficientScope { scope })
+                    if scope.is_none() || requested_scope(scope.as_deref()).is_some() =>
+                {
                     this.goals.clear();
                     this.status = GoalsStatus::Idle;
                     let scope = requested_scope(scope.as_deref()).unwrap_or(READ_GOALS);
@@ -137,6 +150,7 @@ impl GoalsModel {
                     cx.notify();
                 }
                 Err(e) => {
+                    this.loaded_once = true;
                     this.status = GoalsStatus::Failed(Services::error_message(&e, None, cx).into());
                     cx.notify();
                 }

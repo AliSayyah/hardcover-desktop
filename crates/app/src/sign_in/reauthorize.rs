@@ -21,7 +21,7 @@ use gpui_kit::{
     prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::{
-    CancelHandle, GrantedScopes, OAuthConfig, Session, StaticToken, begin_sign_in,
+    CancelHandle, GrantedScopes, OAuthConfig, Session, StaticToken, Tokens, begin_sign_in,
 };
 use hardcover_core::{Client, Error, UserId};
 
@@ -235,29 +235,32 @@ fn replace_tokens(
     user: UserId,
 ) -> Result<GrantedScopes, Failure> {
     let tokens = pending.wait(SIGN_IN_TIMEOUT)?;
-    // A throwaway client on the new access token: the session's own client
-    // remembers the old account's id.
-    let probe = StaticToken::new(tokens.access_token())
-        .ok_or_else(|| Error::Auth("the server sent an empty access token".into()))?;
-    let me = Client::new(Arc::new(probe)).me()?;
-    let result = if me.id != user {
-        Err(Failure::OtherAccount(me.username))
-    } else {
-        // Refused once the user signed out meanwhile.
-        session.replace(tokens.clone()).map_err(Failure::from)
-    };
-    if matches!(
-        result,
-        Err(Failure::OtherAccount(_) | Failure::Core(Error::Unauthorized))
-    ) {
-        // Nobody will use these tokens: revoke them, as signing out does.
-        // Best effort; the failure to report is the one above.
+    let result = adopt(session, &tokens, user);
+    if result.is_err() {
+        // `Session::replace` saves before it swaps, so after any failure the
+        // session still holds its old tokens and nobody will use these ones:
+        // revoke them, as signing out does. Best effort; the failure to
+        // report is the one above.
         if let Err(e) = session.discard(&tokens) {
             eprintln!("hardcover: revoking an unused sign-in: {e}");
         }
     }
     result?;
     Ok(session.granted_scopes())
+}
+
+/// Swaps `tokens` into `session` if they belong to `user`.
+fn adopt(session: &Session, tokens: &Tokens, user: UserId) -> Result<(), Failure> {
+    // A throwaway client on the new access token: the session's own client
+    // remembers the old account's id.
+    let probe = StaticToken::new(tokens.access_token())
+        .ok_or_else(|| Error::Auth("the server sent an empty access token".into()))?;
+    let me = Client::new(Arc::new(probe)).me()?;
+    if me.id != user {
+        return Err(Failure::OtherAccount(me.username));
+    }
+    // Refused once the user signed out meanwhile.
+    session.replace(tokens.clone()).map_err(Failure::from)
 }
 
 impl Render for Reauthorize {

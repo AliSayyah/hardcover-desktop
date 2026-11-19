@@ -1015,9 +1015,6 @@ fn moved_read_fields(
     m
 }
 
-/// `fraction` of `total`, to the nearest unit. An unfinished read never lands
-/// on the last unit: progress at the end may finish the read on Hardcover and
-/// move the book to Read, which changing the edition must not do.
 /// The description to send: Hardcover requires one (`GoalInput.description`
 /// is `String!`), and an empty one would be stored as is.
 fn goal_description(description: Option<&str>) -> Result<&str> {
@@ -1027,6 +1024,9 @@ fn goal_description(description: Option<&str>) -> Result<&str> {
         .ok_or_else(|| Error::InvalidInput("a goal needs a description".into()))
 }
 
+/// `fraction` of `total`, to the nearest unit. An unfinished read never lands
+/// on the last unit: progress at the end may finish the read on Hardcover and
+/// move the book to Read, which changing the edition must not do.
 fn scale(fraction: f64, total: u32) -> u32 {
     let units = (fraction * f64::from(total)).round() as u32;
     if fraction < 1.0 {

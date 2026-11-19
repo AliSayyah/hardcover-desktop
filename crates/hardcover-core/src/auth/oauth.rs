@@ -95,7 +95,10 @@ pub(crate) fn parse_token_response(
             .map_err(|e| TokenError::Transient(Error::Decode(format!("token response: {e}"))))?;
         let expires_in = t.expires_in.as_ref().and_then(crate::api::wire_i64);
         let expires_at = expires_in.map(|s| now + chrono::Duration::seconds(s));
-        return Ok(Tokens::new(t.access_token, t.refresh_token, expires_at).with_scope(t.scope));
+        // A blank scope says nothing about the grant; treat it as missing
+        // rather than as a grant of nothing.
+        let scope = t.scope.filter(|s| !s.trim().is_empty());
+        return Ok(Tokens::new(t.access_token, t.refresh_token, expires_at).with_scope(scope));
     }
     let body: Value = serde_json::from_slice(&resp.body).unwrap_or(Value::Null);
     let field = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_owned);
@@ -242,6 +245,19 @@ mod tests {
     fn refresh_leaves_a_missing_scope_missing() {
         let http = FakeTransport::new();
         http.push(200, r#"{"access_token":"at","refresh_token":"rt"}"#);
+        let t = refresh(&http, &OAuthConfig::new("cid"), "rt0")
+            .ok()
+            .unwrap();
+        assert_eq!(t.scope(), None);
+    }
+
+    #[test]
+    fn a_blank_scope_counts_as_missing() {
+        let http = FakeTransport::new();
+        http.push(
+            200,
+            r#"{"access_token":"at","refresh_token":"rt","scope":" "}"#,
+        );
         let t = refresh(&http, &OAuthConfig::new("cid"), "rt0")
             .ok()
             .unwrap();

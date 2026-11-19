@@ -91,7 +91,12 @@ impl Services {
     /// doesn't request), the message says to sign out and in again.
     pub fn error_message(error: &Error, fallback: Option<&'static str>, cx: &mut App) -> String {
         if let Error::InsufficientScope { scope } = error
-            && let Some(scope) = format::requested_scope(scope.as_deref()).or(fallback)
+            // The fallback stands in only for an unnamed scope: a named one
+            // the app never requests can't be granted by signing in again.
+            && let Some(scope) = match scope {
+                Some(_) => format::requested_scope(scope.as_deref()),
+                None => fallback,
+            }
         {
             Self::scope_refused(scope, cx);
             if cx.try_global::<Self>().is_some_and(|s| s.session.is_some()) {

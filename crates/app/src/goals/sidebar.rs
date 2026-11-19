@@ -38,10 +38,10 @@ impl GoalsSection {
     /// True if the section has something to show: the session can read goals,
     /// and they have loaded (or failed to) at least once.
     pub fn is_visible(&self, cx: &gpui_kit::App) -> bool {
+        let model = self.goals.read(cx);
         Services::global(cx).has_scope(READ_GOALS)
-            && !matches!(self.goals.read(cx).status(), GoalsStatus::Idle)
-            && !(self.goals.read(cx).goals().is_empty()
-                && *self.goals.read(cx).status() == GoalsStatus::Loading)
+            && !matches!(model.status(), GoalsStatus::Idle)
+            && model.has_loaded()
     }
 }
 
