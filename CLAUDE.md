@@ -79,3 +79,21 @@ The workspace has two crates, in `crates/*`.
 ## gpui-kit
 
 Use the bundled `gpui-kit` and `gpui-kit-design-guides` skills, in `.claude/skills`, before any UI or architecture work. When the skills and the crate disagree, the crate source wins: `~/.cargo/registry/src/index.crates.io-*/gpui-component-0.10.0`. For example, `ActiveTheme` is imported from `gpui_kit::component::ActiveTheme`.
+
+## CI and releases
+
+- `.github/workflows/ci.yml` runs on pull requests, on pushes to `master` and weekly:
+  - fmt
+  - clippy with `-D warnings`, and the tests
+  - `cargo deny` (`deny.toml`)
+  - desktop-entry and metainfo validation
+  - actionlint
+- Clippy and the tests run in an `ubuntu:22.04` container, the same one the release builds in. `ci/install-build-deps.sh` holds the system packages; it is the single list for both.
+- The toolchain is pinned in `rust-toolchain.toml`. Bump it on purpose, and fix any new clippy lints in the same commit.
+- Actions are pinned to commit SHAs; Dependabot updates them.
+- **To release:**
+  1. Bump `version` in `crates/app/Cargo.toml`.
+  2. Add a `<release>` to `packaging/linux/io.github.alisayyah.HardcoverDesktop.metainfo.xml`.
+  3. Push a `vX.Y.Z` tag.
+
+  `release.yml` checks that the three versions agree, builds with `--profile dist` (thin LTO, stripped), packs a tarball (`packaging/linux/package.sh`) and creates the GitHub release. Running it by hand builds the tarball as an artifact without publishing anything.
