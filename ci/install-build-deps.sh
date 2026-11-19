@@ -7,14 +7,27 @@ set -euo pipefail
 sudo=
 if [[ $(id -u) != 0 ]]; then sudo=sudo; fi
 
-$sudo apt-get update -qq
-DEBIAN_FRONTEND=noninteractive $sudo apt-get install -y -qq --no-install-recommends \
-  build-essential \
-  ca-certificates \
-  curl \
-  git \
-  pkg-config \
-  libdbus-1-dev \
-  libfontconfig-dev \
-  libxcb1-dev \
+packages=(
+  build-essential
+  ca-certificates
+  curl
+  git
+  pkg-config
+  libdbus-1-dev
+  libfontconfig-dev
+  libxcb1-dev
   libxkbcommon-x11-dev
+)
+
+install() {
+  DEBIAN_FRONTEND=noninteractive $sudo apt-get install -y -qq --no-install-recommends "${packages[@]}"
+}
+
+# CI restores the package lists along with the packages from its cache and
+# sets APT_LISTS_CACHED=1, so a slow mirror can't stall the job. If the
+# cached lists no longer work, update them and try again.
+if [[ ${APT_LISTS_CACHED:-} == 1 ]] && install; then
+  exit 0
+fi
+$sudo apt-get update -qq
+install
