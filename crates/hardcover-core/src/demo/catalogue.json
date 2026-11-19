@@ -1,200 +1,827 @@
 {
-  "user": { "id": 1, "username": "demo_reader", "name": "Demo Reader" },
+  "user": {
+    "id": 1,
+    "username": "demo_reader",
+    "name": "Demo Reader"
+  },
   "books": [
     {
-      "id": 9001, "title": "The Lantern Keeper's Daughter", "author": "Isolde Varga",
-      "pages": 412, "release_date": "2021-03-16", "rating": 4.21, "ratings_count": 1843, "users_count": 5210, "editions_count": 6,
-      "genres": ["Fantasy", "Fiction"],
-      "description": "Every night for three hundred years, a Varrow has lit the great lantern above the harbour of Sel. When her father vanishes on the eve of the winter storms, Maren takes up the keys, and finds that the light has been holding back far more than ships on the rocks.\n\nA quiet, luminous fantasy about inheritance, duty, and the stories families tell to keep the dark at bay.",
-      "cover": { "style": "circle", "bg": "#1f2a44", "fg": "#f4e9d0", "accent": "#e8b04a" }
+      "id": 427578,
+      "title": "Project Hail Mary",
+      "author": "Andy Weir",
+      "pages": 476,
+      "release_date": "2021-01-01",
+      "rating": 4.51,
+      "ratings_count": 9223,
+      "users_count": 19561,
+      "editions_count": 100,
+      "genres": [
+        "Science Fiction",
+        "Space",
+        "Adventure"
+      ],
+      "description": "A schoolteacher wakes up alone on a spaceship light-years from home, with no memory of how he got there, and slowly realises he may be Earth's last chance against a microbe that is dimming the sun.",
+      "cover": {
+        "height": 1500,
+        "url": "https://assets.hardcover.app/editions/3274049/8741341047797682-91mYu67RfUL._SL1500_.jpg",
+        "width": 994
+      }
     },
     {
-      "id": 9002, "title": "Salt and Iron", "author": "Tobias Wren",
-      "pages": 368, "release_date": "2019-05-07", "rating": 4.05, "ratings_count": 2210, "users_count": 7034, "editions_count": 9,
-      "genres": ["Fantasy", "Adventure"], "series": { "name": "The Tidebound Chronicles", "position": 1 },
-      "description": "The tide-cities of the Shallows trade in salt and sell their sailors' names. Kesh has never owned hers. When a drowned ship surfaces carrying a crown no one admits to losing, she has one season to sail it home before three fleets decide it belongs to them.",
-      "cover": { "style": "split", "bg": "#0f4c5c", "fg": "#f2efe6", "accent": "#e36414" }
+      "id": 386446,
+      "title": "The Way of Kings",
+      "author": "Brandon Sanderson",
+      "pages": 1007,
+      "release_date": "2010-01-01",
+      "rating": 4.63,
+      "ratings_count": 4280,
+      "users_count": 10144,
+      "editions_count": 55,
+      "genres": [
+        "Fantasy",
+        "Science Fiction & Fantasy",
+        "High Fantasy"
+      ],
+      "series": {
+        "name": "The Stormlight Archive",
+        "position": 1.0
+      },
+      "description": "On a storm-scoured world, a slave soldier, a scholar with a secret and a highprince haunted by visions are drawn toward a war older than any of them know. The first book of the Stormlight Archive.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/edition/3134360/a18d937805a28e3214a556442c8d33f41c02f2cb.jpeg",
+        "width": 335
+      }
     },
     {
-      "id": 9003, "title": "Salt and Fire", "author": "Tobias Wren",
-      "pages": 401, "release_date": "2020-06-09", "rating": 4.18, "ratings_count": 1590, "users_count": 4420, "editions_count": 5,
-      "genres": ["Fantasy", "Adventure"], "series": { "name": "The Tidebound Chronicles", "position": 2 },
-      "description": "The crown is home, and the Shallows are burning. Kesh and her crew chase a fire that walks on water across the southern reefs, into a war that remembers her name better than she does.",
-      "cover": { "style": "split", "bg": "#9a031e", "fg": "#fbf4e8", "accent": "#fb8b24" }
+      "id": 428023,
+      "title": "Atomic Habits",
+      "subtitle": "An Easy & Proven Way to Build Good Habits & Break Bad Ones",
+      "author": "James Clear",
+      "pages": 305,
+      "release_date": "2018-10-18",
+      "rating": 4.18,
+      "ratings_count": 2662,
+      "users_count": 6645,
+      "editions_count": 79,
+      "genres": [
+        "Self-Help",
+        "Psychology",
+        "Business"
+      ],
+      "description": "A practical guide to how small, steady changes compound, and how to shape your surroundings so good habits are easy and bad ones are hard.",
+      "cover": {
+        "height": 1500,
+        "url": "https://assets.hardcover.app/edition/12605395/629717fe-df46-40b8-8529-dca0323bf699.jpg",
+        "width": 994
+      }
     },
     {
-      "id": 9004, "title": "A Small Map of Everything", "author": "Noor Haddad",
-      "pages": 256, "release_date": "2023-02-14", "rating": 3.94, "ratings_count": 980, "users_count": 3120, "editions_count": 3,
-      "genres": ["Literary Fiction", "Family"],
-      "description": "Four siblings return to the house where they grew up to divide what's left of it: furniture, photographs, and a hand-drawn map of the neighbourhood their mother kept updating until the day she died. Tender and very funny.",
-      "cover": { "style": "frame", "bg": "#f1e3c8", "fg": "#2b2d42", "accent": "#d62828" }
+      "id": 427393,
+      "title": "Dune Messiah",
+      "author": "Frank Herbert",
+      "pages": 304,
+      "release_date": "1969-01-01",
+      "rating": 3.84,
+      "ratings_count": 2491,
+      "users_count": 5578,
+      "editions_count": 128,
+      "genres": [
+        "Science Fiction"
+      ],
+      "series": {
+        "name": "Dune",
+        "position": 2.0
+      },
+      "description": "Twelve years after taking the throne, Paul Atreides rules an empire waging holy war in his name, and the conspirators gathering around him know exactly how much he can foresee.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/edition/24211570/08ad8362f4da9c08a76f6d08aeab822336b97c35.jpeg",
+        "width": 333
+      }
     },
     {
-      "id": 9005, "title": "The Clockmaker of Vell", "author": "Ansel Moravec",
-      "pages": 528, "release_date": "2018-10-02", "rating": 4.32, "ratings_count": 3402, "users_count": 9811, "editions_count": 11,
-      "genres": ["Fantasy", "Mystery"],
-      "description": "In Vell, every citizen's lifespan is wound into a clock kept in the Guildhall. Apprentice Tomas Reyk discovers a clock with no name on it, still ticking, and set to stop tomorrow.",
-      "cover": { "style": "circle", "bg": "#3d2b1f", "fg": "#f5e6c8", "accent": "#c9a227" }
+      "id": 714600,
+      "title": "Fourth Wing",
+      "author": "Rebecca Yarros",
+      "pages": 517,
+      "release_date": "2023-05-02",
+      "rating": 4.02,
+      "ratings_count": 4115,
+      "users_count": 8762,
+      "editions_count": 98,
+      "genres": [
+        "Fantasy",
+        "Romance",
+        "Romantasy"
+      ],
+      "series": {
+        "name": "The Empyrean",
+        "position": 1.0
+      },
+      "description": "Violet Sorrengail was meant to be a scribe. Instead she is sent to the war college where dragon riders are made, and where most candidates don't survive the first year.",
+      "cover": {
+        "height": 1000,
+        "url": "https://assets.hardcover.app/editions/30707731/3559167047761380.jpeg",
+        "width": 646
+      }
     },
     {
-      "id": 9006, "title": "Quiet Engines", "author": "Priya Raman",
-      "pages": 304, "release_date": "2022-08-23", "rating": 4.11, "ratings_count": 1277, "users_count": 4087, "editions_count": 4,
-      "genres": ["Science Fiction"],
-      "description": "A generation ship has been silent for ninety years. Its engineers have forgotten why. When the engines start again, the only person who can read the old manuals is a twelve-year-old who learned the language from a children's song.",
-      "cover": { "style": "stripes", "bg": "#14213d", "fg": "#e5e5e5", "accent": "#fca311" }
+      "id": 479910,
+      "title": "Tomorrow, and Tomorrow, and Tomorrow",
+      "author": "Gabrielle Zevin",
+      "pages": 496,
+      "release_date": "2022-01-01",
+      "rating": 4.1,
+      "ratings_count": 2816,
+      "users_count": 7115,
+      "editions_count": 64,
+      "genres": [
+        "Literary Fiction",
+        "Contemporary",
+        "Romance"
+      ],
+      "description": "Two friends who met as children in a hospital games room make video games together across three decades of success, rivalry and a love that never quite lines up.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/edition/30535150/2efdfd508a803c89913fd6e987f69048a17c89c6.jpeg",
+        "width": 329
+      }
     },
     {
-      "id": 9007, "title": "Notes from a Northern Garden", "author": "Elin Sandvik",
-      "pages": 220, "release_date": "2017-04-11", "rating": 4.02, "ratings_count": 640, "users_count": 1980, "editions_count": 2,
-      "genres": ["Nonfiction", "Nature"],
-      "description": "A year in a small garden above the Arctic Circle, month by month: what grows, what doesn't, and what a patch of stubborn ground teaches about patience.",
-      "cover": { "style": "frame", "bg": "#dde5b6", "fg": "#283618", "accent": "#606c38" }
+      "id": 428018,
+      "title": "The Midnight Library",
+      "author": "Matt Haig",
+      "pages": 304,
+      "release_date": "2020-08-13",
+      "rating": 3.79,
+      "ratings_count": 3664,
+      "users_count": 8360,
+      "editions_count": 88,
+      "genres": [
+        "Fantasy",
+        "Science Fiction",
+        "Magical Realism"
+      ],
+      "series": {
+        "name": "The Midnight World",
+        "position": 1.0
+      },
+      "description": "Between life and death, Nora Seed finds a library whose books each hold a life she could have lived, and gets the chance to try them.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/external_data/30206313/f95c74793bcdd7925758f16a6f6f5f423a2ec81d.jpeg",
+        "width": 358
+      }
     },
     {
-      "id": 9008, "title": "The Cartographer's Error", "author": "Julian Ashby",
-      "pages": 344, "release_date": "2020-01-21", "rating": 3.87, "ratings_count": 1104, "users_count": 3560, "editions_count": 5,
-      "genres": ["Mystery", "Historical Fiction"],
-      "description": "London, 1852. A respected mapmaker is found dead beside a survey of streets that do not exist. His apprentice has a week to find out who wanted them drawn, and who wanted them erased.",
-      "cover": { "style": "stripes", "bg": "#5f0f40", "fg": "#f6e8d6", "accent": "#e09f3e" }
+      "id": 266607,
+      "title": "Klara and the Sun",
+      "author": "Kazuo Ishiguro",
+      "pages": 320,
+      "release_date": "2021-01-01",
+      "rating": 3.78,
+      "ratings_count": 1464,
+      "users_count": 3845,
+      "editions_count": 69,
+      "genres": [
+        "Science Fiction",
+        "Dystopian",
+        "Sci-fi"
+      ],
+      "description": "Klara, an Artificial Friend who learns about the world from a shop window, is chosen by a sick girl and sets out to understand the people she has come to love.",
+      "cover": {
+        "height": 1000,
+        "url": "https://assets.hardcover.app/edition/30399733/66fac4de-272a-40e1-a4e6-32693d78f936.jpg",
+        "width": 658
+      }
     },
     {
-      "id": 9009, "title": "Under a Paper Moon", "author": "Mei Lin Zhao",
-      "pages": 288, "release_date": "2024-02-06", "rating": 3.98, "ratings_count": 870, "users_count": 2760, "editions_count": 3,
-      "genres": ["Romance", "Contemporary"],
-      "description": "Two rival paper-lantern makers are forced to share a stall at the autumn festival. One of them has been sabotaging the other's lanterns for years. Neither of them knows which.",
-      "cover": { "style": "circle", "bg": "#ffcad4", "fg": "#3a0ca3", "accent": "#fff1e6" }
+      "id": 383598,
+      "title": "Circe",
+      "author": "Madeline Miller",
+      "pages": 400,
+      "release_date": "2018-04-10",
+      "rating": 4.21,
+      "ratings_count": 2883,
+      "users_count": 7553,
+      "editions_count": 85,
+      "genres": [
+        "Fantasy",
+        "Historical Fiction",
+        "Mythology"
+      ],
+      "description": "The witch of Aiaia tells her own story: an unloved daughter of the sun god, exiled to an island, who learns the power of transformation and stands against gods and men.",
+      "cover": {
+        "height": 1500,
+        "url": "https://assets.hardcover.app/editions/187333/9694237244087422-circe.jpg",
+        "width": 967
+      }
     },
     {
-      "id": 9010, "title": "The Long Way Down the River", "author": "Samuel Okafor",
-      "pages": 392, "release_date": "2016-07-12", "rating": 4.26, "ratings_count": 2025, "users_count": 6340, "editions_count": 8,
-      "genres": ["Adventure", "Literary Fiction"],
-      "description": "Three old friends take a borrowed boat a thousand miles downriver to scatter the ashes of a fourth. It takes them a summer, two breakdowns, and one wedding they were not invited to.",
-      "cover": { "style": "split", "bg": "#2a9d8f", "fg": "#fefae0", "accent": "#264653" }
+      "id": 490300,
+      "title": "Lessons in Chemistry",
+      "author": "Bonnie Garmus",
+      "pages": 400,
+      "release_date": "2021-01-01",
+      "rating": 4.14,
+      "ratings_count": 1409,
+      "users_count": 3055,
+      "editions_count": 62,
+      "genres": [
+        "Romance",
+        "Historical Fiction",
+        "Literary Fiction"
+      ],
+      "description": "In the 1960s, chemist Elizabeth Zott is pushed out of her lab and ends up hosting a television cooking show, which she teaches as chemistry, to the network's alarm.",
+      "cover": {
+        "height": 2200,
+        "url": "https://assets.hardcover.app/edition/30618050/eeb1fc88-ea92-4854-a37c-e7fdcebc6254.jpg",
+        "width": 1447
+      }
     },
     {
-      "id": 9011, "title": "Ember Protocol", "author": "Kasia Nowak",
-      "pages": 456, "release_date": "2025-03-04", "rating": 4.07, "ratings_count": 1530, "users_count": 5102, "editions_count": 4,
-      "genres": ["Thriller", "Science Fiction"],
-      "description": "A climate engineer discovers the cloud-seeding system she designed is being used to choose which cities get rain. She has nine days and one working satellite link to turn it off.",
-      "cover": { "style": "stripes", "bg": "#1b1b1e", "fg": "#f5f3f4", "accent": "#e5383b" }
+      "id": 312460,
+      "title": "Dune",
+      "author": "Frank Herbert",
+      "pages": 528,
+      "release_date": "1965-06-01",
+      "rating": 4.34,
+      "ratings_count": 6740,
+      "users_count": 16058,
+      "editions_count": 222,
+      "genres": [
+        "Science Fiction"
+      ],
+      "series": {
+        "name": "Dune",
+        "position": 1.0
+      },
+      "description": "On the desert planet Arrakis, the only source of the most valuable substance in the universe, young Paul Atreides' family is handed a trap disguised as a fief.",
+      "cover": {
+        "height": 2560,
+        "url": "https://assets.hardcover.app/edition/6216483/16b2e7f2-d173-46d4-932c-8c5158ea5eff.jpg",
+        "width": 1695
+      }
     },
     {
-      "id": 9012, "title": "The Orchard at World's End", "author": "Lucia Ferrante",
-      "pages": 312, "release_date": "2019-09-17", "rating": 4.14, "ratings_count": 1388, "users_count": 4255, "editions_count": 6,
-      "genres": ["Literary Fiction", "Historical Fiction"],
-      "description": "On a windswept island, three generations of women tend an orchard planted by a man none of them can agree about. A novel of apples, grudges, and forgiveness that takes its time.",
-      "cover": { "style": "frame", "bg": "#a7c957", "fg": "#386641", "accent": "#bc4749" }
+      "id": 2459845,
+      "title": "The Hobbit",
+      "subtitle": "or There and Back Again",
+      "author": "J.R.R. Tolkien",
+      "pages": 320,
+      "release_date": "1937-09-21",
+      "rating": 4.31,
+      "ratings_count": 7517,
+      "users_count": 13446,
+      "editions_count": 540,
+      "genres": [
+        "Fantasy",
+        "Classics",
+        "Adventure"
+      ],
+      "series": {
+        "name": "Middle Earth",
+        "position": 1.0
+      },
+      "description": "Bilbo Baggins, a comfortable hobbit, is swept off by a wizard and thirteen dwarves on a quest to reclaim a treasure guarded by a dragon.",
+      "cover": {
+        "height": 2400,
+        "url": "https://assets.hardcover.app/edition/17456445/d34448a9-bf3f-441d-93f2-1cd32dd3867c.jpg",
+        "width": 1600
+      }
     },
     {
-      "id": 9013, "title": "How Rivers Remember", "author": "Hana Mori",
-      "pages": 272, "release_date": "2021-11-02", "rating": 4.29, "ratings_count": 902, "users_count": 2890, "editions_count": 3,
-      "genres": ["Nonfiction", "Science"],
-      "description": "A hydrologist explains how rivers carry the record of every flood, drought and dam in their beds, and what that memory tells us about the century ahead.",
-      "cover": { "style": "stripes", "bg": "#023e8a", "fg": "#f1faee", "accent": "#90e0ef" }
+      "id": 379760,
+      "title": "1984",
+      "author": "George Orwell",
+      "pages": 336,
+      "release_date": "1949-06-08",
+      "rating": 4.25,
+      "ratings_count": 9382,
+      "users_count": 19843,
+      "editions_count": 736,
+      "genres": [
+        "Classics",
+        "Dystopian"
+      ],
+      "description": "Winston Smith rewrites history for the Ministry of Truth in a state that watches everything, and begins, dangerously, to keep a diary.",
+      "cover": {
+        "height": 475,
+        "url": "https://assets.hardcover.app/edition/29258002/fb69559e-7c34-40cb-8518-3ef4898b830c.jpg",
+        "width": 291
+      }
     },
     {
-      "id": 9014, "title": "The Ninth Lighthouse", "author": "Rowan Hale",
-      "pages": 380, "release_date": "2022-04-26", "rating": 3.91, "ratings_count": 1190, "users_count": 3870, "editions_count": 4,
-      "genres": ["Mystery", "Thriller"],
-      "description": "There are eight lighthouses on the charts of the Grey Coast. Fishermen swear there is a ninth. When a coastguard officer sees it lit, she rows out to prove them wrong.",
-      "cover": { "style": "circle", "bg": "#22333b", "fg": "#eae0d5", "accent": "#c6ac8f" }
+      "id": 379647,
+      "title": "Pride and Prejudice",
+      "author": "Jane Austen",
+      "pages": 480,
+      "release_date": "1813-01-28",
+      "rating": 4.16,
+      "ratings_count": 3621,
+      "users_count": 8104,
+      "editions_count": 1325,
+      "genres": [
+        "Classics",
+        "Romance",
+        "Historical Fiction"
+      ],
+      "description": "Elizabeth Bennet and Mr Darcy take an instant dislike to each other, and spend the rest of the novel finding out how wrong first impressions can be.",
+      "cover": {
+        "height": 400,
+        "url": "https://assets.hardcover.app/edition/30519375/e154c876-72fd-4f13-ba24-3551f0104306.jpg",
+        "width": 261
+      }
     },
     {
-      "id": 9015, "title": "Glass Birds", "author": "Ines Calder",
-      "pages": 198, "release_date": "2023-05-30", "rating": 3.85, "ratings_count": 512, "users_count": 1650, "editions_count": 2,
-      "genres": ["Literary Fiction", "Short Stories"],
-      "description": "Twelve stories about fragile things: a glassblower's last commission, a museum night guard, a family that keeps a sparrow alive through one long winter.",
-      "cover": { "style": "frame", "bg": "#cdeac0", "fg": "#14453d", "accent": "#4ea8de" }
+      "id": 377193,
+      "title": "The Great Gatsby",
+      "author": "F. Scott Fitzgerald",
+      "pages": 180,
+      "release_date": "1925-04-10",
+      "rating": 3.72,
+      "ratings_count": 5448,
+      "users_count": 10113,
+      "editions_count": 653,
+      "genres": [
+        "Classics",
+        "Literary Fiction",
+        "Romance"
+      ],
+      "description": "Nick Carraway spends a summer on Long Island beside his mysterious neighbour Jay Gatsby, whose lavish parties are all aimed at one woman across the bay.",
+      "cover": {
+        "height": 2133,
+        "url": "https://assets.hardcover.app/edition/20216419/2a81c52c-7cf2-4477-9bfc-726d0c69f43e.jpg",
+        "width": 1400
+      }
     },
     {
-      "id": 9016, "title": "The Weight of Small Hours", "author": "Ada Thorne",
-      "pages": 336, "release_date": "2018-02-27", "rating": 4.0, "ratings_count": 1460, "users_count": 4630, "editions_count": 7,
-      "genres": ["Literary Fiction"],
-      "description": "A night-shift nurse, a radio host and an insomniac teenager are connected by one phone call made at 3:14 in the morning. Over a single year, it changes all three of them.",
-      "cover": { "style": "split", "bg": "#3c096c", "fg": "#f8f9fa", "accent": "#9d4edd" }
+      "id": 369692,
+      "title": "Mistborn: The Final Empire",
+      "author": "Brandon Sanderson",
+      "pages": 541,
+      "release_date": "2006-07-17",
+      "rating": 4.46,
+      "ratings_count": 5802,
+      "users_count": 12691,
+      "editions_count": 103,
+      "genres": [
+        "Fantasy",
+        "Adventure",
+        "Young Adult"
+      ],
+      "series": {
+        "name": "The Mistborn Saga: The Original Trilogy",
+        "position": 1.0
+      },
+      "description": "In a world of ash and mist ruled by an immortal emperor, a street thief discovers she can burn metals for power and joins a crew planning an impossible heist.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/edition/5195452/8c6af4492dd7ef9eed7c1e40abefc79f23df2d2f.jpeg",
+        "width": 330
+      }
     },
     {
-      "id": 9017, "title": "Starlight Ledger", "author": "Callum Reyes",
-      "pages": 488, "release_date": "2024-09-10", "rating": 4.36, "ratings_count": 2780, "users_count": 8890, "editions_count": 5,
-      "genres": ["Science Fiction", "Space Opera"], "series": { "name": "The Meridian Cycle", "position": 1 },
-      "description": "An accountant on a mining station finds a debt in the books that predates the station itself, owed to someone who is coming to collect.",
-      "cover": { "style": "circle", "bg": "#03071e", "fg": "#f8f9fa", "accent": "#ffba08" }
+      "id": 340654,
+      "title": "The Seven Husbands of Evelyn Hugo",
+      "author": "Taylor Jenkins Reid",
+      "pages": 389,
+      "release_date": "2017-06-03",
+      "rating": 4.28,
+      "ratings_count": 3131,
+      "users_count": 6058,
+      "editions_count": 122,
+      "genres": [
+        "Romance",
+        "LGBTQ",
+        "Historical Fiction"
+      ],
+      "series": {
+        "name": "Reidverse",
+        "position": 1.0
+      },
+      "description": "A reclusive Hollywood icon chooses an unknown journalist to write her life story, including the truth about her seven marriages.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/edition/1849541/60b7835bda66d83c00f9e3e34c8eceebaee1f381.jpeg",
+        "width": 322
+      }
     },
     {
-      "id": 9018, "title": "A Field Guide to Forgetting", "author": "Oren Vale",
-      "pages": 240, "release_date": "2020-10-13", "rating": 3.96, "ratings_count": 720, "users_count": 2240, "editions_count": 2,
-      "genres": ["Nonfiction", "Essays"],
-      "description": "Essays on memory and its useful failures: lost languages, misremembered songs, and the town that agreed to forget an entire decade.",
-      "cover": { "style": "stripes", "bg": "#e9edc9", "fg": "#432818", "accent": "#bb9457" }
+      "id": 44186,
+      "title": "Educated",
+      "subtitle": "A Memoir",
+      "author": "Tara Westover",
+      "pages": 352,
+      "release_date": "2018-01-01",
+      "rating": 4.43,
+      "ratings_count": 1798,
+      "users_count": 3991,
+      "editions_count": 65,
+      "genres": [
+        "Memoir",
+        "Women",
+        "religious"
+      ],
+      "description": "A memoir of growing up in a survivalist family in rural Idaho, never going to school, and of the education that took Tara Westover to Cambridge and away from home.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/book_mappings/7332324/e6fe1a74bff78e323bef5a82bc505aed21ca4724.jpeg",
+        "width": 329
+      }
     },
     {
-      "id": 9019, "title": "The Winter Archive", "author": "Sofia Lindqvist",
-      "pages": 420, "release_date": "2021-01-19", "rating": 4.19, "ratings_count": 1650, "users_count": 5020, "editions_count": 6,
-      "genres": ["Historical Fiction"],
-      "description": "Stockholm, 1944. An archivist hides refugees' papers among the city's tax records, and keeps a second, secret archive of everyone she could not save.",
-      "cover": { "style": "frame", "bg": "#e0fbfc", "fg": "#253237", "accent": "#5c6b73" }
+      "id": 292354,
+      "title": "The Martian",
+      "author": "Andy Weir",
+      "pages": 385,
+      "release_date": "2011-09-27",
+      "rating": 4.45,
+      "ratings_count": 6312,
+      "users_count": 11925,
+      "editions_count": 140,
+      "genres": [
+        "Science Fiction",
+        "Adventure",
+        "Space"
+      ],
+      "series": {
+        "name": "The Martian",
+        "position": 1.0
+      },
+      "description": "Left for dead on Mars when his crew evacuates, astronaut Mark Watney has to engineer his way to survival with limited food and a lot of duct tape.",
+      "cover": {
+        "height": 1200,
+        "url": "https://assets.hardcover.app/editions/21716111/5323176149970177.jpg",
+        "width": 790
+      }
     },
     {
-      "id": 9020, "title": "Copper and Thread", "author": "Malik Adeyemi",
-      "pages": 352, "release_date": "2023-07-18", "rating": 4.12, "ratings_count": 1320, "users_count": 4410, "editions_count": 4,
-      "genres": ["Fantasy"],
-      "description": "In a city where spells are woven into cloth, a tailor's son is accused of stitching a curse into the governor's coat. He didn't. He knows who did.",
-      "cover": { "style": "split", "bg": "#b56576", "fg": "#fff8f0", "accent": "#355070" }
+      "id": 89871,
+      "title": "Infinite Jest",
+      "author": "David Foster Wallace",
+      "pages": 1104,
+      "release_date": "1985-01-01",
+      "rating": 4.2,
+      "ratings_count": 439,
+      "users_count": 2625,
+      "editions_count": 29,
+      "genres": [
+        "Literary Fiction",
+        "Classics",
+        "General"
+      ],
+      "description": "Set at a tennis academy and a halfway house in a near-future North America, a sprawling novel about addiction, entertainment and a film so engaging that its viewers lose the will to do anything else.",
+      "cover": {
+        "height": 2600,
+        "url": "https://assets.hardcover.app/edition/32718880/2682231d-f875-4902-90f5-02f443b32150.jpg",
+        "width": 1722
+      }
     },
     {
-      "id": 9021, "title": "Midnight at the Paper Mill", "author": "Greta Holm",
-      "pages": 296, "release_date": "2019-03-12", "rating": 3.79, "ratings_count": 860, "users_count": 2730, "editions_count": 3,
-      "genres": ["Mystery", "Cozy Mystery"],
-      "description": "A retired schoolteacher, a mill that closed forty years ago, and a ream of paper delivered to her door every Tuesday with no return address.",
-      "cover": { "style": "circle", "bg": "#f2cc8f", "fg": "#3d405b", "accent": "#e07a5f" }
+      "id": 427513,
+      "title": "Ulysses",
+      "author": "James Joyce",
+      "pages": 1068,
+      "release_date": "1922-02-02",
+      "rating": 3.81,
+      "ratings_count": 294,
+      "users_count": 2043,
+      "editions_count": 288,
+      "genres": [
+        "Classics",
+        "General",
+        "Literary Fiction"
+      ],
+      "description": "One day in Dublin, 16 June 1904, following Leopold Bloom and Stephen Dedalus through the city in a novel that changes its style with every chapter.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/external_data/61208607/8f93e37eab6201f6f715f24fc35fdca81d7c14db.jpeg",
+        "width": 324
+      }
     },
     {
-      "id": 9022, "title": "The Patient Mountain", "author": "Tenzin Clarke",
-      "pages": 264, "release_date": "2022-06-07", "rating": 4.23, "ratings_count": 940, "users_count": 3010, "editions_count": 3,
-      "genres": ["Memoir", "Travel"],
-      "description": "After a failed expedition, a climber returns to the same mountain every spring for ten years, never to summit, only to learn its moods.",
-      "cover": { "style": "stripes", "bg": "#edf6f9", "fg": "#006d77", "accent": "#83c5be" }
+      "id": 1788666,
+      "title": "Moby Dick",
+      "author": "Herman Melville",
+      "pages": 549,
+      "release_date": "1851-10-18",
+      "rating": 3.62,
+      "ratings_count": 1037,
+      "users_count": 3730,
+      "editions_count": 767,
+      "genres": [
+        "Classics",
+        "Adventure",
+        "Literary Fiction"
+      ],
+      "description": "Ishmael signs on to the whaler Pequod, whose captain, Ahab, is set on hunting down the white whale that took his leg.",
+      "cover": {
+        "height": 1500,
+        "url": "https://assets.hardcover.app/edition/32295172/c9f8766e-8705-4057-884b-8331ebe1bd3b.jpg",
+        "width": 940
+      }
     },
     {
-      "id": 9023, "title": "Tidewater Songs", "author": "Tobias Wren",
-      "pages": 410, "release_date": "2023-04-25", "rating": 4.24, "ratings_count": 1210, "users_count": 3980, "editions_count": 4,
-      "genres": ["Fantasy", "Adventure"], "series": { "name": "The Tidebound Chronicles", "position": 3 },
-      "description": "The final voyage of the Tidebound Chronicles. Kesh sails beyond the last charted reef to find out who first sold the Shallows' names, and whether they can be bought back.",
-      "cover": { "style": "split", "bg": "#003049", "fg": "#fdf0d5", "accent": "#c1121f" }
+      "id": 427314,
+      "title": "Children of Dune",
+      "author": "Frank Herbert",
+      "pages": 623,
+      "release_date": "1976-04-01",
+      "rating": 3.91,
+      "ratings_count": 1467,
+      "users_count": 3779,
+      "editions_count": 101,
+      "genres": [
+        "Science Fiction"
+      ],
+      "series": {
+        "name": "Dune",
+        "position": 3.0
+      },
+      "description": "Paul's twin children, born with the memories of their ancestors, inherit an empire held in trust by their aunt and a desert planet that is turning green.",
+      "cover": {
+        "height": 1600,
+        "url": "https://assets.hardcover.app/edition/30825973/a2fec259-e3b1-4d17-8755-2bbe0af30ca9.jpg",
+        "width": 1064
+      }
     },
     {
-      "id": 9024, "title": "The Last Bookbinder", "author": "Isolde Varga",
-      "pages": 376, "release_date": "2024-11-05", "rating": 4.15, "ratings_count": 760, "users_count": 2530, "editions_count": 2,
-      "genres": ["Fantasy", "Fiction"],
-      "description": "In a city where every book has been replaced by a single official edition, an old binder repairs the last private library, one forbidden page at a time.",
-      "cover": { "style": "frame", "bg": "#6b4226", "fg": "#f6e7cb", "accent": "#d9a441" }
+      "id": 427363,
+      "title": "God Emperor of Dune",
+      "author": "Frank Herbert",
+      "pages": 436,
+      "release_date": "1981-05-01",
+      "rating": 3.82,
+      "ratings_count": 969,
+      "users_count": 2713,
+      "editions_count": 76,
+      "genres": [
+        "Science Fiction",
+        "Fantasy",
+        "Classics"
+      ],
+      "series": {
+        "name": "Dune",
+        "position": 4.0
+      },
+      "description": "Thousands of years later, Leto II rules as a tyrant slowly becoming a sandworm, holding humanity to a path that only he can see.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/external_data/30542666/b90d2d32426e5bf180573b4e97421db3307c93e0.jpeg",
+        "width": 333
+      }
     }
   ],
   "library": [
-    { "id": 501, "book": 9005, "status": 2, "date_added": "2026-09-02", "updated_at": "2026-11-18T21:40:00+00:00", "read": { "id": 801, "started_at": "2026-10-28", "progress_pages": 341 } },
-    { "id": 502, "book": 9006, "status": 2, "date_added": "2026-10-10", "updated_at": "2026-11-17T08:15:00+00:00", "read": { "id": 802, "started_at": "2026-11-09", "progress_pages": 74 } },
-    { "id": 503, "book": 9013, "status": 2, "date_added": "2026-08-21", "updated_at": "2026-11-12T19:05:00+00:00", "read": { "id": 803, "started_at": "2026-10-03", "progress_pages": 188 } },
-
-    { "id": 511, "book": 9001, "status": 1, "date_added": "2026-11-15", "updated_at": "2026-11-15T10:00:00+00:00" },
-    { "id": 512, "book": 9017, "status": 1, "date_added": "2026-11-02", "updated_at": "2026-11-02T10:00:00+00:00" },
-    { "id": 513, "book": 9019, "status": 1, "date_added": "2026-10-19", "updated_at": "2026-10-19T10:00:00+00:00" },
-    { "id": 514, "book": 9020, "status": 1, "date_added": "2026-09-30", "updated_at": "2026-09-30T10:00:00+00:00" },
-    { "id": 515, "book": 9003, "status": 1, "date_added": "2026-09-14", "updated_at": "2026-09-14T10:00:00+00:00" },
-    { "id": 516, "book": 9022, "status": 1, "date_added": "2026-08-05", "updated_at": "2026-08-05T10:00:00+00:00" },
-    { "id": 517, "book": 9009, "status": 1, "date_added": "2026-07-22", "updated_at": "2026-07-22T10:00:00+00:00" },
-
-    { "id": 521, "book": 9002, "status": 3, "rating": 4.5, "date_added": "2026-06-01", "updated_at": "2026-09-12T20:00:00+00:00", "read": { "id": 821, "started_at": "2026-08-28", "finished_at": "2026-09-12", "progress_pages": 368 } },
-    { "id": 522, "book": 9010, "status": 3, "rating": 5, "date_added": "2026-05-10", "updated_at": "2026-08-20T20:00:00+00:00", "read": { "id": 822, "started_at": "2026-08-01", "finished_at": "2026-08-20", "progress_pages": 392 } },
-    { "id": 523, "book": 9004, "status": 3, "rating": 4, "date_added": "2026-04-18", "updated_at": "2026-07-28T20:00:00+00:00", "read": { "id": 823, "started_at": "2026-07-19", "finished_at": "2026-07-28", "progress_pages": 256 } },
-    { "id": 524, "book": 9012, "status": 3, "rating": 4.5, "date_added": "2026-03-02", "updated_at": "2026-07-10T20:00:00+00:00", "read": { "id": 824, "started_at": "2026-06-24", "finished_at": "2026-07-10", "progress_pages": 312 } },
-    { "id": 525, "book": 9008, "status": 3, "rating": 3.5, "date_added": "2026-02-11", "updated_at": "2026-06-15T20:00:00+00:00", "read": { "id": 825, "started_at": "2026-06-02", "finished_at": "2026-06-15", "progress_pages": 344 } },
-    { "id": 526, "book": 9016, "status": 3, "rating": 4, "date_added": "2026-01-20", "updated_at": "2026-05-24T20:00:00+00:00", "read": { "id": 826, "started_at": "2026-05-09", "finished_at": "2026-05-24", "progress_pages": 336 } },
-    { "id": 527, "book": 9007, "status": 3, "rating": 3.5, "date_added": "2026-01-05", "updated_at": "2026-04-30T20:00:00+00:00", "read": { "id": 827, "started_at": "2026-04-18", "finished_at": "2026-04-30", "progress_pages": 220 } },
-    { "id": 528, "book": 9014, "status": 3, "rating": 4, "date_added": "2025-12-14", "updated_at": "2026-03-21T20:00:00+00:00", "read": { "id": 828, "started_at": "2026-03-08", "finished_at": "2026-03-21", "progress_pages": 380 } },
-    { "id": 529, "book": 9018, "status": 3, "rating": 3, "date_added": "2025-11-30", "updated_at": "2026-02-17T20:00:00+00:00", "read": { "id": 829, "started_at": "2026-02-06", "finished_at": "2026-02-17", "progress_pages": 240 } },
-
-    { "id": 531, "book": 9021, "status": 4, "date_added": "2026-05-02", "updated_at": "2026-10-01T20:00:00+00:00", "read": { "id": 831, "started_at": "2026-09-15", "progress_pages": 112 } },
-    { "id": 541, "book": 9011, "status": 5, "rating": 2, "date_added": "2026-04-01", "updated_at": "2026-08-09T20:00:00+00:00", "read": { "id": 841, "started_at": "2026-07-30", "progress_pages": 96 } },
-    { "id": 542, "book": 9015, "status": 5, "date_added": "2026-03-14", "updated_at": "2026-05-02T20:00:00+00:00", "read": { "id": 842, "started_at": "2026-04-25", "progress_pages": 41 } }
+    {
+      "id": 501,
+      "book": 427578,
+      "status": 2,
+      "date_added": "2026-09-02",
+      "updated_at": "2026-11-18T21:40:00+00:00",
+      "read": {
+        "id": 801,
+        "started_at": "2026-11-01",
+        "progress_pages": 312
+      }
+    },
+    {
+      "id": 502,
+      "book": 386446,
+      "status": 2,
+      "date_added": "2026-10-10",
+      "updated_at": "2026-11-17T08:15:00+00:00",
+      "read": {
+        "id": 802,
+        "started_at": "2026-10-20",
+        "progress_pages": 418
+      }
+    },
+    {
+      "id": 503,
+      "book": 428023,
+      "status": 2,
+      "date_added": "2026-08-21",
+      "updated_at": "2026-11-12T19:05:00+00:00",
+      "read": {
+        "id": 803,
+        "started_at": "2026-10-03",
+        "progress_pages": 121
+      }
+    },
+    {
+      "id": 511,
+      "book": 427393,
+      "status": 1,
+      "date_added": "2026-11-15",
+      "updated_at": "2026-11-15T20:00:00+00:00"
+    },
+    {
+      "id": 512,
+      "book": 714600,
+      "status": 1,
+      "date_added": "2026-11-02",
+      "updated_at": "2026-11-02T20:00:00+00:00"
+    },
+    {
+      "id": 513,
+      "book": 479910,
+      "status": 1,
+      "date_added": "2026-10-19",
+      "updated_at": "2026-10-19T20:00:00+00:00"
+    },
+    {
+      "id": 514,
+      "book": 428018,
+      "status": 1,
+      "date_added": "2026-09-30",
+      "updated_at": "2026-09-30T20:00:00+00:00"
+    },
+    {
+      "id": 515,
+      "book": 266607,
+      "status": 1,
+      "date_added": "2026-09-14",
+      "updated_at": "2026-09-14T20:00:00+00:00"
+    },
+    {
+      "id": 516,
+      "book": 383598,
+      "status": 1,
+      "date_added": "2026-08-05",
+      "updated_at": "2026-08-05T20:00:00+00:00"
+    },
+    {
+      "id": 517,
+      "book": 490300,
+      "status": 1,
+      "date_added": "2026-07-22",
+      "updated_at": "2026-07-22T20:00:00+00:00"
+    },
+    {
+      "id": 521,
+      "book": 312460,
+      "status": 3,
+      "rating": 5,
+      "date_added": "2026-06-01",
+      "updated_at": "2026-10-12T20:00:00+00:00",
+      "read": {
+        "id": 821,
+        "started_at": "2026-09-20",
+        "finished_at": "2026-10-12",
+        "progress_pages": 528
+      }
+    },
+    {
+      "id": 522,
+      "book": 2459845,
+      "status": 3,
+      "rating": 4.5,
+      "date_added": "2026-05-10",
+      "updated_at": "2026-09-02T20:00:00+00:00",
+      "read": {
+        "id": 822,
+        "started_at": "2026-08-24",
+        "finished_at": "2026-09-02",
+        "progress_pages": 287
+      }
+    },
+    {
+      "id": 523,
+      "book": 292354,
+      "status": 3,
+      "rating": 4,
+      "date_added": "2026-04-18",
+      "updated_at": "2026-08-14T20:00:00+00:00",
+      "read": {
+        "id": 823,
+        "started_at": "2026-08-05",
+        "finished_at": "2026-08-14",
+        "progress_pages": 385
+      }
+    },
+    {
+      "id": 524,
+      "book": 369692,
+      "status": 3,
+      "rating": 4.5,
+      "date_added": "2026-03-02",
+      "updated_at": "2026-07-25T20:00:00+00:00",
+      "read": {
+        "id": 824,
+        "started_at": "2026-07-08",
+        "finished_at": "2026-07-25",
+        "progress_pages": 541
+      }
+    },
+    {
+      "id": 525,
+      "book": 379760,
+      "status": 3,
+      "rating": 4.5,
+      "date_added": "2026-02-11",
+      "updated_at": "2026-06-30T20:00:00+00:00",
+      "read": {
+        "id": 825,
+        "started_at": "2026-06-21",
+        "finished_at": "2026-06-30",
+        "progress_pages": 336
+      }
+    },
+    {
+      "id": 526,
+      "book": 340654,
+      "status": 3,
+      "rating": 4,
+      "date_added": "2026-01-20",
+      "updated_at": "2026-06-08T20:00:00+00:00",
+      "read": {
+        "id": 826,
+        "started_at": "2026-05-30",
+        "finished_at": "2026-06-08",
+        "progress_pages": 389
+      }
+    },
+    {
+      "id": 527,
+      "book": 44186,
+      "status": 3,
+      "rating": 4.5,
+      "date_added": "2026-01-05",
+      "updated_at": "2026-05-11T20:00:00+00:00",
+      "read": {
+        "id": 827,
+        "started_at": "2026-04-28",
+        "finished_at": "2026-05-11",
+        "progress_pages": 352
+      }
+    },
+    {
+      "id": 528,
+      "book": 379647,
+      "status": 3,
+      "rating": 4,
+      "date_added": "2025-12-14",
+      "updated_at": "2026-04-02T20:00:00+00:00",
+      "read": {
+        "id": 828,
+        "started_at": "2026-03-18",
+        "finished_at": "2026-04-02",
+        "progress_pages": 480
+      }
+    },
+    {
+      "id": 529,
+      "book": 377193,
+      "status": 3,
+      "rating": 3.5,
+      "date_added": "2025-11-30",
+      "updated_at": "2026-03-01T20:00:00+00:00",
+      "read": {
+        "id": 829,
+        "started_at": "2026-02-24",
+        "finished_at": "2026-03-01",
+        "progress_pages": 180
+      }
+    },
+    {
+      "id": 531,
+      "book": 89871,
+      "status": 4,
+      "date_added": "2026-05-02",
+      "updated_at": "2026-10-01T20:00:00+00:00",
+      "read": {
+        "id": 831,
+        "started_at": "2026-09-15",
+        "progress_pages": 230
+      }
+    },
+    {
+      "id": 541,
+      "book": 427513,
+      "status": 5,
+      "date_added": "2026-04-01",
+      "updated_at": "2026-08-09T20:00:00+00:00",
+      "read": {
+        "id": 841,
+        "started_at": "2026-07-30",
+        "progress_pages": 88
+      }
+    },
+    {
+      "id": 542,
+      "book": 1788666,
+      "status": 5,
+      "rating": 2.5,
+      "date_added": "2026-03-14",
+      "updated_at": "2026-05-02T20:00:00+00:00",
+      "read": {
+        "id": 842,
+        "started_at": "2026-04-25",
+        "progress_pages": 140
+      }
+    }
   ]
 }

@@ -8,7 +8,7 @@ Hardcover Desktop is a Linux desktop client for [hardcover.app](https://hardcove
 
 ```sh
 cargo run -p hardcover-desktop                    # run the app (signs in with OAuth, or restores the keyring session)
-cargo run -p hardcover-desktop --features demo    # an invented library: no account, network, keyring or real cache
+cargo run -p hardcover-desktop --features demo    # a sample library: no account, keyring, settings or real cache; only covers are downloaded
 cargo test --workspace                            # unit tests; live-API tests are #[ignore]d
 cargo test -p hardcover-core <name>               # one test, e.g. `unauthorized_refreshes_once_and_retries`
 cargo clippy --workspace --all-targets
@@ -60,10 +60,10 @@ The workspace has two crates, in `crates/*`.
   - `StaticToken` is the `HARDCOVER_TOKEN` path.
 - `store`: `LibraryCache`, a SQLite database at `~/.local/share/hardcover-desktop/library.sqlite3`.
 - `covers`: `CoverCache`, on disk at `~/.cache/hardcover-desktop/covers`.
-- `demo` (the `demo` feature, and in tests): `demo::client()` and `demo::cover_cache()` answer every GraphQL operation from `demo/catalogue.json` through a fake transport, so queries, parsing and paging run as they do against Hardcover. Writes fail with a read-only error.
-  - Everything in the catalogue is invented. Keep it that way: no real books, authors or users.
+- `demo` (the `demo` feature, and in tests): `demo::client()` answers every GraphQL operation from `demo/catalogue.json` through a fake transport, so queries, parsing and paging run as they do against Hardcover. Writes fail with a read-only error. `demo::cover_cache()` passes only the catalogue's cover URLs through to the real network and refuses every other URL.
+  - The books are real popular ones; their ids, facts and cover URLs come from Hardcover. The descriptions are our own short text, not publisher blurbs. The reader and their shelves are invented: no real users.
+  - Covers are downloaded from Hardcover at runtime, only for the catalogue's own URLs. Never commit the images.
   - When you add a query, give it an answer in `demo::answer`; the `every_document_has_an_answer` test fails until you do.
-  - The covers in `demo/covers/` are drawn by `demo/make_covers.py`. Rerun it after changing the catalogue.
 - `prefs`: `Preferences` (theme, automatic update checks) in `~/.config/hardcover-desktop/settings.json`. Loading never fails: a missing or garbled file gives the defaults, and every field has `#[serde(default)]`, because a self-updated app reads the file an older version wrote. Writes are atomic (temporary file, then rename). The file survives signing out.
 
 **`app`** (the package is named `hardcover-desktop`) is the GPUI UI.
@@ -99,6 +99,7 @@ The workspace has two crates, in `crates/*`.
 
 `docs/screenshots/` holds the README's screenshots, in light and dark. Take them from the demo build (`--features demo`, with `HARDCOVER_THEME=light` or `dark`), never from a real account:
 - Use a 1200×800 floating window and capture just the window, at its scale factor.
+- The demo downloads its covers, so it needs the network. Wait until every visible cover has loaded before capturing.
 - Resizing the window after launch squeezes the library's list toward its minimum width. Drag the divider back to its default of 24rem before capturing.
 - Strip metadata from the PNGs (`magick … -strip`).
 

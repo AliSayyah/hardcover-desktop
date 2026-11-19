@@ -9,7 +9,7 @@
 //! - [`covers`]: on-disk cache of cover images.
 //! - [`prefs`]: the user's preferences, a small JSON file.
 //! - [`update`]: self-update from signed GitHub releases.
-//! - `demo` (with the `demo` feature): an invented library served without a network.
+//! - `demo` (with the `demo` feature): a sample library of popular books, served without an account.
 
 pub mod api;
 pub mod auth;

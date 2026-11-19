@@ -1,12 +1,15 @@
-//! A made-up library for screenshots and for trying the app without an account.
+//! A demo library for screenshots and for trying the app without an account.
 //!
-//! [`client`] and [`cover_cache`] answer from `demo/catalogue.json` and
-//! `demo/covers/` through a fake transport, so the rest of the client (queries,
-//! parsing, paging) runs exactly as it does against Hardcover. Everything in
-//! the catalogue is invented: the books, their authors and the reader.
+//! [`client`] answers from `demo/catalogue.json` through a fake transport, so
+//! the rest of the client (queries, parsing, paging) runs exactly as it does
+//! against Hardcover. The books are real, popular ones, with facts and cover
+//! links from Hardcover and descriptions written for the demo; the reader and
+//! their shelves are invented.
 //!
-//! Reads work; every write fails with a "read-only" error. Only built with the
-//! `demo` feature (and in tests).
+//! [`cover_cache`] downloads the catalogue's covers from Hardcover, the demo's
+//! only network access; any other URL is refused. Reads work; every write
+//! fails with a "read-only" error. Only built with the `demo` feature (and in
+//! tests).
 
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
@@ -16,30 +19,31 @@ use serde_json::{Value, json};
 
 use crate::api::{Client, TokenSource};
 use crate::covers::CoverCache;
-use crate::http::{HttpRequest, HttpResponse, HttpTransport, Method, RequestBody};
+use crate::http::{HttpRequest, HttpResponse, HttpTransport, Method, RequestBody, UreqTransport};
 use crate::ratelimit::TokenBucket;
 use crate::{Error, Result};
 
 /// The reply to every write.
 pub const READ_ONLY: &str = "The demo library is read-only.";
 
-const COVER_HOST: &str = "https://covers.demo.invalid/";
-const COVER_WIDTH: u32 = 320;
-const COVER_HEIGHT: u32 = 480;
-
 /// A client for the demo library. It never touches the network.
 pub fn client() -> Client {
     Client::with_transport(
         Arc::new(DemoToken),
-        Arc::new(DemoTransport),
+        Arc::new(DemoTransport { covers: None }),
         // No rate limit to respect.
         TokenBucket::new(1_000, 1_000.0),
     )
 }
 
-/// A cover cache in `dir` that "downloads" the demo covers.
+/// A cover cache in `dir` that downloads the catalogue's covers from Hardcover.
 pub fn cover_cache(dir: impl Into<PathBuf>) -> Result<CoverCache> {
-    CoverCache::with_transport(dir, Arc::new(DemoTransport))
+    CoverCache::with_transport(
+        dir,
+        Arc::new(DemoTransport {
+            covers: Some(UreqTransport::new()),
+        }),
+    )
 }
 
 struct DemoToken;
@@ -74,6 +78,7 @@ struct DemoUser {
 struct Book {
     id: i64,
     title: String,
+    subtitle: Option<String>,
     author: String,
     pages: i64,
     release_date: String,
@@ -84,6 +89,14 @@ struct Book {
     genres: Vec<String>,
     series: Option<Series>,
     description: String,
+    cover: CoverLink,
+}
+
+#[derive(Deserialize)]
+struct CoverLink {
+    url: String,
+    width: u32,
+    height: u32,
 }
 
 #[derive(Deserialize)]
@@ -115,17 +128,6 @@ static CATALOGUE: LazyLock<Catalogue> = LazyLock::new(|| {
     serde_json::from_str(include_str!("demo/catalogue.json")).expect("demo/catalogue.json parses")
 });
 
-macro_rules! covers {
-    ($($id:literal),* $(,)?) => {
-        &[$(($id, include_bytes!(concat!("demo/covers/", stringify!($id), ".jpg")))),*]
-    };
-}
-
-static COVERS: &[(i64, &[u8])] = covers![
-    9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010, 9011, 9012, 9013, 9014, 9015, 9016,
-    9017, 9018, 9019, 9020, 9021, 9022, 9023, 9024,
-];
-
 impl Catalogue {
     fn book(&self, id: i64) -> Option<&Book> {
         self.books.iter().find(|b| b.id == id)
@@ -149,9 +151,9 @@ fn slug(title: &str) -> String {
 
 fn image(book: &Book) -> Value {
     json!({
-        "url": format!("{COVER_HOST}{}.jpg", book.id),
-        "width": COVER_WIDTH,
-        "height": COVER_HEIGHT,
+        "url": book.cover.url,
+        "width": book.cover.width,
+        "height": book.cover.height,
     })
 }
 
@@ -164,7 +166,7 @@ fn book_summary(book: &Book) -> Value {
     json!({
         "id": book.id,
         "title": book.title,
-        "subtitle": null,
+        "subtitle": book.subtitle,
         "slug": slug(&book.title),
         "pages": book.pages,
         "release_year": release_year(book),
@@ -242,6 +244,7 @@ fn search_document(book: &Book) -> Value {
     json!({
         "id": book.id,
         "title": book.title,
+        "subtitle": book.subtitle,
         "author_names": [book.author],
         "image": image(book),
         "pages": book.pages,
@@ -254,12 +257,25 @@ fn search_document(book: &Book) -> Value {
 
 // ----- transport -----
 
-struct DemoTransport;
+struct DemoTransport {
+    /// Downloads covers; `None` refuses them (the API client never asks).
+    covers: Option<UreqTransport>,
+}
 
 impl HttpTransport for DemoTransport {
     fn send(&self, req: HttpRequest) -> Result<HttpResponse> {
         match req.method {
-            Method::Get => Ok(cover(&req.url)),
+            Method::Get => {
+                let known = CATALOGUE.books.iter().any(|b| b.cover.url == req.url);
+                match &self.covers {
+                    Some(http) if known => http.send(req),
+                    _ => Ok(HttpResponse {
+                        status: 404,
+                        headers: Vec::new(),
+                        body: Vec::new(),
+                    }),
+                }
+            }
             Method::Post => {
                 let RequestBody::Json(body) = &req.body else {
                     return Err(Error::Network("the demo only answers GraphQL".into()));
@@ -270,27 +286,6 @@ impl HttpTransport for DemoTransport {
                 Ok(json_response(answer(op, &body["variables"])))
             }
         }
-    }
-}
-
-fn cover(url: &str) -> HttpResponse {
-    let bytes = url
-        .strip_prefix(COVER_HOST)
-        .and_then(|name| name.strip_suffix(".jpg"))
-        .and_then(|id| id.parse::<i64>().ok())
-        .and_then(|id| COVERS.iter().find(|(cover, _)| *cover == id))
-        .map(|(_, bytes)| *bytes);
-    match bytes {
-        Some(bytes) => HttpResponse {
-            status: 200,
-            headers: vec![("content-type".into(), "image/jpeg".into())],
-            body: bytes.to_vec(),
-        },
-        None => HttpResponse {
-            status: 404,
-            headers: Vec::new(),
-            body: Vec::new(),
-        },
     }
 }
 
@@ -383,7 +378,7 @@ fn search(catalogue: &Catalogue, vars: &Value) -> Value {
     let page = vars["page"].as_u64().unwrap_or(1).max(1) as usize;
     let per_page = vars["perPage"].as_u64().unwrap_or(25).max(1) as usize;
     let words: Vec<&str> = query.split_whitespace().collect();
-    let matches: Vec<&Book> = catalogue
+    let mut matches: Vec<&Book> = catalogue
         .books
         .iter()
         .filter(|b| {
@@ -391,6 +386,8 @@ fn search(catalogue: &Catalogue, vars: &Value) -> Value {
             words.iter().all(|w| haystack.contains(w))
         })
         .collect();
+    // Most readers first, roughly how Hardcover ranks.
+    matches.sort_by_key(|b| std::cmp::Reverse(b.users_count));
     let hits: Vec<Value> = matches
         .iter()
         .skip((page - 1) * per_page)
@@ -481,17 +478,29 @@ mod tests {
     }
 
     #[test]
-    fn every_book_has_details_and_a_cover() {
+    fn every_book_has_details_and_a_hardcover_cover() {
         let client = client();
-        let dir = tempfile::tempdir().unwrap();
-        let covers = cover_cache(dir.path()).unwrap();
         for book in &CATALOGUE.books {
             let details = client.book_details(BookId::new(book.id)).unwrap();
             assert_eq!(details.summary.title, book.title);
             assert!(details.description.is_some());
             let cover = details.summary.cover.expect("a cover");
-            assert!(covers.fetch(&cover).is_ok(), "no cover for {}", book.id);
+            assert!(
+                cover.url.starts_with("https://assets.hardcover.app/"),
+                "{}",
+                cover.url
+            );
         }
+    }
+
+    #[test]
+    fn only_catalogue_covers_are_fetched() {
+        // No transport for covers: nothing reaches the network in tests.
+        let transport = DemoTransport { covers: None };
+        let response = transport
+            .send(HttpRequest::new(Method::Get, "https://example.com/x.jpg"))
+            .unwrap();
+        assert_eq!(response.status, 404);
     }
 
     #[test]
@@ -507,20 +516,21 @@ mod tests {
         assert!(by_book.is_some());
         assert!(
             client
-                .library_entry_for_book(me.id, BookId::new(9023))
+                .library_entry_for_book(me.id, BookId::new(427314))
                 .unwrap()
                 .is_none(),
-            "9023 is only in search"
+            "Children of Dune is only in search"
         );
     }
 
     #[test]
     fn search_matches_titles_and_authors() {
         let client = client();
-        let wren = client.search_books("tobias wren", 1).unwrap();
-        assert_eq!(wren.books.len(), 3);
-        let salt = client.search_books("Salt", 1).unwrap();
-        assert_eq!(salt.books.len(), 2);
+        let herbert = client.search_books("frank herbert", 1).unwrap();
+        assert_eq!(herbert.books.len(), 4);
+        let dune = client.search_books("Dune", 1).unwrap();
+        assert_eq!(dune.books.len(), 4);
+        assert_eq!(dune.books[0].title, "Dune", "the most read first");
         assert!(client.search_books("zzz", 1).unwrap().books.is_empty());
     }
 
@@ -546,17 +556,6 @@ mod tests {
                 .as_str()
                 .is_some_and(|m| m.starts_with("The demo has no answer"));
             assert!(!unanswered, "{name} ({op}) has no demo answer");
-        }
-    }
-
-    #[test]
-    fn every_book_has_a_cover_file() {
-        for book in &CATALOGUE.books {
-            assert!(
-                COVERS.iter().any(|(id, _)| *id == book.id),
-                "no cover for {}",
-                book.id
-            );
         }
     }
 }
