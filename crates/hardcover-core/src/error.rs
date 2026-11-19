@@ -38,6 +38,9 @@ pub enum Error {
     /// The caller passed something the API cannot accept (checked before any request is sent).
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// Checking for, verifying or installing an app update failed.
+    #[error("update failed: {0}")]
+    Update(String),
     /// The operation was cancelled through a [`crate::auth::CancelHandle`].
     #[error("cancelled")]
     Cancelled,

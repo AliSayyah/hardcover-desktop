@@ -5,14 +5,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::avatar::Avatar;
-use gpui_kit::component::button::ButtonVariant;
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::notification::Notification;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::sidebar::{
     Sidebar, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem,
 };
 use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::text::TextView;
 use gpui_kit::component::{
-    ActiveTheme as _, Collapsible, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Collapsible, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _,
+    h_flex, v_flex,
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FocusHandle,
@@ -29,6 +33,7 @@ use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
 use crate::search::search_view::SearchView;
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
+use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
 use crate::{
     FocusSearch, Refresh, ShowCurrentlyReading, ShowDidNotFinish, ShowPaused, ShowRead,
     ShowWantToRead,
@@ -177,8 +182,13 @@ impl Workspace {
                 }
             }
         });
+        let updates = Updates::global(cx).clone();
         let subscriptions = vec![
             cx.observe(&model, |_, _, cx| cx.notify()),
+            cx.observe(&updates, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&updates, window, |this, _, event, window, cx| {
+                this.on_update_event(event, window, cx)
+            }),
             // A dialog or menu closing can drop focus (its trigger may be gone,
             // e.g. after removing a book). Keyboard shortcuts need a focused
             // element, so return to the current destination.
@@ -319,7 +329,141 @@ impl Workspace {
             .child(NavSection::Group(
                 SidebarGroup::new("Library").child(SidebarMenu::new().children(shelves)),
             ))
-            .footer(self.render_account(window, cx))
+            .footer(
+                v_flex()
+                    .w_full()
+                    .gap_2()
+                    .children(self.render_update(cx))
+                    .child(self.render_account(window, cx)),
+            )
+    }
+
+    // ----- updates -----
+
+    /// The sidebar's update row, while there is something to act on.
+    fn render_update(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let updates = Updates::global(cx).read(cx);
+        let view = cx.entity().downgrade();
+        let button = match updates.state() {
+            UpdateState::Idle | UpdateState::Checking => return None,
+            UpdateState::Available(release) => Button::new("update")
+                .outline()
+                .icon(IconName::ArrowUp)
+                .label(format!("Update to {}…", release.version))
+                .on_click(move |_, window, cx| {
+                    let _ = view.update(cx, |this, cx| this.open_update_dialog(window, cx));
+                }),
+            UpdateState::Installing(release) => Button::new("update")
+                .outline()
+                .loading(true)
+                .disabled(true)
+                .label(format!("Installing {}…", release.version)),
+            UpdateState::Installed(version) => Button::new("update")
+                .primary()
+                .icon(IconName::RotateCw)
+                .label("Restart to update")
+                .tooltip(format!("Version {version} is installed"))
+                .on_click(|_, _, cx| cx.restart()),
+        };
+        Some(
+            div()
+                .w_full()
+                .px_2()
+                .child(button.small().w_full())
+                .into_any_element(),
+        )
+    }
+
+    fn check_for_updates(&mut self, cx: &mut Context<Self>) {
+        Updates::global(cx)
+            .clone()
+            .update(cx, |u, cx| u.check(true, cx));
+    }
+
+    fn on_update_event(
+        &mut self,
+        event: &UpdateEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            UpdateEvent::UpToDate(version) => window.push_notification(
+                Notification::success(format!(
+                    "Hardcover Desktop {version} is the latest version."
+                )),
+                cx,
+            ),
+            UpdateEvent::Found => self.open_update_dialog(window, cx),
+            UpdateEvent::CheckFailed(message) => window.push_notification(
+                Notification::error(message.clone()).title("Couldn't check for updates"),
+                cx,
+            ),
+            UpdateEvent::InstallFailed(message) => window.push_notification(
+                Notification::error(message.clone()).title("Couldn't install the update"),
+                cx,
+            ),
+        }
+    }
+
+    fn open_update_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let updates = Updates::global(cx).clone();
+        let model = updates.read(cx);
+        let UpdateState::Available(release) = model.state() else {
+            return;
+        };
+        let title: SharedString = format!("Hardcover Desktop {}", release.version).into();
+        let notes: SharedString = crate::update::release_notes(&release.notes).into();
+        let page_url = release.page_url.clone();
+        let installable = model.can_install() && release.asset.is_some();
+        let description: SharedString = if installable {
+            format!(
+                "You have {}. The update downloads and installs in the background; restart the app to finish.",
+                model.current()
+            )
+        } else if model.can_install() {
+            format!(
+                "You have {}. This release has no download for this computer; see the release page.",
+                model.current()
+            )
+        } else {
+            format!(
+                "You have {}. Update it the same way you installed it.",
+                model.current()
+            )
+        }
+        .into();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let updates = updates.clone();
+            let page_url = page_url.clone();
+            let notes = notes.clone();
+            let alert = alert
+                .title(title.clone())
+                .description(description.clone())
+                .content(move |content, _, _| {
+                    content.when(!notes.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .id("release-notes")
+                                .max_h(rems(18.))
+                                .overflow_y_scrollbar()
+                                .child(TextView::markdown("release-notes-text", notes.clone())),
+                        )
+                    })
+                })
+                .confirm()
+                .cancel_text("Later");
+            if installable {
+                alert.ok_text("Install").on_ok(move |_, _, cx| {
+                    updates.update(cx, |u: &mut UpdateModel, cx| u.install(cx));
+                    true
+                })
+            } else {
+                alert.ok_text("Open release page").on_ok(move |_, _, cx| {
+                    cx.open_url(&page_url);
+                    true
+                })
+            }
+        });
     }
 
     fn render_account(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -440,13 +584,18 @@ impl Workspace {
                         ),
                         None => menu,
                     };
-                    menu.separator()
-                        .item(
-                            PopupMenuItem::new("Sign out…").on_click(move |_, window, cx| {
-                                let _ =
-                                    view.update(cx, |this, cx| this.confirm_sign_out(window, cx));
-                            }),
-                        )
+                    let updates_view = view.clone();
+                    menu.item(
+                        PopupMenuItem::new("Check for updates").on_click(move |_, _, cx| {
+                            let _ = updates_view.update(cx, |this, cx| this.check_for_updates(cx));
+                        }),
+                    )
+                    .separator()
+                    .item(
+                        PopupMenuItem::new("Sign out…").on_click(move |_, window, cx| {
+                            let _ = view.update(cx, |this, cx| this.confirm_sign_out(window, cx));
+                        }),
+                    )
                 }),
         )
     }

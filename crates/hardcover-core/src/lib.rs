@@ -7,12 +7,14 @@
 //! - [`auth`]: OAuth (authorization code + PKCE over a loopback redirect), token storage and refresh.
 //! - [`store`]: SQLite cache of the signed-in user's library.
 //! - [`covers`]: on-disk cache of cover images.
+//! - [`update`]: self-update from signed GitHub releases.
 
 pub mod api;
 pub mod auth;
 pub mod covers;
 pub mod error;
 pub mod store;
+pub mod update;
 
 mod http;
 mod ratelimit;

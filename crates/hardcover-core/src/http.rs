@@ -240,6 +240,14 @@ pub(crate) mod fake {
             }));
             self
         }
+        pub fn push_bytes(&self, status: u16, body: &[u8]) -> &Self {
+            self.responses.lock().unwrap().push_back(Ok(HttpResponse {
+                status,
+                headers: Vec::new(),
+                body: body.to_vec(),
+            }));
+            self
+        }
         pub fn push_err(&self, e: Error) -> &Self {
             self.responses.lock().unwrap().push_back(Err(e));
             self
