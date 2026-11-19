@@ -19,15 +19,15 @@ packages=(
   libxkbcommon-x11-dev
 )
 
-install() {
+install_packages() {
   DEBIAN_FRONTEND=noninteractive $sudo apt-get install -y -qq --no-install-recommends "${packages[@]}"
 }
 
 # CI restores the package lists along with the packages from its cache and
 # sets APT_LISTS_CACHED=1, so a slow mirror can't stall the job. If the
 # cached lists no longer work, update them and try again.
-if [[ ${APT_LISTS_CACHED:-} == 1 ]] && install; then
+if [[ ${APT_LISTS_CACHED:-} == 1 ]] && install_packages; then
   exit 0
 fi
 $sudo apt-get update -qq
-install
+install_packages
