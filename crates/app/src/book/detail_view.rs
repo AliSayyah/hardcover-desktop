@@ -46,6 +46,7 @@ use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
 use super::star_rating::StarRating;
 use crate::app_state::{Services, cover_image, release_cover_image};
+use crate::bidi::WrappingText;
 use crate::format::{
     average_rating_text, duration_text, edition_text, error_message, parse_position, position_text,
     progress_summary, read_dates_text, series_position_text, status_label,
@@ -1147,10 +1148,15 @@ impl BookDetailView {
                                 div()
                                     .text_2xl()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(book.title.clone()),
+                                    .child(WrappingText::new(book.title.clone())),
                             )
                             .when_some(book.subtitle.clone(), |this, subtitle| {
-                                this.child(div().text_lg().text_color(muted).child(subtitle))
+                                this.child(
+                                    div()
+                                        .text_lg()
+                                        .text_color(muted)
+                                        .child(WrappingText::new(subtitle)),
+                                )
                             })
                             .child(self.render_contributors(book, details, cx))
                             .when(series_link.is_some() || !facts.is_empty(), |this| {
@@ -1439,90 +1445,89 @@ impl BookDetailView {
             })
     }
 
-    fn render_reads(&self, entry: &LibraryEntry, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Every read of the book. The current read's dates are edited in place
+    /// at the top; the other reads are listed below it, each with a menu.
+    fn render_reads(
+        &self,
+        entry: &LibraryEntry,
+        label_width: Pixels,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let muted = cx.theme().muted_foreground;
-        let current = entry.current_read().map(|r| r.id);
-        let view = cx.entity().downgrade();
-        let rows = entry.reads.iter().map(|read| {
-            let mut details: Vec<String> = Vec::new();
-            if !read.is_finished() {
-                details.push("Not finished".to_owned());
-            }
-            if Some(read.id) == current && entry.reads.len() > 1 {
-                details.push("Current read".to_owned());
-            }
-            if let Some(text) = read.edition.as_ref().and_then(edition_text) {
-                details.push(text);
-            }
-            let edit_view = view.clone();
-            let delete_view = view.clone();
-            let session = read.clone();
-            let read_id = read.id;
-            h_flex()
-                .gap_2()
-                .py_1()
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_0p5()
-                        .child(
-                            div()
-                                .text_sm()
-                                .child(read_dates_text(read.started_at, read.finished_at)),
-                        )
-                        .when(!details.is_empty(), |this| {
-                            this.child(div().text_xs().text_color(muted).child(details.join(" · ")))
-                        }),
-                )
-                .child(
-                    Button::new(ElementId::Name(format!("read-{}", read.id).into()))
-                        .ghost()
-                        .small()
-                        .icon(IconName::Ellipsis)
-                        .tooltip("Read actions")
-                        .disabled(pending.is_some())
-                        .dropdown_menu(move |menu, _, _| {
-                            let edit_view = edit_view.clone();
-                            let delete_view = delete_view.clone();
-                            let session = session.clone();
-                            menu.item(
-                                PopupMenuItem::new("Change dates…")
-                                    .icon(IconName::Calendar)
-                                    .on_click(move |_, window, cx| {
-                                        let session = session.clone();
-                                        let _ = edit_view.update(cx, |this, cx| {
-                                            this.open_read_dialog(Some(session), window, cx)
-                                        });
-                                    }),
+        let current = entry.current_read();
+        let others: Vec<&ReadSession> = entry
+            .reads
+            .iter()
+            .filter(|read| Some(read.id) != current.map(|c| c.id))
+            .collect();
+        let rows: Vec<_> = others
+            .iter()
+            .map(|read| {
+                let mut details: Vec<String> = Vec::new();
+                if !read.is_finished() {
+                    details.push("Not finished".to_owned());
+                }
+                if let Some(text) = read.edition.as_ref().and_then(edition_text) {
+                    details.push(text);
+                }
+                h_flex()
+                    .gap_2()
+                    .py_1()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .child(read_dates_text(read.started_at, read.finished_at)),
                             )
-                            .item(
-                                PopupMenuItem::new("Delete read…")
-                                    .icon(IconName::Delete)
-                                    .on_click(move |_, window, cx| {
-                                        let _ = delete_view.update(cx, |this, cx| {
-                                            this.confirm_delete_read(read_id, window, cx)
-                                        });
-                                    }),
-                            )
-                        }),
-                )
-        });
+                            .when(!details.is_empty(), |this| {
+                                this.child(
+                                    div().text_xs().text_color(muted).child(details.join(" · ")),
+                                )
+                            }),
+                    )
+                    .child(self.read_menu(read, true, pending.is_some(), cx))
+            })
+            .collect();
         section("Reads")
-            .child(
-                v_flex()
-                    .gap_1()
-                    .children(rows)
-                    .when(entry.reads.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .text_sm()
-                                .text_color(muted)
-                                .child("No reads recorded."),
+            .when_some(current, |this, read| {
+                let edition = read.edition.as_ref().and_then(edition_text);
+                this.child(
+                    h_flex()
+                        .items_start()
+                        .gap_2()
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_1()
+                                .child(self.render_dates(entry, label_width, cx))
+                                .when_some(edition, |this, edition| {
+                                    this.child(div().text_xs().text_color(muted).child(edition))
+                                }),
                         )
-                    }),
-            )
+                        // The pickers change the dates; the menu keeps the rest.
+                        .child(self.read_menu(read, false, pending.is_some(), cx)),
+                )
+            })
+            .when(!others.is_empty(), |this| {
+                this.when(current.is_some(), |this| {
+                    this.child(div().text_xs().text_color(muted).child("Other reads"))
+                })
+                .child(v_flex().gap_1().children(rows))
+            })
+            .when(entry.reads.is_empty(), |this| {
+                this.child(
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child("No reads recorded."),
+                )
+            })
             .child(
                 h_flex().gap_2().child(
                     Button::new("add-read")
@@ -1536,6 +1541,52 @@ impl BookDetailView {
                         })),
                 ),
             )
+    }
+
+    /// A read's actions: changing its dates in the read dialog (left out for
+    /// the current read, whose dates are edited in place) and deleting it.
+    fn read_menu(
+        &self,
+        read: &ReadSession,
+        change_dates: bool,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let view = cx.entity().downgrade();
+        let session = read.clone();
+        let read_id = read.id;
+        Button::new(ElementId::Name(format!("read-{}", read.id).into()))
+            .ghost()
+            .small()
+            .icon(IconName::Ellipsis)
+            .tooltip("Read actions")
+            .disabled(busy)
+            .dropdown_menu(move |menu, _, _| {
+                let edit_view = view.clone();
+                let delete_view = view.clone();
+                let session = session.clone();
+                menu.when(change_dates, |menu| {
+                    menu.item(
+                        PopupMenuItem::new("Change dates…")
+                            .icon(IconName::Calendar)
+                            .on_click(move |_, window, cx| {
+                                let session = session.clone();
+                                let _ = edit_view.update(cx, |this, cx| {
+                                    this.open_read_dialog(Some(session), window, cx)
+                                });
+                            }),
+                    )
+                })
+                .item(
+                    PopupMenuItem::new("Delete read…")
+                        .icon(IconName::Delete)
+                        .on_click(move |_, window, cx| {
+                            let _ = delete_view.update(cx, |this, cx| {
+                                this.confirm_delete_read(read_id, window, cx)
+                            });
+                        }),
+                )
+            })
     }
 
     fn render_progress(&self, entry: &LibraryEntry, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1586,6 +1637,7 @@ impl BookDetailView {
             })
     }
 
+    /// The current read's start and finish dates, edited in place.
     fn render_dates(
         &self,
         entry: &LibraryEntry,
@@ -1597,31 +1649,29 @@ impl BookDetailView {
             .read(cx)
             .pending_write(entry.user_book_id)
             .is_some();
-        section("Reading dates").child(
-            Form::new()
-                .label_layout(Axis::Horizontal)
-                .label_width(label_width)
-                .child(
-                    Field::new().label("Started").child(
-                        div().w_full().max_w_56().child(
-                            DatePicker::new(&self.started)
-                                .placeholder("Not set")
-                                .cleanable(true)
-                                .disabled(busy),
-                        ),
-                    ),
-                )
-                .child(
-                    Field::new().label("Finished").child(
-                        div().w_full().max_w_56().child(
-                            DatePicker::new(&self.finished)
-                                .placeholder("Not set")
-                                .cleanable(true)
-                                .disabled(busy),
-                        ),
+        Form::new()
+            .label_layout(Axis::Horizontal)
+            .label_width(label_width)
+            .child(
+                Field::new().label("Started").child(
+                    div().w_full().max_w_56().child(
+                        DatePicker::new(&self.started)
+                            .placeholder("Not set")
+                            .cleanable(true)
+                            .disabled(busy),
                     ),
                 ),
-        )
+            )
+            .child(
+                Field::new().label("Finished").child(
+                    div().w_full().max_w_56().child(
+                        DatePicker::new(&self.finished)
+                            .placeholder("Not set")
+                            .cleanable(true)
+                            .disabled(busy),
+                    ),
+                ),
+            )
     }
 
     fn render_add(&self, book: &BookSummary, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1659,7 +1709,7 @@ impl BookDetailView {
                         text.split('\n')
                             .map(str::trim)
                             .filter(|p| !p.is_empty())
-                            .map(|p| div().child(p.to_owned())),
+                            .map(|p| WrappingText::new(p.to_owned())),
                     )
                     .into_any_element(),
                 _ => div()
@@ -1811,10 +1861,7 @@ impl Render for BookDetailView {
                             .when(entry.status == ReadingStatus::CurrentlyReading, |this| {
                                 this.child(self.render_progress(entry, cx))
                             })
-                            .when(entry.current_read().is_some(), |this| {
-                                this.child(self.render_dates(entry, label_width, cx))
-                            })
-                            .child(self.render_reads(entry, cx))
+                            .child(self.render_reads(entry, label_width, cx))
                             .child(self.render_review(entry, cx)),
                         None => this.child(self.render_add(&book, cx)),
                     })

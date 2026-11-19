@@ -24,6 +24,7 @@ use super::list_dialog::open_edit_list;
 use super::model::{ListsEvent, ListsModel};
 use crate::RemoveFromList;
 use crate::app_state::Services;
+use crate::bidi::WrappingText;
 use crate::catalog::book_list::row_details;
 use crate::catalog::navigation::{self, Page};
 use crate::format::{authors_text, needs_permission};
@@ -533,7 +534,7 @@ impl ListView {
                             .min_w_0()
                             .text_2xl()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(list.name.clone()),
+                            .child(WrappingText::new(list.name.clone())),
                     )
                     .children(actions),
             )
@@ -552,8 +553,7 @@ impl ListView {
                         .pt_2()
                         .text_sm()
                         .text_color(muted)
-                        .line_clamp(3)
-                        .child(text),
+                        .child(WrappingText::new(text).line_clamp(3)),
                 )
             })
             .when_some(url, |this, url| {

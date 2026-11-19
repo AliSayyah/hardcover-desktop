@@ -8,6 +8,9 @@
 //!
 //! Books open in the detail pane beside the list. Authors and series open
 //! their pages, on Enter or a click.
+//!
+//! Down or Enter in the query field moves into the results, selecting the
+//! first row when none is, so the focus is visible where it lands.
 
 use std::time::Duration;
 
@@ -19,9 +22,9 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, h_resizable, resizable_panel, v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Subscription, Task, WeakEntity, Window, div,
-    prelude::FluentBuilder as _,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window,
+    actions, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{AuthorHit, BookId, BookSummary, Client, SearchHits, SeriesHit};
@@ -36,6 +39,12 @@ use crate::library::model::LibraryModel;
 use crate::search::results::{Hit, Phase, SearchResults};
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
+
+/// Around the query field. `main` binds Down to [`EnterResults`] in
+/// `SearchField > Input`, over the input's own Down (a no-op on one line).
+pub const KEY_CONTEXT: &str = "SearchField";
+
+actions!(search, [EnterResults]);
 
 /// What the search looks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -291,7 +300,7 @@ impl SearchView {
                         let query = input.read(cx).value();
                         this.query_changed(query, window, cx);
                     }
-                    InputEvent::PressEnter { .. } => this.focus_results(window, cx),
+                    InputEvent::PressEnter { .. } => this.enter_results(window, cx),
                     _ => {}
                 },
             ),
@@ -357,9 +366,22 @@ impl SearchView {
         });
     }
 
-    fn focus_results(&self, window: &mut Window, cx: &mut App) {
+    /// Moves focus from the query field into the results. With no row
+    /// selected, selects the first (for books, showing it in the detail pane):
+    /// a focused list with no selection shows nothing where the focus went.
+    fn enter_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.kind {
-            SearchKind::Books => focus_list(&self.books, window, cx),
+            SearchKind::Books => {
+                let list = &self.books.read(cx);
+                let first = match list.selected_index() {
+                    None => list.delegate().results.hits().first().cloned(),
+                    Some(_) => None,
+                };
+                if let Some(book) = first {
+                    self.select(book, window, cx);
+                }
+                focus_list(&self.books, window, cx);
+            }
             SearchKind::Authors => focus_list(&self.authors, window, cx),
             SearchKind::Series => focus_list(&self.series, window, cx),
         }
@@ -527,12 +549,20 @@ impl SearchView {
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(
-                        Input::new(&self.input)
-                            .cleanable(true)
-                            .prefix(
-                                Icon::new(IconName::Search).text_color(cx.theme().muted_foreground),
-                            )
-                            .when(busy, |this| this.suffix(Spinner::new().small())),
+                        div()
+                            .key_context(KEY_CONTEXT)
+                            .on_action(cx.listener(|this, _: &EnterResults, window, cx| {
+                                this.enter_results(window, cx)
+                            }))
+                            .child(
+                                Input::new(&self.input)
+                                    .cleanable(true)
+                                    .prefix(
+                                        Icon::new(IconName::Search)
+                                            .text_color(cx.theme().muted_foreground),
+                                    )
+                                    .when(busy, |this| this.suffix(Spinner::new().small())),
+                            ),
                     )
                     .child(
                         TabBar::new("search-kind")
@@ -595,14 +625,22 @@ fn new_results_list<T: SearchHit>(
     })
 }
 
+/// Focuses `list` if it has results, selecting its first row if none is.
 fn focus_list<T: SearchHit>(
     list: &Entity<ListState<ResultsDelegate<T>>>,
     window: &mut Window,
     cx: &mut App,
 ) {
-    if !list.read(cx).delegate().results.hits().is_empty() {
-        list.update(cx, |list, cx| list.focus(window, cx));
+    if list.read(cx).delegate().results.hits().is_empty() {
+        return;
     }
+    list.update(cx, |list, cx| {
+        if list.selected_index().is_none() {
+            list.set_selected_index(Some(IndexPath::default()), window, cx);
+            list.scroll_to_selected_item(window, cx);
+        }
+        list.focus(window, cx);
+    });
 }
 
 /// The status line under the input, whether a request is running, and the list.

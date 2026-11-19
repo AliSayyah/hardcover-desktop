@@ -2,10 +2,12 @@
 
 mod about;
 mod app_state;
+mod bidi;
 mod book;
 mod catalog;
 #[cfg(test)]
 mod cover_quality_tests;
+mod fonts;
 mod format;
 mod goals;
 mod library;
@@ -23,6 +25,7 @@ use gpui_kit::{
 };
 
 use crate::book::star_rating;
+use crate::search::search_view;
 
 actions!(
     hardcover,
@@ -66,6 +69,12 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-6", ShowIgnored, None),
         KeyBinding::new("ctrl-shift-d", ShowDiscover, None),
         KeyBinding::new("ctrl-shift-s", ShowStats, None),
+        // Down in Search's query field moves into the results.
+        KeyBinding::new(
+            "down",
+            search_view::EnterResults,
+            Some(&format!("{} > Input", search_view::KEY_CONTEXT)),
+        ),
         KeyBinding::new("alt-left", GoBack, Some("Workspace")),
         // On a catalogue page; lists, menus and fields inside it use Escape first.
         KeyBinding::new("escape", GoBack, Some(shell::PAGE_CONTEXT)),
@@ -126,6 +135,7 @@ fn main() {
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            fonts::init(cx);
             bind_keys(cx);
             if let Some(exe) = &exe {
                 cx.set_restart_path(exe.clone());

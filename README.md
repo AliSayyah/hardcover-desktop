@@ -155,3 +155,5 @@ cargo test --workspace
 ## Licence
 
 [MIT](LICENSE). Hardcover is a trademark of its owners; this project only uses its public API.
+
+The interface font, [Inter](https://rsms.me/inter/), is bundled under the [SIL Open Font License](assets/fonts/inter/LICENSE.txt).

@@ -17,6 +17,7 @@ use hardcover_core::{BookDetails, BookId, BookSummary, Contributor, RatingBucket
 
 use super::{BookDetailView, Details, section};
 use crate::app_state::{Services, cover_thumbnail};
+use crate::bidi::WrappingText;
 use crate::catalog::navigation::{self, Page};
 use crate::format::{authors_text, series_position_text};
 
@@ -152,7 +153,7 @@ impl BookDetailView {
             .into_any_element()
     }
 
-    /// The series fact as a link to the series page, when Hardcover gave its id.
+    /// The series fact, opening the series page when Hardcover gave its id.
     pub(super) fn render_series_link(&self, series: &SeriesRef) -> Option<AnyElement> {
         let id = series.id?;
         let label = match series.position {
@@ -161,7 +162,7 @@ impl BookDetailView {
         };
         Some(
             Button::new("open-series")
-                .link()
+                .text()
                 .label(label)
                 .tooltip("Open the series")
                 .on_click(move |_, _, cx| navigation::open(Page::Series(id), cx))
@@ -373,12 +374,14 @@ impl BookDetailView {
     }
 }
 
-/// A contributor's name: a link to their author page when the id is known.
+/// A contributor's name: opens their author page when the id is known. A
+/// text button, not a link: links are for pages outside the app.
 fn contributor_name(c: &Contributor, id: (&'static str, usize)) -> AnyElement {
     match c.author_id {
         Some(author) => Button::new(id)
-            .link()
+            .text()
             .label(c.name.clone())
+            .tooltip("Open the author")
             .on_click(move |_, _, cx| navigation::open(Page::Author(author), cx))
             .into_any_element(),
         None => div().child(c.name.clone()).into_any_element(),
@@ -482,8 +485,7 @@ fn similar_book(
                         .whitespace_normal()
                         .text_xs()
                         .font_weight(FontWeight::MEDIUM)
-                        .line_clamp(2)
-                        .child(book.title.clone()),
+                        .child(WrappingText::new(book.title.clone()).line_clamp(2)),
                 ),
         )
 }

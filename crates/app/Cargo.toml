@@ -18,6 +18,8 @@ fast_image_resize = "6"
 gpui-kit = "0.10"
 hardcover-core = { path = "../hardcover-core" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "qoi"] }
+# Already in the tree through GPUI's text system; finds right-to-left text.
+unicode-bidi = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
