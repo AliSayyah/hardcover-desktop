@@ -71,6 +71,17 @@ impl Services {
             .collect()
     }
 
+    /// Records that Hardcover refused a request for lack of `scope`, so the
+    /// feature turns into its "sign in again" state.
+    pub fn scope_refused(scope: &'static str, cx: &mut App) {
+        if let Some(services) = cx.try_global::<Self>()
+            && !services.refused.contains(&scope)
+        {
+            cx.global_mut::<Self>().refused.push(scope);
+            cx.refresh_windows();
+        }
+    }
+
     /// After a new sign-in replaced the session's tokens.
     pub fn set_scopes(scopes: GrantedScopes, cx: &mut App) {
         if cx.has_global::<Self>() {

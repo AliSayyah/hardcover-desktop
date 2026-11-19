@@ -1158,3 +1158,160 @@ fn an_unfinished_read_never_scales_to_the_last_unit() {
     assert_eq!(super::scale(1.0, 150), 150);
     assert_eq!(super::scale(0.5, 0), 0);
 }
+
+fn goal_row(id: i64, metric: &str, goal: i64, progress: Value) -> Value {
+    json!({
+        "id": id,
+        "metric": metric,
+        "goal": goal,
+        "progress": progress,
+        "description": format!("{goal} {metric}s in 2030"),
+        "start_date": "2030-01-01",
+        "end_date": "2030-12-31",
+        "conditions": {},
+        "archived": false,
+        "completed_at": null,
+        "privacy_setting_id": 2,
+    })
+}
+
+#[test]
+fn goals_are_scoped_to_me_and_convert_hours() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"me": [{"id": 77, "username": "reader", "name": null, "image": null}]})),
+    );
+    http.push(
+        200,
+        &data(json!({"goals": [
+            goal_row(5, "book", 30, json!("12")),
+            goal_row(6, "hour", 100, json!(36000)),
+            // Unparseable dates are skipped, not fatal.
+            {"id": 7, "metric": "book", "goal": 1, "progress": 0, "start_date": "soon", "end_date": "later"},
+        ]})),
+    );
+    let goals = c.goals().unwrap();
+    assert_eq!(goals.len(), 2);
+    let books = &goals[0];
+    assert_eq!(books.id, GoalId::new(5));
+    assert_eq!(books.metric, GoalMetric::Books);
+    assert_eq!((books.target, books.progress), (30, 12.0));
+    assert_eq!(books.start, Date::from_ymd_opt(2030, 1, 1).unwrap());
+    assert_eq!(books.privacy, Some(Privacy::FollowersOnly));
+    assert!(books.conditions.is_empty());
+    // Hour goals: target in hours, the API's progress in seconds.
+    assert_eq!((goals[1].target, goals[1].progress), (100, 10.0));
+    let reqs = http.requests();
+    assert_eq!(reqs[1].json.as_ref().unwrap()["operationName"], "Goals");
+    assert_eq!(reqs[1].json.as_ref().unwrap()["variables"]["userId"], 77);
+}
+
+#[test]
+fn create_goal_sends_a_whole_goal_input() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"insert_goal": {"errors": null, "id": 5, "goal": goal_row(5, "book", 30, json!(0))}})),
+    );
+    let d = |m, d| Date::from_ymd_opt(2030, m, d).unwrap();
+    let new = NewGoal {
+        metric: GoalMetric::Books,
+        target: 30,
+        start: d(1, 1),
+        end: d(12, 31),
+        description: "30 books in 2030".into(),
+    };
+    let goal = c.create_goal(&new).unwrap();
+    assert_eq!(goal.id, GoalId::new(5));
+    assert_eq!(
+        http.requests()[0].json.as_ref().unwrap()["variables"]["object"],
+        json!({
+            "metric": "book",
+            "goal": 30,
+            "description": "30 books in 2030",
+            "start_date": "2030-01-01",
+            "end_date": "2030-12-31",
+            "conditions": {},
+        })
+    );
+    // Checked before sending.
+    let bad = NewGoal {
+        target: 0,
+        ..new.clone()
+    };
+    assert!(matches!(c.create_goal(&bad), Err(Error::InvalidInput(_))));
+    assert_eq!(http.requests().len(), 1);
+    // `errors` is a list.
+    http.push(
+        200,
+        &data(json!({"insert_goal": {"errors": ["Goal already exists", null], "id": null, "goal": null}})),
+    );
+    assert_eq!(
+        c.create_goal(&new),
+        Err(Error::Api("Goal already exists".into()))
+    );
+}
+
+#[test]
+fn update_goal_resends_everything_and_refetches_when_needed() {
+    let (c, http) = client(TestTokens::new(false));
+    let mut row = goal_row(5, "page", 9000, json!(1200));
+    row["conditions"] = json!({"readingFormatId": 1, "authorBipoc": null});
+    // A payload without the goal: re-read by id.
+    http.push(
+        200,
+        &data(json!({"update_goal": {"errors": [], "id": 5, "goal": null}})),
+    );
+    http.push(200, &data(json!({"goals_by_pk": row})));
+    let mut goal = RawGoal::deserialize(goal_row(5, "page", 9000, json!(1200)))
+        .unwrap()
+        .into_goal()
+        .unwrap();
+    goal.conditions = GoalConditions(json!({"readingFormatId": 1, "authorBipoc": null}));
+    goal.target = 10000;
+    let saved = c.update_goal(&goal).unwrap();
+    assert_eq!(saved.id, GoalId::new(5));
+    let reqs = http.requests();
+    assert_eq!(
+        reqs[0].json.as_ref().unwrap()["variables"],
+        json!({"id": 5, "object": {
+            "metric": "page",
+            "goal": 10000,
+            "description": "9000 pages in 2030",
+            "start_date": "2030-01-01",
+            "end_date": "2030-12-31",
+            "conditions": {"readingFormatId": 1},
+            "archived": false,
+            "privacy_setting_id": 2,
+        }})
+    );
+    assert_eq!(reqs[1].json.as_ref().unwrap()["operationName"], "GoalById");
+
+    // Conditions it can't send back block the update before any request.
+    goal.conditions = GoalConditions(json!({"genre": "poetry"}));
+    assert!(matches!(c.update_goal(&goal), Err(Error::InvalidInput(_))));
+    assert_eq!(http.requests().len(), 2);
+}
+
+#[test]
+fn delete_goal_checks_the_payload() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"delete_goal": {"errors": null, "id": 5}})),
+    );
+    c.delete_goal(GoalId::new(5)).unwrap();
+    assert_eq!(
+        http.requests()[0].json.as_ref().unwrap()["variables"],
+        json!({"id": 5})
+    );
+    http.push(
+        200,
+        &data(json!({"delete_goal": {"errors": ["Not found"], "id": null}})),
+    );
+    assert_eq!(
+        c.delete_goal(GoalId::new(5)),
+        Err(Error::Api("Not found".into()))
+    );
+}

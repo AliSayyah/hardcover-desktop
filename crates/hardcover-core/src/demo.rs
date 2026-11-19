@@ -3,9 +3,9 @@
 //! [`client`] answers from `demo/catalogue.json` through a fake transport, so
 //! the rest of the client (queries, parsing, paging) runs exactly as it does
 //! against Hardcover. The books are real, popular ones, with facts and cover
-//! links from Hardcover and descriptions written for the demo; the reader and
-//! their shelves, reads and notes are invented. Each book has one stand-in
-//! edition for the edition picker, with only the book's title and cover.
+//! links from Hardcover and descriptions written for the demo; the reader,
+//! their shelves, reads, notes and reading goal are invented. Each book has one
+//! stand-in edition for the edition picker, with only the book's title and cover.
 //!
 //! Series and author pages are built from the catalogue alone: a series lists
 //! the catalogue's books in it, an author their books in the catalogue. Their
@@ -73,6 +73,17 @@ struct Catalogue {
     user: DemoUser,
     books: Vec<Book>,
     library: Vec<Entry>,
+    goals: Vec<DemoGoal>,
+}
+
+#[derive(Deserialize)]
+struct DemoGoal {
+    id: i64,
+    metric: String,
+    goal: i64,
+    description: String,
+    start_date: String,
+    end_date: String,
 }
 
 #[derive(Deserialize)]
@@ -221,6 +232,38 @@ impl Catalogue {
 }
 
 // ----- wire shapes -----
+
+/// `GoalFields`. Progress is worked out from the library like Hardcover does:
+/// the reads (or their books' pages) finished within the goal's dates.
+fn goal(catalogue: &Catalogue, goal: &DemoGoal) -> Value {
+    let finished = catalogue.library.iter().flat_map(|e| {
+        e.reads
+            .iter()
+            .filter_map(|r| r.finished_at.as_deref())
+            .filter(|f| (goal.start_date.as_str()..=goal.end_date.as_str()).contains(f))
+            .map(move |_| e)
+    });
+    let progress: i64 = match goal.metric.as_str() {
+        "page" => finished
+            .filter_map(|e| catalogue.book(e.book))
+            .map(|b| b.pages)
+            .sum(),
+        _ => finished.count() as i64,
+    };
+    json!({
+        "id": goal.id,
+        "metric": goal.metric,
+        "goal": goal.goal,
+        "progress": progress,
+        "description": goal.description,
+        "start_date": goal.start_date,
+        "end_date": goal.end_date,
+        "conditions": {},
+        "archived": false,
+        "completed_at": null,
+        "privacy_setting_id": 1,
+    })
+}
 
 fn slug(title: &str) -> String {
     title
@@ -582,8 +625,20 @@ fn answer(op: &str, vars: &Value) -> Value {
                 .collect();
             json!({ "editions": editions })
         }
+        "Goals" => json!({
+            "goals": catalogue.goals.iter()
+                .filter(|_| mine())
+                .map(|g| goal(catalogue, g))
+                .collect::<Vec<_>>(),
+        }),
+        "GoalById" => json!({
+            "goals_by_pk": catalogue.goals.iter()
+                .find(|g| g.id == int("id"))
+                .map(|g| goal(catalogue, g)),
+        }),
         "InsertUserBook" | "UpdateUserBook" | "DeleteUserBook" | "InsertUserBookRead"
-        | "UpdateUserBookRead" | "DeleteUserBookRead" | "EditionOwned" => {
+        | "UpdateUserBookRead" | "DeleteUserBookRead" | "EditionOwned" | "InsertGoal"
+        | "UpdateGoal" | "DeleteGoal" => {
             return error(READ_ONLY);
         }
         other => return error(format!("The demo has no answer for {other}.")),
@@ -760,6 +815,27 @@ mod tests {
         assert_eq!(dune.books.len(), 4);
         assert_eq!(dune.books[0].title, "Dune", "the most read first");
         assert!(client.search_books("zzz", 1).unwrap().books.is_empty());
+    }
+
+    #[test]
+    fn the_reader_has_a_goal_counted_from_their_library() {
+        let client = client();
+        let goals = client.goals().unwrap();
+        assert_eq!(goals.len(), 1);
+        let goal = &goals[0];
+        assert_eq!(goal.metric, crate::GoalMetric::Books);
+        assert_eq!(goal.target, 12);
+        let finished_in_2026 = CATALOGUE
+            .library
+            .iter()
+            .flat_map(|e| &e.reads)
+            .filter_map(|r| r.finished_at.as_deref())
+            .filter(|f| f.starts_with("2026-"))
+            .count();
+        assert!(finished_in_2026 > 0);
+        assert_eq!(goal.progress, finished_in_2026 as f64);
+        let err = client.delete_goal(goal.id).unwrap_err();
+        assert!(err.to_string().contains(READ_ONLY), "{err}");
     }
 
     #[test]

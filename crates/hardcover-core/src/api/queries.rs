@@ -39,6 +39,16 @@ macro_rules! edition_fields {
     };
 }
 
+macro_rules! goal_fields {
+    () => {
+        "fragment GoalFields on goals {
+  id metric goal progress description start_date end_date conditions archived completed_at
+  privacy_setting_id
+}
+"
+    };
+}
+
 pub(crate) const ME: &str = "query Me {
   me { id username name image { url width height } }
 }
@@ -273,6 +283,49 @@ pub(crate) const EDITION_OWNED: &str = "mutation EditionOwned($id: Int!) {
 }
 ";
 
+/// The user's goals that are not archived, the latest end date first.
+pub(crate) const GOALS: &str = concat!(
+    "query Goals($userId: Int!) {
+  goals(
+    where: {user_id: {_eq: $userId}, archived: {_eq: false}}
+    order_by: [{end_date: desc}, {id: desc}]
+  ) { ...GoalFields }
+}
+",
+    goal_fields!()
+);
+
+/// Re-reads a goal when a mutation's payload left it out.
+pub(crate) const GOAL_BY_ID: &str = concat!(
+    "query GoalById($id: Int!) {
+  goals_by_pk(id: $id) { ...GoalFields }
+}
+",
+    goal_fields!()
+);
+
+pub(crate) const INSERT_GOAL: &str = concat!(
+    "mutation InsertGoal($object: GoalInput!) {
+  insert_goal(object: $object) { errors id goal { ...GoalFields } }
+}
+",
+    goal_fields!()
+);
+
+/// `object` is the whole goal: fields left out are not kept.
+pub(crate) const UPDATE_GOAL: &str = concat!(
+    "mutation UpdateGoal($id: Int!, $object: GoalInput!) {
+  update_goal(id: $id, object: $object) { errors id goal { ...GoalFields } }
+}
+",
+    goal_fields!()
+);
+
+pub(crate) const DELETE_GOAL: &str = "mutation DeleteGoal($id: Int!) {
+  delete_goal(id: $id) { errors id }
+}
+";
+
 /// Every document the client sends, by name. Validated against
 /// `schema/hardcover.graphql` in the tests below and against the live schema by
 /// the `api_check` example.
@@ -296,6 +349,11 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("DELETE_USER_BOOK_READ", DELETE_USER_BOOK_READ),
     ("BOOK_EDITIONS", BOOK_EDITIONS),
     ("EDITION_OWNED", EDITION_OWNED),
+    ("GOALS", GOALS),
+    ("GOAL_BY_ID", GOAL_BY_ID),
+    ("INSERT_GOAL", INSERT_GOAL),
+    ("UPDATE_GOAL", UPDATE_GOAL),
+    ("DELETE_GOAL", DELETE_GOAL),
 ];
 
 #[cfg(test)]

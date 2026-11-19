@@ -19,10 +19,10 @@ use gpui_kit::component::{
     h_flex, v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FocusHandle,
-    Focusable, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
-    prelude::FluentBuilder as _, rems,
+    AnyElement, AnyView, App, AppContext as _, Context, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window,
+    div, prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::ReadingStatus;
 use hardcover_core::store::LibraryCache;
@@ -34,6 +34,8 @@ use crate::catalog::author_view::AuthorView;
 use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
 use crate::catalog::series_view::SeriesView;
 use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
+use crate::goals::model::GoalsModel;
+use crate::goals::sidebar::GoalsSection;
 use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
 use crate::search::search_view::SearchView;
@@ -173,6 +175,8 @@ pub struct Workspace {
     page_focus: FocusHandle,
     /// Asks a session that lacks scopes to sign in again.
     reauthorize: Entity<Reauthorize>,
+    goals: Entity<GoalsModel>,
+    goals_section: Entity<GoalsSection>,
     signing_out: bool,
     /// The open Settings dialog's sign-out request.
     _settings: Option<Subscription>,
@@ -199,7 +203,10 @@ impl Workspace {
         let book_page = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
         let navigator = Navigator::init(cx);
         let reauthorize = cx.new(|_| Reauthorize::new(model.clone()));
+        let goals = cx.new(|cx| GoalsModel::new(model.clone(), cx));
+        let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
         model.update(cx, |m, cx| m.start(cx));
+        goals.update(cx, |g, cx| g.load(cx));
         let clock = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -215,6 +222,7 @@ impl Workspace {
             cx.observe(&model, |_, _, cx| cx.notify()),
             cx.observe(&updates, |_, _, cx| cx.notify()),
             cx.observe(&reauthorize, |_, _, cx| cx.notify()),
+            cx.observe(&goals, |_, _, cx| cx.notify()),
             cx.subscribe(&reauthorize, |this, _, event: &Reauthorized, cx| {
                 this.on_reauthorized(event, cx)
             }),
@@ -247,6 +255,8 @@ impl Workspace {
             book_page,
             page_focus: cx.focus_handle(),
             reauthorize,
+            goals,
+            goals_section,
             signing_out: false,
             _settings: None,
             _clock: clock,
@@ -375,11 +385,13 @@ impl Workspace {
     /// The session now holds a new grant: features it adds come alive.
     fn on_reauthorized(&mut self, event: &Reauthorized, cx: &mut Context<Self>) {
         Services::set_scopes(event.scopes.clone(), cx);
+        self.goals.update(cx, |g, cx| g.load(cx));
         cx.notify();
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, |m, cx| m.sync(cx));
+        self.goals.update(cx, |g, cx| g.load(cx));
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -490,6 +502,9 @@ impl Workspace {
             .child(NavSection::Group(
                 SidebarGroup::new("Library").child(SidebarMenu::new().children(shelves)),
             ))
+            .when(self.goals_section.read(cx).is_visible(cx), |this| {
+                this.child(NavSection::View(self.goals_section.clone().into()))
+            })
             .footer(
                 v_flex()
                     .w_full()
@@ -837,11 +852,13 @@ impl Render for Workspace {
 }
 
 /// The sidebar's sections. `Sidebar` takes one item type, and Search sits
-/// above the Library group without a group of its own.
+/// above the Library group without a group of its own. A view draws a section
+/// that keeps its own state (the reading goals).
 #[derive(Clone)]
 enum NavSection {
     Menu(Box<SidebarMenu>),
     Group(SidebarGroup<SidebarMenu>),
+    View(AnyView),
 }
 
 impl Collapsible for NavSection {
@@ -849,6 +866,7 @@ impl Collapsible for NavSection {
         match self {
             Self::Menu(m) => Self::Menu(Box::new(m.collapsed(collapsed))),
             Self::Group(g) => Self::Group(g.collapsed(collapsed)),
+            Self::View(v) => Self::View(v),
         }
     }
 
@@ -856,6 +874,7 @@ impl Collapsible for NavSection {
         match self {
             Self::Menu(m) => m.is_collapsed(),
             Self::Group(g) => g.is_collapsed(),
+            Self::View(_) => false,
         }
     }
 }
@@ -870,6 +889,7 @@ impl SidebarItem for NavSection {
         match self {
             Self::Menu(m) => (*m).render(id, window, cx).into_any_element(),
             Self::Group(g) => g.render(id, window, cx).into_any_element(),
+            Self::View(v) => v.into_any_element(),
         }
     }
 }

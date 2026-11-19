@@ -724,6 +724,73 @@ fn book_from_search_document(doc: &Value) -> Option<BookSummary> {
     Some(b)
 }
 
+// ---------- goals ----------
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawGoal {
+    pub id: i64,
+    pub metric: String,
+    pub goal: i64,
+    pub progress: Option<Value>,
+    pub description: Option<String>,
+    pub start_date: String,
+    pub end_date: String,
+    #[serde(default)]
+    pub conditions: Value,
+    pub archived: Option<bool>,
+    pub completed_at: Option<String>,
+    pub privacy_setting_id: Option<i64>,
+}
+
+impl RawGoal {
+    /// `None` if the dates don't parse.
+    pub fn into_goal(self) -> Option<Goal> {
+        let metric = GoalMetric::from_api(&self.metric);
+        let mut progress = self.progress.as_ref().and_then(as_f64).unwrap_or(0.0);
+        if metric == GoalMetric::Hours {
+            // The target is in hours, the progress in seconds.
+            progress /= 3600.0;
+        }
+        let mut g = Goal::new(
+            GoalId::new(self.id),
+            metric,
+            u32::try_from(self.goal).unwrap_or(0),
+            parse_date(&self.start_date)?,
+            parse_date(&self.end_date)?,
+        );
+        g.progress = progress;
+        g.description = non_empty(self.description);
+        g.archived = self.archived.unwrap_or(false);
+        g.completed_at = self.completed_at.as_deref().and_then(parse_timestamp);
+        g.privacy = self.privacy_setting_id.and_then(Privacy::from_id);
+        g.conditions = GoalConditions(self.conditions);
+        Some(g)
+    }
+}
+
+/// `GoalIdType`: the goal mutations' payload.
+#[derive(Debug, Deserialize)]
+pub(crate) struct GoalPayload {
+    pub errors: Option<Vec<Option<String>>>,
+    pub id: Option<i64>,
+    pub goal: Option<RawGoal>,
+}
+
+impl GoalPayload {
+    /// The payload's errors, joined, if there are any.
+    pub fn error(&self) -> Option<String> {
+        let errors: Vec<&str> = self
+            .errors
+            .iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.trim())
+            .filter(|e| !e.is_empty())
+            .collect();
+        (!errors.is_empty()).then(|| errors.join("; "))
+    }
+}
+
 // ---------- mutation payloads ----------
 
 #[derive(Debug, Deserialize)]

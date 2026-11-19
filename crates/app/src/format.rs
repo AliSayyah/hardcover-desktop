@@ -5,7 +5,9 @@
 
 use chrono::{DateTime, Datelike, TimeZone};
 use hardcover_core::auth::scopes;
-use hardcover_core::{Date, EditionSummary, Error, Length, LibraryEntry, Rating, ReadingStatus};
+use hardcover_core::{
+    Date, EditionSummary, Error, Goal, GoalMetric, Length, LibraryEntry, Rating, ReadingStatus,
+};
 
 /// Sentence-case label for a status, as the app shows it.
 pub fn status_label(status: ReadingStatus) -> &'static str {
@@ -295,6 +297,112 @@ pub fn permissions_message(missing: &[&str]) -> String {
     )
 }
 
+/// Why a feature is unavailable, for a disabled control's tooltip.
+pub fn needs_permission(scope: &str) -> String {
+    format!(
+        "Hardcover Desktop has no permission for {}. Sign in again from the sidebar to grant it.",
+        scope_feature(scope)
+    )
+}
+
+// ----- reading goals -----
+
+/// The unit a goal counts, singular or plural for `n`.
+pub fn goal_unit(metric: &GoalMetric, n: f64) -> &str {
+    let one = (n - 1.0).abs() < f64::EPSILON;
+    match metric {
+        GoalMetric::Books if one => "book",
+        GoalMetric::Books => "books",
+        GoalMetric::Pages if one => "page",
+        GoalMetric::Pages => "pages",
+        GoalMetric::Hours if one => "hour",
+        GoalMetric::Hours => "hours",
+        GoalMetric::Other(name) => name,
+    }
+}
+
+/// An amount in a goal's unit: whole books and pages, hours to one decimal.
+fn goal_amount(metric: &GoalMetric, n: f64) -> String {
+    match metric {
+        GoalMetric::Hours if n.fract().abs() >= 0.05 => format!("{n:.1}"),
+        _ => format!("{}", n.floor() as i64),
+    }
+}
+
+/// `2026` for a calendar year, otherwise the dates: `Mar 1 – Jun 30, 2026`.
+pub fn goal_period(start: Date, end: Date) -> String {
+    let whole_year = start.year() == end.year()
+        && (start.month(), start.day()) == (1, 1)
+        && (end.month(), end.day()) == (12, 31);
+    if whole_year {
+        start.year().to_string()
+    } else if start.year() == end.year() {
+        format!("{} – {}", start.format("%b %-d"), end.format("%b %-d, %Y"))
+    } else {
+        format!(
+            "{} – {}",
+            start.format("%b %-d, %Y"),
+            end.format("%b %-d, %Y")
+        )
+    }
+}
+
+/// `9 / 12 books`.
+pub fn goal_progress(goal: &Goal) -> String {
+    format!(
+        "{} / {} {}",
+        goal_amount(&goal.metric, goal.progress),
+        goal.target,
+        goal_unit(&goal.metric, f64::from(goal.target))
+    )
+}
+
+/// How the goal stands on `today`: `2 books behind schedule`, `On schedule`,
+/// `Goal reached`. `None` for a metric this version does not know.
+pub fn goal_pace(goal: &Goal, today: Date) -> Option<String> {
+    if matches!(goal.metric, GoalMetric::Other(_)) {
+        return None;
+    }
+    if goal.progress >= f64::from(goal.target) {
+        return Some("Goal reached".to_owned());
+    }
+    if today < goal.start {
+        return Some(format!("Starts {}", goal.start.format("%b %-d, %Y")));
+    }
+    if today > goal.end {
+        let short = (f64::from(goal.target) - goal.progress).ceil();
+        return Some(format!(
+            "Ended {} {} short",
+            goal_amount(&goal.metric, short),
+            goal_unit(&goal.metric, short)
+        ));
+    }
+    let pace = goal.pace(today).round();
+    Some(if pace == 0.0 {
+        "On schedule".to_owned()
+    } else {
+        let n = pace.abs();
+        let side = if pace > 0.0 { "ahead of" } else { "behind" };
+        format!(
+            "{} {} {side} schedule",
+            goal_amount(&goal.metric, n),
+            goal_unit(&goal.metric, n)
+        )
+    })
+}
+
+/// The description Hardcover requires for a new goal: `12 books in 2026`, or
+/// `500 pages by Jun 30, 2026` for other dates.
+pub fn goal_description(metric: &GoalMetric, target: u32, start: Date, end: Date) -> String {
+    let unit = goal_unit(metric, f64::from(target));
+    let period = goal_period(start, end);
+    if period.len() == 4 {
+        format!("{target} {unit} in {period}")
+    } else {
+        format!("{target} {unit} by {}", end.format("%b %-d, %Y"))
+    }
+}
+
 /// Upper-cases the first letter and ends with a period.
 fn sentence(msg: &str) -> String {
     let msg = msg.trim().trim_end_matches('.');
@@ -310,7 +418,8 @@ mod tests {
     use super::*;
     use chrono::{Duration, Utc};
     use hardcover_core::{
-        BookId, BookSummary, EditionId, EditionSummary, ReadId, ReadSession, UserBookId, UserId,
+        BookId, BookSummary, EditionId, EditionSummary, GoalId, ReadId, ReadSession, UserBookId,
+        UserId,
     };
 
     fn entry_with_read(
@@ -354,6 +463,58 @@ mod tests {
         assert_eq!(
             missing_features(&[scopes::WRITE_LISTS, scopes::READ_LIBRARY]),
             ["your library", "lists"]
+        );
+    }
+
+    fn goal(metric: GoalMetric, target: u32, progress: f64) -> Goal {
+        let d = |m, d| Date::from_ymd_opt(2026, m, d).unwrap();
+        let mut g = Goal::new(GoalId::new(1), metric, target, d(1, 1), d(12, 31));
+        g.progress = progress;
+        g
+    }
+
+    #[test]
+    fn goal_copy() {
+        let d = |y, m, d| Date::from_ymd_opt(y, m, d).unwrap();
+        let books = goal(GoalMetric::Books, 12, 9.0);
+        assert_eq!(goal_progress(&books), "9 / 12 books");
+        assert_eq!(goal_period(books.start, books.end), "2026");
+        assert_eq!(
+            goal_period(d(2026, 3, 1), d(2026, 6, 30)),
+            "Mar 1 – Jun 30, 2026"
+        );
+        assert_eq!(
+            goal_period(d(2026, 12, 1), d(2027, 1, 31)),
+            "Dec 1, 2026 – Jan 31, 2027"
+        );
+        // 12 a year: 10.6 expected by Nov 19.
+        assert_eq!(
+            goal_pace(&books, d(2026, 11, 19)).unwrap(),
+            "2 books behind schedule"
+        );
+        assert_eq!(
+            goal_pace(&books, d(2026, 9, 1)).unwrap(),
+            "1 book ahead of schedule"
+        );
+        assert_eq!(goal_pace(&books, d(2026, 10, 10)).unwrap(), "On schedule");
+        assert_eq!(
+            goal_pace(&books, d(2027, 1, 5)).unwrap(),
+            "Ended 3 books short"
+        );
+        assert_eq!(
+            goal_pace(&goal(GoalMetric::Books, 12, 12.0), d(2026, 2, 1)).unwrap(),
+            "Goal reached"
+        );
+        let hours = goal(GoalMetric::Hours, 100, 12.5);
+        assert_eq!(goal_progress(&hours), "12.5 / 100 hours");
+        assert!(goal_pace(&goal(GoalMetric::Other("x".into()), 5, 1.0), d(2026, 5, 1)).is_none());
+        assert_eq!(
+            goal_description(&GoalMetric::Books, 12, d(2026, 1, 1), d(2026, 12, 31)),
+            "12 books in 2026"
+        );
+        assert_eq!(
+            goal_description(&GoalMetric::Pages, 1, d(2026, 1, 1), d(2026, 6, 30)),
+            "1 page by Jun 30, 2026"
         );
     }
 

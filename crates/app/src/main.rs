@@ -7,6 +7,7 @@ mod catalog;
 #[cfg(test)]
 mod cover_quality_tests;
 mod format;
+mod goals;
 mod library;
 mod preferences;
 mod search;

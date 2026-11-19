@@ -91,6 +91,7 @@ The workspace has two crates, in `crates/*`.
   - `begin_write`/`end_write` track the writes in flight, per control.
 - `preferences.rs`: the `AppPreferences` global (`PreferencesModel`) and the theme. `follow_theme` re-applies the theme when the desktop's appearance or the preference changes. `UpdateModel` observes the model to start or stop automatic checks.
 - `settings_view.rs` (Settings dialog, `Ctrl+,`) and `about.rs` (About dialog). Both open from the account menu.
+- `goals/`: reading goals. `GoalsModel` loads the goals at start and on Refresh, and again 3 s after the library changes (outside a running sync), because Hardcover recalculates progress itself. `GoalsSection` is the sidebar's "Reading goal" section; `goal_view.rs` holds the goal dialog (target, delete) and the new-goal form. All of it hides without `read:goals`, and writes are disabled without `write:goals`. Goals are not cached.
 - `shell.rs`: `Shell` switches between Starting, SignIn and Workspace. `Workspace` contains the sidebar (shelves by status) plus the current destination (library, search or book detail).
 - `catalog/`: series and author pages, and the page history over the destination.
   - Any view opens a page with `navigation::open(Page::…)`; `Workspace` owns the `PageStack` and shows its top page with a Back bar. Back (`GoBack`: Escape on a page, Alt+Left anywhere) pops it; a sidebar destination clears it.
@@ -105,6 +106,7 @@ The workspace has two crates, in `crates/*`.
 - Moving a book to Currently Reading starts a new read. A progress update with no open read moves the book to Currently Reading first.
 - An entry can have many reads. The current one is the newest unfinished read, else the most recently finished: a past read added later gets the highest id.
 - `edition_owned(id)` takes an edition id and only adds it to the user's Owned list (and posts to their feed). Taking it off needs `delete_list_book` (`write:lists`), reading the list needs `read:lists`, and `user_books.owned` does not follow the list.
+- Goals: `metric` is `book`, `page` or `hour`. For hour goals `goal` is in hours but `progress` in seconds; `Goal::progress` is converted to hours. `update_goal` takes a whole `GoalInput` (fields left out are not kept), so `Client::update_goal` resends the goal as read, `conditions` included, and refuses one whose conditions hold a field it doesn't know. The mutations return `errors` (a list), not `error`. Progress updates by itself as the user reads (`update_goal_progress` exists but the app doesn't call it).
 - Search has a 2 s server timeout. The `_like`, `_ilike` and regex filters are disabled.
 - docs.hardcover.app blocks automated fetches. Read the docs source at github.com/hardcoverapp/hardcover-docs instead.
 
