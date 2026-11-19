@@ -610,11 +610,20 @@ impl Client {
         id: UserBookId,
         keep_status: ReadingStatus,
     ) -> Result<ReviewedEntry> {
+        // Verified live (2026-11-19): Hardcover ignores null or empty
+        // `review_markdown`, and null or `{}` for `review_slate`, and keeps
+        // the review. An empty slate document clears it: `review_markdown`
+        // becomes null, `review_raw` empty and `has_review` false.
+        // `reviewed_at` can't be cleared, but means nothing without a review.
+        let empty_slate = json!({ "document": { "object": "document", "children": [{
+            "object": "block", "type": "paragraph", "data": {},
+            "children": [{ "object": "text", "text": "" }],
+        }]}});
         self.update_review(
             id,
             "DeleteUserBookReview",
             queries::DELETE_USER_BOOK_REVIEW,
-            json!({}),
+            json!({ "slate": empty_slate }),
             keep_status,
             Review::default(),
         )
@@ -1028,10 +1037,9 @@ impl Client {
         if let Some(e) = p.error() {
             return Err(Error::Api(e));
         }
-        match p.id {
-            Some(_) => Ok(()),
-            None => Err(Error::Api(format!("could not delete goal {id}"))),
-        }
+        // Hardcover answers a successful delete with `id: null` (verified
+        // live), so only `errors` means it failed.
+        Ok(())
     }
 
     /// Uses the goal returned by the mutation, or re-reads it if the payload had none.

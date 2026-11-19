@@ -455,17 +455,15 @@ pub(crate) const UPDATE_USER_BOOK_REVIEW: &str = concat!(
     review_fields!()
 );
 
-/// Deletes the review. `review_slate` (the website editor's form) is cleared
-/// too, so a review written on the website is gone as well. Like
-/// [`UPDATE_USER_BOOK_REVIEW`], it resends the status.
+/// Deletes the review by writing an empty `review_slate` document (see
+/// `Client::delete_review`). Like [`UPDATE_USER_BOOK_REVIEW`], it resends the
+/// status.
 pub(crate) const DELETE_USER_BOOK_REVIEW: &str = concat!(
-    "mutation DeleteUserBookReview($id: Int!, $statusId: Int!) {
+    "mutation DeleteUserBookReview($id: Int!, $statusId: Int!, $slate: jsonb!) {
   update_user_book(id: $id, object: {
     status_id: $statusId
-    review_markdown: null
-    review_slate: null
+    review_slate: $slate
     review_has_spoilers: false
-    reviewed_at: null
   }) {
     error id
     user_book { ...UserBookFields ...ReviewFields }
@@ -675,7 +673,7 @@ mod tests {
         }
         let docs = usages(&[("DELETE_USER_BOOK_REVIEW", DELETE_USER_BOOK_REVIEW)]);
         let report = sdl::check_scopes(&caps, &library_only, &docs).unwrap();
-        for arg in ["review_markdown", "review_slate", "reviewed_at"] {
+        for arg in ["review_slate", "review_has_spoilers"] {
             assert!(
                 report
                     .problems
