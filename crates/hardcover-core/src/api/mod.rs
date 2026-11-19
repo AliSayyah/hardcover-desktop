@@ -2,6 +2,8 @@
 
 mod model;
 mod queries;
+#[cfg(test)]
+pub(crate) mod sdl;
 mod wire;
 
 use std::sync::{Arc, OnceLock};
@@ -12,6 +14,11 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
 pub use model::*;
+
+/// Every GraphQL document the client sends, as `(name, document)`. For tooling
+/// that checks them against the live API (the `api_check` example).
+#[doc(hidden)]
+pub const DOCUMENTS: &[(&str, &str)] = queries::ALL;
 
 use crate::http::{HttpRequest, HttpResponse, HttpTransport, Method, UreqTransport};
 use crate::ratelimit::TokenBucket;

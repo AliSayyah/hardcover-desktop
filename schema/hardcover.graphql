@@ -763,6 +763,7 @@ input UserBookCreateInput {
   url: String
   user_date: date
   user_start_date: date
+  viewed_edition_id: Int
 }
 
 type UserBookDeleteType {
@@ -11300,6 +11301,7 @@ input timestamptz_comparison_exp {
 }
 
 input update_user_input {
+  account_activity_comments: Boolean
   account_book_club_invites: Boolean
   account_book_club_invites_privacy_setting_id: Int
   account_buddy_read_invites: Boolean
