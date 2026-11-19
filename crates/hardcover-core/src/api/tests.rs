@@ -241,6 +241,170 @@ fn search_blank_query_sends_nothing_and_error_field_maps() {
 }
 
 #[test]
+fn author_search_parses_documented_fields() {
+    let (c, http) = client(TestTokens::new(false));
+    // Fields as the search guide lists them for authors; the envelope and `id`
+    // are as for books.
+    let results = json!({
+        "found": 3, "page": 1,
+        "hits": [
+            {"document": {"id": "901", "name": "Jane Quill", "name_personal": "Quill, Jane",
+                          "alternate_names": ["J. Quill"], "slug": "jane-quill", "books_count": 12,
+                          "books": ["Sand and Stars", "Sand and Stars", "The Long Tide"],
+                          "series_names": ["Sand"],
+                          "image": {"url": "https://assets.hardcover.app/a.jpg", "width": 400, "height": 600}}},
+            {"document": {"name": "No Id Here", "books": [{"title": "Object Title"}], "image": {}}},
+            {"document": {"id": 903}}
+        ]
+    });
+    http.push(
+        200,
+        &data(json!({"search": {"error": null, "page": 1, "per_page": 25,
+                                 "ids": [901, 902, 903], "results": results}})),
+    );
+    let page = c.search_authors(" quill ", 1).unwrap();
+    assert_eq!(page.total, Some(3));
+    assert!(!page.has_more());
+    assert_eq!(page.hits.len(), 2, "a hit without a name is skipped");
+    let a = &page.hits[0];
+    assert_eq!(a.id, AuthorId::new(901));
+    assert_eq!(a.name, "Jane Quill");
+    assert_eq!(a.slug.as_deref(), Some("jane-quill"));
+    assert_eq!(a.books_count, Some(12));
+    assert_eq!(a.top_books, vec!["Sand and Stars", "The Long Tide"]);
+    assert_eq!(a.photo.as_ref().unwrap().width, Some(400));
+    // No `id` in the document: `ids` lines up with the hits, so it stands in.
+    assert_eq!(page.hits[1].id, AuthorId::new(902));
+    assert_eq!(page.hits[1].top_books, vec!["Object Title"]);
+    assert!(page.hits[1].photo.is_none());
+
+    let req = &http.requests()[0];
+    let body = req.json.as_ref().unwrap();
+    assert_eq!(body["operationName"], "SearchAuthors");
+    assert!(
+        body["query"]
+            .as_str()
+            .unwrap()
+            .contains("query_type: \"author\"")
+    );
+    assert_eq!(body["variables"]["query"], "quill");
+}
+
+#[test]
+fn search_ids_stand_in_only_when_they_line_up() {
+    let (c, http) = client(TestTokens::new(false));
+    let results = json!({"hits": [
+        {"document": {"name": "First"}},
+        {"document": {"id": 5, "name": "Second"}}
+    ]});
+    http.push(
+        200,
+        &data(json!({"search": {"ids": [1], "results": results}})),
+    );
+    let page = c.search_authors("x", 1).unwrap();
+    let ids: Vec<i64> = page.hits.iter().map(|a| a.id.get()).collect();
+    assert_eq!(ids, vec![5], "ids shorter than the hits are not trusted");
+}
+
+#[test]
+fn series_search_parses_documented_fields() {
+    let (c, http) = client(TestTokens::new(false));
+    let results = json!({
+        "found": 60, "page": 2,
+        "hits": [
+            {"document": {"id": "77", "name": "The Sand Cycle", "slug": "the-sand-cycle",
+                          "author_name": "Jane Quill", "books_count": 9, "primary_books_count": 6,
+                          "readers_count": 1234, "books": ["Sand and Stars", "Sand and Sea"]}},
+            {"document": {"id": 78, "name": "Tides", "author": {"id": 5, "name": "Bo Writer"},
+                          "books": [{"title": "Low Tide", "position": 1}, {"title": "High Tide"}]}},
+            {"document": {"id": 79, "name": "  "}}
+        ]
+    });
+    http.push(
+        200,
+        &data(json!({"search": {"error": null, "page": 2, "per_page": 25, "results": results}})),
+    );
+    let page = c.search_series("sand", 2).unwrap();
+    assert!(page.has_more());
+    assert_eq!(page.hits.len(), 2);
+    let s = &page.hits[0];
+    assert_eq!(s.id, SeriesId::new(77));
+    assert_eq!(s.author.as_deref(), Some("Jane Quill"));
+    assert_eq!((s.books_count, s.primary_books_count), (Some(9), Some(6)));
+    assert_eq!(s.books, vec!["Sand and Stars", "Sand and Sea"]);
+    let t = &page.hits[1];
+    assert_eq!(t.author.as_deref(), Some("Bo Writer"));
+    assert_eq!(t.books, vec!["Low Tide", "High Tide"]);
+    assert_eq!(t.books_count, None);
+    let body = http.requests()[0].json.clone().unwrap();
+    assert!(
+        body["query"]
+            .as_str()
+            .unwrap()
+            .contains("query_type: \"series\"")
+    );
+
+    assert!(c.search_series("  ", 1).unwrap().hits.is_empty());
+    assert_eq!(http.requests().len(), 1, "a blank query sends nothing");
+    http.push(200, &data(json!({"search": {"error": "Search timed out"}})));
+    assert_eq!(
+        c.search_series("x", 1),
+        Err(Error::Api("Search timed out".into()))
+    );
+}
+
+#[test]
+fn trending_fetches_ids_then_books_in_rank_order() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"books_trending": {"error": null, "ids": [3, null, 1, 3, 2]}})),
+    );
+    // Hardcover returns the books in any order; one id is unknown.
+    http.push(
+        200,
+        &data(json!({ "books": [book(1, "One"), book(3, "Three")] })),
+    );
+    let books = c.trending_books(TrendingPeriod::Year).unwrap();
+    let titles: Vec<&str> = books.iter().map(|b| b.title.as_str()).collect();
+    assert_eq!(titles, vec!["Three", "One"]);
+    let reqs = http.requests();
+    assert_eq!(reqs.len(), 2);
+    let first = reqs[0].json.as_ref().unwrap();
+    assert_eq!(first["operationName"], "BooksTrending");
+    assert_eq!(first["variables"]["duration"], "one_year");
+    assert_eq!(first["variables"]["limit"], TRENDING_LIMIT);
+    assert_eq!(
+        reqs[1].json.as_ref().unwrap()["variables"]["ids"],
+        json!([3, 1, 2])
+    );
+}
+
+#[test]
+fn trending_errors_and_empty_results() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"books_trending": {"error": "Something broke", "ids": null}})),
+    );
+    assert_eq!(
+        c.trending_books(TrendingPeriod::Week),
+        Err(Error::Api("Something broke".into()))
+    );
+    http.push(
+        200,
+        &data(json!({"books_trending": {"error": null, "ids": null}})),
+    );
+    assert!(c.trending_books(TrendingPeriod::Week).unwrap().is_empty());
+    assert_eq!(http.requests().len(), 2, "no ids, no books request");
+    http.push(200, &data(json!({"books_trending": null})));
+    assert!(matches!(
+        c.trending_books(TrendingPeriod::Week),
+        Err(Error::Decode(_))
+    ));
+}
+
+#[test]
 fn book_details_parse() {
     let (c, http) = client(TestTokens::new(false));
     let mut b = book(7, "Detailed");

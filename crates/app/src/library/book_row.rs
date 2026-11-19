@@ -29,6 +29,8 @@ pub struct BookRow {
     title: SharedString,
     secondary: SharedString,
     cover_url: Option<String>,
+    /// Shown in the cover slot while there is no image.
+    placeholder: IconName,
     trailing: Trailing,
 }
 
@@ -48,6 +50,7 @@ impl BookRow {
             title: entry.book.title.clone().into(),
             secondary: authors_text(&entry.book.authors).into(),
             cover_url: entry.cover().map(|c| c.url.clone()),
+            placeholder: IconName::BookOpen,
             trailing,
         }
     }
@@ -62,12 +65,30 @@ impl BookRow {
             title: book.title.clone().into(),
             secondary: secondary.into(),
             cover_url: book.cover.as_ref().map(|c| c.url.clone()),
+            placeholder: IconName::BookOpen,
             trailing: status.map_or(Trailing::None, |s| Trailing::Status(status_label(s).into())),
         }
     }
 }
 
 impl BookRow {
+    /// An author or a series in search results: `placeholder` stands in for a
+    /// missing image.
+    pub fn for_hit(
+        title: impl Into<SharedString>,
+        details: impl Into<SharedString>,
+        image_url: Option<String>,
+        placeholder: IconName,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            secondary: details.into(),
+            cover_url: image_url,
+            placeholder,
+            trailing: Trailing::None,
+        }
+    }
+
     /// A book on a series or author page: `details` is its secondary line
     /// (position, year, average), with its library status when shelved.
     pub fn for_catalog(
@@ -79,6 +100,7 @@ impl BookRow {
             title: book.title.clone().into(),
             secondary: details.into(),
             cover_url: book.cover.as_ref().map(|c| c.url.clone()),
+            placeholder: IconName::BookOpen,
             trailing: status.map_or(Trailing::None, |s| Trailing::Status(status_label(s).into())),
         }
     }
@@ -111,7 +133,7 @@ impl RenderOnce for BookRow {
                         Some(image) => {
                             this.child(img(image).size_full().object_fit(ObjectFit::Cover))
                         }
-                        None => this.child(Icon::new(IconName::BookOpen).small().text_color(muted)),
+                        None => this.child(Icon::new(self.placeholder).small().text_color(muted)),
                     }),
             )
             .child(

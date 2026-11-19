@@ -14,6 +14,7 @@ mod search;
 mod settings_view;
 mod shell;
 mod sign_in;
+mod stats;
 mod update;
 
 use gpui_kit::{
@@ -37,6 +38,8 @@ actions!(
         OpenSettings,
         ShowAbout,
         GoBack,
+        ShowDiscover,
+        ShowStats,
     ]
 );
 
@@ -59,6 +62,8 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-4", ShowPaused, None),
         KeyBinding::new("ctrl-5", ShowDidNotFinish, None),
         KeyBinding::new("ctrl-6", ShowIgnored, None),
+        KeyBinding::new("ctrl-shift-d", ShowDiscover, None),
+        KeyBinding::new("ctrl-shift-s", ShowStats, None),
         KeyBinding::new("alt-left", GoBack, Some("Workspace")),
         // On a catalogue page; lists, menus and fields inside it use Escape first.
         KeyBinding::new("escape", GoBack, Some(shell::PAGE_CONTEXT)),

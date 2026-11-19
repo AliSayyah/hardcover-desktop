@@ -6,7 +6,8 @@
 use chrono::{DateTime, Datelike, TimeZone};
 use hardcover_core::auth::{DEFAULT_SCOPES, scopes};
 use hardcover_core::{
-    Date, EditionSummary, Error, Goal, GoalMetric, Length, LibraryEntry, Rating, ReadingStatus,
+    AuthorHit, Date, EditionSummary, Error, Goal, GoalMetric, Length, LibraryEntry, Rating,
+    ReadingStatus, SeriesHit,
 };
 
 /// Sentence-case label for a status, as the app shows it.
@@ -213,6 +214,75 @@ pub fn series_position_text(position: f32) -> String {
     } else {
         format!("#{position}")
     }
+}
+
+/// A count with thousands separated: "950", "12,480".
+pub fn count_text(count: u32) -> String {
+    let digits = count.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// "1 book", "1,200 books".
+pub fn books_count_text(count: u32) -> String {
+    match count {
+        1 => "1 book".to_owned(),
+        n => format!("{} books", count_text(n)),
+    }
+}
+
+/// An author result's secondary line: their book count and best-known titles,
+/// "12 books · Dune, Dune Messiah".
+pub fn author_hit_details(author: &AuthorHit) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(count) = author.books_count.filter(|n| *n > 0) {
+        parts.push(books_count_text(count));
+    }
+    if !author.top_books.is_empty() {
+        parts.push(
+            author
+                .top_books
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+    }
+    parts.join(" · ")
+}
+
+/// A series result's secondary line: "by Frank Herbert · 6 books", or its
+/// first titles when Hardcover gives no count.
+pub fn series_hit_details(series: &SeriesHit) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(author) = &series.author {
+        parts.push(format!("by {author}"));
+    }
+    match series
+        .primary_books_count
+        .or(series.books_count)
+        .filter(|n| *n > 0)
+    {
+        Some(count) => parts.push(books_count_text(count)),
+        None if !series.books.is_empty() => parts.push(
+            series
+                .books
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        None => {}
+    }
+    parts.join(" · ")
 }
 
 /// "just now", "5 min ago", "3 hours ago", "yesterday", "4 days ago",
@@ -765,5 +835,40 @@ mod tests {
             let label = status_label(s);
             assert!(label.chars().skip(1).all(|c| !c.is_uppercase()), "{label}");
         }
+    }
+
+    #[test]
+    fn search_hit_details() {
+        use hardcover_core::{AuthorId, SeriesId};
+        let mut author = AuthorHit::new(AuthorId::new(1), "Jane Quill");
+        assert_eq!(author_hit_details(&author), "");
+        author.top_books = vec!["A".into(), "B".into(), "C".into(), "D".into()];
+        assert_eq!(author_hit_details(&author), "A, B, C");
+        author.books_count = Some(1);
+        assert_eq!(author_hit_details(&author), "1 book · A, B, C");
+
+        let mut series = SeriesHit::new(SeriesId::new(2), "Sand");
+        assert_eq!(series_hit_details(&series), "");
+        series.books = vec!["Sand and Stars".into()];
+        series.author = Some("Jane Quill".into());
+        assert_eq!(
+            series_hit_details(&series),
+            "by Jane Quill · Sand and Stars"
+        );
+        series.books_count = Some(9);
+        assert_eq!(series_hit_details(&series), "by Jane Quill · 9 books");
+        series.primary_books_count = Some(6);
+        assert_eq!(series_hit_details(&series), "by Jane Quill · 6 books");
+    }
+
+    #[test]
+    fn counts_group_thousands() {
+        assert_eq!(count_text(0), "0");
+        assert_eq!(count_text(950), "950");
+        assert_eq!(count_text(1000), "1,000");
+        assert_eq!(count_text(12_480), "12,480");
+        assert_eq!(count_text(1_234_567), "1,234,567");
+        assert_eq!(books_count_text(1), "1 book");
+        assert_eq!(books_count_text(2500), "2,500 books");
     }
 }
