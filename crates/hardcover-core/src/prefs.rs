@@ -1,12 +1,9 @@
-//! Small JSON files for the app's own state: the user's preferences and the
-//! main window's size.
+//! The user's preferences, a small JSON file at
+//! `$XDG_CONFIG_HOME/hardcover-desktop/settings.json` that survives signing out.
 //!
-//! - [`Preferences`] live in `$XDG_CONFIG_HOME/hardcover-desktop/settings.json`.
-//! - [`WindowState`] lives in `$XDG_STATE_HOME/hardcover-desktop/window.json`.
-//!
-//! Both survive signing out. Reading never fails: a missing, unreadable or
-//! garbled file gives the defaults, and fields a file lacks (an older version
-//! wrote it) take their default values. Writes go to a temporary file that is
+//! Reading never fails: a missing, unreadable or garbled file gives the
+//! defaults, and fields a file lacks (an older version wrote it) take their
+//! default values. Writes go to a temporary file that is
 //! renamed into place, so a crash never leaves half a file.
 
 use std::fs;
@@ -20,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use crate::Result;
 
 const PREFERENCES_FILE: &str = "settings.json";
-const WINDOW_STATE_FILE: &str = "window.json";
 
 /// The colour scheme the app uses.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,71 +61,6 @@ impl Preferences {
     /// Blocking. Creates the directory if needed.
     pub fn save(&self, path: &Path) -> Result<()> {
         write_json(path, self)
-    }
-}
-
-/// The main window's size, in logical pixels.
-///
-/// There is no position: Wayland doesn't tell clients where their windows
-/// are, nor let them choose, so the window opens centred. There is no
-/// maximized state either: tiling compositors report tiled windows as
-/// maximized, and asking them to maximize a new window covers the others.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct WindowState {
-    pub width: f32,
-    pub height: f32,
-}
-
-impl Default for WindowState {
-    fn default() -> Self {
-        Self {
-            width: 1200.,
-            height: 800.,
-        }
-    }
-}
-
-impl WindowState {
-    /// The smallest window the layout supports.
-    pub const MIN_WIDTH: f32 = 800.;
-    pub const MIN_HEIGHT: f32 = 560.;
-    /// Larger than any real display; anything bigger is a garbled file.
-    const MAX_SIDE: f32 = 16_384.;
-
-    /// `$XDG_STATE_HOME/hardcover-desktop/window.json`, or the data directory
-    /// where there is no state directory.
-    pub fn default_path() -> Result<PathBuf> {
-        let dirs = crate::project_dirs()?;
-        let dir = dirs.state_dir().unwrap_or_else(|| dirs.data_dir());
-        Ok(dir.join(WINDOW_STATE_FILE))
-    }
-
-    /// Blocking. The saved state, or the default size.
-    pub fn load(path: &Path) -> Self {
-        read_json::<Self>(path).unwrap_or_default().sanitized()
-    }
-
-    /// Blocking. Creates the directory if needed.
-    pub fn save(&self, path: &Path) -> Result<()> {
-        write_json(path, &self.sanitized())
-    }
-
-    /// A size the window can actually open at: finite, no smaller than the
-    /// minimum and no larger than any display. Garbage gives the default.
-    pub fn sanitized(self) -> Self {
-        let side = |value: f32, min: f32, default: f32| {
-            if value.is_finite() && value > 0. {
-                value.clamp(min, Self::MAX_SIDE)
-            } else {
-                default
-            }
-        };
-        let default = Self::default();
-        Self {
-            width: side(self.width, Self::MIN_WIDTH, default.width),
-            height: side(self.height, Self::MIN_HEIGHT, default.height),
-        }
     }
 }
 
@@ -191,10 +122,6 @@ mod tests {
             Preferences::load(&dir.path().join("none.json")),
             Preferences::default()
         );
-        assert_eq!(
-            WindowState::load(&dir.path().join("none.json")),
-            WindowState::default()
-        );
     }
 
     #[test]
@@ -205,8 +132,6 @@ mod tests {
         assert_eq!(Preferences::load(&path), Preferences::default());
         fs::write(&path, br#"{"theme": "sepia"}"#).unwrap();
         assert_eq!(Preferences::load(&path), Preferences::default());
-        fs::write(&path, br#"{"width": "wide"}"#).unwrap();
-        assert_eq!(WindowState::load(&path), WindowState::default());
     }
 
     #[test]
@@ -238,30 +163,5 @@ mod tests {
         assert_eq!(Preferences::load(&path), Preferences::default());
         let entries = fs::read_dir(path.parent().unwrap()).unwrap().count();
         assert_eq!(entries, 1);
-    }
-
-    #[test]
-    fn window_state_round_trips() {
-        let dir = temp();
-        let path = dir.path().join("window.json");
-        let state = WindowState {
-            width: 1440.,
-            height: 900.,
-        };
-        state.save(&path).unwrap();
-        assert_eq!(WindowState::load(&path), state);
-    }
-
-    #[test]
-    fn window_sizes_are_clamped_to_something_openable() {
-        let state = |width, height| WindowState { width, height };
-        assert_eq!(state(100., 100.).sanitized(), state(800., 560.));
-        assert_eq!(state(1e9, 900.).sanitized(), state(16_384., 900.));
-        assert_eq!(
-            state(f32::NAN, -5.).sanitized(),
-            state(1200., 800.),
-            "garbage falls back to the default size"
-        );
-        assert_eq!(state(f32::INFINITY, 0.).sanitized(), state(1200., 800.));
     }
 }

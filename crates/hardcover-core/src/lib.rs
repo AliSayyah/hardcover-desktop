@@ -7,7 +7,7 @@
 //! - [`auth`]: OAuth (authorization code + PKCE over a loopback redirect), token storage and refresh.
 //! - [`store`]: SQLite cache of the signed-in user's library.
 //! - [`covers`]: on-disk cache of cover images.
-//! - [`prefs`]: the user's preferences and the window size, as small JSON files.
+//! - [`prefs`]: the user's preferences, a small JSON file.
 //! - [`update`]: self-update from signed GitHub releases.
 
 pub mod api;
@@ -35,7 +35,7 @@ pub const USER_AGENT: &str = concat!(
     " (+https://github.com/AliSayyah/hardcover-desktop)"
 );
 
-/// Directory name used under the XDG config, data, state and cache directories.
+/// Directory name used under the XDG config, data and cache directories.
 pub const APP_DIR_NAME: &str = "hardcover-desktop";
 
 pub(crate) fn project_dirs() -> Result<directories::ProjectDirs> {

@@ -36,7 +36,6 @@ use crate::search::search_view::SearchView;
 use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
-use crate::window_state::WindowStateSaver;
 use crate::{
     FocusSearch, OpenSettings, Refresh, ShowAbout, ShowCurrentlyReading, ShowDidNotFinish,
     ShowPaused, ShowRead, ShowWantToRead,
@@ -54,31 +53,11 @@ enum Screen {
 pub struct Shell {
     screen: Screen,
     cache: Option<Arc<LibraryCache>>,
-    window_state: WindowStateSaver,
     _subscription: Option<Subscription>,
-    _window_subscriptions: [Subscription; 2],
 }
 
 impl Shell {
-    pub fn new(
-        window_state: WindowStateSaver,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let window_subscriptions = [
-            cx.observe_window_bounds(window, |this, window, cx| {
-                this.window_state.bounds_changed(window, cx)
-            }),
-            cx.on_app_quit(|this, _| {
-                this.window_state.flush();
-                async {}
-            }),
-        ];
-        let shell = cx.entity().downgrade();
-        window.on_window_should_close(cx, move |_, cx| {
-            let _ = shell.update(cx, |this, _| this.window_state.flush());
-            true
-        });
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.spawn_in(window, async move |this, cx| {
             let (startup, covers) = cx
                 .background_spawn(async move { (startup(), CoverService::open()) })
@@ -105,9 +84,7 @@ impl Shell {
         Self {
             screen: Screen::Starting,
             cache: None,
-            window_state,
             _subscription: None,
-            _window_subscriptions: window_subscriptions,
         }
     }
 

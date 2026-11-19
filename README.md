@@ -28,7 +28,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 - **Offline access:** your library and covers are cached on your computer, so they open instantly and stay readable without a connection.
 - **Secure sign-in:** you sign in through Hardcover in your browser (OAuth with PKCE). The app never sees your password, and the session is stored in your system keyring.
 - **Self-updating:** the app offers each new release and installs it in one click, after verifying its signature.
-- **Settings:** choose a light or dark theme or follow the system, and turn automatic update checks on or off. The app also remembers its window size.
+- **Settings:** choose a light or dark theme or follow the system, and turn automatic update checks on or off.
 - **Keyboard first:**
 
   | Shortcut | Action |
@@ -78,7 +78,6 @@ The app talks to Hardcover's API, and to GitHub to check for updates. It stores 
 | Library cache | `~/.local/share/hardcover-desktop/` |
 | Cover images | `~/.cache/hardcover-desktop/covers/` |
 | Settings | `~/.config/hardcover-desktop/settings.json` |
-| Window size | `~/.local/state/hardcover-desktop/window.json` |
 
 Signing out (account menu → **Sign out…**, or in **Settings**) revokes the session and deletes the library cache; your settings stay. To turn off automatic update checks, switch them off in **Settings**, or set `HARDCOVER_NO_UPDATE_CHECK=1`. **Check for updates** in the account menu still works.
 
