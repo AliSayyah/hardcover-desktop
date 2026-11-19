@@ -19,7 +19,9 @@ use hardcover_core::auth::{
 };
 use hardcover_core::covers::CoverCache;
 use hardcover_core::store::LibraryCache;
-use hardcover_core::{Client, Cover};
+use hardcover_core::{Client, Cover, Error};
+
+use crate::format;
 
 /// Services available while signed in.
 #[derive(Clone)]
@@ -80,6 +82,23 @@ impl Services {
             cx.global_mut::<Self>().refused.push(scope);
             cx.refresh_windows();
         }
+    }
+
+    /// The message to show for a failed request. A scope Hardcover refused is
+    /// recorded first (the one the error names, else `fallback`), so features
+    /// that need it turn off and the permissions notice offers to sign in
+    /// again. Where no notice can (a personal token, or a scope the app
+    /// doesn't request), the message says to sign out and in again.
+    pub fn error_message(error: &Error, fallback: Option<&'static str>, cx: &mut App) -> String {
+        if let Error::InsufficientScope { scope } = error
+            && let Some(scope) = format::requested_scope(scope.as_deref()).or(fallback)
+        {
+            Self::scope_refused(scope, cx);
+            if cx.try_global::<Self>().is_some_and(|s| s.session.is_some()) {
+                return format::scope_refused_message(scope);
+            }
+        }
+        format::error_message(error)
     }
 
     /// After a new sign-in replaced the session's tokens.

@@ -956,7 +956,9 @@ pub struct Goal {
     pub description: Option<String>,
     pub archived: bool,
     pub completed_at: Option<Timestamp>,
-    pub privacy: Option<Privacy>,
+    /// `privacy_setting_id` as Hardcover sent it, known or not: changing a
+    /// goal sends it back unchanged. See [`Goal::privacy`].
+    pub privacy_id: Option<i64>,
     pub conditions: GoalConditions,
 }
 
@@ -972,9 +974,14 @@ impl Goal {
             description: None,
             archived: false,
             completed_at: None,
-            privacy: None,
+            privacy_id: None,
             conditions: GoalConditions::default(),
         }
+    }
+
+    /// Who can see the goal, if Hardcover sent a setting this version knows.
+    pub fn privacy(&self) -> Option<Privacy> {
+        self.privacy_id.and_then(Privacy::from_id)
     }
 
     /// Progress as a fraction of the target; above 1 once it is passed.

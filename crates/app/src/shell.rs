@@ -436,6 +436,9 @@ impl Workspace {
             return;
         }
         self.signing_out = true;
+        // A "Sign in again…" still waiting on the browser must not sign the
+        // user back in once the session is gone.
+        self.reauthorize.update(cx, |r, cx| r.cancel(cx));
         cx.notify();
         let services = Services::global(cx).clone();
         cx.spawn(async move |this, cx| {

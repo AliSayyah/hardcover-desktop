@@ -17,10 +17,11 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
     Task, Window, div, prelude::FluentBuilder as _, rems,
 };
+use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookId, EDITIONS_PER_PAGE, EditionId, EditionSummary};
 
 use crate::app_state::Services;
-use crate::format::{edition_text, error_message};
+use crate::format::edition_text;
 
 /// The user picked `0`.
 pub struct EditionChosen(pub EditionSummary);
@@ -90,7 +91,10 @@ impl EditionPicker {
                             }
                         }
                     }
-                    Err(e) => this.error = Some(error_message(&e).into()),
+                    Err(e) => {
+                        this.error =
+                            Some(Services::error_message(&e, Some(READ_CATALOG), cx).into())
+                    }
                 }
                 cx.notify();
             });

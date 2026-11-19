@@ -762,7 +762,7 @@ impl RawGoal {
         g.description = non_empty(self.description);
         g.archived = self.archived.unwrap_or(false);
         g.completed_at = self.completed_at.as_deref().and_then(parse_timestamp);
-        g.privacy = self.privacy_setting_id.and_then(Privacy::from_id);
+        g.privacy_id = self.privacy_setting_id;
         g.conditions = GoalConditions(self.conditions);
         Some(g)
     }

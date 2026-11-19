@@ -12,7 +12,7 @@ use hardcover_core::auth::scopes::{READ_GOALS, WRITE_GOALS};
 use hardcover_core::{Date, Error, Goal, GoalId, LibraryEntry, NewGoal};
 
 use crate::app_state::Services;
-use crate::format::error_message;
+use crate::format::requested_scope;
 use crate::library::model::{LibraryModel, SyncStatus};
 
 /// How long after a library change to reload: Hardcover recalculates goal
@@ -129,14 +129,15 @@ impl GoalsModel {
                     this.status = GoalsStatus::Loaded;
                     cx.notify();
                 }
-                Err(Error::InsufficientScope { .. }) => {
+                Err(Error::InsufficientScope { scope }) => {
                     this.goals.clear();
                     this.status = GoalsStatus::Idle;
-                    Services::scope_refused(READ_GOALS, cx);
+                    let scope = requested_scope(scope.as_deref()).unwrap_or(READ_GOALS);
+                    Services::scope_refused(scope, cx);
                     cx.notify();
                 }
                 Err(e) => {
-                    this.status = GoalsStatus::Failed(error_message(&e).into());
+                    this.status = GoalsStatus::Failed(Services::error_message(&e, None, cx).into());
                     cx.notify();
                 }
             });
@@ -181,17 +182,18 @@ impl GoalsModel {
                     Ok(value) => {
                         // A load that started before the write would bring
                         // back the old goals; the write's result is newer.
-                        this._load = None;
-                        this._reload = None;
+                        // It may also carry a library change the goals
+                        // haven't seen, so load again afterwards. A reload
+                        // still waiting on its timer runs as planned.
+                        if this.status == GoalsStatus::Loading {
+                            this._load = None;
+                            this.schedule_reload(cx);
+                        }
                         this.status = GoalsStatus::Loaded;
                         apply(this, value);
                         Ok(())
                     }
-                    Err(e @ Error::InsufficientScope { .. }) => {
-                        Services::scope_refused(WRITE_GOALS, cx);
-                        Err(error_message(&e).into())
-                    }
-                    Err(e) => Err(error_message(&e).into()),
+                    Err(e) => Err(Services::error_message(&e, Some(WRITE_GOALS), cx).into()),
                 }
             })
             .unwrap_or(Ok(()))

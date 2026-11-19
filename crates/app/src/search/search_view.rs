@@ -16,11 +16,11 @@ use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
     Styled as _, Subscription, Task, WeakEntity, Window, div, prelude::FluentBuilder as _,
 };
+use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookId, BookSummary, SearchPage};
 
 use crate::app_state::Services;
 use crate::book::detail_view::{BookDetailView, Subject};
-use crate::format::error_message;
 use crate::library::book_row::BookRow;
 use crate::library::library_view::empty_state;
 use crate::library::model::LibraryModel;
@@ -261,7 +261,7 @@ impl SearchView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = result.map_err(|e| error_message(&e));
+        let result = result.map_err(|e| Services::error_message(&e, Some(READ_CATALOG), cx));
         self.list.update(cx, |list, cx| {
             if list.delegate_mut().results.receive(revision, result) {
                 cx.notify();

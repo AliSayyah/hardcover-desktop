@@ -77,13 +77,11 @@ struct Catalogue {
 }
 
 #[derive(Deserialize)]
+/// A goal for the current calendar year, whichever year the demo runs in.
 struct DemoGoal {
     id: i64,
     metric: String,
     goal: i64,
-    description: String,
-    start_date: String,
-    end_date: String,
 }
 
 #[derive(Deserialize)]
@@ -233,14 +231,16 @@ impl Catalogue {
 
 // ----- wire shapes -----
 
-/// `GoalFields`. Progress is worked out from the library like Hardcover does:
-/// the reads (or their books' pages) finished within the goal's dates.
-fn goal(catalogue: &Catalogue, goal: &DemoGoal) -> Value {
+/// `GoalFields`, for the calendar year `year`. Progress is worked out from the
+/// library like Hardcover does: the reads (or their books' pages) finished
+/// within the goal's dates.
+fn goal(catalogue: &Catalogue, goal: &DemoGoal, year: i32) -> Value {
+    let (start, end) = (format!("{year}-01-01"), format!("{year}-12-31"));
     let finished = catalogue.library.iter().flat_map(|e| {
         e.reads
             .iter()
             .filter_map(|r| r.finished_at.as_deref())
-            .filter(|f| (goal.start_date.as_str()..=goal.end_date.as_str()).contains(f))
+            .filter(|f| (start.as_str()..=end.as_str()).contains(f))
             .map(move |_| e)
     });
     let progress: i64 = match goal.metric.as_str() {
@@ -255,9 +255,9 @@ fn goal(catalogue: &Catalogue, goal: &DemoGoal) -> Value {
         "metric": goal.metric,
         "goal": goal.goal,
         "progress": progress,
-        "description": goal.description,
-        "start_date": goal.start_date,
-        "end_date": goal.end_date,
+        "description": format!("{} {}s in {year}", goal.goal, goal.metric),
+        "start_date": start,
+        "end_date": end,
         "conditions": {},
         "archived": false,
         "completed_at": null,
@@ -531,6 +531,7 @@ fn answer(op: &str, vars: &Value) -> Value {
     let catalogue = &*CATALOGUE;
     let int = |name: &str| vars[name].as_i64().unwrap_or_default();
     let mine = || int("userId") == catalogue.user.id;
+    let year = chrono::Datelike::year(&chrono::Local::now());
     let data = match op {
         "Me" => json!({ "me": [{
             "id": catalogue.user.id,
@@ -628,13 +629,13 @@ fn answer(op: &str, vars: &Value) -> Value {
         "Goals" => json!({
             "goals": catalogue.goals.iter()
                 .filter(|_| mine())
-                .map(|g| goal(catalogue, g))
+                .map(|g| goal(catalogue, g, year))
                 .collect::<Vec<_>>(),
         }),
         "GoalById" => json!({
             "goals_by_pk": catalogue.goals.iter()
                 .find(|g| g.id == int("id"))
-                .map(|g| goal(catalogue, g)),
+                .map(|g| goal(catalogue, g, year)),
         }),
         "InsertUserBook" | "UpdateUserBook" | "DeleteUserBook" | "InsertUserBookRead"
         | "UpdateUserBookRead" | "DeleteUserBookRead" | "EditionOwned" | "InsertGoal"
@@ -825,17 +826,31 @@ mod tests {
         let goal = &goals[0];
         assert_eq!(goal.metric, crate::GoalMetric::Books);
         assert_eq!(goal.target, 12);
-        let finished_in_2026 = CATALOGUE
-            .library
-            .iter()
-            .flat_map(|e| &e.reads)
-            .filter_map(|r| r.finished_at.as_deref())
-            .filter(|f| f.starts_with("2026-"))
-            .count();
-        assert!(finished_in_2026 > 0);
-        assert_eq!(goal.progress, finished_in_2026 as f64);
+        // Always this year's, so the demo shows a current goal.
+        assert!(goal.is_current(chrono::Local::now().date_naive()));
         let err = client.delete_goal(goal.id).unwrap_err();
         assert!(err.to_string().contains(READ_ONLY), "{err}");
+    }
+
+    #[test]
+    fn the_demo_goal_counts_the_reads_finished_in_its_year() {
+        let finished_in = |year: i32| {
+            CATALOGUE
+                .library
+                .iter()
+                .flat_map(|e| &e.reads)
+                .filter_map(|r| r.finished_at.as_deref())
+                .filter(|f| f.starts_with(&format!("{year}-")))
+                .count() as i64
+        };
+        assert!(finished_in(2026) > 0);
+        for year in [2026, 2027] {
+            let g = goal(&CATALOGUE, &CATALOGUE.goals[0], year);
+            assert_eq!(g["start_date"], format!("{year}-01-01"));
+            assert_eq!(g["end_date"], format!("{year}-12-31"));
+            assert_eq!(g["description"], format!("12 books in {year}"));
+            assert_eq!(g["progress"], finished_in(year));
+        }
     }
 
     #[test]

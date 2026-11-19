@@ -4,7 +4,7 @@
 //! Plain functions without GPUI so they can be unit tested directly.
 
 use chrono::{DateTime, Datelike, TimeZone};
-use hardcover_core::auth::scopes;
+use hardcover_core::auth::{DEFAULT_SCOPES, scopes};
 use hardcover_core::{
     Date, EditionSummary, Error, Goal, GoalMetric, Length, LibraryEntry, Rating, ReadingStatus,
 };
@@ -247,8 +247,10 @@ pub fn error_message(error: &Error) -> String {
             "Couldn't reach Hardcover. Check your connection and try again.".to_owned()
         }
         Error::Unauthorized => "Your session has expired. Sign out and sign in again.".to_owned(),
+        // Where the permissions notice can offer to sign in again, the caller
+        // says so instead (`Services::error_message`).
         Error::InsufficientScope { .. } => {
-            "Hardcover didn't grant this app permission for this. Sign in again to grant it."
+            "Hardcover didn't grant this app permission for this. Sign out and sign in again to grant it."
                 .to_owned()
         }
         Error::InvalidInput(msg) => sentence(msg),
@@ -269,6 +271,29 @@ fn scope_feature(scope: &str) -> &'static str {
         scopes::READ_LISTS | scopes::WRITE_LISTS => "lists",
         _ => "your library",
     }
+}
+
+/// The scope an `insufficient_scope` error names, as one the app requests.
+/// Hardcover may name a narrower part (`read:goals:private`) or several scopes;
+/// the first one the app requests wins.
+pub fn requested_scope(named: Option<&str>) -> Option<&'static str> {
+    named?.split_whitespace().find_map(|name| {
+        DEFAULT_SCOPES.into_iter().find(|s| {
+            name == *s
+                || name
+                    .strip_prefix(s)
+                    .is_some_and(|rest| rest.starts_with(':'))
+        })
+    })
+}
+
+/// A request refused for lack of `scope`, while the permissions notice (or the
+/// account menu) offers to sign in again.
+pub fn scope_refused_message(scope: &str) -> String {
+    format!(
+        "Hardcover didn't grant this app permission for {}. Sign in again to grant it.",
+        scope_feature(scope)
+    )
 }
 
 /// `a`, `a and b`, `a, b and c`.
@@ -321,10 +346,19 @@ pub fn goal_unit(metric: &GoalMetric, n: f64) -> &str {
     }
 }
 
-/// An amount in a goal's unit: whole books and pages, hours to one decimal.
+/// An amount in a goal's unit, rounded down: whole books and pages, hours to
+/// one decimal (`12.5`, or `12` when whole). Down, so an amount short of the
+/// target never shows as the target.
 fn goal_amount(metric: &GoalMetric, n: f64) -> String {
     match metric {
-        GoalMetric::Hours if n.fract().abs() >= 0.05 => format!("{n:.1}"),
+        GoalMetric::Hours => {
+            // The epsilon keeps 2.3 (22.999… tenths in binary) from showing as 2.2.
+            let tenths = (n * 10.0 + 1e-6).floor() as i64;
+            match tenths % 10 {
+                0 => format!("{}", tenths / 10),
+                t => format!("{}.{}", tenths / 10, t.abs()),
+            }
+        }
         _ => format!("{}", n.floor() as i64),
     }
 }
@@ -403,6 +437,17 @@ pub fn goal_description(metric: &GoalMetric, target: u32, start: Date, end: Date
     }
 }
 
+/// The description to save with a goal's new target. One the app would have
+/// written follows the target, and so does a missing one, since Hardcover
+/// requires one; the user's own stays.
+pub fn retargeted_description(goal: &Goal, target: u32) -> String {
+    let written = goal_description(&goal.metric, goal.target, goal.start, goal.end);
+    match goal.description.as_deref() {
+        Some(own) if !own.trim().is_empty() && own != written => own.to_owned(),
+        _ => goal_description(&goal.metric, target, goal.start, goal.end),
+    }
+}
+
 /// Upper-cases the first letter and ends with a period.
 fn sentence(msg: &str) -> String {
     let msg = msg.trim().trim_end_matches('.');
@@ -474,6 +519,44 @@ mod tests {
     }
 
     #[test]
+    fn a_new_target_keeps_the_users_own_description() {
+        let mut g = goal(GoalMetric::Books, 12, 3.0);
+        g.description = Some("12 books in 2026".into());
+        assert_eq!(retargeted_description(&g, 20), "20 books in 2026");
+        // Hardcover requires one: a missing or blank one is written.
+        for missing in [None, Some(" ".to_owned())] {
+            g.description = missing;
+            assert_eq!(retargeted_description(&g, 20), "20 books in 2026");
+        }
+        g.description = Some("Read more sci-fi".into());
+        assert_eq!(retargeted_description(&g, 20), "Read more sci-fi");
+    }
+
+    #[test]
+    fn refused_scopes_map_to_requested_ones() {
+        assert_eq!(
+            requested_scope(Some("read:goals")),
+            Some(scopes::READ_GOALS)
+        );
+        assert_eq!(
+            requested_scope(Some("read:goals:private")),
+            Some(scopes::READ_GOALS)
+        );
+        assert_eq!(
+            requested_scope(Some("read:journal write:library")),
+            Some(scopes::WRITE_LIBRARY)
+        );
+        // Not a part of read:goals, and not a scope the app requests.
+        assert_eq!(requested_scope(Some("read:goalsx")), None);
+        assert_eq!(requested_scope(Some("read:journal")), None);
+        assert_eq!(requested_scope(None), None);
+        assert_eq!(
+            scope_refused_message(scopes::WRITE_LIBRARY),
+            "Hardcover didn't grant this app permission for your library. Sign in again to grant it."
+        );
+    }
+
+    #[test]
     fn goal_copy() {
         let d = |y, m, d| Date::from_ymd_opt(y, m, d).unwrap();
         let books = goal(GoalMetric::Books, 12, 9.0);
@@ -507,6 +590,16 @@ mod tests {
         );
         let hours = goal(GoalMetric::Hours, 100, 12.5);
         assert_eq!(goal_progress(&hours), "12.5 / 100 hours");
+        // Rounded down once, so an amount short of the target never shows as it.
+        let hours = |progress| goal_progress(&goal(GoalMetric::Hours, 100, progress));
+        assert_eq!(hours(99.96), "99.9 / 100 hours");
+        assert_eq!(hours(100.0), "100 / 100 hours");
+        assert_eq!(hours(2.3), "2.3 / 100 hours");
+        assert_eq!(hours(0.04), "0 / 100 hours");
+        assert_eq!(
+            goal_pace(&goal(GoalMetric::Hours, 100, 99.96), d(2027, 1, 5)).unwrap(),
+            "Ended 1 hour short"
+        );
         assert!(goal_pace(&goal(GoalMetric::Other("x".into()), 5, 1.0), d(2026, 5, 1)).is_none());
         assert_eq!(
             goal_description(&GoalMetric::Books, 12, d(2026, 1, 1), d(2026, 12, 31)),

@@ -92,20 +92,37 @@ impl Reauthorize {
             return;
         }
         let user = self.library.read(cx).user().map(|u| u.id);
-        let Some(session) = Services::global(cx).session().cloned() else {
+        let services = Services::global(cx);
+        let Some(session) = services.session().cloned() else {
             return;
         };
+        let client = services.client().clone();
         self.state = State::Starting;
         cx.notify();
         self._task = Some(cx.spawn_in(window, async move |this, cx| {
             let config = OAuthConfig::default();
+            // Whose session this is, before the browser opens: before the
+            // first sync the library doesn't know yet, and only the same
+            // account may replace it.
             let pending = cx
                 .background_spawn({
                     let config = config.clone();
-                    async move { begin_sign_in(&config) }
+                    let session = session.clone();
+                    async move {
+                        // Signed out meanwhile, or the session expired: there
+                        // is nothing to replace.
+                        if !session.is_signed_in() {
+                            return Err(Error::Unauthorized);
+                        }
+                        let user = match user {
+                            Some(user) => user,
+                            None => client.me()?.id,
+                        };
+                        Ok((user, begin_sign_in(&config)?))
+                    }
                 })
                 .await;
-            let pending = match pending {
+            let (user, pending) = match pending {
                 Ok(p) => p,
                 Err(e) => {
                     let _ = this.update(cx, |this, cx| this.fail(Failure::Core(e), cx));
@@ -123,6 +140,7 @@ impl Reauthorize {
                 cx.notify();
             });
             if opened.is_err() {
+                // The notice is gone (signed out): stop listening.
                 pending.cancel_handle().cancel();
                 return;
             }
@@ -158,10 +176,19 @@ impl Reauthorize {
         cx.notify();
     }
 
-    fn cancel(&mut self, cx: &mut Context<Self>) {
-        if let State::Waiting { cancel, .. } = &self.state {
+    /// Stops a sign-in in progress. Also called on sign-out, before the
+    /// session forgets its tokens.
+    pub fn cancel(&mut self, cx: &mut Context<Self>) {
+        match &self.state {
             // The waiting task sees the flag and returns `Cancelled`.
-            cancel.cancel();
+            State::Waiting { cancel, .. } => cancel.cancel(),
+            // Not listening yet: dropping the task drops the listener once
+            // it is set up.
+            State::Starting => {
+                self._task = None;
+                self.state = State::Idle { error: None };
+            }
+            State::Idle { .. } => {}
         }
         cx.notify();
     }
@@ -190,25 +217,46 @@ impl Reauthorize {
     }
 }
 
+impl Drop for Reauthorize {
+    fn drop(&mut self) {
+        // The browser wait blocks a background thread and would outlive the
+        // notice: stop it, so an approval that comes later changes nothing.
+        if let State::Waiting { cancel, .. } = &self.state {
+            cancel.cancel();
+        }
+    }
+}
+
 /// Blocking: waits for the browser, checks the account, then swaps the tokens
 /// into the session.
 fn replace_tokens(
     session: &Session,
     pending: hardcover_core::auth::PendingSignIn,
-    user: Option<UserId>,
+    user: UserId,
 ) -> Result<GrantedScopes, Failure> {
     let tokens = pending.wait(SIGN_IN_TIMEOUT)?;
-    if let Some(user) = user {
-        // A throwaway client on the new access token: the session's own
-        // client remembers the old account's id.
-        let probe = StaticToken::new(tokens.access_token())
-            .ok_or_else(|| Error::Auth("the server sent an empty access token".into()))?;
-        let me = Client::new(Arc::new(probe)).me()?;
-        if me.id != user {
-            return Err(Failure::OtherAccount(me.username));
+    // A throwaway client on the new access token: the session's own client
+    // remembers the old account's id.
+    let probe = StaticToken::new(tokens.access_token())
+        .ok_or_else(|| Error::Auth("the server sent an empty access token".into()))?;
+    let me = Client::new(Arc::new(probe)).me()?;
+    let result = if me.id != user {
+        Err(Failure::OtherAccount(me.username))
+    } else {
+        // Refused once the user signed out meanwhile.
+        session.replace(tokens.clone()).map_err(Failure::from)
+    };
+    if matches!(
+        result,
+        Err(Failure::OtherAccount(_) | Failure::Core(Error::Unauthorized))
+    ) {
+        // Nobody will use these tokens: revoke them, as signing out does.
+        // Best effort; the failure to report is the one above.
+        if let Err(e) = session.discard(&tokens) {
+            eprintln!("hardcover: revoking an unused sign-in: {e}");
         }
     }
-    session.replace(tokens)?;
+    result?;
     Ok(session.granted_scopes())
 }
 

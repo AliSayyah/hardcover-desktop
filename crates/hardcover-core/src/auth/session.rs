@@ -115,11 +115,25 @@ impl Session {
     ///
     /// The old tokens are not revoked: they belong to a different grant, and
     /// are dropped here.
+    ///
+    /// `Error::Unauthorized` once the session holds no tokens (signed out, or
+    /// its refresh token was rejected): a sign-in that finishes after that
+    /// must not sign the user back in. Revoke those tokens with
+    /// [`Session::discard`].
     pub fn replace(&self, tokens: Tokens) -> Result<()> {
         let mut guard = self.lock();
+        if guard.is_none() {
+            return Err(Error::Unauthorized);
+        }
         self.store.save(&tokens)?;
         *guard = Some(tokens);
         Ok(())
+    }
+
+    /// Revokes tokens from a sign-in that will not replace this session's,
+    /// e.g. ones another account approved. The session itself is unchanged.
+    pub fn discard(&self, tokens: &Tokens) -> Result<()> {
+        oauth::revoke(&*self.http, &self.cfg, tokens)
     }
 
     /// Revokes the tokens at Hardcover, then forgets them locally (store and memory).
@@ -466,6 +480,30 @@ mod tests {
         };
         assert!(s.replace(Tokens::new("at2", None, None)).is_err());
         assert_eq!(s.access_token().unwrap(), "at1");
+    }
+
+    #[test]
+    fn replace_after_sign_out_is_refused() {
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        http.push(200, "");
+        s.sign_out().unwrap();
+        assert_eq!(
+            s.replace(Tokens::new("at2", Some("rt2".into()), soon(600))),
+            Err(Error::Unauthorized)
+        );
+        assert!(!s.is_signed_in());
+        assert!(store.load().unwrap().is_none());
+    }
+
+    #[test]
+    fn discard_revokes_other_tokens_and_keeps_the_session() {
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        http.push(200, "");
+        s.discard(&Tokens::new("at9", Some("rt9".into()), soon(600)))
+            .unwrap();
+        assert_eq!(http.requests()[0].form_value("token"), Some("rt9"));
+        assert_eq!(s.access_token().unwrap(), "at1");
+        assert_eq!(store.load().unwrap().unwrap().access_token(), "at1");
     }
 
     #[test]

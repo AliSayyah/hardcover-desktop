@@ -885,10 +885,7 @@
     {
       "id": 901,
       "metric": "book",
-      "goal": 12,
-      "description": "12 books in 2026",
-      "start_date": "2026-01-01",
-      "end_date": "2026-12-31"
+      "goal": 12
     }
   ]
 }

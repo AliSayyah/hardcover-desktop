@@ -25,6 +25,7 @@ use super::model::GoalsModel;
 use crate::app_state::Services;
 use crate::format::{
     goal_description, goal_pace, goal_period, goal_progress, goal_unit, needs_permission,
+    retargeted_description,
 };
 use crate::library::model::LibraryModel;
 
@@ -154,11 +155,7 @@ impl GoalView {
         };
         let mut edited = goal.clone();
         edited.target = target;
-        // A description the app would have written follows the new target.
-        let written = goal_description(&goal.metric, goal.target, goal.start, goal.end);
-        if goal.description.as_deref() == Some(written.as_str()) {
-            edited.description = Some(goal_description(&goal.metric, target, goal.start, goal.end));
-        }
+        edited.description = Some(retargeted_description(&goal, target));
         let task = self.goals.update(cx, |m, cx| m.update(edited, cx));
         cx.spawn_in(window, async move |this, cx| {
             if let Err(message) = task.await {

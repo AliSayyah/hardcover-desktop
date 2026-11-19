@@ -776,6 +776,7 @@ impl Client {
                 "a goal needs a target above zero and an end after its start".into(),
             ));
         }
+        let description = goal_description(Some(&goal.description))?;
         #[derive(Deserialize)]
         struct Data {
             insert_goal: Option<GoalPayload>,
@@ -783,7 +784,7 @@ impl Client {
         let object = json!({
             "metric": goal.metric.api_name(),
             "goal": goal.target,
-            "description": goal.description,
+            "description": description,
             "start_date": goal.start.to_string(),
             "end_date": goal.end.to_string(),
             "conditions": {},
@@ -802,7 +803,8 @@ impl Client {
     /// read from Hardcover with only the fields to change edited.
     ///
     /// `Error::InvalidInput` if the goal's conditions hold a field this
-    /// version can't send back, which the update would drop.
+    /// version can't send back, which the update would drop, or if it has no
+    /// description, which Hardcover requires.
     pub fn update_goal(&self, goal: &Goal) -> Result<Goal> {
         let conditions = goal.conditions.to_input().ok_or_else(|| {
             Error::InvalidInput(
@@ -814,6 +816,7 @@ impl Client {
                 "a goal needs a target above zero and an end after its start".into(),
             ));
         }
+        let description = goal_description(goal.description.as_deref())?;
         #[derive(Deserialize)]
         struct Data {
             update_goal: Option<GoalPayload>,
@@ -821,14 +824,16 @@ impl Client {
         let mut object = json!({
             "metric": goal.metric.api_name(),
             "goal": goal.target,
-            "description": goal.description.clone().unwrap_or_default(),
+            "description": description,
             "start_date": goal.start.to_string(),
             "end_date": goal.end.to_string(),
             "conditions": conditions,
             "archived": goal.archived,
         });
-        if let Some(privacy) = goal.privacy {
-            object["privacy_setting_id"] = json!(privacy.id());
+        // Sent back as read, even an id this version doesn't know: left out,
+        // the goal would get the account's default privacy.
+        if let Some(privacy) = goal.privacy_id {
+            object["privacy_setting_id"] = json!(privacy);
         }
         let data: Data = self.query(
             "UpdateGoal",
@@ -1013,6 +1018,15 @@ fn moved_read_fields(
 /// `fraction` of `total`, to the nearest unit. An unfinished read never lands
 /// on the last unit: progress at the end may finish the read on Hardcover and
 /// move the book to Read, which changing the edition must not do.
+/// The description to send: Hardcover requires one (`GoalInput.description`
+/// is `String!`), and an empty one would be stored as is.
+fn goal_description(description: Option<&str>) -> Result<&str> {
+    description
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .ok_or_else(|| Error::InvalidInput("a goal needs a description".into()))
+}
+
 fn scale(fraction: f64, total: u32) -> u32 {
     let units = (fraction * f64::from(total)).round() as u32;
     if fraction < 1.0 {

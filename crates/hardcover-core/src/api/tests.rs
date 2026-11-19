@@ -1198,7 +1198,7 @@ fn goals_are_scoped_to_me_and_convert_hours() {
     assert_eq!(books.metric, GoalMetric::Books);
     assert_eq!((books.target, books.progress), (30, 12.0));
     assert_eq!(books.start, Date::from_ymd_opt(2030, 1, 1).unwrap());
-    assert_eq!(books.privacy, Some(Privacy::FollowersOnly));
+    assert_eq!(books.privacy(), Some(Privacy::FollowersOnly));
     assert!(books.conditions.is_empty());
     // Hour goals: target in hours, the API's progress in seconds.
     assert_eq!((goals[1].target, goals[1].progress), (100, 10.0));
@@ -1241,6 +1241,11 @@ fn create_goal_sends_a_whole_goal_input() {
         ..new.clone()
     };
     assert!(matches!(c.create_goal(&bad), Err(Error::InvalidInput(_))));
+    let blank = NewGoal {
+        description: " ".into(),
+        ..new.clone()
+    };
+    assert!(matches!(c.create_goal(&blank), Err(Error::InvalidInput(_))));
     assert_eq!(http.requests().len(), 1);
     // `errors` is a list.
     http.push(
@@ -1289,9 +1294,42 @@ fn update_goal_resends_everything_and_refetches_when_needed() {
     assert_eq!(reqs[1].json.as_ref().unwrap()["operationName"], "GoalById");
 
     // Conditions it can't send back block the update before any request.
-    goal.conditions = GoalConditions(json!({"genre": "poetry"}));
+    let conditions = std::mem::replace(
+        &mut goal.conditions,
+        GoalConditions(json!({"genre": "poetry"})),
+    );
     assert!(matches!(c.update_goal(&goal), Err(Error::InvalidInput(_))));
     assert_eq!(http.requests().len(), 2);
+    goal.conditions = conditions;
+
+    // So does a missing description, which Hardcover requires.
+    for description in [None, Some("  ".to_owned())] {
+        goal.description = description;
+        assert!(matches!(c.update_goal(&goal), Err(Error::InvalidInput(_))));
+    }
+    assert_eq!(http.requests().len(), 2);
+}
+
+#[test]
+fn update_goal_keeps_a_privacy_setting_it_does_not_know() {
+    let (c, http) = client(TestTokens::new(false));
+    let mut row = goal_row(5, "book", 30, json!(3));
+    row["privacy_setting_id"] = json!(7);
+    let mut goal = RawGoal::deserialize(row.clone())
+        .unwrap()
+        .into_goal()
+        .unwrap();
+    assert_eq!((goal.privacy_id, goal.privacy()), (Some(7), None));
+    http.push(
+        200,
+        &data(json!({"update_goal": {"errors": [], "id": 5, "goal": row}})),
+    );
+    goal.target = 40;
+    c.update_goal(&goal).unwrap();
+    assert_eq!(
+        http.requests()[0].json.as_ref().unwrap()["variables"]["object"]["privacy_setting_id"],
+        7
+    );
 }
 
 #[test]
