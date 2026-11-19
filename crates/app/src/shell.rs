@@ -29,6 +29,10 @@ use hardcover_core::store::LibraryCache;
 
 use crate::about::open_about;
 use crate::app_state::{CoverService, Services, Startup, cover_file, startup};
+use crate::book::detail_view::{BookDetailView, Subject};
+use crate::catalog::author_view::AuthorView;
+use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
+use crate::catalog::series_view::SeriesView;
 use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
 use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
@@ -37,9 +41,12 @@ use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
 use crate::{
-    FocusSearch, OpenSettings, Refresh, ShowAbout, ShowCurrentlyReading, ShowDidNotFinish,
+    FocusSearch, GoBack, OpenSettings, Refresh, ShowAbout, ShowCurrentlyReading, ShowDidNotFinish,
     ShowIgnored, ShowPaused, ShowRead, ShowWantToRead,
 };
+
+/// Key context of a catalogue page, where Escape goes back.
+pub const PAGE_CONTEXT: &str = "CatalogPage";
 
 // ----- top level -----
 
@@ -154,6 +161,12 @@ pub struct Workspace {
     destination: Destination,
     library: Entity<LibraryView>,
     search: Entity<SearchView>,
+    /// Catalogue pages opened from the destination; the top one is shown.
+    pages: PageStack,
+    series_page: Entity<SeriesView>,
+    author_page: Entity<AuthorView>,
+    book_page: Entity<BookDetailView>,
+    page_focus: FocusHandle,
     signing_out: bool,
     /// The open Settings dialog's sign-out request.
     _settings: Option<Subscription>,
@@ -175,6 +188,10 @@ impl Workspace {
         let model = cx.new(|_| LibraryModel::new());
         let library = cx.new(|cx| LibraryView::new(model.clone(), window, cx));
         let search = cx.new(|cx| SearchView::new(model.clone(), window, cx));
+        let series_page = cx.new(|cx| SeriesView::new(model.clone(), window, cx));
+        let author_page = cx.new(|cx| AuthorView::new(model.clone(), window, cx));
+        let book_page = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
+        let navigator = Navigator::init(cx);
         model.update(cx, |m, cx| m.start(cx));
         let clock = cx.spawn(async move |this, cx| {
             loop {
@@ -199,6 +216,13 @@ impl Workspace {
             cx.on_focus_lost(window, |this, window, cx| {
                 this.focus_destination(window, cx)
             }),
+            cx.subscribe_in(
+                &navigator,
+                window,
+                |this, _, event: &NavigationEvent, window, cx| match event {
+                    NavigationEvent::Open(page) => this.open_page(page.clone(), window, cx),
+                },
+            ),
         ];
         Self {
             focus_handle: cx.focus_handle(),
@@ -206,6 +230,11 @@ impl Workspace {
             destination: Destination::Shelf(ReadingStatus::CurrentlyReading),
             library,
             search,
+            pages: PageStack::default(),
+            series_page,
+            author_page,
+            book_page,
+            page_focus: cx.focus_handle(),
             signing_out: false,
             _settings: None,
             _clock: clock,
@@ -219,6 +248,10 @@ impl Workspace {
 
     /// Focuses the current destination's primary control.
     fn focus_destination(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pages.current().is_some() {
+            self.focus_page(window, cx);
+            return;
+        }
         match self.destination {
             Destination::Search => self.search.update(cx, |s, cx| s.focus_input(window, cx)),
             Destination::Shelf(_) => self.library.update(cx, |l, cx| l.focus_list(window, cx)),
@@ -226,6 +259,8 @@ impl Workspace {
     }
 
     fn show(&mut self, destination: Destination, window: &mut Window, cx: &mut Context<Self>) {
+        // A sidebar destination starts a new history.
+        self.pages.clear();
         self.destination = destination;
         match destination {
             Destination::Search => self.search.update(cx, |s, cx| s.focus_input(window, cx)),
@@ -236,6 +271,81 @@ impl Workspace {
             }
         }
         cx.notify();
+    }
+
+    // ----- catalogue pages -----
+
+    fn open_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pages.push(page) {
+            self.show_page(window, cx);
+        }
+    }
+
+    /// Back to the previous page, or to the destination after the first one.
+    fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.pages.pop() {
+            return;
+        }
+        if self.pages.current().is_some() {
+            self.show_page(window, cx);
+        } else {
+            self.focus_destination(window, cx);
+            cx.notify();
+        }
+    }
+
+    fn show_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.pages.current().cloned() {
+            Some(Page::Series(id)) => self.series_page.update(cx, |p, cx| p.show(id, window, cx)),
+            Some(Page::Author(id)) => self.author_page.update(cx, |p, cx| p.show(id, window, cx)),
+            Some(Page::Book(book)) => self.book_page.update(cx, |p, cx| {
+                p.set_subject(Some(Subject::Book(book)), window, cx)
+            }),
+            None => return,
+        }
+        self.focus_page(window, cx);
+        cx.notify();
+    }
+
+    /// The page's book list, or the page itself for a book.
+    fn focus_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.pages.current() {
+            Some(Page::Series(_)) => self.series_page.update(cx, |p, cx| p.focus(window, cx)),
+            Some(Page::Author(_)) => self.author_page.update(cx, |p, cx| p.focus(window, cx)),
+            Some(Page::Book(_)) => window.focus(&self.page_focus, cx),
+            None => {}
+        }
+    }
+
+    fn render_page(&self, page: &Page, cx: &mut Context<Self>) -> impl IntoElement {
+        let content: AnyElement = match page {
+            Page::Series(_) => self.series_page.clone().into_any_element(),
+            Page::Author(_) => self.author_page.clone().into_any_element(),
+            Page::Book(_) => self.book_page.clone().into_any_element(),
+        };
+        v_flex()
+            .id("catalog-page")
+            .key_context(PAGE_CONTEXT)
+            .track_focus(&self.page_focus)
+            .size_full()
+            .child(
+                h_flex()
+                    .flex_shrink_0()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        Button::new("go-back")
+                            .ghost()
+                            .small()
+                            .icon(IconName::ArrowLeft)
+                            .label("Back")
+                            .tooltip_with_action("Back", &GoBack, Some("Workspace"))
+                            .on_click(cx.listener(|this, _, window, cx| this.go_back(window, cx))),
+                    ),
+            )
+            .child(div().flex_1().min_h_0().child(content))
     }
 
     fn show_shelf(&mut self, status: ReadingStatus, window: &mut Window, cx: &mut Context<Self>) {
@@ -662,6 +772,7 @@ impl Render for Workspace {
                 this.show(Destination::Search, window, cx)
             }))
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh(cx)))
+            .on_action(cx.listener(|this, _: &GoBack, window, cx| this.go_back(window, cx)))
             .on_action(
                 cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
             )
@@ -685,16 +796,13 @@ impl Render for Workspace {
                 this.show_shelf(ReadingStatus::Ignored, window, cx)
             }))
             .child(self.render_sidebar(window, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .map(|this| match self.destination {
-                        Destination::Search => this.child(self.search.clone()),
-                        Destination::Shelf(_) => this.child(self.library.clone()),
-                    }),
-            )
+            .child(div().flex_1().min_w_0().h_full().map(|this| {
+                match (self.pages.current(), self.destination) {
+                    (Some(page), _) => this.child(self.render_page(page, cx)),
+                    (None, Destination::Search) => this.child(self.search.clone()),
+                    (None, Destination::Shelf(_)) => this.child(self.library.clone()),
+                }
+            }))
     }
 }
 

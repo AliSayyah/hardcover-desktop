@@ -60,7 +60,8 @@ The workspace has two crates, in `crates/*`.
   - `StaticToken` is the `HARDCOVER_TOKEN` path.
 - `store`: `LibraryCache`, a SQLite database at `~/.local/share/hardcover-desktop/library.sqlite3`.
 - `covers`: `CoverCache`, on disk at `~/.cache/hardcover-desktop/covers`.
-- `demo` (the `demo` feature, and in tests): `demo::client()` answers every GraphQL operation from `demo/catalogue.json` through a fake transport, so queries, parsing and paging run as they do against Hardcover. Writes fail with a read-only error. `demo::cover_cache()` passes only the catalogue's cover URLs through to the real network and refuses every other URL.
+- `demo` (the `demo` feature, and in tests): `demo::client()` answers every GraphQL operation from `demo/catalogue.json` through a fake transport, so queries, parsing and paging run as they do against Hardcover. Writes fail with a read-only error.
+  - Series and author pages and similar books are derived from the catalogue, with the demo's own author and series ids. Books have no ratings distribution or alternative titles: the catalogue does not record them. `demo::cover_cache()` passes only the catalogue's cover URLs through to the real network and refuses every other URL.
   - The books are real popular ones; their ids, facts and cover URLs come from Hardcover. The descriptions are our own short text, not publisher blurbs. The reader and their shelves are invented: no real users.
   - Covers are downloaded from Hardcover at runtime, only for the catalogue's own URLs. Never commit the images.
   - When you add a query, give it an answer in `demo::answer`; the `every_document_has_an_answer` test fails until you do.
@@ -87,6 +88,10 @@ The workspace has two crates, in `crates/*`.
 - `preferences.rs`: the `AppPreferences` global (`PreferencesModel`) and the theme. `follow_theme` re-applies the theme when the desktop's appearance or the preference changes. `UpdateModel` observes the model to start or stop automatic checks.
 - `settings_view.rs` (Settings dialog, `Ctrl+,`) and `about.rs` (About dialog). Both open from the account menu.
 - `shell.rs`: `Shell` switches between Starting, SignIn and Workspace. `Workspace` contains the sidebar (shelves by status) plus the current destination (library, search or book detail).
+- `catalog/`: series and author pages, and the page history over the destination.
+  - Any view opens a page with `navigation::open(Page::…)`; `Workspace` owns the `PageStack` and shows its top page with a Back bar. Back (`GoBack`: Escape on a page, Alt+Left anywhere) pops it; a sidebar destination clears it.
+  - Each page is one request (`SeriesPage`, `AuthorPage`), cached per id for the session. Similar books on the book page are one more (`BooksByIds`), fetched after the details with a delay.
+  - The book detail pane's catalogue parts (contributor and series links, ratings, tags, similar books) are in `book/detail_view/catalog_sections.rs`.
 
 ## Hardcover API quirks the code relies on
 

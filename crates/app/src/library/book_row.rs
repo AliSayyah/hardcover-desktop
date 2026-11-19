@@ -67,6 +67,23 @@ impl BookRow {
     }
 }
 
+impl BookRow {
+    /// A book on a series or author page: `details` is its secondary line
+    /// (position, year, average), with its library status when shelved.
+    pub fn for_catalog(
+        book: &BookSummary,
+        details: impl Into<SharedString>,
+        status: Option<ReadingStatus>,
+    ) -> Self {
+        Self {
+            title: book.title.clone().into(),
+            secondary: details.into(),
+            cover_url: book.cover.as_ref().map(|c| c.url.clone()),
+            trailing: status.map_or(Trailing::None, |s| Trailing::Status(status_label(s).into())),
+        }
+    }
+}
+
 impl RenderOnce for BookRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let thumbnail = self

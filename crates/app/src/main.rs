@@ -3,6 +3,7 @@
 mod about;
 mod app_state;
 mod book;
+mod catalog;
 #[cfg(test)]
 mod cover_quality_tests;
 mod format;
@@ -34,6 +35,7 @@ actions!(
         ShowIgnored,
         OpenSettings,
         ShowAbout,
+        GoBack,
     ]
 );
 
@@ -56,6 +58,9 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-4", ShowPaused, None),
         KeyBinding::new("ctrl-5", ShowDidNotFinish, None),
         KeyBinding::new("ctrl-6", ShowIgnored, None),
+        KeyBinding::new("alt-left", GoBack, Some("Workspace")),
+        // On a catalogue page; lists, menus and fields inside it use Escape first.
+        KeyBinding::new("escape", GoBack, Some(shell::PAGE_CONTEXT)),
         KeyBinding::new(
             "right",
             star_rating::IncreaseRating,
