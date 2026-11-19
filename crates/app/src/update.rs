@@ -8,18 +8,21 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task};
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Subscription, Task,
+};
 use hardcover_core::update::{InstallKind, Release, Updater, Version};
 
 use hardcover_core::Error;
 
 use crate::format::error_message;
+use crate::preferences::AppPreferences;
 
 /// First automatic check, after startup work has settled.
 const FIRST_CHECK: Duration = Duration::from_secs(15);
 /// Later automatic checks while the app stays open.
 const CHECK_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
-/// Set to any value to turn off automatic checks.
+/// Set to any value to turn off automatic checks, whatever Settings says.
 const NO_CHECK_ENV: &str = "HARDCOVER_NO_UPDATE_CHECK";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,7 +55,9 @@ pub struct UpdateModel {
     state: UpdateState,
     _check: Option<Task<()>>,
     _install: Option<Task<()>>,
+    /// The automatic checks; dropping it stops them.
     _schedule: Option<Task<()>>,
+    _preferences: Subscription,
 }
 
 impl EventEmitter<UpdateEvent> for UpdateModel {}
@@ -68,13 +73,15 @@ impl Updates {
     }
 }
 
-/// Creates the model and starts automatic checks. `exe` is the executable path
-/// resolved at startup, before an update could replace it.
+/// Creates the model and starts automatic checks if they are on. `exe` is the
+/// executable path resolved at startup, before an update could replace it.
+/// Needs the preferences global.
 pub fn init(exe: Option<PathBuf>, cx: &mut App) {
     let install = exe
         .as_deref()
         .map(InstallKind::detect)
         .unwrap_or(InstallKind::Other);
+    let preferences = AppPreferences::global(cx).clone();
     let model = cx.new(|cx| {
         let mut model = UpdateModel {
             updater: Updater::new(),
@@ -84,19 +91,35 @@ pub fn init(exe: Option<PathBuf>, cx: &mut App) {
             _check: None,
             _install: None,
             _schedule: None,
+            _preferences: cx.observe(&preferences, |this: &mut UpdateModel, preferences, cx| {
+                let wanted = preferences.read(cx).automatic_update_checks();
+                this.set_automatic_checks(wanted, cx);
+            }),
         };
-        if automatic_checks_enabled() {
-            model.schedule(cx);
-        }
+        let wanted = preferences.read(cx).automatic_update_checks();
+        model.set_automatic_checks(wanted, cx);
         model
     });
     cx.set_global(Updates(model));
 }
 
-/// Development builds and opted-out users don't check on their own; "Check
-/// for updates" still works.
-fn automatic_checks_enabled() -> bool {
-    !cfg!(debug_assertions) && std::env::var_os(NO_CHECK_ENV).is_none()
+/// Why automatic checks can't run whatever the preference says, if they can't.
+/// "Check for updates" works regardless.
+pub fn automatic_checks_unavailable() -> Option<&'static str> {
+    unavailable_reason(
+        cfg!(debug_assertions),
+        std::env::var_os(NO_CHECK_ENV).is_some(),
+    )
+}
+
+fn unavailable_reason(debug_build: bool, opted_out: bool) -> Option<&'static str> {
+    if opted_out {
+        Some("Turned off by HARDCOVER_NO_UPDATE_CHECK.")
+    } else if debug_build {
+        Some("Development builds don't check on their own.")
+    } else {
+        None
+    }
 }
 
 impl UpdateModel {
@@ -112,6 +135,17 @@ impl UpdateModel {
     /// tarball in a writable prefix), rather than only announce them.
     pub fn can_install(&self) -> bool {
         self.install.can_self_update()
+    }
+
+    /// Starts or stops automatic checks. They also need
+    /// [`automatic_checks_unavailable`] to be `None`.
+    fn set_automatic_checks(&mut self, wanted: bool, cx: &mut Context<Self>) {
+        let enabled = wanted && automatic_checks_unavailable().is_none();
+        if !enabled {
+            self._schedule = None;
+        } else if self._schedule.is_none() {
+            self.schedule(cx);
+        }
     }
 
     fn schedule(&mut self, cx: &mut Context<Self>) {
@@ -234,6 +268,18 @@ pub fn release_notes(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_checks_need_a_release_build_without_the_opt_out() {
+        assert_eq!(unavailable_reason(false, false), None);
+        assert!(unavailable_reason(true, false).is_some());
+        assert!(unavailable_reason(false, true).is_some());
+        assert!(
+            unavailable_reason(true, true)
+                .unwrap()
+                .contains(NO_CHECK_ENV)
+        );
+    }
 
     #[test]
     fn release_notes_stop_at_the_install_marker() {

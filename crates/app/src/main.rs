@@ -1,10 +1,13 @@
 //! Hardcover Desktop: a Linux client for hardcover.app.
 
+mod about;
 mod app_state;
 mod book;
 mod format;
 mod library;
+mod preferences;
 mod search;
+mod settings_view;
 mod shell;
 mod sign_in;
 mod update;
@@ -26,6 +29,8 @@ actions!(
         ShowRead,
         ShowPaused,
         ShowDidNotFinish,
+        OpenSettings,
+        ShowAbout,
     ]
 );
 
@@ -37,6 +42,7 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("ctrl-q", Quit, None),
         KeyBinding::new("ctrl-r", Refresh, None),
+        KeyBinding::new("ctrl-,", OpenSettings, None),
         KeyBinding::new("ctrl-f", FocusSearch, None),
         // Input binds ctrl-f to its own search; inside a text field it still
         // means "go to Search".
@@ -91,6 +97,9 @@ fn main() {
     // Resolved before anything else: once an update replaces the binary,
     // /proc/self/exe names the deleted file, and restarting must use this path.
     let exe = std::env::current_exe().ok();
+    // A small file, read before the event loop starts (the one exception to
+    // keeping core calls off the UI thread): the first frame needs the theme.
+    let (prefs, prefs_path) = preferences::load();
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
@@ -99,6 +108,7 @@ fn main() {
             if let Some(exe) = &exe {
                 cx.set_restart_path(exe.clone());
             }
+            preferences::init(prefs.clone(), prefs_path.clone(), cx);
             update::init(exe.clone(), cx);
 
             // Window geometry is a platform boundary: logical pixels, not rems.
@@ -114,7 +124,7 @@ fn main() {
                 ..Default::default()
             };
             gpui_kit::open_window(options, cx, |window, cx| {
-                app_state::follow_appearance(window, cx);
+                preferences::follow_theme(window, cx);
                 cx.new(|cx| shell::Shell::new(window, cx))
             })
             .expect("failed to open window");

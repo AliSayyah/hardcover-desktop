@@ -32,8 +32,8 @@ It then rewrites `schema/hardcover.graphql` and `schema/hardcover-capabilities.j
 Environment variables (see `.env.example`; `.env` is gitignored and must never be committed):
 - `HARDCOVER_TOKEN`: a personal access token. For development only: it bypasses OAuth in the app, and the examples and live tests use it.
 - `HARDCOVER_CLIENT_ID`: overrides the compiled-in OAuth client id, `auth::DEFAULT_CLIENT_ID`.
-- `HARDCOVER_THEME=light`: forces the light theme.
-- `HARDCOVER_NO_UPDATE_CHECK=1`: turns off automatic update checks. Debug builds never check on their own; "Check for updates" in the account menu always works.
+- `HARDCOVER_THEME=light|dark`: forces a theme, over the choice in Settings, which then shows it as unavailable.
+- `HARDCOVER_NO_UPDATE_CHECK=1`: turns off automatic update checks, whatever Settings says. Debug builds never check on their own; "Check for updates" (account menu, or Check now in Settings) always works.
 - `live_writes` example: `HARDCOVER_LIVE_WRITES=yes`, `HARDCOVER_LIVE_PHASE`, `HARDCOVER_TEST_BOOK_ID`.
 
 Live write tests run against a real account. Restore everything afterwards. Removing a book does not delete its `reading_journals` rows; clean those up separately, which needs a token with journal scope.
@@ -59,6 +59,7 @@ The workspace has two crates, in `crates/*`.
   - `StaticToken` is the `HARDCOVER_TOKEN` path.
 - `store`: `LibraryCache`, a SQLite database at `~/.local/share/hardcover-desktop/library.sqlite3`.
 - `covers`: `CoverCache`, on disk at `~/.cache/hardcover-desktop/covers`.
+- `prefs`: `Preferences` (theme, automatic update checks) in `~/.config/hardcover-desktop/settings.json`. Loading never fails: a missing or garbled file gives the defaults, and every field has `#[serde(default)]`, because a self-updated app reads the file an older version wrote. Writes are atomic (temporary file, then rename). The file survives signing out.
 
 **`app`** (the package is named `hardcover-desktop`) is the GPUI UI.
 - `main.rs` sets up actions, keybindings and the window.
@@ -66,7 +67,7 @@ The workspace has two crates, in `crates/*`.
   - `Services` (client, session and cache) exists only while signed in.
   - `CoverService` lives for the whole run.
   - `startup()` picks the auth path in this order: `HARDCOVER_TOKEN`, then the keyring session, then the sign-in screen.
-- Every core call runs inside `cx.background_spawn`, and its result is applied on the foreground. Never call `hardcover-core` on the UI thread.
+- Every core call runs inside `cx.background_spawn`, and its result is applied on the foreground. Never call `hardcover-core` on the UI thread. The one exception: `main` reads the preferences before the event loop starts, because the first frame needs the theme.
 - Covers are GPUI `Asset`s loaded with `window.use_asset`:
   - `CoverThumbnail` is 144 px and `CoverImage` is 480 px.
   - Decoding happens on one dedicated `cover-decoder` thread, not the background pool. Decoding on GPUI's 16 pool threads bloated glibc's per-thread malloc arenas: 62 MB versus 495 MB on a 442-cover benchmark. Keep large image decodes on that thread.
@@ -75,6 +76,8 @@ The workspace has two crates, in `crates/*`.
   - Writes return the full entry, which replaces the local one and is upserted into the cache.
   - A sync that started before a write re-applies that write when the sync lands (`collection::merge_sync`).
   - `begin_write`/`end_write` track the writes in flight, per control.
+- `preferences.rs`: the `AppPreferences` global (`PreferencesModel`) and the theme. `follow_theme` re-applies the theme when the desktop's appearance or the preference changes. `UpdateModel` observes the model to start or stop automatic checks.
+- `settings_view.rs` (Settings dialog, `Ctrl+,`) and `about.rs` (About dialog). Both open from the account menu.
 - `shell.rs`: `Shell` switches between Starting, SignIn and Workspace. `Workspace` contains the sidebar (shelves by status) plus the current destination (library, search or book detail).
 
 ## Hardcover API quirks the code relies on
