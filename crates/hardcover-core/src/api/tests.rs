@@ -1518,6 +1518,12 @@ fn delete_goal_checks_the_payload() {
         http.requests()[0].json.as_ref().unwrap()["variables"],
         json!({"id": 5})
     );
+    // What Hardcover actually answers after deleting a goal.
+    http.push(
+        200,
+        &data(json!({"delete_goal": {"errors": null, "id": null}})),
+    );
+    c.delete_goal(GoalId::new(5)).unwrap();
     http.push(
         200,
         &data(json!({"delete_goal": {"errors": ["Not found"], "id": null}})),
@@ -1677,15 +1683,15 @@ fn delete_review_clears_every_writable_form_and_reports_what_hardcover_kept() {
     let request = http.requests()[0].json.clone().unwrap();
     assert_eq!(request["operationName"], "DeleteUserBookReview");
     let query = request["query"].as_str().unwrap();
-    for cleared in [
-        "review_markdown: null",
-        "review_slate: null",
-        "review_has_spoilers: false",
-        "reviewed_at: null",
-    ] {
+    for cleared in ["review_slate: $slate", "review_has_spoilers: false"] {
         assert!(query.contains(cleared), "{cleared}");
     }
-    assert_eq!(vars(&http, 0), json!({ "id": 3, "statusId": 3 }));
+    let sent = vars(&http, 0);
+    assert_eq!((&sent["id"], &sent["statusId"]), (&json!(3), &json!(3)));
+    assert_eq!(
+        sent["slate"]["document"]["children"][0]["children"][0]["text"],
+        json!("")
+    );
 
     // Markdown Hardcover did not clear is reported as still there.
     http.push(
