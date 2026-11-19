@@ -1274,14 +1274,24 @@ fn delete_read_reads_the_entry_back_without_it() {
 }
 
 #[test]
-fn mark_owned_sends_the_edition() {
+fn mark_owned_sends_the_edition_and_returns_the_row() {
     let (c, http) = client(TestTokens::new(false));
     http.push(
         200,
-        &data(json!({"edition_owned": {"id": 77, "list_book": {"id": 77, "edition_id": 5003}}})),
+        &data(json!({"edition_owned": {"id": 77, "list_book": {"id": 77, "list_id": 40, "book_id": 1003, "edition_id": 5003}}})),
     );
-    c.mark_owned(EditionId::new(5003)).unwrap();
+    let row = c.mark_owned(EditionId::new(5003)).unwrap().unwrap();
     assert_eq!(vars(&http, 0), json!({"id": 5003}));
+    assert_eq!(row.id, ListBookId::new(77));
+    assert_eq!(row.list_id, ListId::new(40));
+    assert_eq!(row.book_id, BookId::new(1003));
+    assert_eq!(row.edition_id, Some(EditionId::new(5003)));
+    // Only an id: added, but the row is unknown.
+    http.push(
+        200,
+        &data(json!({"edition_owned": {"id": 78, "list_book": null}})),
+    );
+    assert_eq!(c.mark_owned(EditionId::new(5003)).unwrap(), None);
     http.push(
         200,
         &data(json!({"edition_owned": {"id": null, "list_book": null}})),
@@ -1759,4 +1769,296 @@ fn review_write_without_an_entry_reads_the_entry_back_and_keeps_the_sent_review(
     assert_eq!(written.entry, None);
     assert_eq!(written.review, Review::default());
     assert_eq!(http.remaining(), 0);
+}
+
+// ----- lists -----
+
+fn list_row(id: i64, name: &str, slug: &str) -> Value {
+    json!({
+        "id": id, "name": name, "slug": slug, "description": "  ", "privacy_setting_id": 3,
+        "ranked": true, "books_count": 4, "default_view": "list", "featured_profile": false,
+        "url": null,
+    })
+}
+
+fn membership(id: i64, list: i64, book: i64, edition: Option<i64>) -> Value {
+    json!({"id": id, "list_id": list, "book_id": book, "edition_id": edition})
+}
+
+fn me_reply(http: &FakeTransport) {
+    http.push(
+        200,
+        &data(json!({"me": [{"id": 77, "username": "reader", "name": null, "image": null}]})),
+    );
+}
+
+#[test]
+fn lists_page_by_keyset_and_find_owned() {
+    let (c, http) = client(TestTokens::new(false));
+    me_reply(&http);
+    let first: Vec<Value> = (1..=100)
+        .map(|i| list_row(i, &format!("Synthetic list {i}"), &format!("list-{i}")))
+        .collect();
+    http.push(200, &data(json!({ "lists": first })));
+    http.push(
+        200,
+        &data(json!({ "lists": [list_row(300, "Owned", "owned"), {"id": 301, "name": null}] })),
+    );
+    let lists = c.lists().unwrap();
+    assert_eq!(lists.len(), 102);
+    assert_eq!(ops(&http), ["Me", "Lists", "Lists"]);
+    assert_eq!(
+        vars(&http, 1),
+        json!({"userId": 77, "afterId": 0, "limit": 100})
+    );
+    assert_eq!(vars(&http, 2)["afterId"], 100);
+    let first = &lists[0];
+    assert_eq!(first.id, ListId::new(1));
+    assert_eq!(first.description, None, "blank is no description");
+    assert_eq!(first.privacy(), Some(Privacy::Private));
+    assert!(first.ranked && !first.is_owned());
+    assert_eq!(first.books_count, 4);
+    assert!(lists[100].is_owned());
+    assert_eq!(
+        lists[100].web_url("reader").as_deref(),
+        Some("https://hardcover.app/@reader/lists/owned")
+    );
+    // Missing fields fall back instead of failing the page.
+    assert_eq!(lists[101].name, "Untitled list");
+    assert_eq!(lists[101].books_count, 0);
+}
+
+#[test]
+fn memberships_stop_after_five_pages_and_say_so() {
+    let (c, http) = client(TestTokens::new(false));
+    me_reply(&http);
+    for page in 0..5 {
+        let rows: Vec<Value> = (1..=1000)
+            .map(|i| membership(page * 1000 + i, 1, i, None))
+            .collect();
+        http.push(200, &data(json!({ "list_books": rows })));
+    }
+    let all = c.list_memberships().unwrap();
+    assert_eq!(all.rows.len(), 5000);
+    assert!(!all.complete);
+    assert_eq!(http.remaining(), 0);
+    assert_eq!(vars(&http, 5)["afterId"], 4000);
+
+    // A short page ends it.
+    http.push(
+        200,
+        &data(json!({ "list_books": [membership(9, 40, 1003, Some(5003))] })),
+    );
+    let all = c.list_memberships().unwrap();
+    assert!(all.complete);
+    assert_eq!(
+        all.rows,
+        [ListMembership {
+            id: ListBookId::new(9),
+            list_id: ListId::new(40),
+            book_id: BookId::new(1003),
+            edition_id: Some(EditionId::new(5003)),
+        }]
+    );
+}
+
+#[test]
+fn one_books_memberships_are_scoped_to_me() {
+    let (c, http) = client(TestTokens::new(false));
+    me_reply(&http);
+    http.push(
+        200,
+        &data(json!({ "list_books": [membership(9, 40, 1003, None), membership(10, 41, 1003, None)] })),
+    );
+    let rows = c.book_list_memberships(BookId::new(1003)).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(ops(&http), ["Me", "BookListMemberships"]);
+    assert_eq!(vars(&http, 1)["bookId"], 1003);
+    assert_eq!(vars(&http, 1)["userId"], 77);
+}
+
+#[test]
+fn list_books_page_by_offset_and_skip_missing_books() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({ "list_books": [
+            {"id": 1, "position": 1, "edition_id": null, "book": book(1001, "First")},
+            {"id": 2, "position": null, "edition_id": 5002, "book": null},
+            {"id": 3, "position": null, "edition_id": null, "book": book(1003, "Third")},
+        ]})),
+    );
+    let books = c.list_books(ListId::new(40), 100).unwrap();
+    assert_eq!(
+        vars(&http, 0),
+        json!({"listId": 40, "limit": 100, "offset": 100})
+    );
+    let titles: Vec<&str> = books.iter().map(|b| b.book.title.as_str()).collect();
+    assert_eq!(titles, ["First", "Third"]);
+    assert_eq!(books[0].position, Some(1));
+    assert_eq!(books[1].id, ListBookId::new(3));
+    assert_eq!(books[0].book.authors, ["Jane Quill"]);
+}
+
+#[test]
+fn create_list_sends_the_draft_and_reports_errors() {
+    let (c, http) = client(TestTokens::new(false));
+    let draft = ListDraft {
+        name: "  Synthetic picks ".into(),
+        description: " For testing. ".into(),
+        privacy: Privacy::FollowersOnly,
+        ranked: false,
+    };
+    http.push(
+        200,
+        &data(json!({"insert_list": {"errors": [], "id": 50, "list": list_row(50, "Synthetic picks", "synthetic-picks")}})),
+    );
+    let list = c.create_list(&draft).unwrap();
+    assert_eq!(list.id, ListId::new(50));
+    assert_eq!(
+        vars(&http, 0),
+        json!({"object": {"name": "Synthetic picks", "description": "For testing.",
+                          "privacy_setting_id": 2, "ranked": false}})
+    );
+    // `errors` is a list; any entry fails the write.
+    http.push(
+        200,
+        &data(json!({"insert_list": {"errors": [null, "Name has already been taken"], "id": null, "list": null}})),
+    );
+    let err = c.create_list(&draft).unwrap_err();
+    assert!(err.to_string().contains("already been taken"), "{err}");
+    // No list in the payload: read it back by id.
+    http.push(
+        200,
+        &data(json!({"insert_list": {"errors": null, "id": 51, "list": null}})),
+    );
+    http.push(
+        200,
+        &data(json!({"lists_by_pk": list_row(51, "Synthetic picks", "synthetic-picks-2")})),
+    );
+    assert_eq!(c.create_list(&draft).unwrap().id, ListId::new(51));
+    assert_eq!(ops(&http)[3], "ListById");
+    // A blank name is refused before any request.
+    let before = http.requests().len();
+    let blank = ListDraft {
+        name: "   ".into(),
+        ..draft
+    };
+    assert!(matches!(c.create_list(&blank), Err(Error::InvalidInput(_))));
+    assert_eq!(http.requests().len(), before);
+}
+
+#[test]
+fn update_list_resends_the_list_as_read() {
+    let (c, http) = client(TestTokens::new(false));
+    let mut list = RawList {
+        id: 50,
+        name: Some("Old name".into()),
+        slug: Some("old-name".into()),
+        description: Some("Old".into()),
+        privacy_setting_id: Some(1),
+        ranked: Some(false),
+        books_count: Some(2),
+        default_view: Some("grid".into()),
+        featured_profile: Some(true),
+        url: Some("https://example.com/synthetic".into()),
+    }
+    .into_list();
+    let draft = ListDraft {
+        name: "New name".into(),
+        description: String::new(),
+        privacy: Privacy::Private,
+        ranked: true,
+    };
+    http.push(
+        200,
+        &data(json!({"update_list": {"errors": [], "id": 50, "list": list_row(50, "New name", "new-name")}})),
+    );
+    let saved = c.update_list(&list, &draft).unwrap();
+    assert_eq!(saved.name, "New name");
+    assert_eq!(
+        vars(&http, 0),
+        json!({"id": 50, "object": {
+            "name": "New name", "description": "", "ranked": true, "privacy_setting_id": 3,
+            "default_view": "grid", "featured_profile": true, "url": "https://example.com/synthetic",
+        }})
+    );
+    // The Owned list is the server's: no request.
+    list.slug = Some(OWNED_LIST_SLUG.into());
+    assert!(matches!(
+        c.update_list(&list, &draft),
+        Err(Error::InvalidInput(_))
+    ));
+    assert_eq!(http.requests().len(), 1);
+}
+
+#[test]
+fn delete_list_checks_success() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(200, &data(json!({"delete_list": {"success": true}})));
+    c.delete_list(ListId::new(50)).unwrap();
+    assert_eq!(vars(&http, 0), json!({"id": 50}));
+    http.push(200, &data(json!({"delete_list": {"success": false}})));
+    assert!(matches!(c.delete_list(ListId::new(50)), Err(Error::Api(_))));
+    http.push(200, &data(json!({"delete_list": null})));
+    assert!(matches!(c.delete_list(ListId::new(50)), Err(Error::Api(_))));
+}
+
+#[test]
+fn add_to_list_returns_the_row() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"insert_list_book": {"id": 9, "list_book": membership(9, 40, 1003, None)}})),
+    );
+    let row = c
+        .add_to_list(ListId::new(40), BookId::new(1003), None)
+        .unwrap();
+    assert_eq!(row.id, ListBookId::new(9));
+    assert_eq!(
+        vars(&http, 0),
+        json!({"object": {"list_id": 40, "book_id": 1003}})
+    );
+    // Only the id: the rest is what was sent.
+    http.push(
+        200,
+        &data(json!({"insert_list_book": {"id": 10, "list_book": null}})),
+    );
+    let row = c
+        .add_to_list(
+            ListId::new(40),
+            BookId::new(1003),
+            Some(EditionId::new(5003)),
+        )
+        .unwrap();
+    assert_eq!(row.id, ListBookId::new(10));
+    assert_eq!(row.edition_id, Some(EditionId::new(5003)));
+    assert_eq!(vars(&http, 1)["object"]["edition_id"], 5003);
+    http.push(
+        200,
+        &data(json!({"insert_list_book": {"id": null, "list_book": null}})),
+    );
+    assert!(matches!(
+        c.add_to_list(ListId::new(40), BookId::new(1003), None),
+        Err(Error::Api(_))
+    ));
+}
+
+#[test]
+fn remove_from_list_takes_the_row_id() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"delete_list_book": {"id": 9, "list_id": 40}})),
+    );
+    c.remove_from_list(ListBookId::new(9)).unwrap();
+    assert_eq!(vars(&http, 0), json!({"id": 9}));
+    http.push(
+        200,
+        &data(json!({"delete_list_book": {"id": null, "list_id": null}})),
+    );
+    assert!(matches!(
+        c.remove_from_list(ListBookId::new(9)),
+        Err(Error::Api(_))
+    ));
 }
