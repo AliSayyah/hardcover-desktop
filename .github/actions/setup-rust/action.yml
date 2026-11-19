@@ -34,3 +34,8 @@ runs:
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         key: ${{ inputs.cache-key }}
+        # Every branch and pull request can restore the default branch's cache,
+        # but a cache saved elsewhere is visible only to its own ref. Saving
+        # only from the default branch keeps those from evicting the shared one
+        # under the repository's 10 GB cache limit.
+        save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
