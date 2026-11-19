@@ -23,7 +23,7 @@ fn reference(path: &Path, max_height: u32) -> Option<(u32, u32, Vec<u8>)> {
     let mut rgba = image
         .resize(width, height, image::imageops::FilterType::Triangle)
         .into_rgba8();
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     Some((rgba.width(), rgba.height(), rgba.into_raw()))
@@ -43,7 +43,7 @@ fn candidate(path: &Path, max_height: u32) -> Option<(u32, u32, Vec<u8>)> {
 fn psnr(a: &[u8], b: &[u8]) -> f64 {
     let mut sum = 0f64;
     let mut n = 0f64;
-    for (pa, pb) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+    for (pa, pb) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0) {
         for c in 0..3 {
             let d = pa[c] as f64 - pb[c] as f64;
             sum += d * d;
