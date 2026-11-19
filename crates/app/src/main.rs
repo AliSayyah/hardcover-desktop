@@ -10,6 +10,7 @@ mod cover_quality_tests;
 mod fonts;
 mod format;
 mod goals;
+mod home;
 mod library;
 mod lists;
 mod preferences;
@@ -44,6 +45,7 @@ actions!(
         GoBack,
         ShowDiscover,
         ShowStats,
+        ShowHome,
         RemoveFromList,
     ]
 );
@@ -69,6 +71,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-6", ShowIgnored, None),
         KeyBinding::new("ctrl-shift-d", ShowDiscover, None),
         KeyBinding::new("ctrl-shift-s", ShowStats, None),
+        KeyBinding::new("ctrl-0", ShowHome, None),
         // Down in Search's query field moves into the results.
         KeyBinding::new(
             "down",

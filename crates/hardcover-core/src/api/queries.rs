@@ -17,7 +17,12 @@ macro_rules! user_book_fields {
     () => {
         "fragment UserBookFields on user_books {
   id user_id status_id rating date_added updated_at privacy_setting_id private_notes
-  book { ...BookSummaryFields }
+  book {
+    ...BookSummaryFields
+    book_series(order_by: [{featured: desc}, {position: asc_nulls_last}]) {
+      position featured series { id name slug }
+    }
+  }
   edition { ...EditionFields }
   user_book_reads(order_by: {id: desc}) {
     id started_at finished_at progress progress_pages progress_seconds edition_id

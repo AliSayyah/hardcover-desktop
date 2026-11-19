@@ -437,21 +437,24 @@ fn user_book(catalogue: &Catalogue, entry: &Entry) -> Option<Value> {
         "updated_at": entry.updated_at,
         "privacy_setting_id": entry.privacy.unwrap_or(1),
         "private_notes": entry.private_notes,
-        "book": book_summary(book),
+        "book": book_with_series(book),
         "edition": null,
         "user_book_reads": reads,
     }))
 }
 
-fn book_details(book: &Book) -> Value {
-    let mut details = book_summary(book);
-    let genres: Vec<Value> = book
-        .genres
-        .iter()
-        .map(|g| json!({ "tag": g, "count": 1 }))
-        .collect();
-    let series: Vec<Value> = book
-        .series
+/// `BookSummaryFields` plus the book's series, as `UserBookFields` asks.
+fn book_with_series(book: &Book) -> Value {
+    let mut value = book_summary(book);
+    if let Some(map) = value.as_object_mut() {
+        map.insert("book_series".into(), Value::Array(book_series(book)));
+    }
+    value
+}
+
+/// A book's `book_series` rows.
+fn book_series(book: &Book) -> Vec<Value> {
+    book.series
         .iter()
         .map(|s| {
             json!({
@@ -464,7 +467,17 @@ fn book_details(book: &Book) -> Value {
                 },
             })
         })
+        .collect()
+}
+
+fn book_details(book: &Book) -> Value {
+    let mut details = book_summary(book);
+    let genres: Vec<Value> = book
+        .genres
+        .iter()
+        .map(|g| json!({ "tag": g, "count": 1 }))
         .collect();
+    let series = book_series(book);
     let extra = json!({
         "description": book.description,
         "release_date": book.release_date,
@@ -1237,6 +1250,24 @@ mod tests {
         assert_eq!(page.books[0].book.title, "Dune", "the most read first");
         assert!(page.bio.is_none() && page.photo.is_none());
         assert!(client.author(crate::AuthorId::new(1)).is_err());
+    }
+
+    #[test]
+    fn library_entries_carry_their_series() {
+        let client = client();
+        let me = client.me().unwrap();
+        let library = client.library(me.id).unwrap();
+        let messiah = library
+            .iter()
+            .find(|e| e.book.title == "Dune Messiah")
+            .expect("Dune Messiah is shelved");
+        let details = client.book_details(messiah.book.id).unwrap();
+        assert_eq!(messiah.series, details.series, "the same as the book page");
+        assert_eq!(messiah.series[0].name, "Dune");
+        assert_eq!(messiah.series[0].position, Some(2.0));
+        assert!(messiah.series[0].id.is_some());
+        let habits = library.iter().find(|e| e.book.title == "Atomic Habits");
+        assert!(habits.expect("shelved").series.is_empty());
     }
 
     #[test]

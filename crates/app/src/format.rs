@@ -6,8 +6,8 @@
 use chrono::{DateTime, Datelike, TimeZone};
 use hardcover_core::auth::{DEFAULT_SCOPES, scopes};
 use hardcover_core::{
-    AuthorHit, Date, EditionSummary, Error, Goal, GoalMetric, Length, LibraryEntry, Rating,
-    ReadingStatus, SeriesHit,
+    AuthorHit, Date, EditionSummary, Error, Goal, GoalMetric, Length, LibraryEntry, ProgressUpdate,
+    Rating, ReadingStatus, SeriesHit,
 };
 
 /// Sentence-case label for a status, as the app shows it.
@@ -142,6 +142,27 @@ pub fn parse_position(text: &str) -> Option<u32> {
         [h, m] if m < 60 => Some(h * 3600 + m * 60),
         [h, m, s] if m < 60 && s < 60 => Some(h * 3600 + m * 60 + s),
         _ => None,
+    }
+}
+
+/// What the user typed as their place in a book of `length`: a page, or for
+/// an audiobook a time like 2:05. The error says what to type instead.
+pub fn parse_progress(length: Option<Length>, text: &str) -> Result<ProgressUpdate, String> {
+    match length {
+        Some(Length::Seconds(total)) => match parse_position(text) {
+            None => Err("Enter the time you're at, like 2:05.".to_owned()),
+            Some(s) if s > total => Err(format!("This edition is {} long.", duration_text(total))),
+            Some(s) => Ok(ProgressUpdate::Seconds(s)),
+        },
+        length => match text.trim().parse::<u32>() {
+            Err(_) => Err("Enter the page you're on.".to_owned()),
+            Ok(page) => match length {
+                Some(Length::Pages(total)) if page > total => {
+                    Err(format!("This edition has {total} pages."))
+                }
+                _ => Ok(ProgressUpdate::Pages(page)),
+            },
+        },
     }
 }
 
@@ -422,7 +443,7 @@ pub fn goal_unit(metric: &GoalMetric, n: f64) -> &str {
 /// An amount in a goal's unit, rounded down: whole books and pages, hours to
 /// one decimal (`12.5`, or `12` when whole). Down, so an amount short of the
 /// target never shows as the target.
-fn goal_amount(metric: &GoalMetric, n: f64) -> String {
+pub fn goal_amount(metric: &GoalMetric, n: f64) -> String {
     match metric {
         GoalMetric::Hours => {
             // The epsilon keeps 2.3 (22.999… tenths in binary) from showing as 2.2.
@@ -539,6 +560,40 @@ mod tests {
         BookId, BookSummary, EditionId, EditionSummary, GoalId, ReadId, ReadSession, UserBookId,
         UserId,
     };
+
+    #[test]
+    fn progress_is_a_page_or_an_audiobook_time_within_the_length() {
+        let pages = Some(Length::Pages(300));
+        assert_eq!(
+            parse_progress(pages, " 120 "),
+            Ok(ProgressUpdate::Pages(120))
+        );
+        assert_eq!(parse_progress(pages, "300"), Ok(ProgressUpdate::Pages(300)));
+        assert_eq!(
+            parse_progress(pages, "301"),
+            Err("This edition has 300 pages.".to_owned())
+        );
+        assert_eq!(
+            parse_progress(pages, "1:05"),
+            Err("Enter the page you're on.".to_owned())
+        );
+        // Without a known length any page goes.
+        assert_eq!(parse_progress(None, "999"), Ok(ProgressUpdate::Pages(999)));
+
+        let audio = Some(Length::Seconds(36_000));
+        assert_eq!(
+            parse_progress(audio, "2:05"),
+            Ok(ProgressUpdate::Seconds(7_500))
+        );
+        assert_eq!(
+            parse_progress(audio, "11:00"),
+            Err("This edition is 10h 0m long.".to_owned())
+        );
+        assert_eq!(
+            parse_progress(audio, "125"),
+            Err("Enter the time you're at, like 2:05.".to_owned())
+        );
+    }
 
     fn entry_with_read(
         pages: Option<u32>,

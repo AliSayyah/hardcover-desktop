@@ -36,8 +36,8 @@ use gpui_kit::{
 use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY};
 use hardcover_core::{
     BookDetails, BookId, BookSummary, Client, Date, EditionChange, EditionSummary, Error, Length,
-    LibraryEntry, Privacy, ProgressUpdate, Rating, ReadId, ReadSession, ReadingStatus, Review,
-    ReviewedEntry, UserBookId,
+    LibraryEntry, Privacy, Rating, ReadId, ReadSession, ReadingStatus, Review, ReviewedEntry,
+    UserBookId,
 };
 
 use self::catalog_sections::Similar;
@@ -48,7 +48,7 @@ use super::star_rating::StarRating;
 use crate::app_state::{Services, cover_image, release_cover_image};
 use crate::bidi::WrappingText;
 use crate::format::{
-    average_rating_text, duration_text, edition_text, error_message, parse_position, position_text,
+    average_rating_text, duration_text, edition_text, error_message, parse_progress, position_text,
     progress_summary, read_dates_text, series_position_text, status_label,
 };
 use crate::library::model::{LibraryModel, WriteKind};
@@ -685,24 +685,7 @@ impl BookDetailView {
             return;
         };
         let text = self.page.read(cx).value();
-        let update = match entry.length() {
-            Some(Length::Seconds(total)) => match parse_position(&text) {
-                None => Err("Enter the time you're at, like 2:05.".to_owned()),
-                Some(s) if s > total => {
-                    Err(format!("This edition is {} long.", duration_text(total)))
-                }
-                Some(s) => Ok(ProgressUpdate::Seconds(s)),
-            },
-            length => match text.trim().parse::<u32>() {
-                Err(_) => Err("Enter the page you're on.".to_owned()),
-                Ok(page) => match length {
-                    Some(Length::Pages(total)) if page > total => {
-                        Err(format!("This edition has {total} pages."))
-                    }
-                    _ => Ok(ProgressUpdate::Pages(page)),
-                },
-            },
-        };
+        let update = parse_progress(entry.length(), &text);
         let update = match update {
             Ok(update) => update,
             Err(error) => {
