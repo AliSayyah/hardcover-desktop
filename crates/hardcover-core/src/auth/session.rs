@@ -4,7 +4,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::oauth::{self, TokenError};
-use super::{OAuthConfig, TokenStore, Tokens};
+use super::{GrantedScopes, OAuthConfig, TokenStore, Tokens};
 use crate::api::TokenSource;
 use crate::http::{HttpTransport, UreqTransport};
 use crate::{Error, Result};
@@ -89,11 +89,51 @@ impl Session {
         self.lock().as_ref().and_then(Tokens::expires_at)
     }
 
-    /// Scopes granted at sign-in, when the server reported them.
+    /// The granted scopes as recorded (see [`Tokens::scope`]).
+    ///
+    /// Blocks while a refresh is running, which can take as long as a network
+    /// request: read it off the UI thread, or use a snapshot.
     pub fn scope(&self) -> Option<String> {
         self.lock()
             .as_ref()
             .and_then(|t| t.scope().map(str::to_owned))
+    }
+
+    /// The granted scopes, for checking features against. Blocks like
+    /// [`Session::scope`].
+    pub fn granted_scopes(&self) -> GrantedScopes {
+        GrantedScopes::for_session(self.scope().as_deref())
+    }
+
+    /// Replaces the tokens with those of a new sign-in, e.g. one that granted
+    /// more scopes, and saves them. On `Err` the session keeps its old tokens.
+    ///
+    /// The session stays the same object, so every [`crate::Client`] built on it
+    /// uses the new tokens from the next request on. A second session would
+    /// keep the old tokens alive in those clients, and its next refresh would
+    /// write the old grant back over the new one in the store.
+    ///
+    /// The old tokens are not revoked: they belong to a different grant, and
+    /// are dropped here.
+    ///
+    /// `Error::Unauthorized` once the session holds no tokens (signed out, or
+    /// its refresh token was rejected): a sign-in that finishes after that
+    /// must not sign the user back in. Revoke those tokens with
+    /// [`Session::discard`].
+    pub fn replace(&self, tokens: Tokens) -> Result<()> {
+        let mut guard = self.lock();
+        if guard.is_none() {
+            return Err(Error::Unauthorized);
+        }
+        self.store.save(&tokens)?;
+        *guard = Some(tokens);
+        Ok(())
+    }
+
+    /// Revokes tokens from a sign-in that will not replace this session's,
+    /// e.g. ones another account approved. The session itself is unchanged.
+    pub fn discard(&self, tokens: &Tokens) -> Result<()> {
+        oauth::revoke(&*self.http, &self.cfg, tokens)
     }
 
     /// Revokes the tokens at Hardcover, then forgets them locally (store and memory).
@@ -119,13 +159,20 @@ impl Session {
         match oauth::refresh(&*self.http, &self.cfg, &refresh_token) {
             Ok(new) => {
                 // Hardcover always rotates, but keep the old refresh token if a
-                // server ever omits it.
-                let new = if new.refresh_token().is_none() {
-                    Tokens::new(new.access_token(), Some(refresh_token), new.expires_at())
-                        .with_scope(new.scope().map(str::to_owned))
-                } else {
-                    new
-                };
+                // server ever omits it. A response without a scope did not
+                // change it (RFC 6749 §5.1): keep the recorded one.
+                let scope = new
+                    .scope()
+                    .or_else(|| guard.as_ref().and_then(Tokens::scope))
+                    .map(str::to_owned);
+                let new = Tokens::new(
+                    new.access_token(),
+                    new.refresh_token()
+                        .map(str::to_owned)
+                        .or(Some(refresh_token)),
+                    new.expires_at(),
+                )
+                .with_scope(scope);
                 **guard = Some(new.clone());
                 // In memory first: the old refresh token is spent either way.
                 self.store.save(&new)
@@ -336,6 +383,127 @@ mod tests {
         assert!(s.sign_out().is_err());
         assert!(!s.is_signed_in());
         assert!(store.load().unwrap().is_none());
+    }
+
+    #[test]
+    fn refresh_keeps_the_scope_unless_the_server_reports_a_new_one() {
+        let granted = "read:me read:library";
+        let (s, http, store) = session(
+            Tokens::new("at1", Some("rt1".into()), soon(2)).with_scope(Some(granted.into())),
+        );
+        // ROTATED has no `scope`.
+        http.push(200, ROTATED);
+        assert_eq!(s.access_token().unwrap(), "at2");
+        assert_eq!(s.scope().as_deref(), Some(granted));
+        assert_eq!(store.load().unwrap().unwrap().scope(), Some(granted));
+
+        let (s, http, store) = session(
+            Tokens::new("at1", Some("rt1".into()), soon(2)).with_scope(Some(granted.into())),
+        );
+        http.push(
+            200,
+            r#"{"access_token":"at2","refresh_token":"rt2","expires_in":604800,"scope":"read:me"}"#,
+        );
+        assert_eq!(s.access_token().unwrap(), "at2");
+        assert_eq!(s.scope().as_deref(), Some("read:me"));
+        assert_eq!(store.load().unwrap().unwrap().scope(), Some("read:me"));
+    }
+
+    #[test]
+    fn refresh_without_a_rotated_token_keeps_the_old_one_and_the_scope() {
+        let (s, http, store) = session(
+            Tokens::new("at1", Some("rt1".into()), soon(2)).with_scope(Some("read:me".into())),
+        );
+        http.push(200, r#"{"access_token":"at2","expires_in":604800}"#);
+        assert_eq!(s.access_token().unwrap(), "at2");
+        let saved = store.load().unwrap().unwrap();
+        assert_eq!(saved.refresh_token(), Some("rt1"));
+        assert_eq!(saved.scope(), Some("read:me"));
+    }
+
+    #[test]
+    fn granted_scopes_follow_the_recorded_scope() {
+        use crate::auth::scopes::{READ_GOALS, READ_LIBRARY};
+        let (s, _, _) = session(Tokens::new("at1", None, None));
+        // Saved by an older version: the scopes it requested.
+        assert!(s.granted_scopes().contains(READ_LIBRARY));
+        assert!(!s.granted_scopes().contains(READ_GOALS));
+        let (s, _, _) =
+            session(Tokens::new("at1", None, None).with_scope(Some("read:goals".into())));
+        assert!(s.granted_scopes().contains(READ_GOALS));
+        assert!(!s.granted_scopes().contains(READ_LIBRARY));
+    }
+
+    #[test]
+    fn replace_swaps_tokens_for_every_user_of_the_session() {
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        let s = Arc::new(s);
+        let client_side = s.clone();
+        s.replace(
+            Tokens::new("at9", Some("rt9".into()), soon(600))
+                .with_scope(Some("read:me read:goals".into())),
+        )
+        .unwrap();
+        assert_eq!(client_side.access_token().unwrap(), "at9");
+        assert_eq!(client_side.scope().as_deref(), Some("read:me read:goals"));
+        let saved = store.load().unwrap().unwrap();
+        assert_eq!(
+            (saved.access_token(), saved.refresh_token()),
+            ("at9", Some("rt9"))
+        );
+        // The old grant is neither refreshed nor revoked.
+        assert!(http.requests().is_empty());
+        // A 401 for the old token now just retries with the new one.
+        assert!(client_side.on_unauthorized("at1").unwrap());
+        assert!(http.requests().is_empty());
+    }
+
+    #[test]
+    fn replace_keeps_the_old_tokens_when_saving_fails() {
+        struct FailingStore;
+        impl TokenStore for FailingStore {
+            fn load(&self) -> Result<Option<Tokens>> {
+                Ok(None)
+            }
+            fn save(&self, _: &Tokens) -> Result<()> {
+                Err(Error::Storage("locked".into()))
+            }
+            fn clear(&self) -> Result<()> {
+                Ok(())
+            }
+        }
+        let s = Session {
+            cfg: OAuthConfig::new("cid"),
+            store: Arc::new(FailingStore),
+            http: Arc::new(FakeTransport::new()),
+            tokens: Mutex::new(Some(Tokens::new("at1", None, None))),
+        };
+        assert!(s.replace(Tokens::new("at2", None, None)).is_err());
+        assert_eq!(s.access_token().unwrap(), "at1");
+    }
+
+    #[test]
+    fn replace_after_sign_out_is_refused() {
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        http.push(200, "");
+        s.sign_out().unwrap();
+        assert_eq!(
+            s.replace(Tokens::new("at2", Some("rt2".into()), soon(600))),
+            Err(Error::Unauthorized)
+        );
+        assert!(!s.is_signed_in());
+        assert!(store.load().unwrap().is_none());
+    }
+
+    #[test]
+    fn discard_revokes_other_tokens_and_keeps_the_session() {
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        http.push(200, "");
+        s.discard(&Tokens::new("at9", Some("rt9".into()), soon(600)))
+            .unwrap();
+        assert_eq!(http.requests()[0].form_value("token"), Some("rt9"));
+        assert_eq!(s.access_token().unwrap(), "at1");
+        assert_eq!(store.load().unwrap().unwrap().access_token(), "at1");
     }
 
     #[test]

@@ -9,12 +9,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gpui_kit::{AppContext as _, Context, SharedString, Task};
+use hardcover_core::auth::scopes::READ_LIBRARY;
 use hardcover_core::store::LibraryCache;
 use hardcover_core::{BookId, Error, LibraryEntry, ReadingStatus, Timestamp, User, UserBookId};
 
 use super::collection::{LocalChange, merge_sync, status_counts};
 use crate::app_state::{CoverService, Services};
-use crate::format::error_message;
 
 /// What a write in flight changes, so only that control shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,7 +254,7 @@ impl LibraryModel {
             Err(error) => {
                 let offline = matches!(error, Error::Network(_) | Error::Timeout);
                 self.sync = SyncStatus::Failed {
-                    message: error_message(&error).into(),
+                    message: Services::error_message(&error, Some(READ_LIBRARY), cx).into(),
                     offline,
                 };
                 // Without a cache there is nothing to show but the failure.

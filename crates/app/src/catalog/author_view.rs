@@ -15,13 +15,13 @@ use gpui_kit::{
     ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
     prelude::FluentBuilder as _, rems,
 };
+use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{AuthorBook, AuthorDetails, AuthorId};
 
 use super::book_list::{
     CatalogBooks, CatalogRow, follow_list, new_list, read_summary, row_details,
 };
 use crate::app_state::{Services, cover_thumbnail};
-use crate::format::error_message;
 use crate::library::model::LibraryModel;
 
 /// How an author's books are ordered.
@@ -196,7 +196,9 @@ impl AuthorView {
                 }
                 let page = match result {
                     Ok(author) => Loaded::Ready(Arc::new(author)),
-                    Err(e) => Loaded::Failed(error_message(&e).into()),
+                    Err(e) => {
+                        Loaded::Failed(Services::error_message(&e, Some(READ_CATALOG), cx).into())
+                    }
                 };
                 this.pages.insert(id, page);
                 this.fill_list(window, cx);

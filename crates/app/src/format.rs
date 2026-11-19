@@ -4,7 +4,10 @@
 //! Plain functions without GPUI so they can be unit tested directly.
 
 use chrono::{DateTime, Datelike, TimeZone};
-use hardcover_core::{Date, EditionSummary, Error, Length, LibraryEntry, Rating, ReadingStatus};
+use hardcover_core::auth::{DEFAULT_SCOPES, scopes};
+use hardcover_core::{
+    Date, EditionSummary, Error, Goal, GoalMetric, Length, LibraryEntry, Rating, ReadingStatus,
+};
 
 /// Sentence-case label for a status, as the app shows it.
 pub fn status_label(status: ReadingStatus) -> &'static str {
@@ -244,8 +247,10 @@ pub fn error_message(error: &Error) -> String {
             "Couldn't reach Hardcover. Check your connection and try again.".to_owned()
         }
         Error::Unauthorized => "Your session has expired. Sign out and sign in again.".to_owned(),
+        // Where the permissions notice can offer to sign in again, the caller
+        // says so instead (`Services::error_message`).
         Error::InsufficientScope { .. } => {
-            "Hardcover didn't grant this app access to your library. Sign out and sign in again."
+            "Hardcover didn't grant this app permission for this. Sign out and sign in again to grant it."
                 .to_owned()
         }
         Error::InvalidInput(msg) => sentence(msg),
@@ -255,6 +260,191 @@ pub fn error_message(error: &Error) -> String {
         Error::Api(msg) => format!("Hardcover reported an error: {msg}."),
         Error::Decode(_) => "Hardcover sent an unexpected response. Try again later.".to_owned(),
         _ => format!("{error}."),
+    }
+}
+
+/// What the user loses without a scope, in the words of the permissions notice.
+fn scope_feature(scope: &str) -> &'static str {
+    match scope {
+        scopes::READ_GOALS | scopes::WRITE_GOALS => "reading goals",
+        scopes::WRITE_REVIEWS => "reviews",
+        scopes::READ_LISTS | scopes::WRITE_LISTS => "lists",
+        _ => "your library",
+    }
+}
+
+/// The scope an `insufficient_scope` error names, as one the app requests.
+/// Hardcover may name a narrower part (`read:goals:private`) or several scopes;
+/// the first one the app requests wins.
+pub fn requested_scope(named: Option<&str>) -> Option<&'static str> {
+    named?.split_whitespace().find_map(|name| {
+        DEFAULT_SCOPES.into_iter().find(|s| {
+            name == *s
+                || name
+                    .strip_prefix(s)
+                    .is_some_and(|rest| rest.starts_with(':'))
+        })
+    })
+}
+
+/// A request refused for lack of `scope`, while the permissions notice (or the
+/// account menu) offers to sign in again.
+pub fn scope_refused_message(scope: &str) -> String {
+    format!(
+        "Hardcover didn't grant this app permission for {}. Sign in again to grant it.",
+        scope_feature(scope)
+    )
+}
+
+/// `a`, `a and b`, `a, b and c`.
+fn join_and(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The features that `missing` scopes cover, in a fixed order.
+pub fn missing_features(missing: &[&str]) -> Vec<&'static str> {
+    const ORDER: [&str; 4] = ["your library", "reading goals", "reviews", "lists"];
+    ORDER
+        .into_iter()
+        .filter(|f| missing.iter().any(|s| scope_feature(s) == *f))
+        .collect()
+}
+
+/// The permissions notice: which features need the user to sign in again.
+pub fn permissions_message(missing: &[&str]) -> String {
+    format!(
+        "Hardcover Desktop needs new permissions for {}. Sign in again to grant them.",
+        join_and(&missing_features(missing))
+    )
+}
+
+/// Why a feature is unavailable, for a disabled control's tooltip.
+pub fn needs_permission(scope: &str) -> String {
+    format!(
+        "Hardcover Desktop has no permission for {}. Sign in again from the sidebar to grant it.",
+        scope_feature(scope)
+    )
+}
+
+// ----- reading goals -----
+
+/// The unit a goal counts, singular or plural for `n`.
+pub fn goal_unit(metric: &GoalMetric, n: f64) -> &str {
+    let one = (n - 1.0).abs() < f64::EPSILON;
+    match metric {
+        GoalMetric::Books if one => "book",
+        GoalMetric::Books => "books",
+        GoalMetric::Pages if one => "page",
+        GoalMetric::Pages => "pages",
+        GoalMetric::Hours if one => "hour",
+        GoalMetric::Hours => "hours",
+        GoalMetric::Other(name) => name,
+    }
+}
+
+/// An amount in a goal's unit, rounded down: whole books and pages, hours to
+/// one decimal (`12.5`, or `12` when whole). Down, so an amount short of the
+/// target never shows as the target.
+fn goal_amount(metric: &GoalMetric, n: f64) -> String {
+    match metric {
+        GoalMetric::Hours => {
+            // The epsilon keeps 2.3 (22.999… tenths in binary) from showing as 2.2.
+            let tenths = (n * 10.0 + 1e-6).floor() as i64;
+            match tenths % 10 {
+                0 => format!("{}", tenths / 10),
+                t => format!("{}.{}", tenths / 10, t.abs()),
+            }
+        }
+        _ => format!("{}", n.floor() as i64),
+    }
+}
+
+/// `2026` for a calendar year, otherwise the dates: `Mar 1 – Jun 30, 2026`.
+pub fn goal_period(start: Date, end: Date) -> String {
+    let whole_year = start.year() == end.year()
+        && (start.month(), start.day()) == (1, 1)
+        && (end.month(), end.day()) == (12, 31);
+    if whole_year {
+        start.year().to_string()
+    } else if start.year() == end.year() {
+        format!("{} – {}", start.format("%b %-d"), end.format("%b %-d, %Y"))
+    } else {
+        format!(
+            "{} – {}",
+            start.format("%b %-d, %Y"),
+            end.format("%b %-d, %Y")
+        )
+    }
+}
+
+/// `9 / 12 books`.
+pub fn goal_progress(goal: &Goal) -> String {
+    format!(
+        "{} / {} {}",
+        goal_amount(&goal.metric, goal.progress),
+        goal.target,
+        goal_unit(&goal.metric, f64::from(goal.target))
+    )
+}
+
+/// How the goal stands on `today`: `2 books behind schedule`, `On schedule`,
+/// `Goal reached`. `None` for a metric this version does not know.
+pub fn goal_pace(goal: &Goal, today: Date) -> Option<String> {
+    if matches!(goal.metric, GoalMetric::Other(_)) {
+        return None;
+    }
+    if goal.progress >= f64::from(goal.target) {
+        return Some("Goal reached".to_owned());
+    }
+    if today < goal.start {
+        return Some(format!("Starts {}", goal.start.format("%b %-d, %Y")));
+    }
+    if today > goal.end {
+        let short = (f64::from(goal.target) - goal.progress).ceil();
+        return Some(format!(
+            "Ended {} {} short",
+            goal_amount(&goal.metric, short),
+            goal_unit(&goal.metric, short)
+        ));
+    }
+    let pace = goal.pace(today).round();
+    Some(if pace == 0.0 {
+        "On schedule".to_owned()
+    } else {
+        let n = pace.abs();
+        let side = if pace > 0.0 { "ahead of" } else { "behind" };
+        format!(
+            "{} {} {side} schedule",
+            goal_amount(&goal.metric, n),
+            goal_unit(&goal.metric, n)
+        )
+    })
+}
+
+/// The description Hardcover requires for a new goal: `12 books in 2026`, or
+/// `500 pages by Jun 30, 2026` for other dates.
+pub fn goal_description(metric: &GoalMetric, target: u32, start: Date, end: Date) -> String {
+    let unit = goal_unit(metric, f64::from(target));
+    let period = goal_period(start, end);
+    if period.len() == 4 {
+        format!("{target} {unit} in {period}")
+    } else {
+        format!("{target} {unit} by {}", end.format("%b %-d, %Y"))
+    }
+}
+
+/// The description to save with a goal's new target. One the app would have
+/// written follows the target, and so does a missing one, since Hardcover
+/// requires one; the user's own stays.
+pub fn retargeted_description(goal: &Goal, target: u32) -> String {
+    let written = goal_description(&goal.metric, goal.target, goal.start, goal.end);
+    match goal.description.as_deref() {
+        Some(own) if !own.trim().is_empty() && own != written => own.to_owned(),
+        _ => goal_description(&goal.metric, target, goal.start, goal.end),
     }
 }
 
@@ -273,7 +463,8 @@ mod tests {
     use super::*;
     use chrono::{Duration, Utc};
     use hardcover_core::{
-        BookId, BookSummary, EditionId, EditionSummary, ReadId, ReadSession, UserBookId, UserId,
+        BookId, BookSummary, EditionId, EditionSummary, GoalId, ReadId, ReadSession, UserBookId,
+        UserId,
     };
 
     fn entry_with_read(
@@ -294,6 +485,130 @@ mod tests {
         read.progress_percent = percent;
         e.upsert_read(read);
         e
+    }
+
+    #[test]
+    fn permissions_message_names_the_missing_features() {
+        let missing = [
+            scopes::WRITE_REVIEWS,
+            scopes::READ_GOALS,
+            scopes::WRITE_GOALS,
+            scopes::READ_LISTS,
+            scopes::WRITE_LISTS,
+        ];
+        assert_eq!(
+            permissions_message(&missing),
+            "Hardcover Desktop needs new permissions for reading goals, reviews and lists. \
+             Sign in again to grant them."
+        );
+        assert_eq!(
+            permissions_message(&[scopes::WRITE_GOALS]),
+            "Hardcover Desktop needs new permissions for reading goals. Sign in again to grant them."
+        );
+        assert_eq!(
+            missing_features(&[scopes::WRITE_LISTS, scopes::READ_LIBRARY]),
+            ["your library", "lists"]
+        );
+    }
+
+    fn goal(metric: GoalMetric, target: u32, progress: f64) -> Goal {
+        let d = |m, d| Date::from_ymd_opt(2026, m, d).unwrap();
+        let mut g = Goal::new(GoalId::new(1), metric, target, d(1, 1), d(12, 31));
+        g.progress = progress;
+        g
+    }
+
+    #[test]
+    fn a_new_target_keeps_the_users_own_description() {
+        let mut g = goal(GoalMetric::Books, 12, 3.0);
+        g.description = Some("12 books in 2026".into());
+        assert_eq!(retargeted_description(&g, 20), "20 books in 2026");
+        // Hardcover requires one: a missing or blank one is written.
+        for missing in [None, Some(" ".to_owned())] {
+            g.description = missing;
+            assert_eq!(retargeted_description(&g, 20), "20 books in 2026");
+        }
+        g.description = Some("Read more sci-fi".into());
+        assert_eq!(retargeted_description(&g, 20), "Read more sci-fi");
+    }
+
+    #[test]
+    fn refused_scopes_map_to_requested_ones() {
+        assert_eq!(
+            requested_scope(Some("read:goals")),
+            Some(scopes::READ_GOALS)
+        );
+        assert_eq!(
+            requested_scope(Some("read:goals:private")),
+            Some(scopes::READ_GOALS)
+        );
+        assert_eq!(
+            requested_scope(Some("read:journal write:library")),
+            Some(scopes::WRITE_LIBRARY)
+        );
+        // Not a part of read:goals, and not a scope the app requests.
+        assert_eq!(requested_scope(Some("read:goalsx")), None);
+        assert_eq!(requested_scope(Some("read:journal")), None);
+        assert_eq!(requested_scope(None), None);
+        assert_eq!(
+            scope_refused_message(scopes::WRITE_LIBRARY),
+            "Hardcover didn't grant this app permission for your library. Sign in again to grant it."
+        );
+    }
+
+    #[test]
+    fn goal_copy() {
+        let d = |y, m, d| Date::from_ymd_opt(y, m, d).unwrap();
+        let books = goal(GoalMetric::Books, 12, 9.0);
+        assert_eq!(goal_progress(&books), "9 / 12 books");
+        assert_eq!(goal_period(books.start, books.end), "2026");
+        assert_eq!(
+            goal_period(d(2026, 3, 1), d(2026, 6, 30)),
+            "Mar 1 – Jun 30, 2026"
+        );
+        assert_eq!(
+            goal_period(d(2026, 12, 1), d(2027, 1, 31)),
+            "Dec 1, 2026 – Jan 31, 2027"
+        );
+        // 12 a year: 10.6 expected by Nov 19.
+        assert_eq!(
+            goal_pace(&books, d(2026, 11, 19)).unwrap(),
+            "2 books behind schedule"
+        );
+        assert_eq!(
+            goal_pace(&books, d(2026, 9, 1)).unwrap(),
+            "1 book ahead of schedule"
+        );
+        assert_eq!(goal_pace(&books, d(2026, 10, 10)).unwrap(), "On schedule");
+        assert_eq!(
+            goal_pace(&books, d(2027, 1, 5)).unwrap(),
+            "Ended 3 books short"
+        );
+        assert_eq!(
+            goal_pace(&goal(GoalMetric::Books, 12, 12.0), d(2026, 2, 1)).unwrap(),
+            "Goal reached"
+        );
+        let hours = goal(GoalMetric::Hours, 100, 12.5);
+        assert_eq!(goal_progress(&hours), "12.5 / 100 hours");
+        // Rounded down once, so an amount short of the target never shows as it.
+        let hours = |progress| goal_progress(&goal(GoalMetric::Hours, 100, progress));
+        assert_eq!(hours(99.96), "99.9 / 100 hours");
+        assert_eq!(hours(100.0), "100 / 100 hours");
+        assert_eq!(hours(2.3), "2.3 / 100 hours");
+        assert_eq!(hours(0.04), "0 / 100 hours");
+        assert_eq!(
+            goal_pace(&goal(GoalMetric::Hours, 100, 99.96), d(2027, 1, 5)).unwrap(),
+            "Ended 1 hour short"
+        );
+        assert!(goal_pace(&goal(GoalMetric::Other("x".into()), 5, 1.0), d(2026, 5, 1)).is_none());
+        assert_eq!(
+            goal_description(&GoalMetric::Books, 12, d(2026, 1, 1), d(2026, 12, 31)),
+            "12 books in 2026"
+        );
+        assert_eq!(
+            goal_description(&GoalMetric::Pages, 1, d(2026, 1, 1), d(2026, 6, 30)),
+            "1 page by Jun 30, 2026"
+        );
     }
 
     #[test]

@@ -14,14 +14,20 @@
 //!
 //! [`StaticToken`] is a development fallback that reads a personal access token
 //! from `HARDCOVER_TOKEN`.
+//!
+//! [`GrantedScopes`] says which scopes a session holds. Sessions saved by an
+//! older version hold fewer than [`DEFAULT_SCOPES`]; [`Session::replace`] swaps
+//! in the tokens of a new sign-in that grants the rest.
 
 mod callback;
 mod oauth;
 mod pkce;
+pub mod scopes;
 mod session;
 mod store;
 
 pub use callback::{CancelHandle, PendingSignIn, begin_sign_in};
+pub use scopes::GrantedScopes;
 pub use session::{Session, StaticToken};
 pub use store::{KeyringTokenStore, MemoryTokenStore, TokenStore};
 
@@ -37,8 +43,20 @@ pub const DEFAULT_CLIENT_ID: &str = "18d30dcc-9d91-4022-8464-d1939ed15ad2";
 /// Environment variable that overrides the client id at runtime.
 pub const CLIENT_ID_ENV: &str = "HARDCOVER_CLIENT_ID";
 
-/// Scopes requested by default: profile, catalog, and read/write on the library.
-pub const DEFAULT_SCOPES: [&str; 4] = ["read:me", "read:catalog", "read:library", "write:library"];
+/// Scopes requested at sign-in: profile, catalog, read/write on the library,
+/// reviews, reading goals and lists. Adding one makes every existing session
+/// ask the user to sign in again, so add them sparingly.
+pub const DEFAULT_SCOPES: [&str; 9] = [
+    scopes::READ_ME,
+    scopes::READ_CATALOG,
+    scopes::READ_LIBRARY,
+    scopes::WRITE_LIBRARY,
+    scopes::WRITE_REVIEWS,
+    scopes::READ_GOALS,
+    scopes::WRITE_GOALS,
+    scopes::READ_LISTS,
+    scopes::WRITE_LISTS,
+];
 
 /// `HARDCOVER_CLIENT_ID` if set and non-empty, otherwise `default`.
 pub fn client_id_from_env_or(default: &str) -> String {
@@ -180,7 +198,9 @@ impl Tokens {
         self.expires_at
     }
 
-    /// Space-separated scopes granted, when the server reported them.
+    /// Space-separated scopes granted. Since this version a sign-in always
+    /// records one (the requested scopes when the server's response left it
+    /// out); `None` means an older version saved these tokens.
     pub fn scope(&self) -> Option<&str> {
         self.scope.as_deref()
     }
@@ -232,7 +252,17 @@ mod tests {
         let c = OAuthConfig::new("cid");
         assert_eq!(
             c.scopes(),
-            ["read:me", "read:catalog", "read:library", "write:library"]
+            [
+                "read:me",
+                "read:catalog",
+                "read:library",
+                "write:library",
+                "write:reviews",
+                "read:goals",
+                "write:goals",
+                "read:lists",
+                "write:lists"
+            ]
         );
         assert_eq!(c.redirect_path(), "/callback");
         assert_eq!(c.endpoints().issuer, "https://api.hardcover.app");

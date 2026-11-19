@@ -33,6 +33,7 @@ use gpui_kit::{
     RenderImage, SharedString, Styled as _, StyledImage as _, Subscription, Task, Window, div, img,
     prelude::FluentBuilder as _, rems,
 };
+use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY};
 use hardcover_core::{
     BookDetails, BookId, BookSummary, Client, Date, EditionChange, EditionSummary, Error, Length,
     LibraryEntry, Privacy, ProgressUpdate, Rating, ReadId, ReadSession, ReadingStatus, UserBookId,
@@ -494,7 +495,9 @@ impl BookDetailView {
                 }
                 let details = match result {
                     Ok(d) => Details::Loaded(Arc::new(d)),
-                    Err(e) => Details::Failed(error_message(&e).into()),
+                    Err(e) => {
+                        Details::Failed(Services::error_message(&e, Some(READ_CATALOG), cx).into())
+                    }
                 };
                 this.details.insert(id, details);
                 this.load_similar(cx);
@@ -566,7 +569,12 @@ impl BookDetailView {
                 }
                 Err(error) => {
                     window.push_notification(
-                        Notification::error(error_message(&error)).title(failure_title),
+                        Notification::error(Services::error_message(
+                            &error,
+                            Some(WRITE_LIBRARY),
+                            cx,
+                        ))
+                        .title(failure_title),
                         cx,
                     );
                     this.revert_controls(window, cx);
@@ -974,7 +982,7 @@ impl BookDetailView {
                 this.owning = None;
                 let note = match result {
                     Ok(()) => Notification::success("Added to your Owned list on Hardcover."),
-                    Err(e) => Notification::error(error_message(&e))
+                    Err(e) => Notification::error(Services::error_message(&e, None, cx))
                         .title("Couldn't add it to your Owned list"),
                 };
                 window.push_notification(note, cx);
@@ -1048,7 +1056,12 @@ impl BookDetailView {
             if let Err(error) = result {
                 let _ = this.update_in(cx, |_, window, cx| {
                     window.push_notification(
-                        Notification::error(error_message(&error)).title("Couldn't add the book"),
+                        Notification::error(Services::error_message(
+                            &error,
+                            Some(WRITE_LIBRARY),
+                            cx,
+                        ))
+                        .title("Couldn't add the book"),
                         cx,
                     );
                 });

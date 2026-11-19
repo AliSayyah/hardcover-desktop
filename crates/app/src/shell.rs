@@ -19,10 +19,10 @@ use gpui_kit::component::{
     h_flex, v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FocusHandle,
-    Focusable, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
-    prelude::FluentBuilder as _, rems,
+    AnyElement, AnyView, App, AppContext as _, Context, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window,
+    div, prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::ReadingStatus;
 use hardcover_core::store::LibraryCache;
@@ -34,10 +34,13 @@ use crate::catalog::author_view::AuthorView;
 use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
 use crate::catalog::series_view::SeriesView;
 use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
+use crate::goals::model::GoalsModel;
+use crate::goals::sidebar::GoalsSection;
 use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
 use crate::search::search_view::SearchView;
 use crate::settings_view::{SettingsView, SignOutRequested};
+use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
 use crate::{
@@ -76,9 +79,11 @@ impl Shell {
                         client,
                         session,
                         cache,
+                        scopes,
                     } => {
                         this.cache = cache.clone();
-                        this.enter_workspace(Services::new(client, session, cache), window, cx);
+                        let services = Services::new(client, session, cache, scopes);
+                        this.enter_workspace(services, window, cx);
                     }
                     Startup::SignedOut { cache } => {
                         this.cache = cache;
@@ -120,6 +125,7 @@ impl Shell {
                         event.client.clone(),
                         Some(event.session.clone()),
                         this.cache.clone(),
+                        event.scopes.clone(),
                     );
                     this.enter_workspace(services, window, cx);
                 }),
@@ -167,6 +173,10 @@ pub struct Workspace {
     author_page: Entity<AuthorView>,
     book_page: Entity<BookDetailView>,
     page_focus: FocusHandle,
+    /// Asks a session that lacks scopes to sign in again.
+    reauthorize: Entity<Reauthorize>,
+    goals: Entity<GoalsModel>,
+    goals_section: Entity<GoalsSection>,
     signing_out: bool,
     /// The open Settings dialog's sign-out request.
     _settings: Option<Subscription>,
@@ -192,7 +202,11 @@ impl Workspace {
         let author_page = cx.new(|cx| AuthorView::new(model.clone(), window, cx));
         let book_page = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
         let navigator = Navigator::init(cx);
+        let reauthorize = cx.new(|_| Reauthorize::new(model.clone()));
+        let goals = cx.new(|cx| GoalsModel::new(model.clone(), cx));
+        let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
         model.update(cx, |m, cx| m.start(cx));
+        goals.update(cx, |g, cx| g.load(cx));
         let clock = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -207,6 +221,11 @@ impl Workspace {
         let subscriptions = vec![
             cx.observe(&model, |_, _, cx| cx.notify()),
             cx.observe(&updates, |_, _, cx| cx.notify()),
+            cx.observe(&reauthorize, |_, _, cx| cx.notify()),
+            cx.observe(&goals, |_, _, cx| cx.notify()),
+            cx.subscribe(&reauthorize, |this, _, event: &Reauthorized, cx| {
+                this.on_reauthorized(event, cx)
+            }),
             cx.subscribe_in(&updates, window, |this, _, event, window, cx| {
                 this.on_update_event(event, window, cx)
             }),
@@ -235,6 +254,9 @@ impl Workspace {
             author_page,
             book_page,
             page_focus: cx.focus_handle(),
+            reauthorize,
+            goals,
+            goals_section,
             signing_out: false,
             _settings: None,
             _clock: clock,
@@ -360,8 +382,16 @@ impl Workspace {
         self.show(Destination::Shelf(status), window, cx);
     }
 
+    /// The session now holds a new grant: features it adds come alive.
+    fn on_reauthorized(&mut self, event: &Reauthorized, cx: &mut Context<Self>) {
+        Services::set_scopes(event.scopes.clone(), cx);
+        self.goals.update(cx, |g, cx| g.load(cx));
+        cx.notify();
+    }
+
     fn refresh(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, |m, cx| m.sync(cx));
+        self.goals.update(cx, |g, cx| g.load(cx));
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -406,6 +436,9 @@ impl Workspace {
             return;
         }
         self.signing_out = true;
+        // A "Sign in again…" still waiting on the browser must not sign the
+        // user back in once the session is gone.
+        self.reauthorize.update(cx, |r, cx| r.cancel(cx));
         cx.notify();
         let services = Services::global(cx).clone();
         cx.spawn(async move |this, cx| {
@@ -472,10 +505,17 @@ impl Workspace {
             .child(NavSection::Group(
                 SidebarGroup::new("Library").child(SidebarMenu::new().children(shelves)),
             ))
+            .when(self.goals_section.read(cx).is_visible(cx), |this| {
+                this.child(NavSection::View(self.goals_section.clone().into()))
+            })
             .footer(
                 v_flex()
                     .w_full()
                     .gap_2()
+                    .when(
+                        self.reauthorize.read(cx).is_needed(Services::global(cx)),
+                        |this| this.child(self.reauthorize.clone()),
+                    )
                     .children(self.render_update(cx))
                     .child(self.render_account(window, cx)),
             )
@@ -664,6 +704,15 @@ impl Workspace {
             .map(|u| format!("https://hardcover.app/@{}", u.username));
         let view = cx.entity().downgrade();
         let focus = self.focus_handle.clone();
+        // After "Later", the permissions notice is one menu item away.
+        let reauthorize = self.reauthorize.clone();
+        let offer_permissions = {
+            let notice = self.reauthorize.read(cx);
+            notice.is_dismissed() && {
+                let services = Services::global(cx);
+                services.session().is_some() && !services.missing_scopes().is_empty()
+            }
+        };
 
         // The dropdown wrapper sizes to its content; this block lets the
         // footer (and its hover surface) span the sidebar.
@@ -731,6 +780,15 @@ impl Workspace {
                         ),
                         None => menu,
                     };
+                    let menu =
+                        if offer_permissions {
+                            let reauthorize = reauthorize.clone();
+                            menu.item(PopupMenuItem::new("Grant new permissions…").on_click(
+                                move |_, _, cx| reauthorize.update(cx, |r, cx| r.show(cx)),
+                            ))
+                        } else {
+                            menu
+                        };
                     let updates_view = view.clone();
                     menu.separator()
                         .menu_with_icon("Settings…", IconName::Settings, Box::new(OpenSettings))
@@ -815,11 +873,13 @@ impl Render for Workspace {
 }
 
 /// The sidebar's sections. `Sidebar` takes one item type, and Search sits
-/// above the Library group without a group of its own.
+/// above the Library group without a group of its own. A view draws a section
+/// that keeps its own state (the reading goals).
 #[derive(Clone)]
 enum NavSection {
     Menu(Box<SidebarMenu>),
     Group(SidebarGroup<SidebarMenu>),
+    View(AnyView),
 }
 
 impl Collapsible for NavSection {
@@ -827,6 +887,7 @@ impl Collapsible for NavSection {
         match self {
             Self::Menu(m) => Self::Menu(Box::new(m.collapsed(collapsed))),
             Self::Group(g) => Self::Group(g.collapsed(collapsed)),
+            Self::View(v) => Self::View(v),
         }
     }
 
@@ -834,6 +895,7 @@ impl Collapsible for NavSection {
         match self {
             Self::Menu(m) => m.is_collapsed(),
             Self::Group(g) => g.is_collapsed(),
+            Self::View(_) => false,
         }
     }
 }
@@ -848,6 +910,7 @@ impl SidebarItem for NavSection {
         match self {
             Self::Menu(m) => (*m).render(id, window, cx).into_any_element(),
             Self::Group(g) => g.render(id, window, cx).into_any_element(),
+            Self::View(v) => v.into_any_element(),
         }
     }
 }

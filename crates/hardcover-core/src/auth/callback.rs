@@ -388,7 +388,8 @@ mod tests {
         assert_eq!(q["client_id"], "client-123");
         assert_eq!(
             q["scope"],
-            "read:me read:catalog read:library write:library"
+            "read:me read:catalog read:library write:library write:reviews \
+             read:goals write:goals read:lists write:lists"
         );
         assert_eq!(q["code_challenge_method"], "S256");
         assert_eq!(q["code_challenge"], pkce::challenge_s256(&pending.verifier));
@@ -456,6 +457,11 @@ mod tests {
         let tokens = handle.join().unwrap().unwrap();
         assert_eq!(tokens.access_token(), "hc_at_new");
         assert_eq!(tokens.refresh_token(), Some("hc_rt_new"));
+        // The response named no scope: the requested ones were granted.
+        assert_eq!(
+            tokens.scope(),
+            Some(crate::auth::DEFAULT_SCOPES.join(" ").as_str())
+        );
         let req = &http.requests()[0];
         assert_eq!(req.url, "https://api.hardcover.app/oauth2/token");
         assert_eq!(req.form_value("grant_type"), Some("authorization_code"));

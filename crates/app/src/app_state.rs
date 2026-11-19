@@ -14,10 +14,14 @@ use std::thread;
 use async_lock::Semaphore;
 use fast_image_resize::{self as fir, PixelType};
 use gpui_kit::{App, Asset, Global, RenderImage, Window};
-use hardcover_core::auth::{KeyringTokenStore, OAuthConfig, Session, StaticToken};
+use hardcover_core::auth::{
+    DEFAULT_SCOPES, GrantedScopes, KeyringTokenStore, OAuthConfig, Session, StaticToken,
+};
 use hardcover_core::covers::CoverCache;
 use hardcover_core::store::LibraryCache;
-use hardcover_core::{Client, Cover};
+use hardcover_core::{Client, Cover, Error};
+
+use crate::format;
 
 /// Services available while signed in.
 #[derive(Clone)]
@@ -27,6 +31,12 @@ pub struct Services {
     session: Option<Arc<Session>>,
     /// `None` if the cache could not be opened; the app then works online only.
     cache: Option<Arc<LibraryCache>>,
+    /// A snapshot of the session's grant: asking the session itself can block
+    /// behind a token refresh.
+    scopes: GrantedScopes,
+    /// Scopes Hardcover refused with `insufficient_scope` although the grant
+    /// lists them. The server is the authority, so these count as missing.
+    refused: Vec<&'static str>,
 }
 
 impl Global for Services {}
@@ -36,11 +46,73 @@ impl Services {
         client: Client,
         session: Option<Arc<Session>>,
         cache: Option<Arc<LibraryCache>>,
+        scopes: GrantedScopes,
     ) -> Self {
         Self {
             client,
             session,
             cache,
+            scopes,
+            refused: Vec::new(),
+        }
+    }
+
+    /// True if Hardcover granted `scope` (one of `hardcover_core::auth::scopes`).
+    /// Cheap: features call it while rendering, to hide or disable what the
+    /// session can't do.
+    pub fn has_scope(&self, scope: &str) -> bool {
+        self.scopes.contains(scope) && !self.refused.contains(&scope)
+    }
+
+    /// The scopes the app requests that this session lacks. Only a session can
+    /// sign in again to get them; a personal token never lacks any it knows of.
+    pub fn missing_scopes(&self) -> Vec<&'static str> {
+        DEFAULT_SCOPES
+            .into_iter()
+            .filter(|s| !self.has_scope(s))
+            .collect()
+    }
+
+    /// Records that Hardcover refused a request for lack of `scope`, so the
+    /// feature turns into its "sign in again" state.
+    pub fn scope_refused(scope: &'static str, cx: &mut App) {
+        if let Some(services) = cx.try_global::<Self>()
+            && !services.refused.contains(&scope)
+        {
+            cx.global_mut::<Self>().refused.push(scope);
+            cx.refresh_windows();
+        }
+    }
+
+    /// The message to show for a failed request. A scope Hardcover refused is
+    /// recorded first (the one the error names, else `fallback`), so features
+    /// that need it turn off and the permissions notice offers to sign in
+    /// again. Where no notice can (a personal token, or a scope the app
+    /// doesn't request), the message says to sign out and in again.
+    pub fn error_message(error: &Error, fallback: Option<&'static str>, cx: &mut App) -> String {
+        if let Error::InsufficientScope { scope } = error
+            // The fallback stands in only for an unnamed scope: a named one
+            // the app never requests can't be granted by signing in again.
+            && let Some(scope) = match scope {
+                Some(_) => format::requested_scope(scope.as_deref()),
+                None => fallback,
+            }
+        {
+            Self::scope_refused(scope, cx);
+            if cx.try_global::<Self>().is_some_and(|s| s.session.is_some()) {
+                return format::scope_refused_message(scope);
+            }
+        }
+        format::error_message(error)
+    }
+
+    /// After a new sign-in replaced the session's tokens.
+    pub fn set_scopes(scopes: GrantedScopes, cx: &mut App) {
+        if cx.has_global::<Self>() {
+            let services = cx.global_mut::<Self>();
+            services.scopes = scopes;
+            services.refused.clear();
+            cx.refresh_windows();
         }
     }
 
@@ -67,6 +139,7 @@ pub enum Startup {
         client: Client,
         session: Option<Arc<Session>>,
         cache: Option<Arc<LibraryCache>>,
+        scopes: GrantedScopes,
     },
     SignedOut {
         cache: Option<Arc<LibraryCache>>,
@@ -91,6 +164,7 @@ fn demo_startup() -> Startup {
         client: hardcover_core::demo::client(),
         session: None,
         cache: LibraryCache::open_in_memory().ok().map(Arc::new),
+        scopes: GrantedScopes::all(),
     }
 }
 
@@ -106,10 +180,13 @@ fn real_startup() -> Startup {
     };
     if let Some(token) = StaticToken::from_env() {
         eprintln!("hardcover: using HARDCOVER_TOKEN (development only)");
+        // A personal token carries no scope information and acts for its
+        // owner with full access.
         return Startup::SignedIn {
             client: Client::new(Arc::new(token)),
             session: None,
             cache,
+            scopes: GrantedScopes::all(),
         };
     }
     let restored = KeyringTokenStore::new()
@@ -119,6 +196,7 @@ fn real_startup() -> Startup {
             let session = Arc::new(session);
             Startup::SignedIn {
                 client: Client::new(session.clone()),
+                scopes: session.granted_scopes(),
                 session: Some(session),
                 cache,
             }

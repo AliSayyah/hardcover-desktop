@@ -12,12 +12,13 @@ use gpui_kit::{
     SharedString, Styled as _, StyledImage as _, Window, div, img, prelude::FluentBuilder as _,
     relative, rems,
 };
+use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookDetails, BookId, BookSummary, Contributor, RatingBucket, SeriesRef};
 
 use super::{BookDetailView, Details, section};
 use crate::app_state::{Services, cover_thumbnail};
 use crate::catalog::navigation::{self, Page};
-use crate::format::{authors_text, error_message, series_position_text};
+use crate::format::{authors_text, series_position_text};
 
 /// Similar books fetched for one book.
 pub(super) enum Similar {
@@ -73,7 +74,9 @@ impl BookDetailView {
                 }
                 let similar = match result {
                     Ok(books) => Similar::Ready(Arc::new(books)),
-                    Err(e) => Similar::Failed(error_message(&e).into()),
+                    Err(e) => {
+                        Similar::Failed(Services::error_message(&e, Some(READ_CATALOG), cx).into())
+                    }
                 };
                 this.similar.insert(id, similar);
                 cx.notify();

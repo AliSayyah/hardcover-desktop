@@ -39,6 +39,16 @@ macro_rules! edition_fields {
     };
 }
 
+macro_rules! goal_fields {
+    () => {
+        "fragment GoalFields on goals {
+  id metric goal progress description start_date end_date conditions archived completed_at
+  privacy_setting_id
+}
+"
+    };
+}
+
 pub(crate) const ME: &str = "query Me {
   me { id username name image { url width height } }
 }
@@ -273,6 +283,49 @@ pub(crate) const EDITION_OWNED: &str = "mutation EditionOwned($id: Int!) {
 }
 ";
 
+/// The user's goals that are not archived, the latest end date first.
+pub(crate) const GOALS: &str = concat!(
+    "query Goals($userId: Int!) {
+  goals(
+    where: {user_id: {_eq: $userId}, archived: {_eq: false}}
+    order_by: [{end_date: desc}, {id: desc}]
+  ) { ...GoalFields }
+}
+",
+    goal_fields!()
+);
+
+/// Re-reads a goal when a mutation's payload left it out.
+pub(crate) const GOAL_BY_ID: &str = concat!(
+    "query GoalById($id: Int!) {
+  goals_by_pk(id: $id) { ...GoalFields }
+}
+",
+    goal_fields!()
+);
+
+pub(crate) const INSERT_GOAL: &str = concat!(
+    "mutation InsertGoal($object: GoalInput!) {
+  insert_goal(object: $object) { errors id goal { ...GoalFields } }
+}
+",
+    goal_fields!()
+);
+
+/// `object` is the whole goal: fields left out are not kept.
+pub(crate) const UPDATE_GOAL: &str = concat!(
+    "mutation UpdateGoal($id: Int!, $object: GoalInput!) {
+  update_goal(id: $id, object: $object) { errors id goal { ...GoalFields } }
+}
+",
+    goal_fields!()
+);
+
+pub(crate) const DELETE_GOAL: &str = "mutation DeleteGoal($id: Int!) {
+  delete_goal(id: $id) { errors id }
+}
+";
+
 /// Every document the client sends, by name. Validated against
 /// `schema/hardcover.graphql` in the tests below and against the live schema by
 /// the `api_check` example.
@@ -296,6 +349,11 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("DELETE_USER_BOOK_READ", DELETE_USER_BOOK_READ),
     ("BOOK_EDITIONS", BOOK_EDITIONS),
     ("EDITION_OWNED", EDITION_OWNED),
+    ("GOALS", GOALS),
+    ("GOAL_BY_ID", GOAL_BY_ID),
+    ("INSERT_GOAL", INSERT_GOAL),
+    ("UPDATE_GOAL", UPDATE_GOAL),
+    ("DELETE_GOAL", DELETE_GOAL),
 ];
 
 #[cfg(test)]
@@ -336,6 +394,73 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    fn committed_scope_map() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../schema/hardcover-capabilities.json"
+        ))
+        .unwrap()
+    }
+
+    fn usages(docs: &[(&'static str, &'static str)]) -> Vec<(&'static str, sdl::Usage)> {
+        docs.iter()
+            .map(|(name, doc)| (*name, sdl::usage(sdl::schema(), name, doc).unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn the_requested_scopes_cover_every_document() {
+        let report = sdl::check_scopes(
+            &committed_scope_map(),
+            &crate::auth::DEFAULT_SCOPES,
+            &usages(ALL),
+        )
+        .unwrap();
+        assert!(report.problems.is_empty(), "{:#?}", report.problems);
+        assert!(report.notes.is_empty(), "{:#?}", report.notes);
+    }
+
+    #[test]
+    fn scope_check_sees_argument_and_column_gates() {
+        let caps = committed_scope_map();
+        let library_only = ["read:me", "read:catalog", "read:library", "write:library"];
+
+        // `review_markdown` is gated by write:reviews, which grants no operation of its own.
+        const LITERAL_REVIEW: &str = "mutation R($id: Int!) {
+  update_user_book(id: $id, object: {review_markdown: \"Great\"}) { id }
+}";
+        let docs = usages(&[("LITERAL_REVIEW", LITERAL_REVIEW)]);
+        let report = sdl::check_scopes(&caps, &library_only, &docs).unwrap();
+        assert_eq!(report.problems.len(), 1, "{:#?}", report.problems);
+        assert!(report.problems[0].contains("`review_markdown`"));
+        let mut with_reviews = library_only.to_vec();
+        with_reviews.push("write:reviews");
+        let report = sdl::check_scopes(&caps, &with_reviews, &docs).unwrap();
+        assert!(report.problems.is_empty(), "{:#?}", report.problems);
+
+        // Through a variable it can only be a note.
+        let docs = usages(&[("UPDATE_USER_BOOK", UPDATE_USER_BOOK)]);
+        let report = sdl::check_scopes(&caps, &library_only, &docs).unwrap();
+        assert!(report.problems.is_empty(), "{:#?}", report.problems);
+        assert!(
+            report.notes.iter().any(|n| n.contains("`review_markdown`")),
+            "{:#?}",
+            report.notes
+        );
+
+        // `email` is a column gated by read:me:email.
+        let docs = usages(&[("EMAIL", "query E { me { id email } }")]);
+        let report = sdl::check_scopes(&caps, &["read:me:content"], &docs).unwrap();
+        assert!(
+            report.problems.iter().any(|p| p.contains("`email`")),
+            "{:#?}",
+            report.problems
+        );
+
+        // A scope that disappeared from the map breaks sign-in.
+        let report = sdl::check_scopes(&caps, &["read:me", "read:nothing"], &[]).unwrap();
+        assert_eq!(report.problems.len(), 1);
     }
 
     #[test]

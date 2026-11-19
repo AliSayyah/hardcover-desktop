@@ -13,6 +13,7 @@ use gpui_kit::{
     ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
     prelude::FluentBuilder as _, rems,
 };
+use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{SeriesDetails, SeriesId};
 
 use super::book_list::{
@@ -20,7 +21,7 @@ use super::book_list::{
 };
 use super::navigation::{self, Page};
 use crate::app_state::Services;
-use crate::format::{error_message, series_position_text};
+use crate::format::series_position_text;
 use crate::library::model::LibraryModel;
 
 enum Loaded {
@@ -107,7 +108,9 @@ impl SeriesView {
                 }
                 let page = match result {
                     Ok(series) => Loaded::Ready(Arc::new(series)),
-                    Err(e) => Loaded::Failed(error_message(&e).into()),
+                    Err(e) => {
+                        Loaded::Failed(Services::error_message(&e, Some(READ_CATALOG), cx).into())
+                    }
                 };
                 this.pages.insert(id, page);
                 this.fill_list(window, cx);

@@ -17,18 +17,21 @@ use gpui_kit::{
     ParentElement as _, Render, SharedString, Styled as _, Task, Window, div,
     prelude::FluentBuilder as _, rems,
 };
-use hardcover_core::auth::{CancelHandle, KeyringTokenStore, OAuthConfig, Session, begin_sign_in};
+use hardcover_core::auth::{
+    CancelHandle, GrantedScopes, KeyringTokenStore, OAuthConfig, Session, begin_sign_in,
+};
 use hardcover_core::{Client, Error};
 
 use crate::format::error_message;
 
 /// How long to wait for the browser before giving up.
-const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+pub(crate) const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// Emitted once sign-in completes.
 pub struct SignedIn {
     pub client: Client,
     pub session: Arc<Session>,
+    pub scopes: GrantedScopes,
 }
 
 enum State {
@@ -93,15 +96,17 @@ impl SignInView {
                     let tokens = pending.wait(SIGN_IN_TIMEOUT)?;
                     let store = KeyringTokenStore::new()?;
                     let session = Arc::new(Session::start(config, Arc::new(store), tokens)?);
-                    Ok::<_, Error>(session)
+                    let scopes = session.granted_scopes();
+                    Ok::<_, Error>((session, scopes))
                 })
                 .await;
             let _ = this.update(cx, |this, cx| match result {
-                Ok(session) => {
+                Ok((session, scopes)) => {
                     this.state = State::Idle { error: None };
                     cx.emit(SignedIn {
                         client: Client::new(session.clone()),
                         session,
+                        scopes,
                     });
                 }
                 Err(Error::Cancelled) => {

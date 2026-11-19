@@ -745,6 +745,155 @@ impl Client {
         read_payload(data.insert_user_book_read, "insert_user_book_read")
     }
 
+    // ----- goals -----
+
+    /// The signed-in user's goals that are not archived, the latest end date
+    /// first. Needs the `read:goals` scope.
+    pub fn goals(&self) -> Result<Vec<Goal>> {
+        #[derive(Deserialize)]
+        struct Data {
+            goals: Vec<RawGoal>,
+        }
+        let me = self.my_id()?;
+        let data: Data = self.query(
+            "Goals",
+            queries::GOALS,
+            json!({ "userId": me.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        Ok(data
+            .goals
+            .into_iter()
+            .filter_map(RawGoal::into_goal)
+            .collect())
+    }
+
+    /// Creates a goal for every book (no conditions), with the account's
+    /// default privacy. Hardcover calculates its progress right away.
+    pub fn create_goal(&self, goal: &NewGoal) -> Result<Goal> {
+        if goal.target == 0 || goal.end < goal.start {
+            return Err(Error::InvalidInput(
+                "a goal needs a target above zero and an end after its start".into(),
+            ));
+        }
+        let description = goal_description(Some(&goal.description))?;
+        #[derive(Deserialize)]
+        struct Data {
+            insert_goal: Option<GoalPayload>,
+        }
+        let object = json!({
+            "metric": goal.metric.api_name(),
+            "goal": goal.target,
+            "description": description,
+            "start_date": goal.start.to_string(),
+            "end_date": goal.end.to_string(),
+            "conditions": {},
+        });
+        let data: Data = self.query(
+            "InsertGoal",
+            queries::INSERT_GOAL,
+            json!({ "object": object }),
+            QUERY_TIMEOUT,
+        )?;
+        self.goal_payload(data.insert_goal, "insert_goal")
+    }
+
+    /// Saves `goal` as given: its metric, target, dates, description, privacy
+    /// and conditions. `update_goal` replaces the whole goal, so pass a goal
+    /// read from Hardcover with only the fields to change edited.
+    ///
+    /// `Error::InvalidInput` if the goal's conditions hold a field this
+    /// version can't send back, which the update would drop, or if it has no
+    /// description, which Hardcover requires.
+    pub fn update_goal(&self, goal: &Goal) -> Result<Goal> {
+        let conditions = goal.conditions.to_input().ok_or_else(|| {
+            Error::InvalidInput(
+                "this goal has conditions the app can't keep; change it on hardcover.app".into(),
+            )
+        })?;
+        if goal.target == 0 || goal.end < goal.start {
+            return Err(Error::InvalidInput(
+                "a goal needs a target above zero and an end after its start".into(),
+            ));
+        }
+        let description = goal_description(goal.description.as_deref())?;
+        #[derive(Deserialize)]
+        struct Data {
+            update_goal: Option<GoalPayload>,
+        }
+        let mut object = json!({
+            "metric": goal.metric.api_name(),
+            "goal": goal.target,
+            "description": description,
+            "start_date": goal.start.to_string(),
+            "end_date": goal.end.to_string(),
+            "conditions": conditions,
+            "archived": goal.archived,
+        });
+        // Sent back as read, even an id this version doesn't know: left out,
+        // the goal would get the account's default privacy.
+        if let Some(privacy) = goal.privacy_id {
+            object["privacy_setting_id"] = json!(privacy);
+        }
+        let data: Data = self.query(
+            "UpdateGoal",
+            queries::UPDATE_GOAL,
+            json!({ "id": goal.id.get(), "object": object }),
+            QUERY_TIMEOUT,
+        )?;
+        self.goal_payload(data.update_goal, "update_goal")
+    }
+
+    pub fn delete_goal(&self, id: GoalId) -> Result<()> {
+        #[derive(Deserialize)]
+        struct Data {
+            delete_goal: Option<GoalPayload>,
+        }
+        let data: Data = self.query(
+            "DeleteGoal",
+            queries::DELETE_GOAL,
+            json!({ "id": id.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        let p = data
+            .delete_goal
+            .ok_or_else(|| Error::Api("`delete_goal` returned null".into()))?;
+        if let Some(e) = p.error() {
+            return Err(Error::Api(e));
+        }
+        match p.id {
+            Some(_) => Ok(()),
+            None => Err(Error::Api(format!("could not delete goal {id}"))),
+        }
+    }
+
+    /// Uses the goal returned by the mutation, or re-reads it if the payload had none.
+    fn goal_payload(&self, payload: Option<GoalPayload>, field: &str) -> Result<Goal> {
+        let p = payload.ok_or_else(|| Error::Api(format!("`{field}` returned null")))?;
+        if let Some(e) = p.error() {
+            return Err(Error::Api(e));
+        }
+        if let Some(goal) = p.goal.and_then(RawGoal::into_goal) {
+            return Ok(goal);
+        }
+        let id = p
+            .id
+            .ok_or_else(|| Error::Decode(format!("`{field}` returned neither a goal nor an id")))?;
+        #[derive(Deserialize)]
+        struct Data {
+            goals_by_pk: Option<RawGoal>,
+        }
+        let data: Data = self.query(
+            "GoalById",
+            queries::GOAL_BY_ID,
+            json!({ "id": id }),
+            QUERY_TIMEOUT,
+        )?;
+        data.goals_by_pk
+            .and_then(RawGoal::into_goal)
+            .ok_or_else(|| Error::Decode(format!("goal {id} not found after `{field}`")))
+    }
+
     // ----- transport -----
 
     fn query<T: DeserializeOwned>(
@@ -864,6 +1013,15 @@ fn moved_read_fields(
         m.insert("progress_seconds".into(), json!(seconds));
     }
     m
+}
+
+/// The description to send: Hardcover requires one (`GoalInput.description`
+/// is `String!`), and an empty one would be stored as is.
+fn goal_description(description: Option<&str>) -> Result<&str> {
+    description
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .ok_or_else(|| Error::InvalidInput("a goal needs a description".into()))
 }
 
 /// `fraction` of `total`, to the nearest unit. An unfinished read never lands

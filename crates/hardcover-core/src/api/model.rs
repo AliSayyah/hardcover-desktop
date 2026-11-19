@@ -76,6 +76,10 @@ id_type!(
     /// `authors.id`
     AuthorId
 );
+id_type!(
+    /// `goals.id`: one reading goal.
+    GoalId
+);
 
 /// A library entry's status (`user_books.status_id`).
 ///
@@ -851,6 +855,175 @@ impl SearchPage {
     }
 }
 
+/// What a reading goal counts (`goals.metric`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GoalMetric {
+    /// Books finished.
+    Books,
+    /// Pages read.
+    Pages,
+    /// Hours read or listened. The API's `progress` is in seconds;
+    /// [`Goal::progress`] is converted to hours.
+    Hours,
+    /// A metric this version does not know, kept as Hardcover named it.
+    Other(String),
+}
+
+impl GoalMetric {
+    pub fn from_api(name: &str) -> Self {
+        match name {
+            "book" => Self::Books,
+            "page" => Self::Pages,
+            "hour" => Self::Hours,
+            other => Self::Other(other.to_owned()),
+        }
+    }
+
+    pub fn api_name(&self) -> &str {
+        match self {
+            Self::Books => "book",
+            Self::Pages => "page",
+            Self::Hours => "hour",
+            Self::Other(name) => name,
+        }
+    }
+}
+
+/// Which books count toward a goal (`goals.conditions`): a format, categories
+/// or author facts. Kept exactly as Hardcover sent it, because changing a goal
+/// resends the whole goal, conditions included.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GoalConditions(pub(crate) serde_json::Value);
+
+/// `GoalConditionInput`'s fields. The stored JSON uses the same names (the
+/// official SDK sends it back unchanged).
+const GOAL_CONDITION_FIELDS: [&str; 5] = [
+    "authorBipoc",
+    "authorGenderIds",
+    "authorLgbtqia",
+    "bookCategoryIds",
+    "readingFormatId",
+];
+
+impl GoalConditions {
+    /// True if every book counts.
+    pub fn is_empty(&self) -> bool {
+        match &self.0 {
+            serde_json::Value::Object(map) => map
+                .values()
+                .all(|v| v.is_null() || v.as_array().is_some_and(|a| a.is_empty())),
+            _ => true,
+        }
+    }
+
+    /// The conditions as a `GoalConditionInput`, or `None` if they hold a
+    /// field this version can't send back (it would be lost on update).
+    pub fn to_input(&self) -> Option<serde_json::Value> {
+        match &self.0 {
+            serde_json::Value::Object(map) => {
+                let known = map
+                    .iter()
+                    .filter(|(_, v)| !v.is_null())
+                    .all(|(k, _)| GOAL_CONDITION_FIELDS.contains(&k.as_str()));
+                known.then(|| {
+                    serde_json::Value::Object(
+                        map.iter()
+                            .filter(|(_, v)| !v.is_null())
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect(),
+                    )
+                })
+            }
+            serde_json::Value::Null => Some(serde_json::json!({})),
+            _ => None,
+        }
+    }
+}
+
+/// A reading goal: read `target` books (or pages, or hours) between `start`
+/// and `end`. Hardcover calculates the progress from the user's reading.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct Goal {
+    pub id: GoalId,
+    pub metric: GoalMetric,
+    /// In the metric's unit (hours for hour goals).
+    pub target: u32,
+    /// In the metric's unit (hours for hour goals), as Hardcover calculated it.
+    pub progress: f64,
+    pub start: Date,
+    pub end: Date,
+    pub description: Option<String>,
+    pub archived: bool,
+    pub completed_at: Option<Timestamp>,
+    /// `privacy_setting_id` as Hardcover sent it, known or not: changing a
+    /// goal sends it back unchanged. See [`Goal::privacy`].
+    pub privacy_id: Option<i64>,
+    pub conditions: GoalConditions,
+}
+
+impl Goal {
+    pub fn new(id: GoalId, metric: GoalMetric, target: u32, start: Date, end: Date) -> Self {
+        Self {
+            id,
+            metric,
+            target,
+            progress: 0.0,
+            start,
+            end,
+            description: None,
+            archived: false,
+            completed_at: None,
+            privacy_id: None,
+            conditions: GoalConditions::default(),
+        }
+    }
+
+    /// Who can see the goal, if Hardcover sent a setting this version knows.
+    pub fn privacy(&self) -> Option<Privacy> {
+        self.privacy_id.and_then(Privacy::from_id)
+    }
+
+    /// Progress as a fraction of the target; above 1 once it is passed.
+    pub fn fraction(&self) -> f64 {
+        if self.target == 0 {
+            return 0.0;
+        }
+        self.progress / f64::from(self.target)
+    }
+
+    /// True if `day` falls within the goal's dates.
+    pub fn is_current(&self, day: Date) -> bool {
+        (self.start..=self.end).contains(&day)
+    }
+
+    /// Where steady progress would be by the end of `day`, in the metric's unit.
+    pub fn expected_by(&self, day: Date) -> f64 {
+        let total = (self.end - self.start).num_days() + 1;
+        if total <= 0 {
+            return f64::from(self.target);
+        }
+        let elapsed = ((day - self.start).num_days() + 1).clamp(0, total);
+        f64::from(self.target) * elapsed as f64 / total as f64
+    }
+
+    /// Ahead (positive) or behind (negative) of steady progress on `day`.
+    pub fn pace(&self, day: Date) -> f64 {
+        self.progress - self.expected_by(day)
+    }
+}
+
+/// A goal to create, for [`crate::api::Client::create_goal`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewGoal {
+    pub metric: GoalMetric,
+    pub target: u32,
+    pub start: Date,
+    pub end: Date,
+    /// Hardcover requires one; the website writes e.g. "30 books in 2026".
+    pub description: String,
+}
+
 /// How far the reader is, for [`crate::api::Client::update_progress`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProgressUpdate {
@@ -981,6 +1154,71 @@ mod tests {
             UserBookId::new(7)
         );
         assert_eq!(ReadId::new(9).to_string(), "9");
+    }
+
+    fn goal(target: u32, progress: f64) -> Goal {
+        let d = |m, d| Date::from_ymd_opt(2026, m, d).unwrap();
+        let mut g = Goal::new(
+            GoalId::new(1),
+            GoalMetric::Books,
+            target,
+            d(1, 1),
+            d(12, 31),
+        );
+        g.progress = progress;
+        g
+    }
+
+    #[test]
+    fn goal_pace_follows_the_calendar() {
+        let d = |m, d| Date::from_ymd_opt(2026, m, d).unwrap();
+        let g = goal(365, 100.0);
+        assert_eq!(g.expected_by(d(1, 1)), 1.0);
+        assert_eq!(g.expected_by(d(4, 10)), 100.0);
+        assert_eq!(g.pace(d(4, 10)), 0.0);
+        assert_eq!(g.pace(d(1, 31)), 69.0);
+        // Before the start nothing is expected; after the end, everything.
+        assert_eq!(g.expected_by(Date::from_ymd_opt(2025, 12, 1).unwrap()), 0.0);
+        assert_eq!(
+            g.expected_by(Date::from_ymd_opt(2027, 2, 1).unwrap()),
+            365.0
+        );
+        assert!(g.is_current(d(12, 31)));
+        assert!(!g.is_current(Date::from_ymd_opt(2027, 1, 1).unwrap()));
+        assert_eq!(goal(12, 9.0).fraction(), 0.75);
+        assert_eq!(goal(0, 9.0).fraction(), 0.0);
+    }
+
+    #[test]
+    fn goal_metrics_round_trip() {
+        for name in ["book", "page", "hour", "minute"] {
+            assert_eq!(GoalMetric::from_api(name).api_name(), name);
+        }
+        assert_eq!(
+            GoalMetric::from_api("minute"),
+            GoalMetric::Other("minute".into())
+        );
+    }
+
+    #[test]
+    fn goal_conditions_go_back_unchanged_or_not_at_all() {
+        use serde_json::json;
+        let empty = GoalConditions(json!({}));
+        assert!(empty.is_empty());
+        assert_eq!(empty.to_input(), Some(json!({})));
+        assert_eq!(GoalConditions(json!(null)).to_input(), Some(json!({})));
+        let audio = GoalConditions(json!({"readingFormatId": 2, "bookCategoryIds": []}));
+        assert!(!audio.is_empty());
+        assert_eq!(
+            audio.to_input(),
+            Some(json!({"readingFormatId": 2, "bookCategoryIds": []}))
+        );
+        // Nulls are dropped; an unknown field can't be sent back.
+        assert_eq!(
+            GoalConditions(json!({"authorBipoc": null})).to_input(),
+            Some(json!({}))
+        );
+        assert_eq!(GoalConditions(json!({"genre": "poetry"})).to_input(), None);
     }
 
     #[test]
