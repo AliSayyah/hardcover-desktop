@@ -352,6 +352,29 @@ pub(crate) const UPDATE_USER_BOOK_REVIEW: &str = concat!(
     review_fields!()
 );
 
+/// Deletes the review. `review_slate` (the website editor's form) is cleared
+/// too, so a review written on the website is gone as well. Like
+/// [`UPDATE_USER_BOOK_REVIEW`], it resends the status.
+pub(crate) const DELETE_USER_BOOK_REVIEW: &str = concat!(
+    "mutation DeleteUserBookReview($id: Int!, $statusId: Int!) {
+  update_user_book(id: $id, object: {
+    status_id: $statusId
+    review_markdown: null
+    review_slate: null
+    review_has_spoilers: false
+    reviewed_at: null
+  }) {
+    error id
+    user_book { ...UserBookFields ...ReviewFields }
+  }
+}
+",
+    user_book_fields!(),
+    book_summary_fields!(),
+    edition_fields!(),
+    review_fields!()
+);
+
 /// The user's goals that are not archived, the latest end date first.
 pub(crate) const GOALS: &str = concat!(
     "query Goals($userId: Int!) {
@@ -423,6 +446,7 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("EDITION_OWNED", EDITION_OWNED),
     ("USER_BOOK_REVIEW", USER_BOOK_REVIEW),
     ("UPDATE_USER_BOOK_REVIEW", UPDATE_USER_BOOK_REVIEW),
+    ("DELETE_USER_BOOK_REVIEW", DELETE_USER_BOOK_REVIEW),
     ("GOALS", GOALS),
     ("GOAL_BY_ID", GOAL_BY_ID),
     ("INSERT_GOAL", INSERT_GOAL),
@@ -527,6 +551,18 @@ mod tests {
         let docs = usages(&[("UPDATE_USER_BOOK_REVIEW", UPDATE_USER_BOOK_REVIEW)]);
         let report = sdl::check_scopes(&caps, &library_only, &docs).unwrap();
         for arg in ["review_markdown", "review_has_spoilers", "reviewed_at"] {
+            assert!(
+                report
+                    .problems
+                    .iter()
+                    .any(|p| p.contains(&format!("`{arg}`"))),
+                "{arg}: {:#?}",
+                report.problems
+            );
+        }
+        let docs = usages(&[("DELETE_USER_BOOK_REVIEW", DELETE_USER_BOOK_REVIEW)]);
+        let report = sdl::check_scopes(&caps, &library_only, &docs).unwrap();
+        for arg in ["review_markdown", "review_slate", "reviewed_at"] {
             assert!(
                 report
                     .problems

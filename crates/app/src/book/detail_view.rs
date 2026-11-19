@@ -33,7 +33,7 @@ use gpui_kit::{
     RenderImage, SharedString, Styled as _, StyledImage as _, Subscription, Task, Window, div, img,
     prelude::FluentBuilder as _, rems,
 };
-use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY, WRITE_REVIEWS};
+use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY};
 use hardcover_core::{
     BookDetails, BookId, BookSummary, Client, Date, EditionChange, EditionSummary, Error, Length,
     LibraryEntry, Privacy, ProgressUpdate, Rating, ReadId, ReadSession, ReadingStatus, Review,
@@ -563,17 +563,28 @@ impl BookDetailView {
             model.update(cx, |m, cx| {
                 m.end_write(id, cx);
                 match &result {
+                    // A review write never removes the entry: without one,
+                    // the entry shown stays.
                     Ok(Written {
-                        entry: Some(entry),
-                        review,
+                        entry,
+                        review: Some(review),
                         ..
                     }) => {
-                        m.apply_written(entry.clone(), cx);
-                        if let Some(review) = review {
-                            m.apply_review(id, review.clone(), cx);
+                        if let Some(entry) = entry {
+                            m.apply_written(entry.clone(), cx);
                         }
+                        m.apply_review(id, review.clone(), cx);
                     }
-                    Ok(Written { entry: None, .. }) => m.apply_removed(id, cx),
+                    Ok(Written {
+                        entry: Some(entry),
+                        review: None,
+                        ..
+                    }) => m.apply_written(entry.clone(), cx),
+                    Ok(Written {
+                        entry: None,
+                        review: None,
+                        ..
+                    }) => m.apply_removed(id, cx),
                     Err(_) => {}
                 }
             });
@@ -594,10 +605,13 @@ impl BookDetailView {
                     window.push_notification(
                         Notification::error(Services::error_message(
                             &error,
-                            Some(match kind {
-                                WriteKind::Review => WRITE_REVIEWS,
-                                _ => WRITE_LIBRARY,
-                            }),
+                            // A review write needs write:reviews and, for its
+                            // status, write:library: an unnamed refusal can't
+                            // be pinned on either.
+                            match kind {
+                                WriteKind::Review => None,
+                                _ => Some(WRITE_LIBRARY),
+                            },
                             cx,
                         ))
                         .title(failure_title),
@@ -1744,8 +1758,9 @@ fn saving(cx: &App) -> impl IntoElement {
 
 /// A titled region of the pane.
 /// The outcome of a write, for [`BookDetailView::run_write`]: the entry to
-/// apply (`None` when it was removed), its review if the write returned one,
-/// and a warning to show despite success.
+/// apply, its review if the write was a review write, and a warning to show
+/// despite success. No entry means it was removed, except after a review
+/// write, which leaves the entry shown as it is.
 struct Written {
     entry: Option<LibraryEntry>,
     review: Option<Review>,
@@ -1765,7 +1780,7 @@ impl From<Option<LibraryEntry>> for Written {
 impl From<ReviewedEntry> for Written {
     fn from(written: ReviewedEntry) -> Self {
         Self {
-            entry: Some(written.entry),
+            entry: written.entry,
             review: Some(written.review),
             warning: None,
         }

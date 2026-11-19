@@ -1401,7 +1401,9 @@ impl Review {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct ReviewedEntry {
-    pub entry: LibraryEntry,
+    /// `None` if the write's response had no entry and reading it back failed:
+    /// the review was written, and the entry was left as it was.
+    pub entry: Option<LibraryEntry>,
     pub review: Review,
 }
 

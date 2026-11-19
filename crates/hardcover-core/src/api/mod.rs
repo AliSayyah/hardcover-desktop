@@ -579,16 +579,21 @@ impl Client {
         }
         self.update_review(
             id,
+            "UpdateUserBookReview",
+            queries::UPDATE_USER_BOOK_REVIEW,
             json!({
                 "markdown": markdown,
                 "spoilers": has_spoilers,
                 "reviewedAt": reviewed_at.map(|d| d.to_string()),
             }),
             keep_status,
+            Review::new(markdown, has_spoilers, reviewed_at),
         )
     }
 
-    /// Deletes the review: its text, spoiler flag and date. The entry stays.
+    /// Deletes the review: its text in every form the app can write
+    /// (`review_markdown` and the website's `review_slate`), its spoiler flag
+    /// and its date. The entry stays.
     pub fn delete_review(
         &self,
         id: UserBookId,
@@ -596,16 +601,24 @@ impl Client {
     ) -> Result<ReviewedEntry> {
         self.update_review(
             id,
-            json!({ "markdown": null, "spoilers": false, "reviewedAt": null }),
+            "DeleteUserBookReview",
+            queries::DELETE_USER_BOOK_REVIEW,
+            json!({}),
             keep_status,
+            Review::default(),
         )
     }
 
+    /// `sent` is the review as written, used when the payload has none: a
+    /// read right after a write can be stale.
     fn update_review(
         &self,
         id: UserBookId,
+        op: &str,
+        doc: &str,
         review: Value,
         keep_status: ReadingStatus,
+        sent: Review,
     ) -> Result<ReviewedEntry> {
         #[derive(Deserialize)]
         struct Data {
@@ -615,12 +628,7 @@ impl Client {
         if let (Value::Object(vars), Value::Object(review)) = (&mut vars, review) {
             vars.extend(review);
         }
-        let data: Data = self.query(
-            "UpdateUserBookReview",
-            queries::UPDATE_USER_BOOK_REVIEW,
-            vars,
-            QUERY_TIMEOUT,
-        )?;
+        let data: Data = self.query(op, doc, vars, QUERY_TIMEOUT)?;
         let p = data
             .update_user_book
             .ok_or_else(|| Error::Api("`update_user_book` returned null".into()))?;
@@ -631,18 +639,16 @@ impl Client {
             && let Some(entry) = written.entry.into_entry()
         {
             return Ok(ReviewedEntry {
-                entry,
+                entry: Some(entry),
                 review: written.review.into_review(),
             });
         }
-        // No entry in the payload: read both back.
+        // No entry in the payload. The write succeeded, so a failed read-back
+        // only means the entry shown stays as it was.
         let id = p.id.map_or(id, UserBookId::new);
-        let entry = self.entry_by_id(id.get())?.ok_or_else(|| {
-            Error::Decode(format!("entry {id} not found after `update_user_book`"))
-        })?;
         Ok(ReviewedEntry {
-            entry,
-            review: self.review(id)?,
+            entry: self.entry_by_id(id.get()).ok().flatten(),
+            review: sent,
         })
     }
 

@@ -14,6 +14,7 @@ use gpui_kit::component::calendar::Date as CalendarDate;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::link::Link;
 use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{
@@ -45,12 +46,36 @@ struct Draft {
 }
 
 impl Draft {
+    /// What the editor opens with: the saved review, or a new one dated
+    /// `today`. An existing review keeps its date, even none.
+    fn base(saved: Option<&Review>, today: Date) -> Self {
+        match saved {
+            Some(review) => Draft {
+                text: review.markdown.clone().unwrap_or_default(),
+                spoilers: review.has_spoilers,
+                date: review.reviewed_at,
+            },
+            None => Draft {
+                text: String::new(),
+                spoilers: false,
+                date: Some(today),
+            },
+        }
+    }
+
     /// Differs from `other` in a way worth saving.
     fn differs(&self, other: &Draft) -> bool {
         self.text.trim() != other.text.trim()
             || self.spoilers != other.spoilers
             || self.date != other.date
     }
+}
+
+/// True if the app may write over `saved`: there is none, or it is Markdown.
+/// A review written on the website (only its own editor's form, and the plain
+/// text Hardcover makes from it) is read-only here, so a save can't flatten it.
+fn editable_here(saved: Option<&Review>) -> bool {
+    saved.is_none_or(|r| r.markdown.is_some())
 }
 
 /// Which review write is in flight.
@@ -139,6 +164,13 @@ impl BookDetailView {
         if self.review.saved != current {
             self.review.saved = None;
         }
+        // Drafts of entries no longer in the library can't be saved.
+        let model = self.model.read(cx);
+        if model.is_loaded() {
+            self.review
+                .drafts
+                .retain(|id, _| model.entry(*id).is_some());
+        }
         let Some(id) = current else {
             self.review.scheduled = None;
             self.review._fetch_task = None;
@@ -189,6 +221,13 @@ impl BookDetailView {
             .filter(Review::exists)
     }
 
+    /// The review of `id` is being fetched again, or will be: an editor
+    /// opened now would start from a review that may be out of date.
+    fn review_refreshing(&self, id: UserBookId, cx: &Context<Self>) -> bool {
+        let model = self.model.read(cx);
+        model.review(id).is_some_and(|s| s.fetching) || model.wants_review(id)
+    }
+
     fn review_draft(&self, cx: &Context<Self>) -> Draft {
         Draft {
             text: self.review.text.read(cx).value().to_string(),
@@ -199,10 +238,14 @@ impl BookDetailView {
 
     /// Unsaved changes in the editor.
     fn review_dirty(&self, cx: &Context<Self>) -> bool {
+        self.draft_dirty(&self.review_draft(cx))
+    }
+
+    fn draft_dirty(&self, draft: &Draft) -> bool {
         self.review
             .editing
             .as_ref()
-            .is_some_and(|(_, base)| self.review_draft(cx).differs(base))
+            .is_some_and(|(_, base)| draft.differs(base))
     }
 
     fn fill_review_editor(
@@ -234,19 +277,11 @@ impl BookDetailView {
             return;
         };
         let id = entry.user_book_id;
-        let today = chrono::Local::now().date_naive();
-        let base = match self.saved_review(id, cx) {
-            Some(review) => Draft {
-                text: review.text().unwrap_or_default().to_owned(),
-                spoilers: review.has_spoilers,
-                date: review.reviewed_at.or(Some(today)),
-            },
-            None => Draft {
-                text: String::new(),
-                spoilers: false,
-                date: Some(today),
-            },
-        };
+        let saved = self.saved_review(id, cx);
+        if !editable_here(saved.as_ref()) || self.review_refreshing(id, cx) {
+            return;
+        }
+        let base = Draft::base(saved.as_ref(), chrono::Local::now().date_naive());
         self.fill_review_editor(id, base.clone(), base, true, window, cx);
     }
 
@@ -283,6 +318,7 @@ impl BookDetailView {
         if self.review.editing.as_ref().map(|(e, _)| *e) != Some(id)
             || !self.review_dirty(cx)
             || !Services::global(cx).has_scope(WRITE_REVIEWS)
+            || !editable_here(self.saved_review(id, cx).as_ref())
         {
             return;
         }
@@ -324,6 +360,9 @@ impl BookDetailView {
             return;
         };
         let id = entry.user_book_id;
+        if !editable_here(self.saved_review(id, cx).as_ref()) {
+            return;
+        }
         let keep = entry.status;
         let title: SharedString = format!("Delete your review of “{}”?", entry.book.title).into();
         let view = cx.entity().downgrade();
@@ -347,7 +386,9 @@ impl BookDetailView {
                             "Couldn't delete your review",
                             move |client| {
                                 client.delete_review(id, keep).map(|written| {
-                                    let kept = written.review.exists();
+                                    // Plain text left behind is Hardcover's
+                                    // own copy; only Markdown is the app's.
+                                    let kept = written.review.markdown.is_some();
                                     let mut written = Written::from(written);
                                     if kept {
                                         written.warning = Some((
@@ -398,16 +439,24 @@ impl BookDetailView {
     ) -> impl IntoElement {
         let id = entry.user_book_id;
         let can_write = Services::global(cx).has_scope(WRITE_REVIEWS);
-        let slot = self.model.read(cx).review(id).cloned().unwrap_or_default();
-        let review = slot.review.clone().filter(Review::exists);
+        let model = self.model.read(cx);
+        let slot = model.review(id);
+        let fetched = slot.is_some_and(|s| s.review.is_some());
+        let fetching = slot.is_some_and(|s| s.fetching);
+        let error = slot.and_then(|s| s.error.clone());
+        let review = slot
+            .and_then(|s| s.review.as_ref())
+            .filter(|r| r.exists())
+            .cloned();
         let editing = self.review.editing.as_ref().is_some_and(|(e, _)| *e == id);
         let body: AnyElement = if editing {
-            self.render_review_editor(entry, review.is_some(), can_write, cx)
+            let editable = editable_here(review.as_ref());
+            self.render_review_editor(entry, review.is_some(), can_write, editable, cx)
                 .into_any_element()
         } else if let Some(review) = review {
-            self.render_saved_review(id, &review, can_write, cx)
+            self.render_saved_review(entry, review, can_write, cx)
                 .into_any_element()
-        } else if let Some(error) = slot.error.clone().filter(|_| slot.review.is_none()) {
+        } else if let Some(error) = error.clone().filter(|_| !fetched) {
             h_flex()
                 .gap_2()
                 .text_sm()
@@ -419,9 +468,9 @@ impl BookDetailView {
                         .on_click(cx.listener(|this, _, _, cx| this.retry_review(cx))),
                 )
                 .into_any_element()
-        } else if slot.review.is_none() {
+        } else if !fetched {
             // Not fetched yet: a pulse only while the request runs.
-            match slot.fetching {
+            match fetching {
                 true => v_flex()
                     .gap_2()
                     .child(Skeleton::new().h_4().w_full())
@@ -440,18 +489,39 @@ impl BookDetailView {
             self.render_no_review(entry, can_write, cx)
                 .into_any_element()
         };
-        section("Your review").child(body)
+        // A review shown from before a failed refetch may be out of date.
+        let refresh_failed = error.filter(|_| fetched).map(|error| {
+            h_flex()
+                .gap_2()
+                .items_center()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child("Couldn't refresh")
+                .child("·")
+                .child(
+                    Button::new("refresh-review")
+                        .ghost()
+                        .xsmall()
+                        .label("Try again")
+                        .tooltip(error)
+                        .on_click(cx.listener(|this, _, _, cx| this.retry_review(cx))),
+                )
+        });
+        section("Your review").child(body).children(refresh_failed)
     }
 
     fn render_saved_review(
         &self,
-        id: UserBookId,
-        review: &Review,
+        entry: &LibraryEntry,
+        review: Review,
         can_write: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let id = entry.user_book_id;
         let muted = cx.theme().muted_foreground;
         let busy = self.model.read(cx).pending_write(id).is_some();
+        let refreshing = self.review_refreshing(id, cx);
+        let editable = editable_here(Some(&review));
         let mut facts: Vec<String> = Vec::new();
         if let Some(date) = review.reviewed_at {
             facts.push(format!("Reviewed {}", date_text(date)));
@@ -459,31 +529,63 @@ impl BookDetailView {
         if review.has_spoilers {
             facts.push("Contains spoilers".to_owned());
         }
-        let Some(text) = review.text().map(str::to_owned) else {
-            // Nothing to edit from, so no editor: saving would replace it.
-            return div()
+        // The app writes only Markdown; any other review is changed on
+        // Hardcover, so a save here can't flatten it.
+        let url = entry.book.web_url();
+        let on_hardcover = move |note: &'static str| {
+            h_flex()
+                .flex_wrap()
+                .gap_x_2()
                 .text_sm()
                 .text_color(muted)
-                .child(
-                    "You have a review of this book that this app can't show. \
-                     Open it on Hardcover to read or change it.",
-                )
-                .into_any_element();
+                .child(note)
+                .when_some(url, |this, url| {
+                    this.child(
+                        Link::new("edit-review-on-hardcover")
+                            .href(url)
+                            .child("Edit on Hardcover"),
+                    )
+                })
         };
-        let body: AnyElement = match review.markdown.is_some() {
-            true => TextView::markdown(ElementId::Name(format!("review-{id}").into()), text)
-                .selectable(true)
-                .into_any_element(),
+        let body: AnyElement = match (review.markdown, review.plain) {
+            (Some(markdown), _) => {
+                TextView::markdown(ElementId::Name(format!("review-{id}").into()), markdown)
+                    .selectable(true)
+                    .into_any_element()
+            }
             // Plain text from Hardcover: paragraphs as written, not Markdown.
-            false => v_flex()
+            (None, Some(plain)) => v_flex()
                 .gap_2()
                 .children(
-                    text.split('\n')
+                    plain
+                        .split('\n')
                         .map(str::trim)
                         .filter(|p| !p.is_empty())
                         .map(|p| div().child(p.to_owned())),
                 )
                 .into_any_element(),
+            // Nothing to edit from, so no editor: saving would replace it.
+            (None, None) => {
+                return on_hardcover(
+                    "You have a review of this book that this app can't show. \
+                     Open it on Hardcover to read or change it.",
+                )
+                .into_any_element();
+            }
+        };
+        let edit: AnyElement = if editable {
+            Button::new("edit-review")
+                .outline()
+                .small()
+                .label("Edit…")
+                .disabled(!can_write || busy || refreshing)
+                .when(!can_write, |this| {
+                    this.tooltip(needs_permission(WRITE_REVIEWS))
+                })
+                .on_click(cx.listener(|this, _, window, cx| this.open_review_editor(window, cx)))
+                .into_any_element()
+        } else {
+            on_hardcover("Written on the Hardcover website, and changed there.").into_any_element()
         };
         v_flex()
             .gap_3()
@@ -495,19 +597,7 @@ impl BookDetailView {
                     .text_sm()
                     .text_color(muted)
                     .when(!facts.is_empty(), |this| this.child(facts.join(" · ")))
-                    .child(
-                        Button::new("edit-review")
-                            .outline()
-                            .small()
-                            .label("Edit…")
-                            .disabled(!can_write || busy)
-                            .when(!can_write, |this| {
-                                this.tooltip(needs_permission(WRITE_REVIEWS))
-                            })
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_review_editor(window, cx)
-                            })),
-                    )
+                    .child(edit)
                     .when(self.review.saved == Some(id), |this| {
                         this.child(
                             h_flex()
@@ -527,11 +617,9 @@ impl BookDetailView {
         can_write: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let busy = self
-            .model
-            .read(cx)
-            .pending_write(entry.user_book_id)
-            .is_some();
+        let id = entry.user_book_id;
+        let busy = self.model.read(cx).pending_write(id).is_some();
+        let refreshing = self.review_refreshing(id, cx);
         h_flex()
             .flex_wrap()
             .gap_2()
@@ -546,7 +634,7 @@ impl BookDetailView {
                     .small()
                     .icon(IconName::Plus)
                     .label("Write a review…")
-                    .disabled(!can_write || busy)
+                    .disabled(!can_write || busy || refreshing)
                     .when(!can_write, |this| {
                         this.tooltip(needs_permission(WRITE_REVIEWS))
                     })
@@ -561,6 +649,7 @@ impl BookDetailView {
         entry: &LibraryEntry,
         has_review: bool,
         can_write: bool,
+        editable: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
@@ -569,7 +658,8 @@ impl BookDetailView {
             .flatten();
         let saving = writing.is_some();
         let draft = self.review_draft(cx);
-        let can_save = can_write && !draft.text.trim().is_empty() && self.review_dirty(cx);
+        let can_save =
+            can_write && editable && !draft.text.trim().is_empty() && self.draft_dirty(&draft);
         v_flex()
             .w_full()
             .gap_3()
@@ -611,10 +701,13 @@ impl BookDetailView {
                             .primary()
                             .small()
                             .label("Save")
-                            .tooltip(if can_write {
-                                "Ctrl+Enter".to_owned()
-                            } else {
+                            .tooltip(if !can_write {
                                 needs_permission(WRITE_REVIEWS)
+                            } else if !editable {
+                                "Your review was changed on the website. Edit it on Hardcover."
+                                    .to_owned()
+                            } else {
+                                "Ctrl+Enter".to_owned()
                             })
                             .loading(writing == Some(ReviewWrite::Save))
                             .disabled(!can_save || pending.is_some())
@@ -640,7 +733,7 @@ impl BookDetailView {
                                 .small()
                                 .label("Delete review…")
                                 .loading(writing == Some(ReviewWrite::Delete))
-                                .disabled(!can_write || pending.is_some())
+                                .disabled(!can_write || !editable || pending.is_some())
                                 .when(!can_write, |this| {
                                     this.tooltip(needs_permission(WRITE_REVIEWS))
                                 })
@@ -674,5 +767,34 @@ mod tests {
         let mut later = base.clone();
         later.date = Date::from_ymd_opt(2026, 1, 3);
         assert!(later.differs(&base));
+    }
+
+    #[test]
+    fn an_existing_review_keeps_its_date_and_a_new_one_is_dated_today() {
+        let today = Date::from_ymd_opt(2026, 5, 6).unwrap();
+        let new = Draft::base(None, today);
+        assert_eq!(new.date, Some(today));
+        assert!(new.text.is_empty());
+
+        let mut undated = Review::new("Loved it.", true, None);
+        assert_eq!(Draft::base(Some(&undated), today).date, None);
+        undated.reviewed_at = Date::from_ymd_opt(2025, 1, 2);
+        let base = Draft::base(Some(&undated), today);
+        assert_eq!(base.date, Date::from_ymd_opt(2025, 1, 2));
+        assert_eq!(base.text, "Loved it.");
+        assert!(base.spoilers);
+    }
+
+    #[test]
+    fn only_a_markdown_review_or_none_is_edited_here() {
+        assert!(editable_here(None));
+        assert!(editable_here(Some(&Review::new("Mine.", false, None))));
+        // Written on the website: Hardcover's plain copy, or nothing readable.
+        let mut website = Review::new("Mine.", false, None);
+        website.markdown = None;
+        website.plain = Some("Mine.".to_owned());
+        assert!(!editable_here(Some(&website)));
+        website.plain = None;
+        assert!(!editable_here(Some(&website)));
     }
 }

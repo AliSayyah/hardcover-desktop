@@ -685,6 +685,7 @@ fn answer(op: &str, vars: &Value) -> Value {
         | "DeleteUserBookRead"
         | "EditionOwned"
         | "UpdateUserBookReview"
+        | "DeleteUserBookReview"
         | "InsertGoal"
         | "UpdateGoal"
         | "DeleteGoal" => {
