@@ -311,8 +311,14 @@ impl Render for Reauthorize {
                 .child(
                     h_flex()
                         .gap_2()
-                        .child(Spinner::new().xsmall())
-                        .child(div().child("Waiting for approval in your browser…")),
+                        .child(div().flex_shrink_0().child(Spinner::new().xsmall()))
+                        // Wraps inside the narrow sidebar card.
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child("Waiting for approval in your browser…"),
+                        ),
                 )
                 .child(
                     h_flex()
