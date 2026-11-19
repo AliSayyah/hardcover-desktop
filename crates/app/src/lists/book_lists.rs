@@ -187,11 +187,10 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
     };
     let note: Option<SharedString> = match (&rows, reason) {
         (_, Some(reason)) => Some(reason),
-        (Some(rows), None) if owned => {
-            let this_edition =
-                edition.is_some_and(|e| rows.iter().any(|r| r.edition_id == Some(e.id)));
-            (!this_edition).then(|| "Another edition is on your Owned list.".into())
-        }
+        // Only worth saying when the entry names an edition that isn't the one owned.
+        (Some(rows), None) if owned => edition
+            .filter(|e| !rows.iter().any(|r| r.edition_id == Some(e.id)))
+            .map(|_| "Another edition is on your Owned list.".into()),
         _ => None,
     };
     let entry = entry.clone();
