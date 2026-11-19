@@ -94,6 +94,8 @@ The workspace has two crates, in `crates/*`.
 - Setting a rating without a status moves the book to Read. `set_rating` therefore takes a `keep_status` and resends the current status.
 - Reading an entry right after a write can return stale data. Use the entry from the mutation's own response, and refetch only when it is missing.
 - Moving a book to Currently Reading starts a new read. A progress update with no open read moves the book to Currently Reading first.
+- An entry can have many reads. The current one is the newest unfinished read, else the most recently finished: a past read added later gets the highest id.
+- `edition_owned(id)` takes an edition id and only adds it to the user's Owned list (and posts to their feed). Taking it off needs `delete_list_book` (`write:lists`), reading the list needs `read:lists`, and `user_books.owned` does not follow the list.
 - Search has a 2 s server timeout. The `_like`, `_ilike` and regex filters are disabled.
 - docs.hardcover.app blocks automated fetches. Read the docs source at github.com/hardcoverapp/hardcover-docs instead.
 

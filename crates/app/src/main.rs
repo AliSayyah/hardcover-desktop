@@ -31,6 +31,7 @@ actions!(
         ShowRead,
         ShowPaused,
         ShowDidNotFinish,
+        ShowIgnored,
         OpenSettings,
         ShowAbout,
     ]
@@ -54,6 +55,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-3", ShowRead, None),
         KeyBinding::new("ctrl-4", ShowPaused, None),
         KeyBinding::new("ctrl-5", ShowDidNotFinish, None),
+        KeyBinding::new("ctrl-6", ShowIgnored, None),
         KeyBinding::new(
             "right",
             star_rating::IncreaseRating,

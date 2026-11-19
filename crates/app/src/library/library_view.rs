@@ -318,8 +318,13 @@ impl LibraryView {
         } else {
             EmptyCopy {
                 title: format!("No books in {shelf}").into(),
-                description: "Books you shelve here on Hardcover or from Search appear here."
-                    .into(),
+                description: match self.status {
+                    ReadingStatus::Ignored => {
+                        "Books you hide from recommendations on Hardcover appear here."
+                    }
+                    _ => "Books you shelve here on Hardcover or from Search appear here.",
+                }
+                .into(),
             }
         };
         self.rows_key = Some(key);

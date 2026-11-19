@@ -26,10 +26,12 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 
 ## Features
 
-- **Your library by shelf:** Currently Reading, Want to Read, Read, Paused and Did Not Finish, with counts in the sidebar.
+- **Your library by shelf:** Currently Reading, Want to Read, Read, Paused and Did Not Finish, with counts in the sidebar, plus the books you ignored.
 - **Search:** find any book on Hardcover and add it to a shelf.
 - **Book details:** the authors, series, page count, average rating and description.
-- **Your reading:** set the status and rating, update your page progress, set the dates you started and finished, or remove a book.
+- **Your reading:** set the status and rating, update your progress in pages (or time, for an audiobook), set the dates you started and finished, or remove a book.
+- **Your copy:** choose the edition you read, keep private notes, choose who can see the book, and add the edition to your Owned list.
+- **Every read:** see each time you read a book, add a re-read or an earlier read, change its dates, or delete it.
 - **Offline access:** your library and covers are cached on your computer, so they open instantly and stay readable without a connection.
 - **Secure sign-in:** you sign in through Hardcover in your browser (OAuth with PKCE). The app never sees your password, and the session is stored in your system keyring.
 - **Self-updating:** the app offers each new release and installs it in one click, after verifying its signature.
@@ -45,7 +47,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
   | Shortcut | Action |
   | --- | --- |
   | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search |
-  | <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>5</kbd> | Go to a shelf |
+  | <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>6</kbd> | Go to a shelf |
   | <kbd>Ctrl</kbd>+<kbd>R</kbd> | Refresh the library |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Settings |
   | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
