@@ -9,10 +9,13 @@
 //! - [`covers`]: on-disk cache of cover images.
 //! - [`prefs`]: the user's preferences, a small JSON file.
 //! - [`update`]: self-update from signed GitHub releases.
+//! - `demo` (with the `demo` feature): an invented library served without a network.
 
 pub mod api;
 pub mod auth;
 pub mod covers;
+#[cfg(any(test, feature = "demo"))]
+pub mod demo;
 pub mod error;
 pub mod prefs;
 pub mod store;

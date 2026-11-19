@@ -19,6 +19,11 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 > [!NOTE]
 > This is a community project. It is not made by, affiliated with, or endorsed by Hardcover.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/library-dark.png">
+  <img src="docs/screenshots/library-light.png" alt="Hardcover Desktop showing the Currently reading shelf, with a book's details and reading progress beside it">
+</picture>
+
 ## Features
 
 - **Your library by shelf:** Currently Reading, Want to Read, Read, Paused and Did Not Finish, with counts in the sidebar.
@@ -29,6 +34,12 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 - **Secure sign-in:** you sign in through Hardcover in your browser (OAuth with PKCE). The app never sees your password, and the session is stored in your system keyring.
 - **Self-updating:** the app offers each new release and installs it in one click, after verifying its signature.
 - **Settings:** choose a light or dark theme or follow the system, and turn automatic update checks on or off.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/search-dark.png">
+  <img src="docs/screenshots/search-light.png" alt="Searching for an author, with one of the results open beside the list">
+</picture>
+
 - **Keyboard first:**
 
   | Shortcut | Action |
@@ -100,6 +111,14 @@ cargo run -p hardcover-desktop                # run the app
 cargo test --workspace                        # run the tests
 cargo build --profile dist -p hardcover-desktop  # optimized, stripped build
 ```
+
+To try the app without an account, build it with the `demo` feature:
+
+```sh
+cargo run -p hardcover-desktop --features demo
+```
+
+It shows an invented library: made-up books, authors and covers, for a reader called `demo_reader`. The demo never reads your keyring, cache or settings and never goes online, and edits are refused. The screenshots above come from it.
 
 The workspace has two crates:
 - `crates/hardcover-core`: the Hardcover GraphQL client, OAuth sign-in, the library and cover caches, and self-update. It has no GUI code.

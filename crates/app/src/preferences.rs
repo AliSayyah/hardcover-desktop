@@ -40,6 +40,10 @@ impl AppPreferences {
 
 /// Blocking: reads the preferences file. Runs in `main` before the window opens.
 pub fn load() -> (Preferences, Option<PathBuf>) {
+    // A demo build keeps its choices for the run only.
+    if cfg!(feature = "demo") {
+        return (Preferences::default(), None);
+    }
     match Preferences::default_path() {
         Ok(path) => (Preferences::load(&path), Some(path)),
         Err(e) => {
