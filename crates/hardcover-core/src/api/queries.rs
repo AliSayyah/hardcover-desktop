@@ -338,6 +338,73 @@ mod tests {
         );
     }
 
+    fn committed_scope_map() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../schema/hardcover-capabilities.json"
+        ))
+        .unwrap()
+    }
+
+    fn usages(docs: &[(&'static str, &'static str)]) -> Vec<(&'static str, sdl::Usage)> {
+        docs.iter()
+            .map(|(name, doc)| (*name, sdl::usage(sdl::schema(), name, doc).unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn the_requested_scopes_cover_every_document() {
+        let report = sdl::check_scopes(
+            &committed_scope_map(),
+            &crate::auth::DEFAULT_SCOPES,
+            &usages(ALL),
+        )
+        .unwrap();
+        assert!(report.problems.is_empty(), "{:#?}", report.problems);
+        assert!(report.notes.is_empty(), "{:#?}", report.notes);
+    }
+
+    #[test]
+    fn scope_check_sees_argument_and_column_gates() {
+        let caps = committed_scope_map();
+        let library_only = ["read:me", "read:catalog", "read:library", "write:library"];
+
+        // `review_markdown` is gated by write:reviews, which grants no operation of its own.
+        const LITERAL_REVIEW: &str = "mutation R($id: Int!) {
+  update_user_book(id: $id, object: {review_markdown: \"Great\"}) { id }
+}";
+        let docs = usages(&[("LITERAL_REVIEW", LITERAL_REVIEW)]);
+        let report = sdl::check_scopes(&caps, &library_only, &docs).unwrap();
+        assert_eq!(report.problems.len(), 1, "{:#?}", report.problems);
+        assert!(report.problems[0].contains("`review_markdown`"));
+        let mut with_reviews = library_only.to_vec();
+        with_reviews.push("write:reviews");
+        let report = sdl::check_scopes(&caps, &with_reviews, &docs).unwrap();
+        assert!(report.problems.is_empty(), "{:#?}", report.problems);
+
+        // Through a variable it can only be a note.
+        let docs = usages(&[("UPDATE_USER_BOOK", UPDATE_USER_BOOK)]);
+        let report = sdl::check_scopes(&caps, &library_only, &docs).unwrap();
+        assert!(report.problems.is_empty(), "{:#?}", report.problems);
+        assert!(
+            report.notes.iter().any(|n| n.contains("`review_markdown`")),
+            "{:#?}",
+            report.notes
+        );
+
+        // `email` is a column gated by read:me:email.
+        let docs = usages(&[("EMAIL", "query E { me { id email } }")]);
+        let report = sdl::check_scopes(&caps, &["read:me:content"], &docs).unwrap();
+        assert!(
+            report.problems.iter().any(|p| p.contains("`email`")),
+            "{:#?}",
+            report.problems
+        );
+
+        // A scope that disappeared from the map breaks sign-in.
+        let report = sdl::check_scopes(&caps, &["read:me", "read:nothing"], &[]).unwrap();
+        assert_eq!(report.problems.len(), 1);
+    }
+
     #[test]
     fn every_document_has_one_top_level_field() {
         use apollo_compiler::ExecutableDocument;

@@ -26,7 +26,7 @@ cargo run -p hardcover-core --example api_check -- --check        # same, withou
 `api_check` is local only and is not run in CI. It uses `HARDCOVER_TOKEN` if set, otherwise the app's keyring session; both see the same schema. It does three things:
 1. Introspects the live schema and lists added, removed and changed types and fields.
 2. Validates every document in `queries::ALL` against the live schema.
-3. Checks the public scope map (`https://api.hardcover.app/capabilities.json`): `auth::DEFAULT_SCOPES` must still grant every top-level field the app uses.
+3. Checks the public scope map (`https://api.hardcover.app/capabilities.json`): every scope in `auth::DEFAULT_SCOPES` must still exist, and together they must grant every top-level field, gated column and gated argument the documents use. Some scopes gate only arguments: `write:reviews` grants no operation, just the `review*` fields of `insert_user_book`/`update_user_book`. Arguments inside a variable's value can't be seen statically, so an ungranted one there is a note, not a failure. The same check runs offline against `schema/` in the unit tests (`the_requested_scopes_cover_every_document`).
 
 It then rewrites `schema/hardcover.graphql` and `schema/hardcover-capabilities.json`; review the change with `git diff schema/`. It exits non-zero if a document breaks or a scope no longer covers it. Never edit `schema/` by hand.
 
@@ -58,6 +58,9 @@ The workspace has two crates, in `crates/*`.
   - Authorization code with PKCE S256, redirected to a loopback `http://127.0.0.1:<port>/callback`. `state` and `iss` are checked.
   - `Session` stores tokens in the system keyring (`KeyringTokenStore`, secret-service) and refreshes them proactively. Refresh tokens are single-use, so refreshes are serialized.
   - `StaticToken` is the `HARDCOVER_TOKEN` path.
+  - Scopes: `DEFAULT_SCOPES` is `read:me read:catalog read:library write:library write:reviews read:goals write:goals read:lists write:lists`; the names are constants in `auth::scopes`. Adding one makes every existing session show the "sign in again" notice, so add new scopes in batches. `GrantedScopes` checks a grant, following the scope map's `implies` (`read:lists` covers `read:lists:public`; `all` covers everything); a test keeps its table in step with `schema/hardcover-capabilities.json`.
+  - The granted scope is recorded with the tokens. A code exchange whose response has no `scope` records the requested scopes (RFC 6749 §5.1); a refresh without one keeps the recorded scope. Tokens with no recorded scope were saved by 0.1.x and count as `LEGACY_SCOPES` (the four it requested).
+  - `Session::replace` swaps a new sign-in's tokens into the existing session (the "sign in again" path), so every `Client` on it moves to them. Never start a second `Session` next to a live one: its refresh would write the old grant back over the new one. The old grant is not revoked.
 - `store`: `LibraryCache`, a SQLite database at `~/.local/share/hardcover-desktop/library.sqlite3`.
 - `covers`: `CoverCache`, on disk at `~/.cache/hardcover-desktop/covers`.
 - `demo` (the `demo` feature, and in tests): `demo::client()` answers every GraphQL operation from `demo/catalogue.json` through a fake transport, so queries, parsing and paging run as they do against Hardcover. Writes fail with a read-only error.
@@ -70,7 +73,8 @@ The workspace has two crates, in `crates/*`.
 **`app`** (the package is named `hardcover-desktop`) is the GPUI UI.
 - `main.rs` sets up actions, keybindings and the window.
 - `app_state.rs` holds the GPUI globals:
-  - `Services` (client, session and cache) exists only while signed in.
+  - `Services` (client, session, cache and a snapshot of the granted scopes) exists only while signed in. Feature code asks `Services::global(cx).has_scope(scopes::READ_GOALS)`; it is cheap enough for `render`. Never ask the `Session` for its scope from the UI thread: its lock is held across a token refresh. A personal token (`HARDCOVER_TOKEN`) and the demo count as having every scope.
+  - A feature whose scope is missing hides, or shows a disabled state with `format::needs_permission`. A session that lacks any of `DEFAULT_SCOPES` gets the sidebar notice (`sign_in/reauthorize.rs`): "Sign in again…" runs the browser sign-in, checks that the same account approved, and calls `Session::replace`; the cache and the library stay. When Hardcover answers `insufficient_scope` for a scope the grant lists, call `Services::scope_refused`, which counts it as missing.
   - `CoverService` lives for the whole run.
   - `startup()` picks the auth path in this order: `HARDCOVER_TOKEN`, then the keyring session, then the sign-in screen.
   - With the `demo` feature, `startup()` always returns the demo client with an in-memory cache, before anything real is opened. Covers go to a temporary directory, and preferences are not saved.

@@ -5,8 +5,15 @@
 //!    added, removed or changed since the committed copy.
 //! 2. Validates every document the client sends against the live schema.
 //! 3. Fetches the public OAuth scope map (`/capabilities.json`) and checks that
-//!    the scopes the app requests still grant every top-level field it uses,
-//!    and lists scope changes since `schema/hardcover-capabilities.json`.
+//!    every scope the app requests still exists and that together they grant
+//!    every top-level field (operation), gated column and gated argument the
+//!    documents use, then lists scope changes since
+//!    `schema/hardcover-capabilities.json`. Some scopes gate only arguments
+//!    (`write:reviews` grants the `review*` fields of `update_user_book`, no
+//!    operation). Arguments written out in a document are checked exactly;
+//!    the fields of an input-object *variable* are only what the client can
+//!    send, so an ungranted one is printed as a note, not a failure. The same
+//!    check runs offline against `schema/` in the unit tests.
 //!
 //! Then it writes both files, so `git diff schema/` shows the full change.
 //! Exits non-zero when a document no longer validates or a scope no longer
@@ -95,25 +102,24 @@ fn run() -> Result<bool, Error> {
     // ----- OAuth scopes -----
     println!("\nFetching {CAPABILITIES}");
     let caps = get_json(CAPABILITIES)?;
-    let granted = granted_operations(&caps, &DEFAULT_SCOPES)?;
-    let mut uncovered = Vec::new();
-    for (name, doc) in hardcover_core::api::DOCUMENTS {
-        for field in sdl::top_level_fields(&live, name, doc) {
-            if !granted.contains(field.as_str()) {
-                uncovered.push(format!("{name} uses `{field}`"));
-            }
-        }
-    }
-    if uncovered.is_empty() {
+    let usages: Vec<(&str, sdl::Usage)> = hardcover_core::api::DOCUMENTS
+        .iter()
+        .filter_map(|(name, doc)| Some((*name, sdl::usage(&live, name, doc)?)))
+        .collect();
+    let scopes = sdl::check_scopes(&caps, &DEFAULT_SCOPES, &usages)?;
+    if scopes.problems.is_empty() {
         println!(
-            "  the app's scopes ({}) cover every top-level field it uses",
+            "  the app's scopes ({}) cover every operation, column and argument it uses",
             DEFAULT_SCOPES.join(" ")
         );
     } else {
         ok = false;
-        for u in &uncovered {
-            println!("  NOT GRANTED  {u}");
+        for p in &scopes.problems {
+            println!("  NOT GRANTED  {p}");
         }
+    }
+    for note in &scopes.notes {
+        println!("  note: {note}");
     }
     let caps_json = serde_json::to_string_pretty(&caps)? + "\n";
     let old_caps = std::fs::read_to_string(&caps_path).unwrap_or_default();
@@ -138,7 +144,7 @@ fn run() -> Result<bool, Error> {
     } else {
         println!("schema/ matches the live API.");
     }
-    if !ok && (bad_documents > 0 || !uncovered.is_empty()) {
+    if !ok && (bad_documents > 0 || !scopes.problems.is_empty()) {
         println!("The app is BROKEN against the live API: see BROKEN / NOT GRANTED above.");
     }
     Ok(ok)
@@ -420,31 +426,6 @@ fn report_scope_diff(old: &str, new: &Value) {
     if !listed {
         println!("  no operations moved between scopes; see `git diff schema/` for the details");
     }
-}
-
-/// Top-level fields the given scopes grant, following `implies`.
-fn granted_operations(caps: &Value, scopes: &[&str]) -> Result<BTreeSet<String>, Error> {
-    let by_scope: BTreeMap<&str, &Value> = list(&caps["scopes"])
-        .filter_map(|s| Some((s["scope"].as_str()?, s)))
-        .collect();
-    if by_scope.is_empty() {
-        return Err("capabilities.json lists no scopes".into());
-    }
-    let mut pending: Vec<&str> = scopes.to_vec();
-    let mut seen = BTreeSet::new();
-    let mut granted = BTreeSet::new();
-    while let Some(scope) = pending.pop() {
-        if !seen.insert(scope) {
-            continue;
-        }
-        let Some(s) = by_scope.get(scope) else {
-            println!("  scope {scope} no longer exists");
-            continue;
-        };
-        granted.extend(list(&s["operations"]).filter_map(|o| o.as_str().map(str::to_owned)));
-        pending.extend(list(&s["implies"]).filter_map(|i| i.as_str()));
-    }
-    Ok(granted)
 }
 
 fn write(path: &PathBuf, contents: &str, changed: bool) -> Result<(), Error> {

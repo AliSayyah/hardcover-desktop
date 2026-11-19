@@ -4,6 +4,7 @@
 //! Plain functions without GPUI so they can be unit tested directly.
 
 use chrono::{DateTime, Datelike, TimeZone};
+use hardcover_core::auth::scopes;
 use hardcover_core::{Date, EditionSummary, Error, Length, LibraryEntry, Rating, ReadingStatus};
 
 /// Sentence-case label for a status, as the app shows it.
@@ -245,7 +246,7 @@ pub fn error_message(error: &Error) -> String {
         }
         Error::Unauthorized => "Your session has expired. Sign out and sign in again.".to_owned(),
         Error::InsufficientScope { .. } => {
-            "Hardcover didn't grant this app access to your library. Sign out and sign in again."
+            "Hardcover didn't grant this app permission for this. Sign in again to grant it."
                 .to_owned()
         }
         Error::InvalidInput(msg) => sentence(msg),
@@ -256,6 +257,42 @@ pub fn error_message(error: &Error) -> String {
         Error::Decode(_) => "Hardcover sent an unexpected response. Try again later.".to_owned(),
         _ => format!("{error}."),
     }
+}
+
+/// What the user loses without a scope, in the words of the permissions notice.
+fn scope_feature(scope: &str) -> &'static str {
+    match scope {
+        scopes::READ_GOALS | scopes::WRITE_GOALS => "reading goals",
+        scopes::WRITE_REVIEWS => "reviews",
+        scopes::READ_LISTS | scopes::WRITE_LISTS => "lists",
+        _ => "your library",
+    }
+}
+
+/// `a`, `a and b`, `a, b and c`.
+fn join_and(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The features that `missing` scopes cover, in a fixed order.
+pub fn missing_features(missing: &[&str]) -> Vec<&'static str> {
+    const ORDER: [&str; 4] = ["your library", "reading goals", "reviews", "lists"];
+    ORDER
+        .into_iter()
+        .filter(|f| missing.iter().any(|s| scope_feature(s) == *f))
+        .collect()
+}
+
+/// The permissions notice: which features need the user to sign in again.
+pub fn permissions_message(missing: &[&str]) -> String {
+    format!(
+        "Hardcover Desktop needs new permissions for {}. Sign in again to grant them.",
+        join_and(&missing_features(missing))
+    )
 }
 
 /// Upper-cases the first letter and ends with a period.
@@ -294,6 +331,30 @@ mod tests {
         read.progress_percent = percent;
         e.upsert_read(read);
         e
+    }
+
+    #[test]
+    fn permissions_message_names_the_missing_features() {
+        let missing = [
+            scopes::WRITE_REVIEWS,
+            scopes::READ_GOALS,
+            scopes::WRITE_GOALS,
+            scopes::READ_LISTS,
+            scopes::WRITE_LISTS,
+        ];
+        assert_eq!(
+            permissions_message(&missing),
+            "Hardcover Desktop needs new permissions for reading goals, reviews and lists. \
+             Sign in again to grant them."
+        );
+        assert_eq!(
+            permissions_message(&[scopes::WRITE_GOALS]),
+            "Hardcover Desktop needs new permissions for reading goals. Sign in again to grant them."
+        );
+        assert_eq!(
+            missing_features(&[scopes::WRITE_LISTS, scopes::READ_LIBRARY]),
+            ["your library", "lists"]
+        );
     }
 
     #[test]

@@ -38,6 +38,7 @@ use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
 use crate::search::search_view::SearchView;
 use crate::settings_view::{SettingsView, SignOutRequested};
+use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
 use crate::{
@@ -76,9 +77,11 @@ impl Shell {
                         client,
                         session,
                         cache,
+                        scopes,
                     } => {
                         this.cache = cache.clone();
-                        this.enter_workspace(Services::new(client, session, cache), window, cx);
+                        let services = Services::new(client, session, cache, scopes);
+                        this.enter_workspace(services, window, cx);
                     }
                     Startup::SignedOut { cache } => {
                         this.cache = cache;
@@ -120,6 +123,7 @@ impl Shell {
                         event.client.clone(),
                         Some(event.session.clone()),
                         this.cache.clone(),
+                        event.scopes.clone(),
                     );
                     this.enter_workspace(services, window, cx);
                 }),
@@ -167,6 +171,8 @@ pub struct Workspace {
     author_page: Entity<AuthorView>,
     book_page: Entity<BookDetailView>,
     page_focus: FocusHandle,
+    /// Asks a session that lacks scopes to sign in again.
+    reauthorize: Entity<Reauthorize>,
     signing_out: bool,
     /// The open Settings dialog's sign-out request.
     _settings: Option<Subscription>,
@@ -192,6 +198,7 @@ impl Workspace {
         let author_page = cx.new(|cx| AuthorView::new(model.clone(), window, cx));
         let book_page = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
         let navigator = Navigator::init(cx);
+        let reauthorize = cx.new(|_| Reauthorize::new(model.clone()));
         model.update(cx, |m, cx| m.start(cx));
         let clock = cx.spawn(async move |this, cx| {
             loop {
@@ -207,6 +214,10 @@ impl Workspace {
         let subscriptions = vec![
             cx.observe(&model, |_, _, cx| cx.notify()),
             cx.observe(&updates, |_, _, cx| cx.notify()),
+            cx.observe(&reauthorize, |_, _, cx| cx.notify()),
+            cx.subscribe(&reauthorize, |this, _, event: &Reauthorized, cx| {
+                this.on_reauthorized(event, cx)
+            }),
             cx.subscribe_in(&updates, window, |this, _, event, window, cx| {
                 this.on_update_event(event, window, cx)
             }),
@@ -235,6 +246,7 @@ impl Workspace {
             author_page,
             book_page,
             page_focus: cx.focus_handle(),
+            reauthorize,
             signing_out: false,
             _settings: None,
             _clock: clock,
@@ -360,6 +372,12 @@ impl Workspace {
         self.show(Destination::Shelf(status), window, cx);
     }
 
+    /// The session now holds a new grant: features it adds come alive.
+    fn on_reauthorized(&mut self, event: &Reauthorized, cx: &mut Context<Self>) {
+        Services::set_scopes(event.scopes.clone(), cx);
+        cx.notify();
+    }
+
     fn refresh(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, |m, cx| m.sync(cx));
     }
@@ -476,6 +494,10 @@ impl Workspace {
                 v_flex()
                     .w_full()
                     .gap_2()
+                    .when(
+                        self.reauthorize.read(cx).is_needed(Services::global(cx)),
+                        |this| this.child(self.reauthorize.clone()),
+                    )
                     .children(self.render_update(cx))
                     .child(self.render_account(window, cx)),
             )

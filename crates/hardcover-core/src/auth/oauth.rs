@@ -28,6 +28,8 @@ pub(crate) enum TokenError {
     Transient(Error),
 }
 
+/// The returned tokens always carry a scope: a response without one granted
+/// exactly what was requested (RFC 6749 §5.1), so that is recorded instead.
 pub(crate) fn exchange_code(
     http: &dyn HttpTransport,
     cfg: &OAuthConfig,
@@ -35,7 +37,7 @@ pub(crate) fn exchange_code(
     redirect_uri: &str,
     verifier: &str,
 ) -> std::result::Result<Tokens, TokenError> {
-    token_request(
+    let tokens = token_request(
         http,
         cfg,
         &[
@@ -45,10 +47,16 @@ pub(crate) fn exchange_code(
             ("code_verifier", verifier),
             ("client_id", cfg.client_id()),
         ],
-    )
+    )?;
+    Ok(match tokens.scope() {
+        Some(_) => tokens,
+        None => tokens.with_scope(Some(cfg.scopes().join(" "))),
+    })
 }
 
 /// One attempt only: refresh tokens rotate, and replaying one revokes the chain.
+/// The result's scope is `None` when the response left it out, which means it
+/// did not change (RFC 6749 §5.1); the caller keeps the previous one.
 pub(crate) fn refresh(
     http: &dyn HttpTransport,
     cfg: &OAuthConfig,
@@ -208,6 +216,36 @@ mod tests {
             parse_token_response(&resp(200, "not json"), now),
             Err(TokenError::Transient(_))
         ));
+    }
+
+    #[test]
+    fn code_exchange_records_the_requested_scopes_when_the_response_has_none() {
+        let http = FakeTransport::new();
+        let cfg = OAuthConfig::new("cid").with_scopes(["read:me", "read:goals"]);
+        http.push(
+            200,
+            r#"{"access_token":"at","refresh_token":"rt","expires_in":60}"#,
+        );
+        let t = exchange_code(&http, &cfg, "code", "http://127.0.0.1/callback", "v")
+            .ok()
+            .unwrap();
+        assert_eq!(t.scope(), Some("read:me read:goals"));
+        // A narrower grant is kept as the server reported it.
+        http.push(200, r#"{"access_token":"at","scope":"read:me"}"#);
+        let t = exchange_code(&http, &cfg, "code", "http://127.0.0.1/callback", "v")
+            .ok()
+            .unwrap();
+        assert_eq!(t.scope(), Some("read:me"));
+    }
+
+    #[test]
+    fn refresh_leaves_a_missing_scope_missing() {
+        let http = FakeTransport::new();
+        http.push(200, r#"{"access_token":"at","refresh_token":"rt"}"#);
+        let t = refresh(&http, &OAuthConfig::new("cid"), "rt0")
+            .ok()
+            .unwrap();
+        assert_eq!(t.scope(), None);
     }
 
     #[test]
