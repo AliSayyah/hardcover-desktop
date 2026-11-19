@@ -4,9 +4,9 @@
 //! the rest of the client (queries, parsing, paging) runs exactly as it does
 //! against Hardcover. The books are real, popular ones, with facts and cover
 //! links from Hardcover and descriptions written for the demo; the reader,
-//! their shelves, reads, notes, reviews and reading goal are invented. Each
-//! book has one stand-in edition for the edition picker, with only the book's
-//! title and cover.
+//! their shelves, reads, notes, reviews, reading goal and lists are invented.
+//! Each book has one stand-in edition for the edition picker, with only the
+//! book's title and cover; the Owned list holds that edition.
 //!
 //! Series and author pages are built from the catalogue alone: a series lists
 //! the catalogue's books in it, an author their books in the catalogue. Their
@@ -81,6 +81,35 @@ struct Catalogue {
     books: Vec<Book>,
     library: Vec<Entry>,
     goals: Vec<DemoGoal>,
+    lists: Vec<DemoList>,
+}
+
+#[derive(Deserialize)]
+/// One of the reader's lists. The Owned list's books are on it as their one
+/// demo edition, whose id is the book's.
+struct DemoList {
+    id: i64,
+    name: String,
+    slug: String,
+    description: Option<String>,
+    privacy: i64,
+    ranked: bool,
+    books: Vec<i64>,
+}
+
+impl DemoList {
+    fn is_owned(&self) -> bool {
+        self.slug == crate::api::OWNED_LIST_SLUG
+    }
+
+    /// `(row id, book id, position)` for each book, in the list's order.
+    /// Row ids are the list's id times 1,000 plus the place.
+    fn rows(&self) -> impl Iterator<Item = (i64, i64, Option<i64>)> + '_ {
+        self.books.iter().enumerate().map(|(i, book)| {
+            let place = i as i64 + 1;
+            (self.id * 1_000 + place, *book, self.ranked.then_some(place))
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -280,6 +309,43 @@ fn goal(catalogue: &Catalogue, goal: &DemoGoal, year: i32) -> Value {
         "completed_at": null,
         "privacy_setting_id": 1,
     })
+}
+
+/// `ListFields`.
+fn list(list: &DemoList) -> Value {
+    json!({
+        "id": list.id,
+        "name": list.name,
+        "slug": list.slug,
+        "description": list.description,
+        "privacy_setting_id": list.privacy,
+        "ranked": list.ranked,
+        "books_count": list.books.len(),
+        "default_view": "list",
+        "featured_profile": false,
+        "url": null,
+    })
+}
+
+/// Every row on the reader's lists as `{id list_id book_id edition_id}`.
+fn memberships(catalogue: &Catalogue) -> Vec<(i64, Value)> {
+    catalogue
+        .lists
+        .iter()
+        .flat_map(|l| {
+            l.rows().map(move |(id, book, _)| {
+                (
+                    book,
+                    json!({
+                        "id": id,
+                        "list_id": l.id,
+                        "book_id": book,
+                        "edition_id": l.is_owned().then_some(book),
+                    }),
+                )
+            })
+        })
+        .collect()
 }
 
 fn slug(title: &str) -> String {
@@ -677,6 +743,66 @@ fn answer(op: &str, vars: &Value) -> Value {
                 .find(|g| g.id == int("id"))
                 .map(|g| goal(catalogue, g, year)),
         }),
+        "Lists" => {
+            let after = int("afterId");
+            let limit = usize::try_from(int("limit")).unwrap_or_default();
+            let lists: Vec<Value> = catalogue
+                .lists
+                .iter()
+                .filter(|l| mine() && l.id > after)
+                .take(limit)
+                .map(list)
+                .collect();
+            json!({ "lists": lists })
+        }
+        "ListById" => json!({
+            "lists_by_pk": catalogue.lists.iter().find(|l| l.id == int("id")).map(list),
+        }),
+        "ListMemberships" => {
+            let after = int("afterId");
+            let limit = usize::try_from(int("limit")).unwrap_or_default();
+            let mut rows = memberships(catalogue);
+            rows.sort_by_key(|(_, row)| row["id"].as_i64());
+            let rows: Vec<Value> = rows
+                .into_iter()
+                .map(|(_, row)| row)
+                .filter(|row| mine() && row["id"].as_i64() > Some(after))
+                .take(limit)
+                .collect();
+            json!({ "list_books": rows })
+        }
+        "BookListMemberships" => {
+            let rows: Vec<Value> = memberships(catalogue)
+                .into_iter()
+                .filter(|(book, _)| mine() && *book == int("bookId"))
+                .map(|(_, row)| row)
+                .collect();
+            json!({ "list_books": rows })
+        }
+        "ListBooks" => {
+            let offset = usize::try_from(int("offset")).unwrap_or_default();
+            let limit = usize::try_from(int("limit")).unwrap_or_default();
+            let rows: Vec<Value> = catalogue
+                .lists
+                .iter()
+                .find(|l| l.id == int("listId"))
+                .into_iter()
+                .flat_map(|l| {
+                    l.rows().filter_map(|(id, book, position)| {
+                        let book = catalogue.book(book)?;
+                        Some(json!({
+                            "id": id,
+                            "position": position,
+                            "edition_id": l.is_owned().then_some(book.id),
+                            "book": book_summary(book),
+                        }))
+                    })
+                })
+                .skip(offset)
+                .take(limit)
+                .collect();
+            json!({ "list_books": rows })
+        }
         "InsertUserBook"
         | "UpdateUserBook"
         | "DeleteUserBook"
@@ -688,7 +814,12 @@ fn answer(op: &str, vars: &Value) -> Value {
         | "DeleteUserBookReview"
         | "InsertGoal"
         | "UpdateGoal"
-        | "DeleteGoal" => {
+        | "DeleteGoal"
+        | "InsertList"
+        | "UpdateList"
+        | "DeleteList"
+        | "InsertListBook"
+        | "DeleteListBook" => {
             return error(READ_ONLY);
         }
         other => return error(format!("The demo has no answer for {other}.")),
@@ -1174,6 +1305,40 @@ mod tests {
         // Periods rank differently, so switching shows a change.
         assert_ne!(firsts[0], firsts[1]);
         assert_ne!(firsts[1], firsts[3]);
+    }
+
+    #[test]
+    fn the_reader_has_lists_and_an_owned_list() {
+        let client = client();
+        let lists = client.lists().unwrap();
+        assert!(lists.len() >= 3);
+        let owned: Vec<_> = lists.iter().filter(|l| l.is_owned()).collect();
+        assert_eq!(owned.len(), 1);
+        let ranked = lists.iter().find(|l| l.ranked).expect("a ranked list");
+        let books = client.list_books(ranked.id, 0).unwrap();
+        assert_eq!(books.len() as u32, ranked.books_count);
+        let positions: Vec<Option<i32>> = books.iter().map(|b| b.position).collect();
+        assert_eq!(positions[..2], [Some(1), Some(2)]);
+        assert!(client.list_books(ranked.id, 100).unwrap().is_empty());
+
+        let all = client.list_memberships().unwrap();
+        assert!(all.complete);
+        let total: u32 = lists.iter().map(|l| l.books_count).sum();
+        assert_eq!(all.rows.len() as u32, total);
+        // Owned rows name the book's demo edition; other lists name none.
+        for row in &all.rows {
+            let on_owned = row.list_id == owned[0].id;
+            assert_eq!(row.edition_id.is_some(), on_owned, "{row:?}");
+        }
+        let dune = client.book_list_memberships(BookId::new(312460)).unwrap();
+        assert!(dune.iter().any(|r| r.list_id == owned[0].id));
+
+        let err = client
+            .add_to_list(ranked.id, BookId::new(312460), None)
+            .unwrap_err();
+        assert!(err.to_string().contains(READ_ONLY), "{err}");
+        let err = client.remove_from_list(dune[0].id).unwrap_err();
+        assert!(err.to_string().contains(READ_ONLY), "{err}");
     }
 
     #[test]

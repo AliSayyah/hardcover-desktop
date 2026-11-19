@@ -51,6 +51,8 @@ use crate::format::{
     progress_summary, read_dates_text, series_position_text, status_label,
 };
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::lists::book_lists;
+use crate::lists::model::ListsModel;
 
 mod catalog_sections;
 mod review_section;
@@ -195,8 +197,6 @@ pub struct BookDetailView {
     /// One picker per book, so editions are fetched once per run.
     edition_pickers: HashMap<BookId, (Entity<EditionPicker>, Subscription)>,
     read_dialog: Option<(Entity<ReadDialog>, Subscription)>,
-    /// The entry being added to the Owned list.
-    owning: Option<UserBookId>,
     shown: Option<Shown>,
     /// The cover URL last requested and its image once loaded, released when
     /// the pane moves to another cover.
@@ -295,6 +295,10 @@ impl BookDetailView {
                 ),
             ];
         subscriptions.extend(review_subscriptions);
+        // The list menu and the Owned switch follow the user's lists.
+        if let Some(lists) = ListsModel::global(cx) {
+            subscriptions.push(cx.observe(&lists, |_, _, cx| cx.notify()));
+        }
 
         Self {
             model,
@@ -316,7 +320,6 @@ impl BookDetailView {
             notes_saved: None,
             edition_pickers: HashMap::new(),
             read_dialog: None,
-            owning: None,
             shown: None,
             cover: None,
             similar: HashMap::new(),
@@ -342,6 +345,9 @@ impl BookDetailView {
         self.shown = None;
         self.sync_controls(window, cx);
         self.load_details(cx);
+        if let Some(book) = self.book(cx) {
+            book_lists::book_shown(book.id, cx);
+        }
         self.tags_expanded = false;
         // Drops a pending similar-books fetch for the book left behind.
         self._similar_task = None;
@@ -960,78 +966,6 @@ impl BookDetailView {
         });
     }
 
-    fn confirm_mark_owned(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(entry) = self.current_entry(cx) else {
-            return;
-        };
-        let Some(edition) = entry.edition.clone() else {
-            return;
-        };
-        let id = entry.user_book_id;
-        let title: SharedString = format!("Add “{}” to your Owned list?", entry.book.title).into();
-        let which = edition
-            .format
-            .as_ref()
-            .or(edition.reading_format.as_ref())
-            .map_or_else(
-                || "This edition".to_owned(),
-                |format| format!("The {} edition", format.to_lowercase()),
-            );
-        let description: SharedString = format!(
-            "{which} goes on your Owned list on Hardcover and appears in your activity, \
-             which others may see even if this book is private. To take it off the list, \
-             use the Hardcover website."
-        )
-        .into();
-        let view = cx.entity().downgrade();
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let view = view.clone();
-            let edition = edition.id;
-            alert
-                .title(title.clone())
-                .description(description.clone())
-                .confirm()
-                .ok_text("Add")
-                .on_ok(move |_, window, cx| {
-                    let _ = view.update(cx, |this, cx| this.mark_owned(id, edition, window, cx));
-                    true
-                })
-        });
-    }
-
-    /// Not a library write: Hardcover keeps ownership on a list, and the
-    /// entry does not change.
-    fn mark_owned(
-        &mut self,
-        id: UserBookId,
-        edition: hardcover_core::EditionId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.owning.is_some() {
-            return;
-        }
-        self.owning = Some(id);
-        cx.notify();
-        let client = Services::global(cx).client().clone();
-        cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { client.mark_owned(edition) })
-                .await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.owning = None;
-                let note = match result {
-                    Ok(()) => Notification::success("Added to your Owned list on Hardcover."),
-                    Err(e) => Notification::error(Services::error_message(&e, None, cx))
-                        .title("Couldn't add it to your Owned list"),
-                };
-                window.push_notification(note, cx);
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
     fn confirm_remove(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(entry) = self.current_entry(cx) else {
             return;
@@ -1260,6 +1194,7 @@ impl BookDetailView {
                             }),
                     ),
             )
+            .children(book_lists::lists_button(book, cx))
             .when_some(entry, |this, entry| {
                 let busy = self
                     .model
@@ -1267,7 +1202,11 @@ impl BookDetailView {
                     .pending_write(entry.user_book_id)
                     .is_some();
                 let has_edition = entry.edition.is_some();
-                let owning = self.owning.is_some();
+                // With `read:lists` the Owned switch under "Your book" replaces this.
+                let one_way_owned = book_lists::offers_one_way_owned(cx);
+                let owning =
+                    ListsModel::global(cx).is_some_and(|l| l.read(cx).is_busy(entry.book.id));
+                let owned_entry = entry.clone();
                 let view = cx.entity().downgrade();
                 this.child(
                     Button::new("book-more")
@@ -1276,7 +1215,6 @@ impl BookDetailView {
                         .tooltip("More actions")
                         .disabled(busy)
                         .dropdown_menu(move |menu, _, _| {
-                            let own_view = view.clone();
                             let remove_view = view.clone();
                             // Ownership is per edition on Hardcover.
                             let own_label = if has_edition {
@@ -1284,17 +1222,20 @@ impl BookDetailView {
                             } else {
                                 "Add to Owned list (choose an edition first)"
                             };
+                            let owned_entry = owned_entry.clone();
+                            let menu = if one_way_owned {
+                                menu.item(
+                                    PopupMenuItem::new(own_label)
+                                        .disabled(!has_edition || owning)
+                                        .on_click(move |_, window, cx| {
+                                            book_lists::confirm_owned(&owned_entry, window, cx)
+                                        }),
+                                )
+                                .separator()
+                            } else {
+                                menu
+                            };
                             menu.item(
-                                PopupMenuItem::new(own_label)
-                                    .disabled(!has_edition || owning)
-                                    .on_click(move |_, window, cx| {
-                                        let _ = own_view.update(cx, |this, cx| {
-                                            this.confirm_mark_owned(window, cx)
-                                        });
-                                    }),
-                            )
-                            .separator()
-                            .item(
                                 PopupMenuItem::new("Remove from library…")
                                     .icon(IconName::Delete)
                                     .on_click(move |_, window, cx| {
@@ -1372,6 +1313,9 @@ impl BookDetailView {
                         .label("Edition")
                         .child(self.render_edition(entry, cx)),
                 )
+                .when_some(book_lists::owned_control(entry, cx), |this, control| {
+                    this.child(Field::new().label("Owned").child(control))
+                })
                 .child(
                     Field::new().label("Privacy").child(
                         h_flex()

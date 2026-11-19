@@ -2,7 +2,7 @@
 //! books on them. Also Discover, the books trending on Hardcover.
 
 pub mod author_view;
-mod book_list;
+pub mod book_list;
 pub mod discover_view;
 pub mod navigation;
 pub mod series_view;

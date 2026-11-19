@@ -895,5 +895,66 @@
       "metric": "book",
       "goal": 12
     }
+  ],
+  "lists": [
+    {
+      "id": 601,
+      "name": "Owned",
+      "slug": "owned",
+      "description": null,
+      "privacy": 1,
+      "ranked": false,
+      "books": [
+        312460,
+        2459845,
+        386446,
+        369692,
+        379647
+      ]
+    },
+    {
+      "id": 602,
+      "name": "Best science fiction so far",
+      "slug": "best-science-fiction-so-far",
+      "description": "My ranking, revised whenever a new one earns a place.",
+      "privacy": 1,
+      "ranked": true,
+      "books": [
+        427578,
+        312460,
+        292354,
+        427314,
+        266607,
+        379760
+      ]
+    },
+    {
+      "id": 603,
+      "name": "Book club picks",
+      "slug": "book-club-picks",
+      "description": "What the Thursday group chose this year.",
+      "privacy": 2,
+      "ranked": false,
+      "books": [
+        490300,
+        479910,
+        340654,
+        383598
+      ]
+    },
+    {
+      "id": 604,
+      "name": "Classics to finish",
+      "slug": "classics-to-finish",
+      "description": "Started, stalled, still meaning to.",
+      "privacy": 3,
+      "ranked": false,
+      "books": [
+        427513,
+        1788666,
+        89871,
+        377193
+      ]
+    }
   ]
 }

@@ -1,6 +1,7 @@
 //! The window's content: the sign-in screen or the workspace (sidebar plus the
 //! current destination).
 
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,8 +25,8 @@ use gpui_kit::{
     Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window,
     div, prelude::FluentBuilder as _, rems,
 };
-use hardcover_core::ReadingStatus;
 use hardcover_core::store::LibraryCache;
+use hardcover_core::{ListId, ReadingStatus};
 
 use crate::about::open_about;
 use crate::app_state::{CoverService, Services, Startup, cover_file, startup};
@@ -39,6 +40,9 @@ use crate::goals::model::GoalsModel;
 use crate::goals::sidebar::GoalsSection;
 use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
+use crate::lists::list_view::ListView;
+use crate::lists::model::{ListsEvent, ListsModel};
+use crate::lists::sidebar::lists_group;
 use crate::search::search_view::SearchView;
 use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
@@ -119,6 +123,7 @@ impl Shell {
         if cx.has_global::<Services>() {
             cx.remove_global::<Services>();
         }
+        ListsModel::release(cx);
         let sign_in = cx.new(|cx| SignInView::new(window, cx));
         self._subscription =
             Some(
@@ -160,6 +165,7 @@ pub enum Destination {
     Discover,
     Stats,
     Shelf(ReadingStatus),
+    List(ListId),
 }
 
 /// Emitted after signing out.
@@ -183,6 +189,8 @@ pub struct Workspace {
     reauthorize: Entity<Reauthorize>,
     goals: Entity<GoalsModel>,
     goals_section: Entity<GoalsSection>,
+    lists: Entity<ListsModel>,
+    list_page: Entity<ListView>,
     signing_out: bool,
     /// The open Settings dialog's sign-out request.
     _settings: Option<Subscription>,
@@ -202,6 +210,9 @@ impl Focusable for Workspace {
 impl Workspace {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let model = cx.new(|_| LibraryModel::new());
+        // Before the views: the book page finds the lists through the global.
+        let lists = ListsModel::init(cx);
+        let list_page = cx.new(|cx| ListView::new(lists.clone(), model.clone(), window, cx));
         let library = cx.new(|cx| LibraryView::new(model.clone(), window, cx));
         let search = cx.new(|cx| SearchView::new(model.clone(), window, cx));
         let discover = cx.new(|cx| DiscoverView::new(model.clone(), window, cx));
@@ -215,6 +226,7 @@ impl Workspace {
         let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
         model.update(cx, |m, cx| m.start(cx));
         goals.update(cx, |g, cx| g.load(cx));
+        lists.update(cx, |l, cx| l.load(cx));
         let clock = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -231,6 +243,23 @@ impl Workspace {
             cx.observe(&updates, |_, _, cx| cx.notify()),
             cx.observe(&reauthorize, |_, _, cx| cx.notify()),
             cx.observe(&goals, |_, _, cx| cx.notify()),
+            // A list shown that is gone after a reload, or no longer
+            // readable, hands over to a shelf.
+            cx.observe_in(&lists, window, |this, lists, window, cx| {
+                if let Destination::List(id) = this.destination
+                    && lists.read(cx).is_gone(id)
+                {
+                    this.show_shelf(ReadingStatus::CurrentlyReading, window, cx);
+                }
+                cx.notify();
+            }),
+            cx.subscribe_in(&lists, window, |this, _, event: &ListsEvent, window, cx| {
+                if let ListsEvent::Deleted(id) = event
+                    && this.destination == Destination::List(*id)
+                {
+                    this.show_shelf(ReadingStatus::CurrentlyReading, window, cx);
+                }
+            }),
             cx.subscribe(&reauthorize, |this, _, event: &Reauthorized, cx| {
                 this.on_reauthorized(event, cx)
             }),
@@ -267,6 +296,8 @@ impl Workspace {
             reauthorize,
             goals,
             goals_section,
+            lists,
+            list_page,
             signing_out: false,
             _settings: None,
             _clock: clock,
@@ -289,6 +320,7 @@ impl Workspace {
             Destination::Discover => self.discover.update(cx, |d, cx| d.focus(window, cx)),
             Destination::Stats => self.stats.update(cx, |s, cx| s.focus(window, cx)),
             Destination::Shelf(_) => self.library.update(cx, |l, cx| l.focus_list(window, cx)),
+            Destination::List(_) => self.list_page.update(cx, |l, cx| l.focus(window, cx)),
         }
     }
 
@@ -307,6 +339,12 @@ impl Workspace {
                 self.library
                     .update(cx, |l, cx| l.show_shelf(status, window, cx));
                 self.library.update(cx, |l, cx| l.focus_list(window, cx));
+            }
+            Destination::List(id) => {
+                self.list_page.update(cx, |l, cx| {
+                    l.show(id, window, cx);
+                    l.focus(window, cx);
+                });
             }
         }
         cx.notify();
@@ -403,12 +441,14 @@ impl Workspace {
     fn on_reauthorized(&mut self, event: &Reauthorized, cx: &mut Context<Self>) {
         Services::set_scopes(event.scopes.clone(), cx);
         self.goals.update(cx, |g, cx| g.load(cx));
+        self.lists.update(cx, |l, cx| l.reload(cx));
         cx.notify();
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, |m, cx| m.sync(cx));
         self.goals.update(cx, |g, cx| g.load(cx));
+        self.lists.update(cx, |l, cx| l.reload(cx));
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -528,6 +568,25 @@ impl Workspace {
             .when(self.goals_section.read(cx).is_visible(cx), |this| {
                 this.child(NavSection::View(self.goals_section.clone().into()))
             })
+            .when_some(
+                lists_group(
+                    &self.lists,
+                    match self.destination {
+                        Destination::List(id) => Some(id),
+                        _ => None,
+                    },
+                    Rc::new({
+                        let view = view.clone();
+                        move |id, window, cx| {
+                            let _ = view.update(cx, |this, cx| {
+                                this.show(Destination::List(id), window, cx)
+                            });
+                        }
+                    }),
+                    cx,
+                ),
+                |this, group| this.child(NavSection::Group(group)),
+            )
             .footer(
                 v_flex()
                     .w_full()
@@ -895,6 +954,7 @@ impl Render for Workspace {
                     (None, Destination::Discover) => this.child(self.discover.clone()),
                     (None, Destination::Stats) => this.child(self.stats.clone()),
                     (None, Destination::Shelf(_)) => this.child(self.library.clone()),
+                    (None, Destination::List(_)) => this.child(self.list_page.clone()),
                 }
             }))
     }

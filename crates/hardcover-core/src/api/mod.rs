@@ -45,6 +45,17 @@ pub const BOOKS_BY_IDS_LIMIT: usize = 25;
 /// Books [`Client::trending_books`] asks for: all of them fit one
 /// [`Client::books_by_ids`] request.
 pub const TRENDING_LIMIT: usize = BOOKS_BY_IDS_LIMIT;
+/// Lists per request: Hardcover returns at most 100 `lists` rows.
+const LISTS_PAGE_SIZE: u32 = 100;
+/// Most list requests [`Client::lists`] makes: 1,000 lists.
+const LISTS_MAX_PAGES: usize = 10;
+/// List memberships per request: Hardcover returns at most 1,000 `list_books` rows.
+const MEMBERSHIPS_PAGE_SIZE: u32 = 1_000;
+/// Most requests [`Client::list_memberships`] makes, so a huge collection
+/// can't spend a minute of the rate limit at once.
+const MEMBERSHIPS_MAX_PAGES: usize = 5;
+/// Books per page in [`Client::list_books`].
+pub const LIST_BOOKS_PER_PAGE: u32 = 100;
 
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
@@ -652,33 +663,6 @@ impl Client {
         })
     }
 
-    /// Puts `edition` on the user's Owned list. Repeating it is harmless.
-    ///
-    /// There is no way back with this app's scopes: taking an edition off the
-    /// list needs `write:lists`, and reading the list needs `read:lists`
-    /// (`user_books.owned` does not follow it). Hardcover posts the addition to
-    /// the user's activity feed.
-    pub fn mark_owned(&self, edition: EditionId) -> Result<()> {
-        #[derive(Deserialize)]
-        struct Data {
-            edition_owned: Option<OwnedPayload>,
-        }
-        let data: Data = self.query(
-            "EditionOwned",
-            queries::EDITION_OWNED,
-            json!({ "id": edition.get() }),
-            QUERY_TIMEOUT,
-        )?;
-        match data.edition_owned {
-            Some(p) if p.id.is_some() || p.list_book.as_ref().is_some_and(|b| !b.is_null()) => {
-                Ok(())
-            }
-            _ => Err(Error::Api(format!(
-                "could not add edition {edition} to the Owned list"
-            ))),
-        }
-    }
-
     fn update_user_book(&self, id: UserBookId, object: Value) -> Result<LibraryEntry> {
         #[derive(Deserialize)]
         struct Data {
@@ -1077,6 +1061,314 @@ impl Client {
             .ok_or_else(|| Error::Decode(format!("goal {id} not found after `{field}`")))
     }
 
+    // ----- lists -----
+
+    /// The signed-in user's lists, the Owned list included once it exists,
+    /// in the order they were created. Needs `read:lists`.
+    pub fn lists(&self) -> Result<Vec<UserList>> {
+        #[derive(Deserialize)]
+        struct Data {
+            lists: Vec<RawList>,
+        }
+        let me = self.my_id()?;
+        let mut all = Vec::new();
+        let mut after = 0_i64;
+        for _ in 0..LISTS_MAX_PAGES {
+            let data: Data = self.query(
+                "Lists",
+                queries::LISTS,
+                json!({ "userId": me.get(), "afterId": after, "limit": LISTS_PAGE_SIZE }),
+                QUERY_TIMEOUT,
+            )?;
+            let fetched = data.lists.len();
+            for raw in data.lists {
+                after = after.max(raw.id);
+                all.push(raw.into_list());
+            }
+            if fetched < LISTS_PAGE_SIZE as usize {
+                break;
+            }
+        }
+        Ok(all)
+    }
+
+    /// Which of the user's books are on which of their lists, as one index:
+    /// one request per 1,000 rows, at most five. Past that the result is
+    /// marked incomplete; [`Client::book_list_memberships`] covers one book.
+    pub fn list_memberships(&self) -> Result<ListMemberships> {
+        let me = self.my_id()?;
+        let mut rows = Vec::new();
+        let mut after = 0_i64;
+        for _ in 0..MEMBERSHIPS_MAX_PAGES {
+            let page = self.memberships(
+                "ListMemberships",
+                queries::LIST_MEMBERSHIPS,
+                json!({ "userId": me.get(), "afterId": after, "limit": MEMBERSHIPS_PAGE_SIZE }),
+            )?;
+            let fetched = page.len();
+            after = page.iter().map(|m| m.id.get()).fold(after, i64::max);
+            rows.extend(page);
+            if fetched < MEMBERSHIPS_PAGE_SIZE as usize {
+                return Ok(ListMemberships {
+                    rows,
+                    complete: true,
+                });
+            }
+        }
+        Ok(ListMemberships {
+            rows,
+            complete: false,
+        })
+    }
+
+    /// The user's lists that `book` is on, one row per list and edition.
+    pub fn book_list_memberships(&self, book: BookId) -> Result<Vec<ListMembership>> {
+        let me = self.my_id()?;
+        self.memberships(
+            "BookListMemberships",
+            queries::BOOK_LIST_MEMBERSHIPS,
+            json!({ "userId": me.get(), "bookId": book.get(), "limit": MEMBERSHIPS_PAGE_SIZE }),
+        )
+    }
+
+    fn memberships(&self, op: &str, doc: &str, vars: Value) -> Result<Vec<ListMembership>> {
+        #[derive(Deserialize)]
+        struct Data {
+            list_books: Vec<RawListMembership>,
+        }
+        let data: Data = self.query(op, doc, vars, QUERY_TIMEOUT)?;
+        Ok(data
+            .list_books
+            .into_iter()
+            .map(RawListMembership::into_membership)
+            .collect())
+    }
+
+    /// One page of a list's books in the list's order. `offset` counts the
+    /// rows already fetched; a page shorter than [`LIST_BOOKS_PER_PAGE`] is
+    /// the last. Rows whose book did not resolve are left out.
+    pub fn list_books(&self, list: ListId, offset: u32) -> Result<Vec<ListBook>> {
+        #[derive(Deserialize)]
+        struct Data {
+            list_books: Vec<RawListBook>,
+        }
+        let data: Data = self.query(
+            "ListBooks",
+            queries::LIST_BOOKS,
+            json!({ "listId": list.get(), "limit": LIST_BOOKS_PER_PAGE, "offset": offset }),
+            QUERY_TIMEOUT,
+        )?;
+        Ok(data
+            .list_books
+            .into_iter()
+            .filter_map(RawListBook::into_list_book)
+            .collect())
+    }
+
+    /// Creates a list. Needs `write:lists`.
+    pub fn create_list(&self, draft: &ListDraft) -> Result<UserList> {
+        let name = list_name(&draft.name)?;
+        let mut object = json!({
+            "name": name,
+            "description": draft.description.trim(),
+            "ranked": draft.ranked,
+        });
+        if let Some(privacy) = draft.privacy {
+            object["privacy_setting_id"] = json!(privacy.id());
+        }
+        #[derive(Deserialize)]
+        struct Data {
+            insert_list: Option<ListPayload>,
+        }
+        let data: Data = self.query(
+            "InsertList",
+            queries::INSERT_LIST,
+            json!({ "object": object }),
+            QUERY_TIMEOUT,
+        )?;
+        self.list_payload(data.insert_list, "insert_list")
+    }
+
+    /// Saves `list` with the draft's name, description, privacy and ranking.
+    ///
+    /// The rest of the list (its default view, profile feature and link) is
+    /// sent back as read: whether `update_list` keeps fields left out is
+    /// unverified, and `update_goal` does not. Refuses the Owned list, which
+    /// Hardcover finds by its slug.
+    pub fn update_list(&self, list: &UserList, draft: &ListDraft) -> Result<UserList> {
+        if list.is_owned() {
+            return Err(Error::InvalidInput(
+                "the Owned list can't be changed".into(),
+            ));
+        }
+        let name = list_name(&draft.name)?;
+        let mut object = json!({
+            "name": name,
+            "description": draft.description.trim(),
+            "ranked": draft.ranked,
+        });
+        // Sent back as read when unchanged, even an id this version doesn't know.
+        if let Some(privacy) = draft.privacy.map(Privacy::id).or(list.privacy_id) {
+            object["privacy_setting_id"] = json!(privacy);
+        }
+        if let Some(view) = &list.default_view {
+            object["default_view"] = json!(view);
+        }
+        if let Some(featured) = list.featured_profile {
+            object["featured_profile"] = json!(featured);
+        }
+        if let Some(url) = &list.url {
+            object["url"] = json!(url);
+        }
+        #[derive(Deserialize)]
+        struct Data {
+            update_list: Option<ListPayload>,
+        }
+        let data: Data = self.query(
+            "UpdateList",
+            queries::UPDATE_LIST,
+            json!({ "id": list.id.get(), "object": object }),
+            QUERY_TIMEOUT,
+        )?;
+        self.list_payload(data.update_list, "update_list")
+    }
+
+    /// Deletes a list and takes its books off it; the books stay in the library.
+    pub fn delete_list(&self, id: ListId) -> Result<()> {
+        #[derive(Deserialize)]
+        struct Data {
+            delete_list: Option<ListDeletePayload>,
+        }
+        let data: Data = self.query(
+            "DeleteList",
+            queries::DELETE_LIST,
+            json!({ "id": id.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        match data.delete_list {
+            Some(ListDeletePayload {
+                success: Some(true),
+            }) => Ok(()),
+            _ => Err(Error::Api(format!("could not delete list {id}"))),
+        }
+    }
+
+    /// Puts `book` on `list`, as `edition` if given. Needs `write:lists`.
+    pub fn add_to_list(
+        &self,
+        list: ListId,
+        book: BookId,
+        edition: Option<EditionId>,
+    ) -> Result<ListMembership> {
+        let mut object = json!({ "list_id": list.get(), "book_id": book.get() });
+        if let Some(edition) = edition {
+            object["edition_id"] = json!(edition.get());
+        }
+        #[derive(Deserialize)]
+        struct Data {
+            insert_list_book: Option<ListBookPayload>,
+        }
+        let data: Data = self.query(
+            "InsertListBook",
+            queries::INSERT_LIST_BOOK,
+            json!({ "object": object }),
+            QUERY_TIMEOUT,
+        )?;
+        let p = data
+            .insert_list_book
+            .ok_or_else(|| Error::Api("`insert_list_book` returned null".into()))?;
+        match (p.list_book, p.id) {
+            (Some(row), _) => Ok(row.into_membership()),
+            // The row's id is all the payload had; the rest is what was sent.
+            (None, Some(id)) => Ok(ListMembership {
+                id: ListBookId::new(id),
+                list_id: list,
+                book_id: book,
+                edition_id: edition,
+            }),
+            (None, None) => Err(Error::Api(format!(
+                "could not add book {book} to list {list}"
+            ))),
+        }
+    }
+
+    /// Takes one row off its list: a book, or one edition of it on the Owned
+    /// list. Needs `write:lists`.
+    pub fn remove_from_list(&self, row: ListBookId) -> Result<()> {
+        #[derive(Deserialize)]
+        struct Data {
+            delete_list_book: Option<ListBookDeletePayload>,
+        }
+        let data: Data = self.query(
+            "DeleteListBook",
+            queries::DELETE_LIST_BOOK,
+            json!({ "id": row.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        match data.delete_list_book {
+            Some(ListBookDeletePayload { id: Some(_) }) => Ok(()),
+            _ => Err(Error::Api(format!("could not remove list book {row}"))),
+        }
+    }
+
+    /// Puts `edition` on the user's Owned list, which Hardcover creates the
+    /// first time. Repeating it is harmless. Needs `write:library`.
+    ///
+    /// Returns the list row when Hardcover sends it (the Owned list's id may be
+    /// new to the caller); `None` if it sent only an id. Taking the edition off
+    /// again is [`Client::remove_from_list`] (`write:lists`), and
+    /// `user_books.owned` does not follow the list. Hardcover posts the
+    /// addition to the user's activity feed.
+    pub fn mark_owned(&self, edition: EditionId) -> Result<Option<ListMembership>> {
+        #[derive(Deserialize)]
+        struct Data {
+            edition_owned: Option<ListBookPayload>,
+        }
+        let data: Data = self.query(
+            "EditionOwned",
+            queries::EDITION_OWNED,
+            json!({ "id": edition.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        match data.edition_owned {
+            Some(ListBookPayload {
+                list_book: Some(row),
+                ..
+            }) => Ok(Some(row.into_membership())),
+            Some(ListBookPayload { id: Some(_), .. }) => Ok(None),
+            _ => Err(Error::Api(format!(
+                "could not add edition {edition} to the Owned list"
+            ))),
+        }
+    }
+
+    /// Uses the list returned by the mutation, or re-reads it if the payload had none.
+    fn list_payload(&self, payload: Option<ListPayload>, field: &str) -> Result<UserList> {
+        let p = payload.ok_or_else(|| Error::Api(format!("`{field}` returned null")))?;
+        if let Some(e) = p.error() {
+            return Err(Error::Api(e));
+        }
+        if let Some(list) = p.list {
+            return Ok(list.into_list());
+        }
+        let id = p
+            .id
+            .ok_or_else(|| Error::Decode(format!("`{field}` returned neither a list nor an id")))?;
+        #[derive(Deserialize)]
+        struct Data {
+            lists_by_pk: Option<RawList>,
+        }
+        let data: Data = self.query(
+            "ListById",
+            queries::LIST_BY_ID,
+            json!({ "id": id }),
+            QUERY_TIMEOUT,
+        )?;
+        data.lists_by_pk
+            .map(RawList::into_list)
+            .ok_or_else(|| Error::Decode(format!("list {id} not found after `{field}`")))
+    }
+
     // ----- transport -----
 
     fn query<T: DeserializeOwned>(
@@ -1205,6 +1497,13 @@ fn goal_description(description: Option<&str>) -> Result<&str> {
         .map(str::trim)
         .filter(|d| !d.is_empty())
         .ok_or_else(|| Error::InvalidInput("a goal needs a description".into()))
+}
+
+/// The name to send: Hardcover needs one to make a list's slug.
+fn list_name(name: &str) -> Result<&str> {
+    Some(name.trim())
+        .filter(|n| !n.is_empty())
+        .ok_or_else(|| Error::InvalidInput("a list needs a name".into()))
 }
 
 /// `fraction` of `total`, to the nearest unit. An unfinished read never lands

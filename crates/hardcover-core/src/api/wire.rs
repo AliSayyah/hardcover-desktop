@@ -782,15 +782,7 @@ pub(crate) struct GoalPayload {
 impl GoalPayload {
     /// The payload's errors, joined, if there are any.
     pub fn error(&self) -> Option<String> {
-        let errors: Vec<&str> = self
-            .errors
-            .iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.trim())
-            .filter(|e| !e.is_empty())
-            .collect();
-        (!errors.is_empty()).then(|| errors.join("; "))
+        joined_errors(&self.errors)
     }
 }
 
@@ -900,6 +892,120 @@ impl RawTrending {
     }
 }
 
+// ---------- lists ----------
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawList {
+    pub id: i64,
+    pub name: Option<String>,
+    pub slug: Option<String>,
+    pub description: Option<String>,
+    pub privacy_setting_id: Option<i64>,
+    pub ranked: Option<bool>,
+    pub books_count: Option<i64>,
+    pub default_view: Option<String>,
+    pub featured_profile: Option<bool>,
+    pub url: Option<String>,
+}
+
+impl RawList {
+    pub fn into_list(self) -> UserList {
+        let mut l = UserList::new(
+            ListId::new(self.id),
+            non_empty(self.name).unwrap_or_else(|| "Untitled list".to_owned()),
+        );
+        l.slug = non_empty(self.slug);
+        l.description = non_empty(self.description);
+        l.privacy_id = self.privacy_setting_id;
+        l.ranked = self.ranked.unwrap_or(false);
+        l.books_count = opt_u32(self.books_count).unwrap_or(0);
+        l.default_view = self.default_view;
+        l.featured_profile = self.featured_profile;
+        l.url = self.url;
+        l
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawListMembership {
+    pub id: i64,
+    pub list_id: i64,
+    pub book_id: i64,
+    pub edition_id: Option<i64>,
+}
+
+impl RawListMembership {
+    pub fn into_membership(self) -> ListMembership {
+        ListMembership {
+            id: ListBookId::new(self.id),
+            list_id: ListId::new(self.list_id),
+            book_id: BookId::new(self.book_id),
+            edition_id: self.edition_id.map(EditionId::new),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawListBook {
+    pub id: i64,
+    pub position: Option<i64>,
+    pub edition_id: Option<i64>,
+    pub book: Option<RawBook>,
+}
+
+impl RawListBook {
+    /// `None` for a row whose book did not resolve.
+    pub fn into_list_book(self) -> Option<ListBook> {
+        let mut b = ListBook::new(ListBookId::new(self.id), self.book?.into_summary());
+        b.edition_id = self.edition_id.map(EditionId::new);
+        b.position = self.position.and_then(|p| i32::try_from(p).ok());
+        Some(b)
+    }
+}
+
+/// `ListIdType`: `insert_list` and `update_list`'s payload.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListPayload {
+    pub errors: Option<Vec<Option<String>>>,
+    pub id: Option<i64>,
+    pub list: Option<RawList>,
+}
+
+impl ListPayload {
+    pub fn error(&self) -> Option<String> {
+        joined_errors(&self.errors)
+    }
+}
+
+/// `ListBookIdType`: `insert_list_book` and `edition_owned`'s payload.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListBookPayload {
+    pub id: Option<i64>,
+    pub list_book: Option<RawListMembership>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListDeletePayload {
+    pub success: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListBookDeletePayload {
+    pub id: Option<i64>,
+}
+
+/// An `errors: [String]` field, joined, if it holds any.
+fn joined_errors(errors: &Option<Vec<Option<String>>>) -> Option<String> {
+    let errors: Vec<&str> = errors
+        .iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.trim())
+        .filter(|e| !e.is_empty())
+        .collect();
+    (!errors.is_empty()).then(|| errors.join("; "))
+}
+
 // ---------- mutation payloads ----------
 
 #[derive(Debug, Deserialize)]
@@ -993,12 +1099,6 @@ pub(crate) struct DeletePayload {
 pub(crate) struct DeleteReadPayload {
     pub error: Option<String>,
     pub id: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct OwnedPayload {
-    pub id: Option<i64>,
-    pub list_book: Option<Value>,
 }
 
 // ---------- progress context ----------

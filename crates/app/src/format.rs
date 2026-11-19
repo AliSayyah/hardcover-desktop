@@ -327,7 +327,10 @@ pub fn error_message(error: &Error) -> String {
         Error::Storage(msg) => format!("Couldn't save data on this computer: {msg}."),
         Error::Auth(msg) => format!("Sign-in failed: {msg}."),
         Error::Cancelled => "Sign-in was cancelled.".to_owned(),
-        Error::Api(msg) => format!("Hardcover reported an error: {msg}."),
+        Error::Api(msg) => format!(
+            "Hardcover reported an error: {}.",
+            msg.trim_end_matches('.')
+        ),
         Error::Decode(_) => "Hardcover sent an unexpected response. Try again later.".to_owned(),
         _ => format!("{error}."),
     }
@@ -813,6 +816,15 @@ mod tests {
 
     #[test]
     fn error_copy() {
+        // One full stop, whether or not Hardcover's message ends with one.
+        assert_eq!(
+            error_message(&Error::Api("The demo library is read-only.".into())),
+            "Hardcover reported an error: The demo library is read-only."
+        );
+        assert_eq!(
+            error_message(&Error::Api("not found".into())),
+            "Hardcover reported an error: not found."
+        );
         assert_eq!(
             error_message(&Error::RateLimited { retry_after: None }),
             "Hardcover's rate limit was reached. Try again in a minute."

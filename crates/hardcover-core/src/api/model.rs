@@ -80,6 +80,14 @@ id_type!(
     /// `goals.id`: one reading goal.
     GoalId
 );
+id_type!(
+    /// `lists.id`: one of a user's lists.
+    ListId
+);
+id_type!(
+    /// `list_books.id`: one book on one list.
+    ListBookId
+);
 
 /// A library entry's status (`user_books.status_id`).
 ///
@@ -1143,6 +1151,120 @@ impl TrendingPeriod {
             Self::ThreeMonths => "three_month",
             Self::Year => "one_year",
             Self::AllTime => "all",
+        }
+    }
+}
+
+/// The slug of the list Hardcover keeps owned editions on. The server creates
+/// it on the first [`crate::api::Client::mark_owned`]; the official SDK finds
+/// it the same way (the user's `lists` row with this slug).
+pub const OWNED_LIST_SLUG: &str = "owned";
+
+/// One of the signed-in user's lists (`lists`).
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct UserList {
+    pub id: ListId,
+    pub name: String,
+    pub slug: Option<String>,
+    pub description: Option<String>,
+    /// `privacy_setting_id` as Hardcover sent it, known or not: changing a
+    /// list sends it back unchanged. See [`UserList::privacy`].
+    pub privacy_id: Option<i64>,
+    /// The books have an order (their position) that the list shows.
+    pub ranked: bool,
+    pub books_count: u32,
+    /// Kept only to send back on update: `update_list` takes a whole `ListInput`.
+    pub(crate) default_view: Option<String>,
+    pub(crate) featured_profile: Option<bool>,
+    pub(crate) url: Option<String>,
+}
+
+impl UserList {
+    pub fn new(id: ListId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            slug: None,
+            description: None,
+            privacy_id: None,
+            ranked: false,
+            books_count: 0,
+            default_view: None,
+            featured_profile: None,
+            url: None,
+        }
+    }
+
+    /// Who can see the list, if Hardcover sent a setting this version knows.
+    pub fn privacy(&self) -> Option<Privacy> {
+        self.privacy_id.and_then(Privacy::from_id)
+    }
+
+    /// The list Hardcover keeps owned editions on. It is managed through
+    /// [`crate::api::Client::mark_owned`], not edited like other lists.
+    pub fn is_owned(&self) -> bool {
+        self.slug.as_deref() == Some(OWNED_LIST_SLUG)
+    }
+
+    /// `https://hardcover.app/@<username>/lists/<slug>`, when the list has a slug.
+    pub fn web_url(&self, username: &str) -> Option<String> {
+        self.slug
+            .as_deref()
+            .map(|s| format!("https://hardcover.app/@{username}/lists/{s}"))
+    }
+}
+
+/// A list as the user enters it, for [`crate::api::Client::create_list`] and
+/// [`crate::api::Client::update_list`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListDraft {
+    pub name: String,
+    /// Blank clears it.
+    pub description: String,
+    /// `None` keeps the list's setting as read (one this version may not
+    /// know), or gives a new list the account's default.
+    pub privacy: Option<Privacy>,
+    pub ranked: bool,
+}
+
+/// That a book is on one of the user's lists (`list_books`), without the book.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ListMembership {
+    pub id: ListBookId,
+    pub list_id: ListId,
+    pub book_id: BookId,
+    /// The edition on the list, if one was chosen (always, on the Owned list).
+    pub edition_id: Option<EditionId>,
+}
+
+/// Every book on the user's lists, from [`crate::api::Client::list_memberships`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ListMemberships {
+    pub rows: Vec<ListMembership>,
+    /// False if there were more rows than the client reads in one go: a
+    /// book missing from `rows` may still be on a list then.
+    pub complete: bool,
+}
+
+/// One book on a list, for the list's page.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct ListBook {
+    pub id: ListBookId,
+    pub book: BookSummary,
+    pub edition_id: Option<EditionId>,
+    /// Place on a ranked list; usually empty on others.
+    pub position: Option<i32>,
+}
+
+impl ListBook {
+    pub fn new(id: ListBookId, book: BookSummary) -> Self {
+        Self {
+            id,
+            book,
+            edition_id: None,
+            position: None,
         }
     }
 }

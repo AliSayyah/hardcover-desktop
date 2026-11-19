@@ -50,6 +50,15 @@ macro_rules! review_fields {
     };
 }
 
+macro_rules! list_fields {
+    () => {
+        "fragment ListFields on lists {
+  id name slug description privacy_setting_id ranked books_count default_view featured_profile url
+}
+"
+    };
+}
+
 macro_rules! goal_fields {
     () => {
         "fragment GoalFields on goals {
@@ -313,9 +322,103 @@ pub(crate) const BOOK_EDITIONS: &str = concat!(
 );
 
 /// Puts an edition on the user's Owned list (created on first use). Only adds:
-/// taking it off needs `delete_list_book`, which is in the `write:lists` scope.
+/// taking it off is `DELETE_LIST_BOOK`. The row tells the client the Owned
+/// list's id, which it may not have known.
 pub(crate) const EDITION_OWNED: &str = "mutation EditionOwned($id: Int!) {
-  edition_owned(id: $id) { id list_book { id edition_id } }
+  edition_owned(id: $id) { id list_book { id list_id book_id edition_id } }
+}
+";
+
+/// Keyset pagination over one user's lists. Hardcover returns at most 100 rows.
+pub(crate) const LISTS: &str = concat!(
+    "query Lists($userId: Int!, $afterId: Int!, $limit: Int!) {
+  lists(where: {user_id: {_eq: $userId}, id: {_gt: $afterId}}, order_by: {id: asc}, limit: $limit) {
+    ...ListFields
+  }
+}
+",
+    list_fields!()
+);
+
+/// Re-reads a list when a mutation's payload left it out.
+pub(crate) const LIST_BY_ID: &str = concat!(
+    "query ListById($id: Int!) {
+  lists_by_pk(id: $id) { ...ListFields }
+}
+",
+    list_fields!()
+);
+
+/// Keyset pagination over every book on one user's lists, without the books.
+pub(crate) const LIST_MEMBERSHIPS: &str =
+    "query ListMemberships($userId: Int!, $afterId: Int!, $limit: Int!) {
+  list_books(
+    where: {list: {user_id: {_eq: $userId}}, id: {_gt: $afterId}}
+    order_by: {id: asc}
+    limit: $limit
+  ) { id list_id book_id edition_id }
+}
+";
+
+/// The user's lists one book is on: for when [`LIST_MEMBERSHIPS`] was cut short.
+pub(crate) const BOOK_LIST_MEMBERSHIPS: &str =
+    "query BookListMemberships($userId: Int!, $bookId: Int!, $limit: Int!) {
+  list_books(
+    where: {book_id: {_eq: $bookId}, list: {user_id: {_eq: $userId}}}
+    order_by: {id: asc}
+    limit: $limit
+  ) { id list_id book_id edition_id }
+}
+";
+
+/// A page of one list's books in the list's order. Unranked lists usually
+/// have no positions, so the id keeps the order stable between pages.
+pub(crate) const LIST_BOOKS: &str = concat!(
+    "query ListBooks($listId: Int!, $limit: Int!, $offset: Int!) {
+  list_books(
+    where: {list_id: {_eq: $listId}}
+    order_by: [{position: asc_nulls_last}, {id: asc}]
+    limit: $limit
+    offset: $offset
+  ) {
+    id position edition_id
+    book { ...BookSummaryFields }
+  }
+}
+",
+    book_summary_fields!()
+);
+
+pub(crate) const INSERT_LIST: &str = concat!(
+    "mutation InsertList($object: ListInput!) {
+  insert_list(object: $object) { errors id list { ...ListFields } }
+}
+",
+    list_fields!()
+);
+
+/// `object` is sent whole: the client resends the list as read with the edits.
+pub(crate) const UPDATE_LIST: &str = concat!(
+    "mutation UpdateList($id: Int!, $object: ListInput!) {
+  update_list(id: $id, object: $object) { errors id list { ...ListFields } }
+}
+",
+    list_fields!()
+);
+
+pub(crate) const DELETE_LIST: &str = "mutation DeleteList($id: Int!) {
+  delete_list(id: $id) { success }
+}
+";
+
+pub(crate) const INSERT_LIST_BOOK: &str = "mutation InsertListBook($object: ListBookInput!) {
+  insert_list_book(object: $object) { id list_book { id list_id book_id edition_id } }
+}
+";
+
+/// Takes the `list_books` row id, not the book's.
+pub(crate) const DELETE_LIST_BOOK: &str = "mutation DeleteListBook($id: Int!) {
+  delete_list_book(id: $id) { id list_id }
 }
 ";
 
@@ -452,6 +555,16 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("INSERT_GOAL", INSERT_GOAL),
     ("UPDATE_GOAL", UPDATE_GOAL),
     ("DELETE_GOAL", DELETE_GOAL),
+    ("LISTS", LISTS),
+    ("LIST_BY_ID", LIST_BY_ID),
+    ("LIST_MEMBERSHIPS", LIST_MEMBERSHIPS),
+    ("BOOK_LIST_MEMBERSHIPS", BOOK_LIST_MEMBERSHIPS),
+    ("LIST_BOOKS", LIST_BOOKS),
+    ("INSERT_LIST", INSERT_LIST),
+    ("UPDATE_LIST", UPDATE_LIST),
+    ("DELETE_LIST", DELETE_LIST),
+    ("INSERT_LIST_BOOK", INSERT_LIST_BOOK),
+    ("DELETE_LIST_BOOK", DELETE_LIST_BOOK),
 ];
 
 #[cfg(test)]

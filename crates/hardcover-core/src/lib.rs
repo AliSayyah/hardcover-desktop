@@ -27,10 +27,11 @@ mod ratelimit;
 pub use api::{
     AuthorBook, AuthorDetails, AuthorHit, AuthorId, AuthorRef, BookDetails, BookId, BookSummary,
     Client, Contributor, Cover, Date, EDITIONS_PER_PAGE, EditionChange, EditionId, EditionSummary,
-    Goal, GoalConditions, GoalId, GoalMetric, Length, LibraryEntry, NewGoal, Privacy,
-    ProgressUpdate, Rating, RatingBucket, ReadId, ReadSession, ReadingStatus, Review,
+    Goal, GoalConditions, GoalId, GoalMetric, LIST_BOOKS_PER_PAGE, Length, LibraryEntry, ListBook,
+    ListBookId, ListDraft, ListId, ListMembership, ListMemberships, NewGoal, OWNED_LIST_SLUG,
+    Privacy, ProgressUpdate, Rating, RatingBucket, ReadId, ReadSession, ReadingStatus, Review,
     ReviewedEntry, SearchHits, SearchPage, SeriesBook, SeriesDetails, SeriesHit, SeriesId,
-    SeriesRef, Timestamp, TokenSource, TrendingPeriod, User, UserBookId, UserId,
+    SeriesRef, Timestamp, TokenSource, TrendingPeriod, User, UserBookId, UserId, UserList,
 };
 pub use error::{Error, Result};
 
