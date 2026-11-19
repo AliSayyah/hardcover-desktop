@@ -1,0 +1,81 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Hardcover Desktop is a Linux desktop client for [hardcover.app](https://hardcover.app). It is written in Rust (edition 2024) with gpui-kit 0.10. The licence is MIT, and the app id is `io.github.alisayyah.HardcoverDesktop`.
+
+## Commands
+
+```sh
+cargo run -p hardcover-desktop                    # run the app (signs in with OAuth, or restores the keyring session)
+cargo test --workspace                            # unit tests; live-API tests are #[ignore]d
+cargo test -p hardcover-core <name>               # one test, e.g. `unauthorized_refreshes_once_and_retries`
+cargo clippy --workspace --all-targets
+cargo fmt --all
+
+# Live API: needs network and a token
+HARDCOVER_TOKEN=... cargo test -p hardcover-core --test live_read -- --ignored
+HARDCOVER_TOKEN=... cargo run -p hardcover-core --example smoke   # read-only
+cargo run -p hardcover-core --example oauth_login                 # CLI sign-in, stores the session in the keyring
+cargo run -p hardcover-core --example oauth_check -- <book-id>    # scope + write cycle on a book NOT in the library
+```
+
+Environment variables (see `.env.example`; `.env` is gitignored and must never be committed):
+- `HARDCOVER_TOKEN`: a personal access token. For development only: it bypasses OAuth in the app, and the examples and live tests use it.
+- `HARDCOVER_CLIENT_ID`: overrides the compiled-in OAuth client id, `auth::DEFAULT_CLIENT_ID`.
+- `HARDCOVER_THEME=light`: forces the light theme.
+- `live_writes` example: `HARDCOVER_LIVE_WRITES=yes`, `HARDCOVER_LIVE_PHASE`, `HARDCOVER_TEST_BOOK_ID`.
+
+Live write tests run against a real account. Restore everything afterwards. Removing a book does not delete its `reading_journals` rows; clean those up separately, which needs a token with journal scope.
+
+## Architecture
+
+The workspace has two crates, in `crates/*`.
+
+**`hardcover-core`** has no GPUI dependency, and every call in it is **synchronous and blocking**: there is no async runtime.
+- `api`: `Client` over the GraphQL endpoint `https://api.hardcover.app/v1/graphql`.
+  - `queries.rs` holds every GraphQL document as a const. A unit test validates each one against `schema/hardcover.graphql`, an introspected SDL loaded through apollo-compiler.
+  - When you add or change a query, register it in `queries::ALL` so the test covers it.
+  - `wire.rs` holds the raw response shapes; `model.rs` holds the public types.
+- `http.rs`: a small transport seam. Production uses ureq. `http::fake::FakeTransport` scripts responses for the tests in `api/tests.rs`.
+  - All fixtures must be synthetic: no real user data.
+  - `HttpRequest` deliberately does not implement `Debug`, because it carries tokens.
+- `ratelimit.rs`: a client-side token bucket with burst 8 and a refill of 1 per second. Hardcover's own limits are 60 requests per minute, burst 10, and at most 10 top-level fields per request.
+  - On a 429 the client waits and retries once.
+  - On a 401 it calls `TokenSource::on_unauthorized` once, which refreshes the token, then retries.
+- `auth`: OAuth for a native public client.
+  - Authorization code with PKCE S256, redirected to a loopback `http://127.0.0.1:<port>/callback`. `state` and `iss` are checked.
+  - `Session` stores tokens in the system keyring (`KeyringTokenStore`, secret-service) and refreshes them proactively. Refresh tokens are single-use, so refreshes are serialized.
+  - `StaticToken` is the `HARDCOVER_TOKEN` path.
+- `store`: `LibraryCache`, a SQLite database at `~/.local/share/hardcover-desktop/library.sqlite3`.
+- `covers`: `CoverCache`, on disk at `~/.cache/hardcover-desktop/covers`.
+
+**`app`** (the package is named `hardcover-desktop`) is the GPUI UI.
+- `main.rs` sets up actions, keybindings and the window.
+- `app_state.rs` holds the GPUI globals:
+  - `Services` (client, session and cache) exists only while signed in.
+  - `CoverService` lives for the whole run.
+  - `startup()` picks the auth path in this order: `HARDCOVER_TOKEN`, then the keyring session, then the sign-in screen.
+- Every core call runs inside `cx.background_spawn`, and its result is applied on the foreground. Never call `hardcover-core` on the UI thread.
+- Covers are GPUI `Asset`s loaded with `window.use_asset`:
+  - `CoverThumbnail` is 144 px and `CoverImage` is 480 px.
+  - Decoding happens on one dedicated `cover-decoder` thread, not the background pool. Decoding on GPUI's 16 pool threads bloated glibc's per-thread malloc arenas: 62 MB versus 495 MB on a 442-cover benchmark. Keep large image decodes on that thread.
+- `library/model.rs`: `LibraryModel` is the one entity every library view reads.
+  - It loads the cache first, then syncs page by page.
+  - Writes return the full entry, which replaces the local one and is upserted into the cache.
+  - A sync that started before a write re-applies that write when the sync lands (`collection::merge_sync`).
+  - `begin_write`/`end_write` track the writes in flight, per control.
+- `shell.rs`: `Shell` switches between Starting, SignIn and Workspace. `Workspace` contains the sidebar (shelves by status) plus the current destination (library, search or book detail).
+
+## Hardcover API quirks the code relies on
+
+- Status ids: 1 Want to Read, 2 Currently Reading, 3 Read, 4 Paused, 5 Did Not Finish, 6 Ignored.
+- Setting a rating without a status moves the book to Read. `set_rating` therefore takes a `keep_status` and resends the current status.
+- Reading an entry right after a write can return stale data. Use the entry from the mutation's own response, and refetch only when it is missing.
+- Moving a book to Currently Reading starts a new read. A progress update with no open read moves the book to Currently Reading first.
+- Search has a 2 s server timeout. The `_like`, `_ilike` and regex filters are disabled.
+- docs.hardcover.app blocks automated fetches. Read the docs source at github.com/hardcoverapp/hardcover-docs instead.
+
+## gpui-kit
+
+Use the bundled `gpui-kit` and `gpui-kit-design-guides` skills, in `.claude/skills`, before any UI or architecture work. When the skills and the crate disagree, the crate source wins: `~/.cargo/registry/src/index.crates.io-*/gpui-component-0.10.0`. For example, `ActiveTheme` is imported from `gpui_kit::component::ActiveTheme`.
