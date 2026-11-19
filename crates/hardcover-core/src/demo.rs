@@ -4,8 +4,9 @@
 //! the rest of the client (queries, parsing, paging) runs exactly as it does
 //! against Hardcover. The books are real, popular ones, with facts and cover
 //! links from Hardcover and descriptions written for the demo; the reader,
-//! their shelves, reads, notes and reading goal are invented. Each book has one
-//! stand-in edition for the edition picker, with only the book's title and cover.
+//! their shelves, reads, notes, reviews and reading goal are invented. Each
+//! book has one stand-in edition for the edition picker, with only the book's
+//! title and cover.
 //!
 //! Series and author pages are built from the catalogue alone: a series lists
 //! the catalogue's books in it, an author their books in the catalogue. Their
@@ -141,6 +142,16 @@ struct Entry {
     private_notes: Option<String>,
     /// `privacy_setting_id`; Public when absent.
     privacy: Option<i64>,
+    review: Option<DemoReview>,
+}
+
+/// The demo reader's own review, written for the demo.
+#[derive(Deserialize)]
+struct DemoReview {
+    markdown: String,
+    #[serde(default)]
+    spoilers: bool,
+    reviewed_at: String,
 }
 
 #[derive(Deserialize)]
@@ -635,6 +646,24 @@ fn answer(op: &str, vars: &Value) -> Value {
                 .collect();
             json!({ "editions": editions })
         }
+        "UserBookReview" => json!({
+            "user_books_by_pk": catalogue.entry(int("id")).map(|e| match &e.review {
+                Some(r) => json!({
+                    "id": e.id,
+                    "review_markdown": r.markdown,
+                    "review_raw": null,
+                    "review_has_spoilers": r.spoilers,
+                    "reviewed_at": format!("{}T00:00:00", r.reviewed_at),
+                }),
+                None => json!({
+                    "id": e.id,
+                    "review_markdown": null,
+                    "review_raw": null,
+                    "review_has_spoilers": false,
+                    "reviewed_at": null,
+                }),
+            }),
+        }),
         "Goals" => json!({
             "goals": catalogue.goals.iter()
                 .filter(|_| mine())
@@ -646,9 +675,17 @@ fn answer(op: &str, vars: &Value) -> Value {
                 .find(|g| g.id == int("id"))
                 .map(|g| goal(catalogue, g, year)),
         }),
-        "InsertUserBook" | "UpdateUserBook" | "DeleteUserBook" | "InsertUserBookRead"
-        | "UpdateUserBookRead" | "DeleteUserBookRead" | "EditionOwned" | "InsertGoal"
-        | "UpdateGoal" | "DeleteGoal" => {
+        "InsertUserBook"
+        | "UpdateUserBook"
+        | "DeleteUserBook"
+        | "InsertUserBookRead"
+        | "UpdateUserBookRead"
+        | "DeleteUserBookRead"
+        | "EditionOwned"
+        | "UpdateUserBookReview"
+        | "InsertGoal"
+        | "UpdateGoal"
+        | "DeleteGoal" => {
             return error(READ_ONLY);
         }
         other => return error(format!("The demo has no answer for {other}.")),
@@ -1010,6 +1047,25 @@ mod tests {
             assert_eq!(g["description"], format!("12 books in {year}"));
             assert_eq!(g["progress"], finished_in(year));
         }
+    }
+
+    #[test]
+    fn the_reader_has_reviewed_a_few_books() {
+        let client = client();
+        let dune = client.review(UserBookId::new(521)).unwrap();
+        assert!(dune.text().unwrap().contains("Dune Messiah"));
+        assert_eq!(
+            dune.reviewed_at,
+            chrono::NaiveDate::from_ymd_opt(2026, 10, 13)
+        );
+        assert!(!dune.has_spoilers);
+        let reviewed = CATALOGUE.library.iter().filter(|e| e.review.is_some());
+        assert_eq!(reviewed.count(), 2);
+        assert!(!client.review(UserBookId::new(501)).unwrap().exists());
+        let err = client
+            .delete_review(UserBookId::new(521), ReadingStatus::Read)
+            .unwrap_err();
+        assert!(err.to_string().contains(READ_ONLY), "{err}");
     }
 
     #[test]

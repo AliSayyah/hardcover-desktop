@@ -1354,6 +1354,52 @@ mod tests {
     }
 }
 
+/// The user's review of a library entry (`user_books.review_*`).
+///
+/// Not part of [`LibraryEntry`]: review text can be long, so the library sync
+/// leaves it out and the book page fetches it with [`crate::api::Client::review`].
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Review {
+    /// The review as Markdown (`review_markdown`).
+    pub markdown: Option<String>,
+    /// The review as plain text (`review_raw`). Shown when Hardcover has no
+    /// Markdown for a review.
+    pub plain: Option<String>,
+    pub has_spoilers: bool,
+    /// The day the review is dated.
+    pub reviewed_at: Option<Date>,
+}
+
+impl Review {
+    pub fn new(markdown: impl Into<String>, has_spoilers: bool, reviewed_at: Option<Date>) -> Self {
+        Self {
+            markdown: Some(markdown.into()),
+            plain: None,
+            has_spoilers,
+            reviewed_at,
+        }
+    }
+
+    /// True if there is a review to show.
+    pub fn exists(&self) -> bool {
+        self.text().is_some()
+    }
+
+    /// The text to show and to edit: the Markdown, else the plain text.
+    pub fn text(&self) -> Option<&str> {
+        self.markdown.as_deref().or(self.plain.as_deref())
+    }
+}
+
+/// A library entry and its review, as a review write left them.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct ReviewedEntry {
+    pub entry: LibraryEntry,
+    pub review: Review,
+}
+
 /// What [`crate::api::Client::set_edition`] did.
 #[derive(Debug)]
 pub struct EditionChange {
