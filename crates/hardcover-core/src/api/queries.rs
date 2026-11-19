@@ -44,7 +44,7 @@ macro_rules! edition_fields {
 macro_rules! review_fields {
     () => {
         "fragment ReviewFields on user_books {
-  review_markdown review_raw review_has_spoilers reviewed_at
+  review_markdown review_raw review_has_spoilers reviewed_at has_review
 }
 "
     };

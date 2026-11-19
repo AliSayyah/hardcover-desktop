@@ -1580,6 +1580,20 @@ fn review_is_fetched_on_its_own() {
     assert_eq!(c.review(UserBookId::new(3)).unwrap(), Review::default());
     http.push(200, &data(json!({"user_books_by_pk": null})));
     assert_eq!(c.review(UserBookId::new(3)).unwrap(), Review::default());
+
+    // A review Hardcover has but in no form this app reads.
+    http.push(
+        200,
+        &data(json!({"user_books_by_pk": {
+            "id": 3, "review_markdown": null, "review_raw": null,
+            "review_has_spoilers": true, "reviewed_at": "2024-03-05T00:00:00",
+            "has_review": true,
+        }})),
+    );
+    let review = c.review(UserBookId::new(3)).unwrap();
+    assert!(review.exists());
+    assert_eq!(review.text(), None);
+    assert!(review.has_spoilers);
 }
 
 #[test]

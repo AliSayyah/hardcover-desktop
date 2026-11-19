@@ -1369,6 +1369,10 @@ pub struct Review {
     pub has_spoilers: bool,
     /// The day the review is dated.
     pub reviewed_at: Option<Date>,
+    /// Hardcover's `has_review`. True with no text is a review kept in a form
+    /// this app can't read (only the website's own editor format).
+    #[serde(default)]
+    pub has_review: bool,
 }
 
 impl Review {
@@ -1378,12 +1382,13 @@ impl Review {
             plain: None,
             has_spoilers,
             reviewed_at,
+            has_review: true,
         }
     }
 
-    /// True if there is a review to show.
+    /// True if the entry has a review, readable here or not.
     pub fn exists(&self) -> bool {
-        self.text().is_some()
+        self.has_review || self.text().is_some()
     }
 
     /// The text to show and to edit: the Markdown, else the plain text.

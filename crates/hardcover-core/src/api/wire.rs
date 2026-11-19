@@ -919,16 +919,19 @@ pub(crate) struct RawReview {
     pub review_has_spoilers: Option<bool>,
     /// A `timestamp`, though it is written as a `date`.
     pub reviewed_at: Option<String>,
+    pub has_review: Option<bool>,
 }
 
 impl RawReview {
     pub fn into_review(self) -> Review {
         let markdown = non_empty(self.review_markdown);
         let plain = non_empty(self.review_raw);
-        let exists = markdown.is_some() || plain.is_some();
+        let readable = markdown.is_some() || plain.is_some();
+        let exists = readable || self.has_review.unwrap_or(false);
         Review {
             markdown,
             plain,
+            has_review: exists,
             // Without text, a leftover flag or date describes nothing.
             has_spoilers: exists && self.review_has_spoilers.unwrap_or(false),
             reviewed_at: self

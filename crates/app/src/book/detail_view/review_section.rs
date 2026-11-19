@@ -150,10 +150,9 @@ impl BookDetailView {
             self.fill_review_editor(id, draft, base, false, window, cx);
         }
         if !self.model.read(cx).wants_review(id) {
-            if self.review.scheduled == Some(id) {
-                self.review.scheduled = None;
-                self.review._fetch_task = None;
-            }
+            // Also drops a wait for a book left behind.
+            self.review.scheduled = None;
+            self.review._fetch_task = None;
             return;
         }
         if self.review.scheduled == Some(id) {
@@ -298,7 +297,23 @@ impl BookDetailView {
             id,
             WriteKind::Review,
             "Couldn't save your review",
-            move |client| client.set_review(id, &draft.text, draft.spoilers, draft.date, keep),
+            move |client| {
+                client
+                    .set_review(id, &draft.text, draft.spoilers, draft.date, keep)
+                    .map(|written| {
+                        let kept = written.review.text().is_some();
+                        let mut written = Written::from(written);
+                        if !kept {
+                            written.warning = Some((
+                                "Review not saved",
+                                "Hardcover didn't keep your review. It is still in the \
+                                 editor; try again."
+                                    .to_owned(),
+                            ));
+                        }
+                        written
+                    })
+            },
             window,
             cx,
         );
@@ -354,9 +369,18 @@ impl BookDetailView {
         });
     }
 
-    /// After a review write on `id` succeeded; the model has the review.
+    /// After a review write on `id` succeeded; the model has the review
+    /// Hardcover returned.
     pub(super) fn review_written(&mut self, id: UserBookId, cx: &mut Context<Self>) {
         let write = self.review.writing.take();
+        let kept = self
+            .saved_review(id, cx)
+            .is_some_and(|r| r.text().is_some());
+        // A save Hardcover didn't keep leaves the draft in the editor.
+        if write == Some(ReviewWrite::Save) && !kept {
+            cx.notify();
+            return;
+        }
         if self.review.editing.as_ref().is_some_and(|(e, _)| *e == id) {
             self.review.editing = None;
         }
@@ -425,7 +449,7 @@ impl BookDetailView {
         review: &Review,
         can_write: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let busy = self.model.read(cx).pending_write(id).is_some();
         let mut facts: Vec<String> = Vec::new();
@@ -435,7 +459,17 @@ impl BookDetailView {
         if review.has_spoilers {
             facts.push("Contains spoilers".to_owned());
         }
-        let text = review.text().unwrap_or_default().to_owned();
+        let Some(text) = review.text().map(str::to_owned) else {
+            // Nothing to edit from, so no editor: saving would replace it.
+            return div()
+                .text_sm()
+                .text_color(muted)
+                .child(
+                    "You have a review of this book that this app can't show. \
+                     Open it on Hardcover to read or change it.",
+                )
+                .into_any_element();
+        };
         let body: AnyElement = match review.markdown.is_some() {
             true => TextView::markdown(ElementId::Name(format!("review-{id}").into()), text)
                 .selectable(true)
@@ -451,36 +485,40 @@ impl BookDetailView {
                 )
                 .into_any_element(),
         };
-        v_flex().gap_3().child(div().text_sm().child(body)).child(
-            h_flex()
-                .flex_wrap()
-                .gap_2()
-                .text_sm()
-                .text_color(muted)
-                .when(!facts.is_empty(), |this| this.child(facts.join(" · ")))
-                .child(
-                    Button::new("edit-review")
-                        .outline()
-                        .small()
-                        .label("Edit…")
-                        .disabled(!can_write || busy)
-                        .when(!can_write, |this| {
-                            this.tooltip(needs_permission(WRITE_REVIEWS))
-                        })
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.open_review_editor(window, cx)),
-                        ),
-                )
-                .when(self.review.saved == Some(id), |this| {
-                    this.child(
-                        h_flex()
-                            .gap_1()
-                            .text_xs()
-                            .child(Icon::new(IconName::Check).xsmall())
-                            .child("Saved"),
+        v_flex()
+            .gap_3()
+            .child(div().text_sm().child(body))
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .text_sm()
+                    .text_color(muted)
+                    .when(!facts.is_empty(), |this| this.child(facts.join(" · ")))
+                    .child(
+                        Button::new("edit-review")
+                            .outline()
+                            .small()
+                            .label("Edit…")
+                            .disabled(!can_write || busy)
+                            .when(!can_write, |this| {
+                                this.tooltip(needs_permission(WRITE_REVIEWS))
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_review_editor(window, cx)
+                            })),
                     )
-                }),
-        )
+                    .when(self.review.saved == Some(id), |this| {
+                        this.child(
+                            h_flex()
+                                .gap_1()
+                                .text_xs()
+                                .child(Icon::new(IconName::Check).xsmall())
+                                .child("Saved"),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 
     fn render_no_review(

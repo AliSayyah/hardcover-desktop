@@ -81,6 +81,9 @@ pub struct LibraryModel {
     fill_during_sync: bool,
     /// `Some` while a sync runs: writes to re-apply on top of its result.
     changes_during_sync: Option<Vec<LocalChange>>,
+    /// Entries whose review was written while the running sync ran: the sync
+    /// does not make those reviews stale.
+    reviews_during_sync: HashSet<UserBookId>,
     writes: HashMap<UserBookId, WriteKind>,
     adding: HashSet<BookId>,
     reviews: HashMap<UserBookId, ReviewSlot>,
@@ -102,6 +105,7 @@ impl LibraryModel {
             sync_fetched: 0,
             fill_during_sync: false,
             changes_during_sync: None,
+            reviews_during_sync: HashSet::new(),
             writes: HashMap::new(),
             adding: HashSet::new(),
             reviews: HashMap::new(),
@@ -210,6 +214,7 @@ impl LibraryModel {
         self.sync_fetched = 0;
         self.fill_during_sync = self.entries.is_empty();
         self.changes_during_sync = Some(Vec::new());
+        self.reviews_during_sync.clear();
         cx.notify();
 
         let services = Services::global(cx).clone();
@@ -279,9 +284,12 @@ impl LibraryModel {
                 self.sync = SyncStatus::Synced;
                 self.last_synced_at = Some(chrono::Utc::now());
                 // Fetched again when next shown, also after a failure.
-                for slot in self.reviews.values_mut() {
-                    slot.current = false;
-                    slot.error = None;
+                let written = std::mem::take(&mut self.reviews_during_sync);
+                for (id, slot) in &mut self.reviews {
+                    if !written.contains(id) {
+                        slot.current = false;
+                        slot.error = None;
+                    }
                 }
                 CoverService::retry_failed(cx);
                 cx.notify();
@@ -390,6 +398,9 @@ impl LibraryModel {
 
     /// The review a review write returned.
     pub fn apply_review(&mut self, id: UserBookId, review: Review, cx: &mut Context<Self>) {
+        if self.changes_during_sync.is_some() {
+            self.reviews_during_sync.insert(id);
+        }
         let slot = self.reviews.entry(id).or_default();
         slot.review = Some(review);
         slot.current = true;

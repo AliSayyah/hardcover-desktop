@@ -654,6 +654,7 @@ fn answer(op: &str, vars: &Value) -> Value {
                     "review_raw": null,
                     "review_has_spoilers": r.spoilers,
                     "reviewed_at": format!("{}T00:00:00", r.reviewed_at),
+                    "has_review": true,
                 }),
                 None => json!({
                     "id": e.id,
@@ -661,6 +662,7 @@ fn answer(op: &str, vars: &Value) -> Value {
                     "review_raw": null,
                     "review_has_spoilers": false,
                     "reviewed_at": null,
+                    "has_review": false,
                 }),
             }),
         }),
