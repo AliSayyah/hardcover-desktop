@@ -25,9 +25,9 @@ mod http;
 mod ratelimit;
 
 pub use api::{
-    BookDetails, BookId, BookSummary, Client, Cover, Date, EditionId, EditionSummary, LibraryEntry,
-    Privacy, ProgressUpdate, Rating, ReadId, ReadSession, ReadingStatus, SearchPage, SeriesRef,
-    Timestamp, TokenSource, User, UserBookId, UserId,
+    BookDetails, BookId, BookSummary, Client, Cover, Date, EDITIONS_PER_PAGE, EditionId,
+    EditionSummary, Length, LibraryEntry, Privacy, ProgressUpdate, Rating, ReadId, ReadSession,
+    ReadingStatus, SearchPage, SeriesRef, Timestamp, TokenSource, User, UserBookId, UserId,
 };
 pub use error::{Error, Result};
 

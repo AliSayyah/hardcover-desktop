@@ -95,7 +95,7 @@ struct Shown {
 
 impl Shown {
     fn of(entry: &LibraryEntry) -> Self {
-        let read = entry.current_read.as_ref();
+        let read = entry.current_read();
         Self {
             id: entry.user_book_id,
             status: entry.status,
@@ -445,11 +445,7 @@ impl BookDetailView {
         }
         self.page_error = None;
         let id = entry.user_book_id;
-        let read = entry
-            .current_read
-            .as_ref()
-            .filter(|r| !r.is_finished())
-            .map(|r| r.id);
+        let read = entry.open_read().map(|r| r.id);
         self.run_write(
             id,
             WriteKind::Progress,
@@ -476,7 +472,7 @@ impl BookDetailView {
         let Some(entry) = self.current_entry(cx) else {
             return;
         };
-        let Some(read) = entry.current_read.clone() else {
+        let Some(read) = entry.current_read().cloned() else {
             return;
         };
         // `set_read_dates` sets both dates, so the other one comes from the model.
@@ -1024,7 +1020,7 @@ impl Render for BookDetailView {
                             .when(entry.status == ReadingStatus::CurrentlyReading, |this| {
                                 this.child(self.render_progress(entry, cx))
                             })
-                            .when(entry.current_read.is_some(), |this| {
+                            .when(entry.current_read().is_some(), |this| {
                                 this.child(self.render_dates(entry, label_width, cx))
                             }),
                         None => this.child(self.render_add(&book, cx)),

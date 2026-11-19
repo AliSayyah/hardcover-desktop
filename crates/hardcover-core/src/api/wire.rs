@@ -233,6 +233,7 @@ impl RawBookDetails {
 
 // ---------- library ----------
 
+/// `EditionFields`, or the shorter selection on a read's edition (the rest absent).
 #[derive(Debug, Deserialize)]
 pub(crate) struct RawEdition {
     pub id: i64,
@@ -242,16 +243,41 @@ pub(crate) struct RawEdition {
     pub edition_format: Option<String>,
     #[serde(default)]
     pub cached_image: Value,
+    pub release_date: Option<String>,
+    pub isbn_13: Option<String>,
+    pub reading_format: Option<RawReadingFormat>,
+    pub publisher: Option<RawName>,
+    pub language: Option<RawLanguage>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawReadingFormat {
+    pub format: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawName {
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawLanguage {
+    pub language: Option<String>,
 }
 
 impl RawEdition {
-    fn into_summary(self) -> EditionSummary {
+    pub(crate) fn into_summary(self) -> EditionSummary {
         let mut e = EditionSummary::new(EditionId::new(self.id));
         e.title = non_empty(self.title);
         e.pages = opt_u32(self.pages).filter(|p| *p > 0);
         e.audio_seconds = opt_u32(self.audio_seconds).filter(|s| *s > 0);
         e.cover = cover_from_value(&self.cached_image);
         e.format = non_empty(self.edition_format);
+        e.reading_format = self.reading_format.and_then(|f| non_empty(f.format));
+        e.release_date = self.release_date.as_deref().and_then(parse_date);
+        e.isbn_13 = non_empty(self.isbn_13);
+        e.publisher = self.publisher.and_then(|p| non_empty(p.name));
+        e.language = self.language.and_then(|l| non_empty(l.language));
         e
     }
 }
@@ -265,6 +291,7 @@ pub(crate) struct RawRead {
     pub progress_pages: Option<i64>,
     pub progress_seconds: Option<i64>,
     pub edition_id: Option<i64>,
+    pub edition: Option<RawEdition>,
 }
 
 impl RawRead {
@@ -279,6 +306,7 @@ impl RawRead {
             .filter(|p| p.is_finite())
             .map(|p| p.clamp(0.0, 100.0) as f32);
         r.edition_id = self.edition_id.map(EditionId::new);
+        r.edition = self.edition.map(RawEdition::into_summary);
         r
     }
 }
@@ -291,6 +319,8 @@ pub(crate) struct RawUserBook {
     pub rating: Option<Value>,
     pub date_added: Option<String>,
     pub updated_at: Option<String>,
+    pub privacy_setting_id: Option<i64>,
+    pub private_notes: Option<String>,
     pub book: RawBook,
     pub edition: Option<RawEdition>,
     #[serde(default)]
@@ -313,13 +343,16 @@ impl RawUserBook {
             .and_then(as_f64)
             .and_then(Rating::from_api);
         e.edition = self.edition.map(RawEdition::into_summary);
-        e.current_read = self
+        e.reads = self
             .user_book_reads
             .into_iter()
-            .max_by_key(|r| r.id)
-            .map(RawRead::into_session);
+            .map(RawRead::into_session)
+            .collect();
+        e.reads.sort_by(read_order);
         e.date_added = self.date_added.as_deref().and_then(parse_date);
         e.updated_at = self.updated_at.as_deref().and_then(parse_timestamp);
+        e.private_notes = self.private_notes.filter(|n| !n.trim().is_empty());
+        e.privacy = self.privacy_setting_id.and_then(Privacy::from_id);
         Some(e)
     }
 }
@@ -429,13 +462,11 @@ pub(crate) struct ReadRef {
 }
 
 impl ReadRef {
-    /// The nested entry with the written read as its current read (when it is the latest).
+    /// The nested entry with the written read in it, as written: the nested
+    /// list may or may not include the write yet.
     pub fn into_entry(self) -> Option<LibraryEntry> {
         let mut entry = self.user_book?.into_entry()?;
-        let read = self.read.into_session();
-        if entry.current_read.as_ref().is_none_or(|r| r.id <= read.id) {
-            entry.current_read = Some(read);
-        }
+        entry.upsert_read(self.read.into_session());
         Some(entry)
     }
 }
@@ -443,6 +474,18 @@ impl ReadRef {
 #[derive(Debug, Deserialize)]
 pub(crate) struct DeletePayload {
     pub id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct DeleteReadPayload {
+    pub error: Option<String>,
+    pub id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct OwnedPayload {
+    pub id: Option<i64>,
+    pub list_book: Option<Value>,
 }
 
 // ---------- progress context ----------
@@ -468,25 +511,32 @@ pub(crate) struct ProgressContext {
     pub user_book_reads: Vec<ContextRead>,
 }
 
+impl Lengths {
+    fn length(&self) -> Option<Length> {
+        match (opt_u32(self.pages), opt_u32(self.audio_seconds)) {
+            (Some(p), _) if p > 0 => Some(Length::Pages(p)),
+            (_, Some(s)) if s > 0 => Some(Length::Seconds(s)),
+            _ => None,
+        }
+    }
+}
+
 impl ProgressContext {
-    /// (pages, audio seconds) of the read's edition, then the entry's edition, then the book.
-    pub fn lengths(&self) -> (Option<u32>, Option<u32>) {
-        let candidates = [
+    /// The length of the read's edition, else the entry's edition, else the
+    /// book's. The first with a known length decides the unit, as
+    /// [`LibraryEntry::length`] does, so an audiobook counts time even though
+    /// the book has a page count.
+    pub fn length(&self) -> Option<Length> {
+        [
             self.user_book_reads
                 .first()
                 .and_then(|r| r.edition.as_ref()),
             self.edition.as_ref(),
             self.book.as_ref(),
-        ];
-        let pages = candidates
-            .iter()
-            .flatten()
-            .find_map(|l| opt_u32(l.pages).filter(|p| *p > 0));
-        let seconds = candidates
-            .iter()
-            .flatten()
-            .find_map(|l| opt_u32(l.audio_seconds).filter(|s| *s > 0));
-        (pages, seconds)
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(Lengths::length)
     }
 }
 

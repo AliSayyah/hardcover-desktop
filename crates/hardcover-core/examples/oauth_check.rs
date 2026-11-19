@@ -49,22 +49,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("status: {:?}", e.status);
         let e = client.set_rating(e.user_book_id, Rating::new(4.0), e.status)?;
         println!("rating: {:?} status kept: {:?}", e.rating, e.status);
-        let read = e.current_read.as_ref().map(|r| r.id);
+        let read = e.current_read().map(|r| r.id);
         let e = client.update_progress(e.user_book_id, read, ProgressUpdate::Pages(10))?;
         println!(
             "progress pages: {:?}",
-            e.current_read.as_ref().and_then(|r| r.progress_pages)
+            e.current_read().and_then(|r| r.progress_pages)
         );
         let read = e
-            .current_read
-            .as_ref()
+            .current_read()
             .ok_or(hardcover_core::Error::Api("no read".into()))?;
         let started = chrono::Local::now().date_naive();
         let e = client.set_read_dates(read.id, Some(started), None)?;
-        println!(
-            "started: {:?}",
-            e.current_read.as_ref().and_then(|r| r.started_at)
-        );
+        println!("started: {:?}", e.current_read().and_then(|r| r.started_at));
         Ok(())
     };
     let result = cycle();

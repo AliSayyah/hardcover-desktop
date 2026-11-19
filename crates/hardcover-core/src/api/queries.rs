@@ -16,12 +16,24 @@ macro_rules! book_summary_fields {
 macro_rules! user_book_fields {
     () => {
         "fragment UserBookFields on user_books {
-  id user_id status_id rating date_added updated_at
+  id user_id status_id rating date_added updated_at privacy_setting_id private_notes
   book { ...BookSummaryFields }
-  edition { id title pages audio_seconds edition_format cached_image }
-  user_book_reads(order_by: {id: desc}, limit: 1) {
+  edition { ...EditionFields }
+  user_book_reads(order_by: {id: desc}) {
     id started_at finished_at progress progress_pages progress_seconds edition_id
+    edition { id title pages audio_seconds edition_format }
   }
+}
+"
+    };
+}
+
+/// The edition picker's fields, also used for an entry's own edition.
+macro_rules! edition_fields {
+    () => {
+        "fragment EditionFields on editions {
+  id title pages audio_seconds edition_format release_date isbn_13 cached_image
+  reading_format { format } publisher { name } language { language }
 }
 "
     };
@@ -32,18 +44,19 @@ pub(crate) const ME: &str = "query Me {
 }
 ";
 
-/// Keyset pagination over one user's shelves (status 1..=5; "Ignored" is left out).
+/// Keyset pagination over one user's shelves, Ignored (6) included.
 pub(crate) const LIBRARY_PAGE: &str = concat!(
     "query LibraryPage($userId: Int!, $afterId: Int!, $limit: Int!) {
   user_books(
-    where: {user_id: {_eq: $userId}, id: {_gt: $afterId}, status_id: {_in: [1, 2, 3, 4, 5]}}
+    where: {user_id: {_eq: $userId}, id: {_gt: $afterId}, status_id: {_in: [1, 2, 3, 4, 5, 6]}}
     order_by: {id: asc}
     limit: $limit
   ) { ...UserBookFields }
 }
 ",
     user_book_fields!(),
-    book_summary_fields!()
+    book_summary_fields!(),
+    edition_fields!()
 );
 
 /// Not scoped to a user: used to re-read an entry right after mutating it.
@@ -53,7 +66,8 @@ pub(crate) const USER_BOOK_BY_ID: &str = concat!(
 }
 ",
     user_book_fields!(),
-    book_summary_fields!()
+    book_summary_fields!(),
+    edition_fields!()
 );
 
 pub(crate) const USER_BOOK_FOR_USER: &str = concat!(
@@ -62,7 +76,8 @@ pub(crate) const USER_BOOK_FOR_USER: &str = concat!(
 }
 ",
     user_book_fields!(),
-    book_summary_fields!()
+    book_summary_fields!(),
+    edition_fields!()
 );
 
 pub(crate) const USER_BOOK_FOR_BOOK: &str = concat!(
@@ -73,7 +88,8 @@ pub(crate) const USER_BOOK_FOR_BOOK: &str = concat!(
 }
 ",
     user_book_fields!(),
-    book_summary_fields!()
+    book_summary_fields!(),
+    edition_fields!()
 );
 
 pub(crate) const SEARCH_BOOKS: &str =
@@ -119,7 +135,8 @@ pub(crate) const INSERT_USER_BOOK: &str = concat!(
 }
 ",
     user_book_fields!(),
-    book_summary_fields!()
+    book_summary_fields!(),
+    edition_fields!()
 );
 
 pub(crate) const UPDATE_USER_BOOK: &str = concat!(
@@ -128,7 +145,8 @@ pub(crate) const UPDATE_USER_BOOK: &str = concat!(
 }
 ",
     user_book_fields!(),
-    book_summary_fields!()
+    book_summary_fields!(),
+    edition_fields!()
 );
 
 pub(crate) const DELETE_USER_BOOK: &str = "mutation DeleteUserBook($id: Int!) {
@@ -144,13 +162,15 @@ pub(crate) const INSERT_USER_BOOK_READ: &str = concat!(
     error id
     user_book_read {
       id user_book_id started_at finished_at progress progress_pages progress_seconds edition_id
+      edition { id title pages audio_seconds edition_format }
       user_book { ...UserBookFields }
     }
   }
 }
 ",
     user_book_fields!(),
-    book_summary_fields!()
+    book_summary_fields!(),
+    edition_fields!()
 );
 
 /// Returns the written read and, nested, the whole entry as of this write:
@@ -161,14 +181,45 @@ pub(crate) const UPDATE_USER_BOOK_READ: &str = concat!(
     error id
     user_book_read {
       id user_book_id started_at finished_at progress progress_pages progress_seconds edition_id
+      edition { id title pages audio_seconds edition_format }
       user_book { ...UserBookFields }
     }
   }
 }
 ",
     user_book_fields!(),
-    book_summary_fields!()
+    book_summary_fields!(),
+    edition_fields!()
 );
+
+/// Deletes a read (and the journal entries it wrote). Asks only for the id:
+/// relations of a just-deleted row may not resolve, and an error there would
+/// hide a delete that happened. The client reads the entry back instead.
+pub(crate) const DELETE_USER_BOOK_READ: &str = "mutation DeleteUserBookRead($id: Int!) {
+  delete_user_book_read(id: $id) { error id }
+}
+";
+
+/// A book's editions for the edition picker, most read first.
+pub(crate) const BOOK_EDITIONS: &str = concat!(
+    "query BookEditions($bookId: Int!, $limit: Int!, $offset: Int!) {
+  editions(
+    where: {book_id: {_eq: $bookId}}
+    order_by: [{users_count: desc}, {id: asc}]
+    limit: $limit
+    offset: $offset
+  ) { ...EditionFields }
+}
+",
+    edition_fields!()
+);
+
+/// Puts an edition on the user's Owned list (created on first use). Only adds:
+/// taking it off needs `delete_list_book`, which is in the `write:lists` scope.
+pub(crate) const EDITION_OWNED: &str = "mutation EditionOwned($id: Int!) {
+  edition_owned(id: $id) { id list_book { id edition_id } }
+}
+";
 
 /// Every document the client sends, by name. Validated against
 /// `schema/hardcover.graphql` in the tests below and against the live schema by
@@ -187,6 +238,9 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("DELETE_USER_BOOK", DELETE_USER_BOOK),
     ("INSERT_USER_BOOK_READ", INSERT_USER_BOOK_READ),
     ("UPDATE_USER_BOOK_READ", UPDATE_USER_BOOK_READ),
+    ("DELETE_USER_BOOK_READ", DELETE_USER_BOOK_READ),
+    ("BOOK_EDITIONS", BOOK_EDITIONS),
+    ("EDITION_OWNED", EDITION_OWNED),
 ];
 
 #[cfg(test)]

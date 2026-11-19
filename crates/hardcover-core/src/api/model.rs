@@ -75,9 +75,9 @@ id_type!(
 /// 1 want-to-read, 2 currently-reading, 3 read, 4 paused, 5 did-not-finish, 6 ignored.
 ///
 /// [`Ignored`](Self::Ignored) is a real status (a book the user hid from
-/// recommendations). [`crate::api::Client::library`] leaves those entries out, but
-/// single-entry lookups return them so the UI never mistakes an ignored book for
-/// one that is not in the library. Rows with an id this enum does not know are skipped.
+/// recommendations). [`crate::api::Client::library`] returns those entries too,
+/// so the app can list them apart from the reading shelves. Rows with an id this
+/// enum does not know are skipped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ReadingStatus {
     WantToRead,
@@ -96,6 +96,16 @@ impl ReadingStatus {
         Self::Read,
         Self::Paused,
         Self::DidNotFinish,
+    ];
+
+    /// Every status, in Hardcover's order: the shelves, then Ignored.
+    pub const ALL: [ReadingStatus; 6] = [
+        Self::WantToRead,
+        Self::CurrentlyReading,
+        Self::Read,
+        Self::Paused,
+        Self::DidNotFinish,
+        Self::Ignored,
     ];
 
     /// `status_id` used by the API.
@@ -167,6 +177,8 @@ pub enum Privacy {
 }
 
 impl Privacy {
+    pub const ALL: [Privacy; 3] = [Self::Public, Self::FollowersOnly, Self::Private];
+
     pub const fn id(self) -> i64 {
         match self {
             Self::Public => 1,
@@ -182,6 +194,15 @@ impl Privacy {
             3 => Self::Private,
             _ => return None,
         })
+    }
+
+    /// Hardcover's label (`privacy_settings.setting`).
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Public => "Public",
+            Self::FollowersOnly => "Followers only",
+            Self::Private => "Private",
+        }
     }
 }
 
@@ -325,7 +346,9 @@ impl BookSummary {
     }
 }
 
-/// The edition a library entry is tied to.
+/// One edition of a book: the one a library entry or a read is tied to, or a
+/// choice in the edition picker. A read's edition carries only the id, title,
+/// lengths and format.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct EditionSummary {
@@ -337,6 +360,12 @@ pub struct EditionSummary {
     pub cover: Option<Cover>,
     /// `editions.edition_format`, free text such as "Paperback", "Hardcover", "Kindle Edition".
     pub format: Option<String>,
+    /// `reading_formats.format`, Hardcover's broad kind of edition (such as "Audiobook").
+    pub reading_format: Option<String>,
+    pub release_date: Option<Date>,
+    pub isbn_13: Option<String>,
+    pub publisher: Option<String>,
+    pub language: Option<String>,
 }
 
 impl EditionSummary {
@@ -348,8 +377,30 @@ impl EditionSummary {
             audio_seconds: None,
             cover: None,
             format: None,
+            reading_format: None,
+            release_date: None,
+            isbn_13: None,
+            publisher: None,
+            language: None,
         }
     }
+
+    /// The edition's length: pages, or for an audiobook without a page count,
+    /// its running time.
+    pub fn length(&self) -> Option<Length> {
+        match (self.pages, self.audio_seconds) {
+            (Some(p), _) if p > 0 => Some(Length::Pages(p)),
+            (_, Some(s)) if s > 0 => Some(Length::Seconds(s)),
+            _ => None,
+        }
+    }
+}
+
+/// How long an edition is, in the unit its progress is recorded in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Length {
+    Pages(u32),
+    Seconds(u32),
 }
 
 /// One read-through of a book (`user_book_reads`).
@@ -364,6 +415,9 @@ pub struct ReadSession {
     /// `user_book_reads.progress`, a percentage 0..=100 computed by the server.
     pub progress_percent: Option<f32>,
     pub edition_id: Option<EditionId>,
+    /// The read's edition, when it has one.
+    #[serde(default)]
+    pub edition: Option<EditionSummary>,
 }
 
 impl ReadSession {
@@ -376,12 +430,29 @@ impl ReadSession {
             progress_seconds: None,
             progress_percent: None,
             edition_id: None,
+            edition: None,
         }
     }
 
     pub fn is_finished(&self) -> bool {
         self.finished_at.is_some()
     }
+
+    /// The date that places the read in time: when it finished, or else when it started.
+    pub fn date(&self) -> Option<Date> {
+        self.finished_at.or(self.started_at)
+    }
+}
+
+/// Order of reads in [`LibraryEntry::reads`]: open reads first (newest first),
+/// then finished ones by date, most recent first. Ids break ties, newest first.
+///
+/// Ids alone are not enough: a past read added today gets the highest id.
+pub fn read_order(a: &ReadSession, b: &ReadSession) -> std::cmp::Ordering {
+    a.is_finished()
+        .cmp(&b.is_finished())
+        .then_with(|| b.date().cmp(&a.date()))
+        .then_with(|| b.id.cmp(&a.id))
 }
 
 /// One book in the user's library (`user_books`).
@@ -395,10 +466,17 @@ pub struct LibraryEntry {
     pub status: ReadingStatus,
     pub rating: Option<Rating>,
     pub edition: Option<EditionSummary>,
-    /// The most recent read (highest id), finished or not.
-    pub current_read: Option<ReadSession>,
+    /// Every read of the book, in [`read_order`]: the current one first.
+    #[serde(default)]
+    pub reads: Vec<ReadSession>,
     pub date_added: Option<Date>,
     pub updated_at: Option<Timestamp>,
+    /// `user_books.private_notes`, visible only to the owner.
+    #[serde(default)]
+    pub private_notes: Option<String>,
+    /// Who can see the entry. `None` in caches written before it was stored.
+    #[serde(default)]
+    pub privacy: Option<Privacy>,
 }
 
 impl LibraryEntry {
@@ -415,10 +493,34 @@ impl LibraryEntry {
             status,
             rating: None,
             edition: None,
-            current_read: None,
+            reads: Vec::new(),
             date_added: None,
             updated_at: None,
+            private_notes: None,
+            privacy: None,
         }
+    }
+
+    /// The read progress and the date fields act on: the newest unfinished
+    /// read, or else the most recently finished one.
+    pub fn current_read(&self) -> Option<&ReadSession> {
+        self.reads.iter().min_by(|a, b| read_order(a, b))
+    }
+
+    /// The current read if it is unfinished.
+    pub fn open_read(&self) -> Option<&ReadSession> {
+        self.current_read().filter(|r| !r.is_finished())
+    }
+
+    pub fn read(&self, id: ReadId) -> Option<&ReadSession> {
+        self.reads.iter().find(|r| r.id == id)
+    }
+
+    /// Adds `read`, or replaces the read with its id, keeping [`read_order`].
+    pub fn upsert_read(&mut self, read: ReadSession) {
+        self.reads.retain(|r| r.id != read.id);
+        self.reads.push(read);
+        self.reads.sort_by(read_order);
     }
 
     /// The cover to show: the edition's, falling back to the book's.
@@ -429,13 +531,23 @@ impl LibraryEntry {
             .or(self.book.cover.as_ref())
     }
 
-    /// Page count of the edition being read, falling back to the book's default.
+    /// Length of what is being read: the open read's edition, else the entry's
+    /// edition, else the book's default page count. The first of those with a
+    /// known length decides the unit, as in [`crate::api::Client::update_progress`].
+    pub fn length(&self) -> Option<Length> {
+        self.open_read()
+            .and_then(|r| r.edition.as_ref())
+            .and_then(EditionSummary::length)
+            .or_else(|| self.edition.as_ref().and_then(EditionSummary::length))
+            .or_else(|| self.book.pages.filter(|p| *p > 0).map(Length::Pages))
+    }
+
+    /// Page count of what is being read; `None` for an audiobook.
     pub fn total_pages(&self) -> Option<u32> {
-        self.edition
-            .as_ref()
-            .and_then(|e| e.pages)
-            .or(self.book.pages)
-            .filter(|p| *p > 0)
+        match self.length() {
+            Some(Length::Pages(p)) => Some(p),
+            _ => None,
+        }
     }
 }
 
@@ -556,6 +668,75 @@ mod tests {
         assert_eq!(ReadingStatus::CurrentlyReading.id(), 2);
         assert!(ReadingStatus::SHELVES.iter().all(|s| s.is_shelf()));
         assert!(!ReadingStatus::Ignored.is_shelf());
+        assert_eq!(ReadingStatus::ALL[..5], ReadingStatus::SHELVES);
+        for p in Privacy::ALL {
+            assert_eq!(Privacy::from_id(p.id()), Some(p));
+        }
+    }
+
+    fn read(
+        id: i64,
+        started: Option<(i32, u32, u32)>,
+        finished: Option<(i32, u32, u32)>,
+    ) -> ReadSession {
+        let date = |(y, m, d)| Date::from_ymd_opt(y, m, d).unwrap();
+        let mut r = ReadSession::new(ReadId::new(id));
+        r.started_at = started.map(date);
+        r.finished_at = finished.map(date);
+        r
+    }
+
+    #[test]
+    fn current_read_is_the_open_one_not_the_highest_id() {
+        let mut e = LibraryEntry::new(
+            UserBookId::new(1),
+            UserId::new(1),
+            BookSummary::new(BookId::new(1), "Synthetic"),
+            ReadingStatus::CurrentlyReading,
+        );
+        assert!(e.current_read().is_none());
+        e.upsert_read(read(10, Some((2026, 11, 1)), None));
+        // A re-read from years ago, added later, so it has the higher id.
+        e.upsert_read(read(11, Some((2019, 3, 1)), Some((2019, 4, 1))));
+        assert_eq!(e.current_read().unwrap().id, ReadId::new(10));
+        assert_eq!(e.open_read().unwrap().id, ReadId::new(10));
+        // Finishing it: still current, as the most recent finished read.
+        e.upsert_read(read(10, Some((2026, 11, 1)), Some((2026, 11, 20))));
+        assert_eq!(e.current_read().unwrap().id, ReadId::new(10));
+        assert!(e.open_read().is_none());
+        let ids: Vec<i64> = e.reads.iter().map(|r| r.id.get()).collect();
+        assert_eq!(ids, [10, 11]);
+        // Without dates, the newest id wins.
+        e.upsert_read(read(12, None, Some((2027, 1, 1))));
+        e.upsert_read(read(13, None, None));
+        let ids: Vec<i64> = e.reads.iter().map(|r| r.id.get()).collect();
+        assert_eq!(ids, [13, 12, 10, 11]);
+    }
+
+    #[test]
+    fn length_follows_the_open_read_then_the_entry_then_the_book() {
+        let mut book = BookSummary::new(BookId::new(1), "Synthetic");
+        book.pages = Some(300);
+        let mut e = LibraryEntry::new(
+            UserBookId::new(1),
+            UserId::new(1),
+            book,
+            ReadingStatus::CurrentlyReading,
+        );
+        assert_eq!(e.length(), Some(Length::Pages(300)));
+        let mut audio = EditionSummary::new(EditionId::new(2));
+        audio.audio_seconds = Some(36_000);
+        e.edition = Some(audio);
+        assert_eq!(e.length(), Some(Length::Seconds(36_000)));
+        assert_eq!(e.total_pages(), None);
+        // An open read still on a paper edition keeps counting pages.
+        let mut paper = EditionSummary::new(EditionId::new(3));
+        paper.pages = Some(410);
+        let mut r = read(5, Some((2026, 1, 1)), None);
+        r.edition_id = Some(paper.id);
+        r.edition = Some(paper);
+        e.upsert_read(r);
+        assert_eq!(e.total_pages(), Some(410));
     }
 
     #[test]
