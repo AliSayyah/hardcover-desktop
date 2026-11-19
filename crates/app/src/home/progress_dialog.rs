@@ -22,7 +22,6 @@ pub fn open_progress(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let title: SharedString = entry.book.title.clone().into();
     let view = cx.new(|cx| ProgressDialog::new(model, entry, window, cx));
     let input = view.read(cx).input.clone();
     window.open_dialog(cx, move |dialog, window, _| {
@@ -30,7 +29,7 @@ pub fn open_progress(
         // Enter anywhere in the dialog confirms. The dialog stays open until
         // the write succeeds, and closes itself then.
         dialog
-            .title(title.clone())
+            .title("Update progress")
             .w(rems(24.).to_pixels(window.rem_size()))
             .on_ok(move |_, window, cx| {
                 ok_view.update(cx, |this, cx| this.save(window, cx));
@@ -153,8 +152,10 @@ impl Render for ProgressDialog {
             Some(Length::Seconds(total)) => Some(format!("of {}", duration_text(total))),
             None => None,
         };
+        let title = model.entry(self.id).map(|e| e.book.title.clone());
         v_flex()
             .gap_3()
+            .children(title.map(|t| div().text_sm().truncate().child(t)))
             .child(
                 h_flex()
                     .gap_2()

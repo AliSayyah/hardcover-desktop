@@ -336,10 +336,33 @@ impl HomeView {
                             .disabled(pending.is_some() || !can_write)
                             .when_some(disabled_reason, |b, r| b.tooltip(r))
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                this.set_status(id, ReadingStatus::Read, window, cx)
+                                this.confirm_finished(id, window, cx)
                             })),
                     ),
             )
+    }
+
+    /// Asks before finishing a book: the read ends today, and moving the
+    /// book back to Currently Reading would start another read.
+    fn confirm_finished(&mut self, id: UserBookId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(title) = self.model.read(cx).entry(id).map(|e| e.book.title.clone()) else {
+            return;
+        };
+        let view = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let view = view.clone();
+            alert
+                .title(format!("Mark “{title}” as read?"))
+                .description("It moves to your Read shelf, and this read ends today.")
+                .confirm()
+                .ok_text("Mark as read")
+                .on_ok(move |_, window, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        this.set_status(id, ReadingStatus::Read, window, cx)
+                    });
+                    true
+                })
+        });
     }
 
     /// The most recently paused book, so it isn't forgotten. Opening it is

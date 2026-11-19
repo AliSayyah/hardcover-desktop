@@ -182,9 +182,16 @@ fn series_next(entries: &[LibraryEntry]) -> Option<SeriesNext> {
             let Some((after, after_position)) = after else {
                 continue;
             };
+            // A book between them still to be read comes first. One the
+            // reader ignored or gave up on doesn't hold the next one back.
             let unread_between = entries.iter().any(|e| {
                 e.user_book_id != next.user_book_id
-                    && e.status != ReadingStatus::Read
+                    && matches!(
+                        e.status,
+                        ReadingStatus::WantToRead
+                            | ReadingStatus::CurrentlyReading
+                            | ReadingStatus::Paused
+                    )
                     && in_series(e, id).is_some_and(|p| p > after_position && p < position)
             });
             if unread_between {
@@ -210,7 +217,8 @@ fn series_next(entries: &[LibraryEntry]) -> Option<SeriesNext> {
 }
 
 /// What the goal can expect from the books being read: how many of them
-/// should finish by its end at their pace. Only for a goal counted in books.
+/// should finish by its end at their pace. A book left idle doesn't count,
+/// as Home shows no finish date for it. Only for a goal counted in books.
 pub fn finishing_by(goal: &Goal, digest: &Digest, today: Date) -> usize {
     if goal.metric != GoalMetric::Books || today > goal.end {
         return 0;
@@ -218,6 +226,7 @@ pub fn finishing_by(goal: &Goal, digest: &Digest, today: Date) -> usize {
     digest
         .reading
         .iter()
+        .filter(|r| r.idle_days.is_none())
         .filter_map(|r| r.pace?.finish)
         .filter(|f| *f <= goal.end)
         .count()
@@ -393,6 +402,11 @@ mod tests {
         let next = d.series_next.unwrap();
         assert_eq!((next.id.get(), next.after_position), (2, 1.5));
 
+        // An ignored novella between them doesn't hold book 2 back.
+        let ignored = in_series(entry(3, ReadingStatus::Ignored, Some(90)), 7, Some(1.5));
+        let d = compute(&[one.clone(), two.clone(), ignored], day("2026-11-20"));
+        assert_eq!(d.series_next.unwrap().id.get(), 2);
+
         // Book 2 being read (or paused) leaves nothing to suggest.
         let mut reading_two = two.clone();
         reading_two.status = ReadingStatus::CurrentlyReading;
@@ -487,6 +501,13 @@ mod tests {
         let pages = goal(GoalMetric::Pages, "2026-01-01", "2026-12-31");
         assert_eq!(finishing_by(&pages, &d, today), 0);
         assert_eq!(finishing_by(&year, &d, day("2027-01-02")), 0);
+
+        // An idle book's finish date isn't trusted.
+        let mut idle = reading(3, 476, Some("2026-11-01"), Some(312));
+        idle.updated_at = Some(at("2026-11-10"));
+        let d = compute(&[idle], today);
+        assert!(d.reading[0].pace.and_then(|p| p.finish).is_some());
+        assert_eq!(finishing_by(&year, &d, today), 0);
     }
 
     #[test]
