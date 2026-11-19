@@ -7,6 +7,13 @@
 //! their shelves, reads and notes are invented. Each book has one stand-in
 //! edition for the edition picker, with only the book's title and cover.
 //!
+//! Series and author pages are built from the catalogue alone: a series lists
+//! the catalogue's books in it, an author their books in the catalogue. Their
+//! ids are the demo's own, not Hardcover's. Authors have no bio, photo or book count.
+//! "Similar books" are the catalogue's books sharing the most genres, not
+//! Hardcover's picks, and books have no ratings distribution or alternative
+//! titles: the catalogue does not record them.
+//!
 //! [`cover_cache`] downloads the catalogue's covers from Hardcover, the demo's
 //! only network access; any other URL is refused. Reads work; every write
 //! fails with a "read-only" error. Only built with the `demo` feature (and in
@@ -133,9 +140,79 @@ static CATALOGUE: LazyLock<Catalogue> = LazyLock::new(|| {
     serde_json::from_str(include_str!("demo/catalogue.json")).expect("demo/catalogue.json parses")
 });
 
+/// Demo ids for authors and series, which the catalogue names but does not number.
+const AUTHOR_IDS: i64 = 70_000;
+const SERIES_IDS: i64 = 80_000;
+
 impl Catalogue {
     fn book(&self, id: i64) -> Option<&Book> {
         self.books.iter().find(|b| b.id == id)
+    }
+
+    /// Distinct names in catalogue order, numbered from `base + 1`.
+    fn numbered<'a>(
+        &'a self,
+        names: impl Iterator<Item = &'a str>,
+        base: i64,
+    ) -> Vec<(i64, &'a str)> {
+        let mut seen: Vec<&str> = Vec::new();
+        for name in names {
+            if !seen.contains(&name) {
+                seen.push(name);
+            }
+        }
+        seen.into_iter()
+            .enumerate()
+            .map(|(i, name)| (base + 1 + i as i64, name))
+            .collect()
+    }
+
+    fn authors(&self) -> Vec<(i64, &str)> {
+        self.numbered(self.books.iter().map(|b| b.author.as_str()), AUTHOR_IDS)
+    }
+
+    fn series(&self) -> Vec<(i64, &str)> {
+        self.numbered(
+            self.books
+                .iter()
+                .filter_map(|b| b.series.as_ref().map(|s| s.name.as_str())),
+            SERIES_IDS,
+        )
+    }
+
+    fn author_id(&self, name: &str) -> i64 {
+        self.authors()
+            .into_iter()
+            .find(|(_, n)| *n == name)
+            .map_or(0, |(id, _)| id)
+    }
+
+    fn series_id(&self, name: &str) -> i64 {
+        self.series()
+            .into_iter()
+            .find(|(_, n)| *n == name)
+            .map_or(0, |(id, _)| id)
+    }
+
+    /// Other books sharing at least one genre, most shared genres first, then
+    /// the most read.
+    fn similar(&self, book: &Book) -> Vec<i64> {
+        let mut others: Vec<(usize, &Book)> = self
+            .books
+            .iter()
+            .filter(|b| b.id != book.id)
+            .map(|b| {
+                (
+                    b.genres.iter().filter(|g| book.genres.contains(g)).count(),
+                    b,
+                )
+            })
+            .filter(|(shared, _)| *shared > 0)
+            .collect();
+        others.sort_by_key(|(shared, b)| {
+            (std::cmp::Reverse(*shared), std::cmp::Reverse(b.users_count))
+        });
+        others.into_iter().take(10).map(|(_, b)| b.id).collect()
     }
 
     fn entry(&self, id: i64) -> Option<&Entry> {
@@ -198,7 +275,10 @@ fn book_summary(book: &Book) -> Value {
         "rating": book.rating,
         "users_count": book.users_count,
         "cached_image": image(book),
-        "cached_contributors": [{ "author": { "name": book.author }, "contribution": null }],
+        "cached_contributors": [{
+            "author": { "id": CATALOGUE.author_id(&book.author), "name": book.author },
+            "contribution": null,
+        }],
     })
 }
 
@@ -251,7 +331,11 @@ fn book_details(book: &Book) -> Value {
             json!({
                 "position": s.position,
                 "featured": true,
-                "series": { "name": s.name, "slug": slug(&s.name) },
+                "series": {
+                    "id": CATALOGUE.series_id(&s.name),
+                    "name": s.name,
+                    "slug": slug(&s.name),
+                },
             })
         })
         .collect();
@@ -261,12 +345,81 @@ fn book_details(book: &Book) -> Value {
         "editions_count": book.editions_count,
         "ratings_count": book.ratings_count,
         "cached_tags": { "Genre": genres },
+        "ratings_distribution": [],
+        "alternative_titles": [],
+        "cached_similar_book_ids": CATALOGUE.similar(book),
         "book_series": series,
     });
     if let (Some(map), Value::Object(extra)) = (details.as_object_mut(), extra) {
         map.extend(extra);
     }
     details
+}
+
+/// `series_by_pk` for `SeriesPage`.
+fn series_page(catalogue: &Catalogue, id: i64) -> Option<Value> {
+    let (id, name) = catalogue.series().into_iter().find(|(i, _)| *i == id)?;
+    let books: Vec<&Book> = catalogue
+        .books
+        .iter()
+        .filter(|b| b.series.as_ref().is_some_and(|s| s.name == name))
+        .collect();
+    let author = books
+        .first()
+        .map(|b| json!({ "id": catalogue.author_id(&b.author), "name": b.author }));
+    let rows: Vec<Value> = books
+        .iter()
+        .map(|b| {
+            let mut book = book_summary(b);
+            book["is_partial_book"] = json!(false);
+            json!({
+                "position": b.series.as_ref().map(|s| s.position),
+                "compilation": false,
+                "book": book,
+            })
+        })
+        .collect();
+    Some(json!({
+        "id": id,
+        "name": name,
+        "slug": slug(name),
+        "description": null,
+        "primary_books_count": null,
+        "is_completed": null,
+        "author": author,
+        "book_series": rows,
+    }))
+}
+
+/// `authors_by_pk` for `AuthorPage`, most read first.
+fn author_page(catalogue: &Catalogue, id: i64) -> Option<Value> {
+    let (id, name) = catalogue.authors().into_iter().find(|(i, _)| *i == id)?;
+    let mut books: Vec<&Book> = catalogue
+        .books
+        .iter()
+        .filter(|b| b.author == name)
+        .collect();
+    books.sort_by_key(|b| std::cmp::Reverse(b.users_count));
+    let contributions: Vec<Value> = books
+        .iter()
+        .map(|b| {
+            let mut book = book_summary(b);
+            book["is_partial_book"] = json!(false);
+            json!({ "contribution": null, "book": book })
+        })
+        .collect();
+    Some(json!({
+        "id": id,
+        "name": name,
+        "slug": slug(name),
+        "bio": null,
+        "cached_image": {},
+        "born_year": null,
+        "death_year": null,
+        // The catalogue holds a few of their books, not their count.
+        "books_count": null,
+        "contributions": contributions,
+    }))
 }
 
 fn search_document(book: &Book) -> Value {
@@ -380,6 +533,21 @@ fn answer(op: &str, vars: &Value) -> Value {
         "BookDetails" => json!({
             "books_by_pk": catalogue.book(int("id")).map(book_details),
         }),
+        "SeriesPage" => json!({ "series_by_pk": series_page(catalogue, int("id")) }),
+        "AuthorPage" => json!({ "authors_by_pk": author_page(catalogue, int("id")) }),
+        "BooksByIds" => {
+            let ids: Vec<i64> = vars["ids"]
+                .as_array()
+                .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
+                .unwrap_or_default();
+            let books: Vec<Value> = catalogue
+                .books
+                .iter()
+                .filter(|b| ids.contains(&b.id))
+                .map(book_summary)
+                .collect();
+            json!({ "books": books })
+        }
         "ProgressContext" => {
             // `$reads` is either `{id: {_eq: n}}` or "unfinished".
             let wanted = vars["reads"]["id"]["_eq"].as_i64();
@@ -601,6 +769,46 @@ mod tests {
             .set_status(UserBookId::new(501), ReadingStatus::Read)
             .unwrap_err();
         assert!(err.to_string().contains(READ_ONLY), "{err}");
+    }
+
+    #[test]
+    fn series_and_author_pages_link_up() {
+        let client = client();
+        let dune = client.book_details(BookId::new(312460)).unwrap();
+        let series_id = dune.series[0].id.expect("a series id");
+        let series = client.series(series_id).unwrap();
+        assert_eq!(series.name, "Dune");
+        let titles: Vec<&str> = series.books.iter().map(|b| b.book.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec![
+                "Dune",
+                "Dune Messiah",
+                "Children of Dune",
+                "God Emperor of Dune"
+            ]
+        );
+        let author = series.author.expect("an author");
+        assert_eq!(author.name, "Frank Herbert");
+        assert_eq!(dune.contributors[0].author_id, Some(author.id));
+
+        let page = client.author(author.id).unwrap();
+        assert_eq!(page.books.len(), 4);
+        assert_eq!(page.books[0].book.title, "Dune", "the most read first");
+        assert!(page.bio.is_none() && page.photo.is_none());
+        assert!(client.author(crate::AuthorId::new(1)).is_err());
+    }
+
+    #[test]
+    fn similar_books_come_from_the_catalogue() {
+        let client = client();
+        let dune = client.book_details(BookId::new(312460)).unwrap();
+        assert!(!dune.similar_book_ids.is_empty());
+        assert!(!dune.similar_book_ids.contains(&BookId::new(312460)));
+        let books = client.books_by_ids(&dune.similar_book_ids).unwrap();
+        assert_eq!(books.len(), dune.similar_book_ids.len());
+        assert_eq!(books[0].id, dune.similar_book_ids[0]);
+        assert!(dune.ratings_distribution.is_empty());
     }
 
     #[test]

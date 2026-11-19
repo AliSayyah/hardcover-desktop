@@ -35,6 +35,13 @@ const LIBRARY_PAGE_SIZE: u32 = 100;
 pub const SEARCH_PER_PAGE: u32 = 25;
 /// Editions per page in [`Client::book_editions`].
 pub const EDITIONS_PER_PAGE: u32 = 50;
+/// Rows a series page asks for, duplicates included. Long-running series with
+/// many unmerged translations can exceed it; the most-read come first.
+const SERIES_ROWS_LIMIT: u32 = 200;
+/// Books an author page lists: Hardcover caps nested contributions at 100.
+pub const AUTHOR_BOOKS_LIMIT: u32 = 100;
+/// Most books [`Client::books_by_ids`] asks for in one request.
+pub const BOOKS_BY_IDS_LIMIT: usize = 25;
 
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
@@ -288,6 +295,68 @@ impl Client {
             .into_iter()
             .map(RawEdition::into_summary)
             .collect())
+    }
+
+    /// A series page in one request. `Error::Api` if the series does not exist.
+    pub fn series(&self, id: SeriesId) -> Result<SeriesDetails> {
+        #[derive(Deserialize)]
+        struct Data {
+            series_by_pk: Option<RawSeriesPage>,
+        }
+        let data: Data = self.query(
+            "SeriesPage",
+            queries::SERIES_PAGE,
+            json!({ "id": id.get(), "limit": SERIES_ROWS_LIMIT }),
+            QUERY_TIMEOUT,
+        )?;
+        data.series_by_pk
+            .map(RawSeriesPage::into_details)
+            .ok_or_else(|| Error::Api(format!("series {id} not found")))
+    }
+
+    /// An author page in one request. `Error::Api` if the author does not exist.
+    pub fn author(&self, id: AuthorId) -> Result<AuthorDetails> {
+        #[derive(Deserialize)]
+        struct Data {
+            authors_by_pk: Option<RawAuthorPage>,
+        }
+        let data: Data = self.query(
+            "AuthorPage",
+            queries::AUTHOR_PAGE,
+            json!({ "id": id.get(), "limit": AUTHOR_BOOKS_LIMIT }),
+            QUERY_TIMEOUT,
+        )?;
+        data.authors_by_pk
+            .map(RawAuthorPage::into_details)
+            .ok_or_else(|| Error::Api(format!("author {id} not found")))
+    }
+
+    /// The books with these ids, in the order given, in one request. Only the
+    /// first [`BOOKS_BY_IDS_LIMIT`] ids are used; ids Hardcover does not know
+    /// are left out. No ids, no request.
+    pub fn books_by_ids(&self, ids: &[BookId]) -> Result<Vec<BookSummary>> {
+        let ids: Vec<i64> = ids
+            .iter()
+            .take(BOOKS_BY_IDS_LIMIT)
+            .map(|id| id.get())
+            .collect();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        #[derive(Deserialize)]
+        struct Data {
+            books: Vec<RawBook>,
+        }
+        let data: Data = self.query(
+            "BooksByIds",
+            queries::BOOKS_BY_IDS,
+            json!({ "ids": ids, "limit": ids.len() }),
+            QUERY_TIMEOUT,
+        )?;
+        let mut books: Vec<BookSummary> =
+            data.books.into_iter().map(RawBook::into_summary).collect();
+        books.sort_by_key(|b| ids.iter().position(|id| *id == b.id.get()));
+        Ok(books)
     }
 
     // ----- writes -----

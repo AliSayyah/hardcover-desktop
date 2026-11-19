@@ -68,6 +68,14 @@ id_type!(
     /// `users.id`
     UserId
 );
+id_type!(
+    /// `series.id`
+    SeriesId
+);
+id_type!(
+    /// `authors.id`
+    AuthorId
+);
 
 /// A library entry's status (`user_books.status_id`).
 ///
@@ -555,6 +563,9 @@ impl LibraryEntry {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SeriesRef {
+    /// `None` only if Hardcover left it out; the series page needs it.
+    #[serde(default)]
+    pub id: Option<SeriesId>,
     pub name: String,
     pub slug: Option<String>,
     /// Position in the series; may be fractional (1.5 for a novella).
@@ -566,11 +577,56 @@ pub struct SeriesRef {
 impl SeriesRef {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
+            id: None,
             name: name.into(),
             slug: None,
             position: None,
             featured: false,
         }
+    }
+}
+
+/// Someone credited on a book (`cached_contributors`), in credit order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Contributor {
+    /// `None` when the cached entry has no author id; it then cannot link.
+    pub author_id: Option<AuthorId>,
+    pub name: String,
+    /// The role, e.g. "Translator", "Narrator", "Illustrator". `None` (or
+    /// "Author") for a primary author.
+    pub role: Option<String>,
+}
+
+impl Contributor {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            author_id: None,
+            name: name.into(),
+            role: None,
+        }
+    }
+
+    /// No role, or the "Author" role.
+    pub fn is_author(&self) -> bool {
+        self.role
+            .as_deref()
+            .is_none_or(|r| r.eq_ignore_ascii_case("author"))
+    }
+}
+
+/// How many readers gave one star rating (`ratings_distribution`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct RatingBucket {
+    /// 0.5 to 5.0.
+    pub rating: f32,
+    pub count: u32,
+}
+
+impl RatingBucket {
+    pub fn new(rating: f32, count: u32) -> Self {
+        Self { rating, count }
     }
 }
 
@@ -593,6 +649,18 @@ pub struct BookDetails {
     pub content_warnings: Vec<String>,
     pub editions_count: Option<u32>,
     pub ratings_count: Option<u32>,
+    /// Everyone credited, with roles, in credit order.
+    #[serde(default)]
+    pub contributors: Vec<Contributor>,
+    /// Ratings per star level, highest first; empty when Hardcover has none.
+    #[serde(default)]
+    pub ratings_distribution: Vec<RatingBucket>,
+    /// Other titles the book is known by (`alternative_titles`).
+    #[serde(default)]
+    pub alternative_titles: Vec<String>,
+    /// Hardcover's similar books, most similar first (`cached_similar_book_ids`).
+    #[serde(default)]
+    pub similar_book_ids: Vec<BookId>,
 }
 
 impl BookDetails {
@@ -608,7 +676,148 @@ impl BookDetails {
             content_warnings: Vec::new(),
             editions_count: None,
             ratings_count: None,
+            contributors: Vec::new(),
+            ratings_distribution: Vec::new(),
+            alternative_titles: Vec::new(),
+            similar_book_ids: Vec::new(),
         }
+    }
+}
+
+/// A series' author or another linked author.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct AuthorRef {
+    pub id: AuthorId,
+    pub name: String,
+}
+
+impl AuthorRef {
+    pub fn new(id: AuthorId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+        }
+    }
+}
+
+/// One book on a series page.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct SeriesBook {
+    pub book: BookSummary,
+    /// `None` for a book the series lists without a number.
+    pub position: Option<f32>,
+}
+
+impl SeriesBook {
+    pub fn new(book: BookSummary) -> Self {
+        Self {
+            book,
+            position: None,
+        }
+    }
+
+    /// A whole-numbered entry: the series' main books, as opposed to
+    /// novellas in between (1.5) and unnumbered extras.
+    pub fn is_main(&self) -> bool {
+        self.position.is_some_and(|p| p.fract() == 0.0)
+    }
+}
+
+/// A series page (`series_by_pk`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct SeriesDetails {
+    pub id: SeriesId,
+    pub name: String,
+    pub slug: Option<String>,
+    pub author: Option<AuthorRef>,
+    pub description: Option<String>,
+    pub is_completed: Option<bool>,
+    /// Hardcover's count of the main books (without companions).
+    pub primary_books_count: Option<u32>,
+    /// In reading order: numbered books by position (one book per position),
+    /// then unnumbered ones. Merged duplicates, partial books and
+    /// compilations are left out.
+    pub books: Vec<SeriesBook>,
+}
+
+impl SeriesDetails {
+    pub fn new(id: SeriesId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            slug: None,
+            author: None,
+            description: None,
+            is_completed: None,
+            primary_books_count: None,
+            books: Vec::new(),
+        }
+    }
+
+    /// `https://hardcover.app/series/<slug>`, when the series has a slug.
+    pub fn web_url(&self) -> Option<String> {
+        self.slug
+            .as_deref()
+            .map(|s| format!("https://hardcover.app/series/{s}"))
+    }
+}
+
+/// One book on an author page.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct AuthorBook {
+    pub book: BookSummary,
+    /// The author's role when they did not write it, e.g. "Translator".
+    pub role: Option<String>,
+}
+
+impl AuthorBook {
+    pub fn new(book: BookSummary) -> Self {
+        Self { book, role: None }
+    }
+}
+
+/// An author page (`authors_by_pk`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct AuthorDetails {
+    pub id: AuthorId,
+    pub name: String,
+    pub slug: Option<String>,
+    pub bio: Option<String>,
+    pub photo: Option<Cover>,
+    pub born_year: Option<i32>,
+    pub death_year: Option<i32>,
+    /// Hardcover's count of the author's books.
+    pub books_count: Option<u32>,
+    /// Their most-read books (at most [`crate::api::AUTHOR_BOOKS_LIMIT`]),
+    /// most-read first, one row per book.
+    pub books: Vec<AuthorBook>,
+}
+
+impl AuthorDetails {
+    pub fn new(id: AuthorId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            slug: None,
+            bio: None,
+            photo: None,
+            born_year: None,
+            death_year: None,
+            books_count: None,
+            books: Vec::new(),
+        }
+    }
+
+    /// `https://hardcover.app/authors/<slug>`, when the author has a slug.
+    pub fn web_url(&self) -> Option<String> {
+        self.slug
+            .as_deref()
+            .map(|s| format!("https://hardcover.app/authors/{s}"))
     }
 }
 
