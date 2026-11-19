@@ -23,6 +23,11 @@ pub enum WriteKind {
     Rating,
     Progress,
     Dates,
+    Edition,
+    Privacy,
+    Notes,
+    /// Adding, changing or deleting a read in the reading history.
+    Reads,
     Remove,
 }
 

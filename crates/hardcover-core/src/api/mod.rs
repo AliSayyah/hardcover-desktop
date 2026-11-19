@@ -33,6 +33,8 @@ pub const GRAPHQL_ENDPOINT: &str = "https://api.hardcover.app/v1/graphql";
 const LIBRARY_PAGE_SIZE: u32 = 100;
 /// Search results per page.
 pub const SEARCH_PER_PAGE: u32 = 25;
+/// Editions per page in [`Client::book_editions`].
+pub const EDITIONS_PER_PAGE: u32 = 50;
 
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
@@ -131,8 +133,8 @@ impl Client {
         }
     }
 
-    /// The user's whole library (statuses 1..=5; "Ignored" entries are left out),
-    /// ordered by `user_book_id`. Pages of 100, one request each.
+    /// The user's whole library, Ignored entries included, ordered by
+    /// `user_book_id`. Pages of 100, one request each, with every read nested.
     pub fn library(&self, user: UserId) -> Result<Vec<LibraryEntry>> {
         self.library_with_progress(user, |_| {})
     }
@@ -268,6 +270,26 @@ impl Client {
             .ok_or_else(|| Error::Api(format!("book {id} not found")))
     }
 
+    /// One page of `book`'s editions, most read first. `offset` counts editions
+    /// already fetched; a page shorter than [`EDITIONS_PER_PAGE`] is the last.
+    pub fn book_editions(&self, book: BookId, offset: u32) -> Result<Vec<EditionSummary>> {
+        #[derive(Deserialize)]
+        struct Data {
+            editions: Vec<RawEdition>,
+        }
+        let data: Data = self.query(
+            "BookEditions",
+            queries::BOOK_EDITIONS,
+            json!({ "bookId": book.get(), "limit": EDITIONS_PER_PAGE, "offset": offset }),
+            QUERY_TIMEOUT,
+        )?;
+        Ok(data
+            .editions
+            .into_iter()
+            .map(RawEdition::into_summary)
+            .collect())
+    }
+
     // ----- writes -----
 
     /// Adds `book` with `status`, using the account's default privacy. The server
@@ -327,6 +349,82 @@ impl Client {
             id,
             json!({ "rating": rating, "status_id": keep_status.id() }),
         )
+    }
+
+    /// Ties the entry to `edition`.
+    ///
+    /// An open read on another edition moves to `edition` too, in a second
+    /// request, with its progress converted at the same percentage: page 150 of
+    /// 300 becomes 5 hours of a 10-hour audiobook. Otherwise progress would be
+    /// counted against one edition and shown against the other. If that second
+    /// request fails, the edition change still stands: the returned entry shows
+    /// the read on its old edition, which is consistent on its own, and
+    /// [`EditionChange::read_left_behind`] carries the error so the caller can
+    /// say so.
+    pub fn set_edition(&self, id: UserBookId, edition: EditionId) -> Result<EditionChange> {
+        let entry = self.update_user_book(id, json!({ "edition_id": edition.get() }))?;
+        let Some(read) = entry
+            .open_read()
+            .filter(|r| r.edition_id != Some(edition))
+            .cloned()
+        else {
+            return Ok(EditionChange {
+                entry,
+                read_left_behind: None,
+            });
+        };
+        let fields = moved_read_fields(&read, edition, entry.edition.as_ref());
+        Ok(match self.update_read(read.id, Value::Object(fields)) {
+            Ok(written) => EditionChange {
+                entry: self
+                    .entry_after_read_write(written, "edition change")
+                    .unwrap_or(entry),
+                read_left_behind: None,
+            },
+            Err(e) => EditionChange {
+                entry,
+                read_left_behind: Some(e),
+            },
+        })
+    }
+
+    /// Sets the entry's private notes; blank text clears them.
+    pub fn set_private_notes(&self, id: UserBookId, notes: &str) -> Result<LibraryEntry> {
+        let notes = notes.trim();
+        let notes = (!notes.is_empty()).then_some(notes);
+        self.update_user_book(id, json!({ "private_notes": notes }))
+    }
+
+    /// Changes who can see the entry.
+    pub fn set_privacy(&self, id: UserBookId, privacy: Privacy) -> Result<LibraryEntry> {
+        self.update_user_book(id, json!({ "privacy_setting_id": privacy.id() }))
+    }
+
+    /// Puts `edition` on the user's Owned list. Repeating it is harmless.
+    ///
+    /// There is no way back with this app's scopes: taking an edition off the
+    /// list needs `write:lists`, and reading the list needs `read:lists`
+    /// (`user_books.owned` does not follow it). Hardcover posts the addition to
+    /// the user's activity feed.
+    pub fn mark_owned(&self, edition: EditionId) -> Result<()> {
+        #[derive(Deserialize)]
+        struct Data {
+            edition_owned: Option<OwnedPayload>,
+        }
+        let data: Data = self.query(
+            "EditionOwned",
+            queries::EDITION_OWNED,
+            json!({ "id": edition.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        match data.edition_owned {
+            Some(p) if p.id.is_some() || p.list_book.as_ref().is_some_and(|b| !b.is_null()) => {
+                Ok(())
+            }
+            _ => Err(Error::Api(format!(
+                "could not add edition {edition} to the Owned list"
+            ))),
+        }
     }
 
     fn update_user_book(&self, id: UserBookId, object: Value) -> Result<LibraryEntry> {
@@ -423,10 +521,7 @@ impl Client {
         let target = match (target, &context) {
             (None, Some(ctx)) if ctx.status_id != Some(ReadingStatus::CurrentlyReading.id()) => {
                 let entry = self.set_status(id, ReadingStatus::CurrentlyReading)?;
-                entry
-                    .current_read
-                    .filter(|r| !r.is_finished())
-                    .map(|r| r.id)
+                entry.open_read().map(|r| r.id)
             }
             (t, _) => t,
         };
@@ -494,6 +589,63 @@ impl Client {
         });
         let written = self.update_read(read, object)?;
         self.entry_after_read_write(written, "date update")
+    }
+
+    /// Adds a finished read, such as a re-read or one from before the account.
+    /// A finish date is required so this never opens a second unfinished read.
+    /// `edition` is normally the entry's.
+    pub fn add_read(
+        &self,
+        id: UserBookId,
+        started: Option<Date>,
+        finished: Date,
+        edition: Option<EditionId>,
+    ) -> Result<LibraryEntry> {
+        if started.is_some_and(|s| finished < s) {
+            return Err(Error::InvalidInput(
+                "finish date is before the start date".into(),
+            ));
+        }
+        let mut object = Map::new();
+        object.insert("started_at".into(), json!(started.map(|d| d.to_string())));
+        object.insert("finished_at".into(), json!(finished.to_string()));
+        if let Some(edition) = edition {
+            object.insert("edition_id".into(), json!(edition.get()));
+        }
+        let written = self.insert_read(id, Value::Object(object))?;
+        self.entry_after_read_write(written, "adding a read")
+    }
+
+    /// Deletes `read` of entry `id` and returns the entry without it.
+    ///
+    /// The mutation returns only the id (a deleted row's relations may not
+    /// resolve), so the entry is read back. A read-back that is a moment stale
+    /// can still list the read, so it is taken out by id.
+    pub fn delete_read(&self, id: UserBookId, read: ReadId) -> Result<LibraryEntry> {
+        #[derive(Deserialize)]
+        struct Data {
+            delete_user_book_read: Option<DeleteReadPayload>,
+        }
+        let data: Data = self.query(
+            "DeleteUserBookRead",
+            queries::DELETE_USER_BOOK_READ,
+            json!({ "id": read.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        let p = data
+            .delete_user_book_read
+            .ok_or_else(|| Error::Api("`delete_user_book_read` returned null".into()))?;
+        if let Some(e) = p.error.filter(|e| !e.is_empty()) {
+            return Err(Error::Api(e));
+        }
+        if p.id.is_none() {
+            return Err(Error::Api(format!("could not delete read {read}")));
+        }
+        let mut entry = self
+            .entry_by_id(id.get())?
+            .ok_or_else(|| Error::Decode(format!("entry {id} not found after deleting a read")))?;
+        entry.reads.retain(|r| r.id != read);
+        Ok(entry)
     }
 
     fn update_read(&self, read: ReadId, object: Value) -> Result<ReadRef> {
@@ -601,24 +753,60 @@ fn progress_fields(
                     "progress {pct}% is outside 0..=100"
                 )));
             }
-            let (pages, seconds) = ctx.map(ProgressContext::lengths).unwrap_or_default();
             let fraction = f64::from(pct) / 100.0;
-            if let Some(total) = pages {
-                m.insert("progress_pages".into(), json!(scale(fraction, total)));
-            } else if let Some(total) = seconds {
-                m.insert("progress_seconds".into(), json!(scale(fraction, total)));
-            } else {
-                return Err(Error::InvalidInput(
-                    "cannot convert a percentage: the edition's length is unknown; set pages instead".into(),
-                ));
+            match ctx.and_then(ProgressContext::length) {
+                Some(Length::Pages(total)) => {
+                    m.insert("progress_pages".into(), json!(scale(fraction, total)));
+                }
+                Some(Length::Seconds(total)) => {
+                    m.insert("progress_seconds".into(), json!(scale(fraction, total)));
+                }
+                None => {
+                    return Err(Error::InvalidInput(
+                        "cannot convert a percentage: the edition's length is unknown; set pages instead".into(),
+                    ));
+                }
             }
         }
     }
     Ok(m)
 }
 
+/// The `DatesReadInput` that moves an open read to `edition`: its progress at
+/// the same percentage, in the new edition's unit, with the other unit cleared.
+/// Just the edition when the percentage or the new length is unknown.
+fn moved_read_fields(
+    read: &ReadSession,
+    edition: EditionId,
+    new_edition: Option<&EditionSummary>,
+) -> Map<String, Value> {
+    let mut m = Map::new();
+    m.insert("edition_id".into(), json!(edition.get()));
+    let length = new_edition
+        .filter(|e| e.id == edition)
+        .and_then(EditionSummary::length);
+    if let (Some(pct), Some(length)) = (read.progress_percent, length) {
+        let fraction = f64::from(pct.clamp(0.0, 100.0)) / 100.0;
+        let (pages, seconds) = match length {
+            Length::Pages(total) => (Some(scale(fraction, total)), None),
+            Length::Seconds(total) => (None, Some(scale(fraction, total))),
+        };
+        m.insert("progress_pages".into(), json!(pages));
+        m.insert("progress_seconds".into(), json!(seconds));
+    }
+    m
+}
+
+/// `fraction` of `total`, to the nearest unit. An unfinished read never lands
+/// on the last unit: progress at the end may finish the read on Hardcover and
+/// move the book to Read, which changing the edition must not do.
 fn scale(fraction: f64, total: u32) -> u32 {
-    ((fraction * f64::from(total)).round() as u32).min(total)
+    let units = (fraction * f64::from(total)).round() as u32;
+    if fraction < 1.0 {
+        units.min(total.saturating_sub(1))
+    } else {
+        units.min(total)
+    }
 }
 
 fn retry_after(resp: &HttpResponse) -> Option<Duration> {

@@ -371,7 +371,7 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
     println!(
         "add_to_library: status={} read={}",
         e.status,
-        e.current_read.is_some()
+        e.current_read().is_some()
     );
     dump(raw, ub, "after add");
     let check = |label: &str,
@@ -385,8 +385,8 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
     println!(
         "update_progress with no read: status={} read_present={} pages={:?}",
         e.status,
-        e.current_read.is_some(),
-        e.current_read.as_ref().and_then(|r| r.progress_pages)
+        e.current_read().is_some(),
+        e.current_read().and_then(|r| r.progress_pages)
     );
     dump(raw, ub, "after progress without read");
 
@@ -396,13 +396,16 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
     )?;
     println!("set_status CurrentlyReading: status={}", e.status);
     dump(raw, ub, "after set_status(2)");
-    let r = e.current_read.clone().ok_or("no read after set_status")?;
+    let r = e
+        .current_read()
+        .cloned()
+        .ok_or("no read after set_status")?;
 
     let e = check(
         "update_progress(Some, Pages(10))",
         client.update_progress(id, Some(r.id), ProgressUpdate::Pages(10)),
     )?;
-    let r = e.current_read.clone().ok_or("no read after progress")?;
+    let r = e.current_read().cloned().ok_or("no read after progress")?;
     println!(
         "update_progress(Some, pages=10): pages={:?} status={}",
         r.progress_pages, e.status
@@ -414,8 +417,8 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
         client.update_progress(id, Some(r.id), ProgressUpdate::Percent(50.0)),
     )?;
     let r2 = e
-        .current_read
-        .clone()
+        .current_read()
+        .cloned()
         .ok_or("no read after percent progress")?;
     println!(
         "update_progress(Some, 50%): pages={:?} percent={:?} status={}",
@@ -428,7 +431,7 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
         "set_read_dates",
         client.set_read_dates(r2.id, Some(start), None),
     )?;
-    let r3 = e.current_read.clone().ok_or("no read after dates")?;
+    let r3 = e.current_read().cloned().ok_or("no read after dates")?;
     println!(
         "set_read_dates(2026-01-02, None): started_at={:?} finished_at={:?} pages_kept={:?} status={}",
         r3.started_at, r3.finished_at, r3.progress_pages, e.status
@@ -463,13 +466,11 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
     println!(
         "set_status Read: status={} latest_read_finished={}",
         e.status,
-        e.current_read
-            .as_ref()
-            .is_some_and(|r| r.finished_at.is_some())
+        e.current_read().is_some_and(|r| r.finished_at.is_some())
     );
     dump(raw, ub, "after set_status(3)");
 
-    let fin_read = e.current_read.clone().ok_or("no read after Read")?;
+    let fin_read = e.current_read().cloned().ok_or("no read after Read")?;
     let start = Date::from_ymd_opt(2026, 1, 2).unwrap();
     let finish = Date::from_ymd_opt(2026, 1, 20).unwrap();
     let e = check(
@@ -478,8 +479,8 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
     )?;
     println!(
         "set_read_dates(2026-01-02, 2026-01-20): started={:?} finished={:?} status={}",
-        e.current_read.as_ref().and_then(|r| r.started_at),
-        e.current_read.as_ref().and_then(|r| r.finished_at),
+        e.current_read().and_then(|r| r.started_at),
+        e.current_read().and_then(|r| r.finished_at),
         e.status
     );
     dump(raw, ub, "after set_read_dates with finish");
@@ -491,7 +492,7 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
         "set_rating 4.0 on Read entry: rating={:?} status={} finished={:?}",
         e.rating.map(|r| r.value()),
         e.status,
-        e.current_read.as_ref().and_then(|r| r.finished_at)
+        e.current_read().and_then(|r| r.finished_at)
     );
     dump(raw, ub, "after set_rating on Read");
 

@@ -4,7 +4,7 @@
 //! Plain functions without GPUI so they can be unit tested directly.
 
 use chrono::{DateTime, Datelike, TimeZone};
-use hardcover_core::{Error, LibraryEntry, Rating, ReadingStatus};
+use hardcover_core::{Date, EditionSummary, Error, Length, LibraryEntry, Rating, ReadingStatus};
 
 /// Sentence-case label for a status, as the app shows it.
 pub fn status_label(status: ReadingStatus) -> &'static str {
@@ -18,13 +18,14 @@ pub fn status_label(status: ReadingStatus) -> &'static str {
     }
 }
 
-/// The library shelves in sidebar order. Ctrl+1…5 follow this order.
-pub const SIDEBAR_SHELVES: [ReadingStatus; 5] = [
+/// The library shelves in sidebar order, Ignored last. Ctrl+1…6 follow this order.
+pub const SIDEBAR_SHELVES: [ReadingStatus; 6] = [
     ReadingStatus::CurrentlyReading,
     ReadingStatus::WantToRead,
     ReadingStatus::Read,
     ReadingStatus::Paused,
     ReadingStatus::DidNotFinish,
+    ReadingStatus::Ignored,
 ];
 
 /// Reading progress of an entry's open read, ready for display.
@@ -34,18 +35,31 @@ pub struct ProgressSummary {
     pub page: Option<u32>,
     /// Page count of the edition being read.
     pub total_pages: Option<u32>,
-    /// 0..=100, from the server or derived from pages.
+    /// Position in an audiobook, when the read records time.
+    pub seconds: Option<u32>,
+    /// Running time of the audiobook being listened to.
+    pub total_seconds: Option<u32>,
+    /// 0..=100, from the server or derived from pages or time.
     pub percent: Option<f32>,
 }
 
 impl ProgressSummary {
-    /// "Page 120 of 350", "Page 120", "42%", or "Not started".
+    /// True when progress is counted in time: the edition is an audiobook.
+    pub fn is_audio(&self) -> bool {
+        self.total_seconds.is_some()
+    }
+
+    /// "Page 120 of 350", "Page 120", "2h 5m of 10h 30m", "42%", or "Not started".
     pub fn text(&self) -> String {
-        match (self.page, self.total_pages, self.percent) {
-            (Some(page), Some(total), _) => format!("Page {page} of {total}"),
-            (Some(page), None, _) => format!("Page {page}"),
-            (None, _, Some(pct)) => format!("{}%", pct.round() as u32),
-            (None, _, None) => "Not started".to_owned(),
+        match (self.page, self.total_pages, self.seconds, self.percent) {
+            (Some(page), Some(total), _, _) => format!("Page {page} of {total}"),
+            (Some(page), None, _, _) => format!("Page {page}"),
+            (None, _, Some(secs), _) => match self.total_seconds {
+                Some(total) => format!("{} of {}", duration_text(secs), duration_text(total)),
+                None => duration_text(secs),
+            },
+            (None, _, None, Some(pct)) => format!("{}%", pct.round() as u32),
+            (None, _, None, None) => "Not started".to_owned(),
         }
     }
 
@@ -59,22 +73,109 @@ impl ProgressSummary {
     }
 }
 
-/// Progress of the entry's unfinished read, if it has one.
+/// Progress of the entry's unfinished read, if it has one, in the unit of
+/// [`LibraryEntry::length`]: pages, or time for an audiobook.
 pub fn progress_summary(entry: &LibraryEntry) -> ProgressSummary {
-    let total_pages = entry.total_pages();
-    let read = entry.current_read.as_ref().filter(|r| !r.is_finished());
-    let page = read.and_then(|r| r.progress_pages).filter(|p| *p > 0);
+    let (total_pages, total_seconds) = match entry.length() {
+        Some(Length::Pages(p)) => (Some(p), None),
+        Some(Length::Seconds(s)) => (None, Some(s)),
+        None => (None, None),
+    };
+    let read = entry.open_read();
+    let page = read
+        .and_then(|r| r.progress_pages)
+        .filter(|p| *p > 0 && total_seconds.is_none());
+    let seconds = read
+        .and_then(|r| r.progress_seconds)
+        .filter(|s| *s > 0 && page.is_none());
+    let fraction = |done: u32, total: u32| (f64::from(done) / f64::from(total) * 100.0) as f32;
     let percent = read
         .and_then(|r| r.progress_percent)
-        .or_else(|| match (page, total_pages) {
-            (Some(p), Some(t)) => Some((f64::from(p) / f64::from(t) * 100.0) as f32),
+        .or_else(|| match (page, total_pages, seconds, total_seconds) {
+            (Some(p), Some(t), _, _) => Some(fraction(p, t)),
+            (_, _, Some(s), Some(t)) => Some(fraction(s, t)),
             _ => None,
         })
         .map(|p| p.clamp(0.0, 100.0));
     ProgressSummary {
         page,
         total_pages,
+        seconds,
+        total_seconds,
         percent,
+    }
+}
+
+/// "10h 5m", "45m", "0m" for a position or running time.
+pub fn duration_text(seconds: u32) -> String {
+    let minutes = seconds / 60;
+    match (minutes / 60, minutes % 60) {
+        (0, m) => format!("{m}m"),
+        (h, m) => format!("{h}h {m}m"),
+    }
+}
+
+/// "2:05" (hours and minutes), or "2:05:30" when the seconds are not zero, for
+/// an audiobook position field. Exact, so submitting the field unchanged writes
+/// the same position back.
+pub fn position_text(seconds: u32) -> String {
+    let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    if s == 0 {
+        format!("{h}:{m:02}")
+    } else {
+        format!("{h}:{m:02}:{s:02}")
+    }
+}
+
+/// A position typed as "h:mm" or "h:mm:ss", in seconds.
+pub fn parse_position(text: &str) -> Option<u32> {
+    let parts: Vec<u32> = text
+        .trim()
+        .split(':')
+        .map(|p| p.parse().ok())
+        .collect::<Option<_>>()?;
+    match parts[..] {
+        [h, m] if m < 60 => Some(h * 3600 + m * 60),
+        [h, m, s] if m < 60 && s < 60 => Some(h * 3600 + m * 60 + s),
+        _ => None,
+    }
+}
+
+/// "Nov 3, 2024", as the date pickers show dates.
+pub fn date_text(date: Date) -> String {
+    date.format("%b %-d, %Y").to_string()
+}
+
+/// One line about an edition: "Paperback · 412 pages · Penguin, 2004".
+/// `None` when nothing is known beyond its id.
+pub fn edition_text(edition: &EditionSummary) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(format) = edition.format.as_ref().or(edition.reading_format.as_ref()) {
+        parts.push(format.clone());
+    }
+    match edition.length() {
+        Some(Length::Pages(p)) => parts.push(format!("{p} pages")),
+        Some(Length::Seconds(s)) => parts.push(duration_text(s)),
+        None => {}
+    }
+    let year = edition.release_date.map(|d| d.year().to_string());
+    match (&edition.publisher, year) {
+        (Some(p), Some(y)) => parts.push(format!("{p}, {y}")),
+        (Some(p), None) => parts.push(p.clone()),
+        (None, Some(y)) => parts.push(y),
+        (None, None) => {}
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// "Jan 3, 2019 – Feb 1, 2019", "Started Jan 3, 2019", "Finished Feb 1, 2019"
+/// or "No dates" for a read.
+pub fn read_dates_text(started: Option<Date>, finished: Option<Date>) -> String {
+    match (started, finished) {
+        (Some(s), Some(f)) => format!("{} – {}", date_text(s), date_text(f)),
+        (Some(s), None) => format!("Started {}", date_text(s)),
+        (None, Some(f)) => format!("Finished {}", date_text(f)),
+        (None, None) => "No dates".to_owned(),
     }
 }
 
@@ -191,7 +292,7 @@ mod tests {
         let mut read = ReadSession::new(ReadId::new(9));
         read.progress_pages = pages;
         read.progress_percent = percent;
-        e.current_read = Some(read);
+        e.upsert_read(read);
         e
     }
 
@@ -238,10 +339,61 @@ mod tests {
     #[test]
     fn finished_read_has_no_progress() {
         let mut e = entry_with_read(Some(300), Some(100.0), Some(300));
-        e.current_read.as_mut().unwrap().finished_at = chrono::NaiveDate::from_ymd_opt(2024, 1, 1);
+        e.reads[0].finished_at = chrono::NaiveDate::from_ymd_opt(2024, 1, 1);
         let p = progress_summary(&e);
         assert_eq!(p.page, None);
         assert_eq!(p.percent, None);
+    }
+
+    #[test]
+    fn audiobook_progress_counts_time() {
+        let mut e = entry_with_read(None, None, Some(400));
+        e.reads[0].progress_seconds = Some(2 * 3600 + 5 * 60);
+        // A stale page count from a paper edition is not shown against time.
+        e.reads[0].progress_pages = Some(120);
+        let mut audio = EditionSummary::new(EditionId::new(3));
+        audio.audio_seconds = Some(10 * 3600);
+        e.edition = Some(audio);
+        let p = progress_summary(&e);
+        assert!(p.is_audio());
+        assert_eq!(p.page, None);
+        assert_eq!(p.text(), "2h 5m of 10h 0m");
+        assert_eq!(p.percent.map(|p| p.round()), Some(21.0));
+    }
+
+    #[test]
+    fn positions_and_durations() {
+        assert_eq!(duration_text(45 * 60 + 30), "45m");
+        assert_eq!(duration_text(36_300), "10h 5m");
+        assert_eq!(position_text(7_500), "2:05");
+        assert_eq!(position_text(7_530), "2:05:30");
+        assert_eq!(parse_position(&position_text(7_530)), Some(7_530));
+        assert_eq!(parse_position("2:05"), Some(7_500));
+        assert_eq!(parse_position(" 0:45:30 "), Some(2_730));
+        assert_eq!(parse_position("2:75"), None);
+        assert_eq!(parse_position("125"), None);
+        assert_eq!(parse_position(""), None);
+    }
+
+    #[test]
+    fn edition_and_read_lines() {
+        let mut e = EditionSummary::new(EditionId::new(1));
+        assert_eq!(edition_text(&e), None);
+        e.format = Some("Paperback".into());
+        e.pages = Some(412);
+        e.publisher = Some("Synthetic House".into());
+        e.release_date = chrono::NaiveDate::from_ymd_opt(2004, 5, 6);
+        assert_eq!(
+            edition_text(&e).unwrap(),
+            "Paperback · 412 pages · Synthetic House, 2004"
+        );
+        let d = |y, m, d| chrono::NaiveDate::from_ymd_opt(y, m, d);
+        assert_eq!(
+            read_dates_text(d(2019, 1, 3), d(2019, 2, 1)),
+            "Jan 3, 2019 – Feb 1, 2019"
+        );
+        assert_eq!(read_dates_text(d(2019, 1, 3), None), "Started Jan 3, 2019");
+        assert_eq!(read_dates_text(None, None), "No dates");
     }
 
     #[test]

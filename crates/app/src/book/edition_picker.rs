@@ -1,0 +1,230 @@
+//! The edition picker: a book's editions, fetched a page at a time when the
+//! picker first opens, kept for the rest of the run.
+//!
+//! One picker exists per book, so a response can never land on another book.
+//! Choosing an edition emits [`EditionChosen`]; the detail view makes the write.
+
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::skeleton::Skeleton;
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex,
+    v_flex,
+};
+use gpui_kit::{
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FontWeight,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
+    Task, Window, div, prelude::FluentBuilder as _, rems,
+};
+use hardcover_core::{BookId, EDITIONS_PER_PAGE, EditionId, EditionSummary};
+
+use crate::app_state::Services;
+use crate::format::{edition_text, error_message};
+
+/// The user picked `0`.
+pub struct EditionChosen(pub EditionSummary);
+
+pub struct EditionPicker {
+    book: BookId,
+    book_title: SharedString,
+    editions: Vec<EditionSummary>,
+    /// The entry's edition, marked in the list.
+    current: Option<EditionId>,
+    /// More pages may follow the ones fetched.
+    has_more: bool,
+    loading: bool,
+    error: Option<SharedString>,
+    _fetch: Option<Task<()>>,
+}
+
+impl EventEmitter<EditionChosen> for EditionPicker {}
+
+impl EditionPicker {
+    pub fn new(book: BookId, book_title: SharedString, cx: &mut Context<Self>) -> Self {
+        let mut this = Self {
+            book,
+            book_title,
+            editions: Vec::new(),
+            current: None,
+            has_more: true,
+            loading: false,
+            error: None,
+            _fetch: None,
+        };
+        this.fetch_more(cx);
+        this
+    }
+
+    pub fn set_current(&mut self, current: Option<EditionId>, cx: &mut Context<Self>) {
+        if self.current != current {
+            self.current = current;
+            cx.notify();
+        }
+    }
+
+    /// Fetches the next page, or retries after a failure.
+    fn fetch_more(&mut self, cx: &mut Context<Self>) {
+        if self.loading || !self.has_more {
+            return;
+        }
+        self.loading = true;
+        self.error = None;
+        cx.notify();
+        let client = Services::global(cx).client().clone();
+        let book = self.book;
+        let offset = self.editions.len() as u32;
+        self._fetch = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { client.book_editions(book, offset) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.loading = false;
+                match result {
+                    Ok(page) => {
+                        this.has_more = page.len() >= EDITIONS_PER_PAGE as usize;
+                        // Offset paging can repeat a row if the order shifted between pages.
+                        for edition in page {
+                            if !this.editions.iter().any(|e| e.id == edition.id) {
+                                this.editions.push(edition);
+                            }
+                        }
+                    }
+                    Err(e) => this.error = Some(error_message(&e).into()),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Opens `view` in a dialog.
+    pub fn open(view: Entity<Self>, window: &mut Window, cx: &mut App) {
+        window.open_dialog(cx, move |dialog: Dialog, window, _| {
+            dialog
+                .title("Choose an edition")
+                .w(rems(32.).to_pixels(window.rem_size()))
+                .child(view.clone())
+        });
+    }
+
+    fn render_row(&self, edition: &EditionSummary, cx: &mut Context<Self>) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        let current = self.current == Some(edition.id);
+        let headline = edition_text(edition).unwrap_or_else(|| "Edition".to_owned());
+        let mut details: Vec<String> = Vec::new();
+        if let Some(title) = edition.title.as_ref().filter(|t| **t != *self.book_title) {
+            details.push(title.clone());
+        }
+        if let Some(language) = &edition.language {
+            details.push(language.clone());
+        }
+        if let Some(isbn) = &edition.isbn_13 {
+            details.push(format!("ISBN {isbn}"));
+        }
+        let chosen = edition.clone();
+        Button::new(ElementId::Name(format!("edition-{}", edition.id).into()))
+            .ghost()
+            .w_full()
+            .h_auto()
+            .py_2()
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_3()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .items_start()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .when(current, |this| this.font_weight(FontWeight::SEMIBOLD))
+                                    .child(headline),
+                            )
+                            .when(!details.is_empty(), |this| {
+                                this.child(
+                                    div().text_xs().text_color(muted).child(details.join(" · ")),
+                                )
+                            }),
+                    )
+                    .when(current, |this| {
+                        this.child(Icon::new(IconName::Check).small().text_color(muted))
+                    }),
+            )
+            .on_click(cx.listener(move |_, _, window, cx| {
+                cx.emit(EditionChosen(chosen.clone()));
+                window.close_dialog(cx);
+            }))
+            .into_any_element()
+    }
+}
+
+impl Render for EditionPicker {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = cx.theme().muted_foreground;
+        let rows: Vec<AnyElement> = self
+            .editions
+            .iter()
+            .map(|e| self.render_row(e, cx))
+            .collect();
+        let empty = rows.is_empty() && !self.loading && self.error.is_none();
+        v_flex()
+            .gap_3()
+            .child(
+                v_flex()
+                    .id("edition-list")
+                    .max_h(rems(24.))
+                    .overflow_y_scrollbar()
+                    .gap_0p5()
+                    .children(rows)
+                    .when(self.loading && self.editions.is_empty(), |this| {
+                        this.children((0..4).map(|_| {
+                            v_flex()
+                                .gap_1()
+                                .py_2()
+                                .child(Skeleton::new().h_4().w_2_3())
+                                .child(Skeleton::new().h_3().w_1_3())
+                        }))
+                    }),
+            )
+            .when(empty, |this| {
+                this.child(
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child("Hardcover lists no editions for this book."),
+                )
+            })
+            .when_some(self.error.clone(), |this, error| {
+                this.child(
+                    h_flex()
+                        .gap_2()
+                        .text_sm()
+                        .child(div().text_color(muted).child(error))
+                        .child(
+                            Button::new("retry-editions")
+                                .small()
+                                .label("Try again")
+                                .on_click(cx.listener(|this, _, _, cx| this.fetch_more(cx))),
+                        ),
+                )
+            })
+            .when(
+                self.has_more && self.error.is_none() && !self.editions.is_empty(),
+                |this| {
+                    this.child(
+                        div().child(
+                            Button::new("more-editions")
+                                .small()
+                                .label("Show more")
+                                .loading(self.loading)
+                                .disabled(self.loading)
+                                .on_click(cx.listener(|this, _, _, cx| this.fetch_more(cx))),
+                        ),
+                    )
+                },
+            )
+    }
+}

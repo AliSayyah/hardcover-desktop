@@ -38,7 +38,7 @@ use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
 use crate::{
     FocusSearch, OpenSettings, Refresh, ShowAbout, ShowCurrentlyReading, ShowDidNotFinish,
-    ShowPaused, ShowRead, ShowWantToRead,
+    ShowIgnored, ShowPaused, ShowRead, ShowWantToRead,
 };
 
 // ----- top level -----
@@ -645,7 +645,8 @@ fn shelf_icon(status: ReadingStatus) -> IconName {
         ReadingStatus::WantToRead => IconName::Inbox,
         ReadingStatus::Read => IconName::CircleCheck,
         ReadingStatus::Paused => IconName::Pause,
-        ReadingStatus::DidNotFinish | ReadingStatus::Ignored => IconName::Ban,
+        ReadingStatus::DidNotFinish => IconName::Ban,
+        ReadingStatus::Ignored => IconName::EyeOff,
     }
 }
 
@@ -679,6 +680,9 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &ShowDidNotFinish, window, cx| {
                 this.show_shelf(ReadingStatus::DidNotFinish, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ShowIgnored, window, cx| {
+                this.show_shelf(ReadingStatus::Ignored, window, cx)
             }))
             .child(self.render_sidebar(window, cx))
             .child(

@@ -30,7 +30,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (status, n) in counts.values() {
         println!("  {status:<18} {n}");
     }
-    let with_read = library.iter().filter(|e| e.current_read.is_some()).count();
+    let with_read = library
+        .iter()
+        .filter(|e| e.current_read().is_some())
+        .count();
     let with_cover = library.iter().filter(|e| e.cover().is_some()).count();
     println!("  entries with a read: {with_read}, with a cover: {with_cover}");
 

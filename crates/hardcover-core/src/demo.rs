@@ -4,7 +4,8 @@
 //! the rest of the client (queries, parsing, paging) runs exactly as it does
 //! against Hardcover. The books are real, popular ones, with facts and cover
 //! links from Hardcover and descriptions written for the demo; the reader and
-//! their shelves are invented.
+//! their shelves, reads and notes are invented. Each book has one stand-in
+//! edition for the edition picker, with only the book's title and cover.
 //!
 //! [`cover_cache`] downloads the catalogue's covers from Hardcover, the demo's
 //! only network access; any other URL is refused. Reads work; every write
@@ -113,7 +114,11 @@ struct Entry {
     rating: Option<f64>,
     date_added: String,
     updated_at: String,
-    read: Option<Read>,
+    #[serde(default)]
+    reads: Vec<Read>,
+    private_notes: Option<String>,
+    /// `privacy_setting_id`; Public when absent.
+    privacy: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -157,6 +162,26 @@ fn image(book: &Book) -> Value {
     })
 }
 
+/// `EditionFields` for the book's one demo edition. Its id is the book's,
+/// not a Hardcover edition id. Only the title and cover are filled in: the
+/// catalogue's page count and date are the book's, which another edition
+/// may not share.
+fn edition(book: &Book) -> Value {
+    json!({
+        "id": book.id,
+        "title": book.title,
+        "pages": null,
+        "audio_seconds": null,
+        "edition_format": null,
+        "release_date": null,
+        "isbn_13": null,
+        "cached_image": image(book),
+        "reading_format": null,
+        "publisher": null,
+        "language": null,
+    })
+}
+
 fn release_year(book: &Book) -> Option<i64> {
     book.release_date.get(..4)?.parse().ok()
 }
@@ -180,9 +205,10 @@ fn book_summary(book: &Book) -> Value {
 /// `UserBookFields`.
 fn user_book(catalogue: &Catalogue, entry: &Entry) -> Option<Value> {
     let book = catalogue.book(entry.book)?;
-    let reads: Vec<Value> = entry
-        .read
-        .iter()
+    let mut reads: Vec<&Read> = entry.reads.iter().collect();
+    reads.sort_by_key(|r| std::cmp::Reverse(r.id));
+    let reads: Vec<Value> = reads
+        .into_iter()
         .map(|read| {
             json!({
                 "id": read.id,
@@ -192,6 +218,7 @@ fn user_book(catalogue: &Catalogue, entry: &Entry) -> Option<Value> {
                 "progress_pages": read.progress_pages,
                 "progress_seconds": null,
                 "edition_id": null,
+                "edition": null,
             })
         })
         .collect();
@@ -202,6 +229,8 @@ fn user_book(catalogue: &Catalogue, entry: &Entry) -> Option<Value> {
         "rating": entry.rating,
         "date_added": entry.date_added,
         "updated_at": entry.updated_at,
+        "privacy_setting_id": entry.privacy.unwrap_or(1),
+        "private_notes": entry.private_notes,
         "book": book_summary(book),
         "edition": null,
         "user_book_reads": reads,
@@ -352,21 +381,43 @@ fn answer(op: &str, vars: &Value) -> Value {
             "books_by_pk": catalogue.book(int("id")).map(book_details),
         }),
         "ProgressContext" => {
+            // `$reads` is either `{id: {_eq: n}}` or "unfinished".
+            let wanted = vars["reads"]["id"]["_eq"].as_i64();
             let found = catalogue.entry(int("id")).and_then(|e| {
                 let book = catalogue.book(e.book)?;
+                let read = e
+                    .reads
+                    .iter()
+                    .filter(|r| match wanted {
+                        Some(id) => r.id == id,
+                        None => r.finished_at.is_none(),
+                    })
+                    .max_by_key(|r| r.id);
                 Some(json!({
                     "id": e.id,
                     "status_id": e.status,
                     "book": { "pages": book.pages, "audio_seconds": null },
                     "edition": null,
-                    "user_book_reads": e.read.iter().map(|r| json!({ "id": r.id, "edition": null }))
+                    "user_book_reads": read.map(|r| json!({ "id": r.id, "edition": null }))
+                        .into_iter()
                         .collect::<Vec<_>>(),
                 }))
             });
             json!({ "user_books": found.into_iter().collect::<Vec<_>>() })
         }
+        "BookEditions" => {
+            let editions: Vec<Value> = catalogue
+                .book(int("bookId"))
+                .filter(|_| int("offset") == 0)
+                .map(edition)
+                .into_iter()
+                .collect();
+            json!({ "editions": editions })
+        }
         "InsertUserBook" | "UpdateUserBook" | "DeleteUserBook" | "InsertUserBookRead"
-        | "UpdateUserBookRead" => return error(READ_ONLY),
+        | "UpdateUserBookRead" | "DeleteUserBookRead" | "EditionOwned" => {
+            return error(READ_ONLY);
+        }
         other => return error(format!("The demo has no answer for {other}.")),
     };
     json!({ "data": data })
@@ -421,13 +472,7 @@ mod tests {
         let me = client.me().unwrap();
         let library = client.library(me.id).unwrap();
         assert_eq!(library.len(), CATALOGUE.library.len());
-        for status in [
-            ReadingStatus::CurrentlyReading,
-            ReadingStatus::WantToRead,
-            ReadingStatus::Read,
-            ReadingStatus::Paused,
-            ReadingStatus::DidNotFinish,
-        ] {
+        for status in ReadingStatus::ALL {
             assert!(
                 library.iter().any(|e| e.status == status),
                 "nothing on {status:?}"
@@ -437,15 +482,30 @@ mod tests {
             .iter()
             .find(|e| e.status == ReadingStatus::CurrentlyReading)
             .unwrap();
-        assert!(
-            reading
-                .current_read
-                .as_ref()
-                .unwrap()
-                .progress_pages
-                .is_some()
-        );
+        assert!(reading.open_read().unwrap().progress_pages.is_some());
         assert!(reading.book.cover.is_some());
+        assert!(
+            library.iter().any(|e| e.reads.len() > 1),
+            "no entry shows a read history"
+        );
+        assert!(library.iter().any(|e| e.private_notes.is_some()));
+    }
+
+    #[test]
+    fn every_book_has_one_edition() {
+        let client = client();
+        for book in &CATALOGUE.books {
+            let editions = client.book_editions(BookId::new(book.id), 0).unwrap();
+            assert_eq!(editions.len(), 1, "{}", book.title);
+            let edition = &editions[0];
+            assert_eq!(edition.cover.as_ref().unwrap().url, book.cover.url);
+            assert!(
+                client
+                    .book_editions(BookId::new(book.id), 1)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
     }
 
     #[test]

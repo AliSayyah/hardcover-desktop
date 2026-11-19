@@ -581,11 +581,15 @@
       "status": 2,
       "date_added": "2026-09-02",
       "updated_at": "2026-11-18T21:40:00+00:00",
-      "read": {
-        "id": 801,
-        "started_at": "2026-11-01",
-        "progress_pages": 312
-      }
+      "reads": [
+        {
+          "id": 801,
+          "started_at": "2026-11-01",
+          "progress_pages": 312
+        }
+      ],
+      "private_notes": "Borrowed from the library, due back on the 30th.",
+      "privacy": 3
     },
     {
       "id": 502,
@@ -593,11 +597,13 @@
       "status": 2,
       "date_added": "2026-10-10",
       "updated_at": "2026-11-17T08:15:00+00:00",
-      "read": {
-        "id": 802,
-        "started_at": "2026-10-20",
-        "progress_pages": 418
-      }
+      "reads": [
+        {
+          "id": 802,
+          "started_at": "2026-10-20",
+          "progress_pages": 418
+        }
+      ]
     },
     {
       "id": 503,
@@ -605,11 +611,13 @@
       "status": 2,
       "date_added": "2026-08-21",
       "updated_at": "2026-11-12T19:05:00+00:00",
-      "read": {
-        "id": 803,
-        "started_at": "2026-10-03",
-        "progress_pages": 121
-      }
+      "reads": [
+        {
+          "id": 803,
+          "started_at": "2026-10-03",
+          "progress_pages": 121
+        }
+      ]
     },
     {
       "id": 511,
@@ -667,12 +675,21 @@
       "rating": 5,
       "date_added": "2026-06-01",
       "updated_at": "2026-10-12T20:00:00+00:00",
-      "read": {
-        "id": 821,
-        "started_at": "2026-09-20",
-        "finished_at": "2026-10-12",
-        "progress_pages": 528
-      }
+      "reads": [
+        {
+          "id": 821,
+          "started_at": "2026-09-20",
+          "finished_at": "2026-10-12",
+          "progress_pages": 528
+        },
+        {
+          "id": 851,
+          "started_at": "2019-01-05",
+          "finished_at": "2019-02-10",
+          "progress_pages": 528
+        }
+      ],
+      "private_notes": "Second time through. Read it again before the next film."
     },
     {
       "id": 522,
@@ -681,12 +698,24 @@
       "rating": 4.5,
       "date_added": "2026-05-10",
       "updated_at": "2026-09-02T20:00:00+00:00",
-      "read": {
-        "id": 822,
-        "started_at": "2026-08-24",
-        "finished_at": "2026-09-02",
-        "progress_pages": 287
-      }
+      "reads": [
+        {
+          "id": 822,
+          "started_at": "2026-08-24",
+          "finished_at": "2026-09-02",
+          "progress_pages": 287
+        },
+        {
+          "id": 852,
+          "started_at": "2012-12-01",
+          "finished_at": "2012-12-20",
+          "progress_pages": 287
+        },
+        {
+          "id": 853,
+          "finished_at": "2001-06-01"
+        }
+      ]
     },
     {
       "id": 523,
@@ -695,12 +724,14 @@
       "rating": 4,
       "date_added": "2026-04-18",
       "updated_at": "2026-08-14T20:00:00+00:00",
-      "read": {
-        "id": 823,
-        "started_at": "2026-08-05",
-        "finished_at": "2026-08-14",
-        "progress_pages": 385
-      }
+      "reads": [
+        {
+          "id": 823,
+          "started_at": "2026-08-05",
+          "finished_at": "2026-08-14",
+          "progress_pages": 385
+        }
+      ]
     },
     {
       "id": 524,
@@ -709,12 +740,14 @@
       "rating": 4.5,
       "date_added": "2026-03-02",
       "updated_at": "2026-07-25T20:00:00+00:00",
-      "read": {
-        "id": 824,
-        "started_at": "2026-07-08",
-        "finished_at": "2026-07-25",
-        "progress_pages": 541
-      }
+      "reads": [
+        {
+          "id": 824,
+          "started_at": "2026-07-08",
+          "finished_at": "2026-07-25",
+          "progress_pages": 541
+        }
+      ]
     },
     {
       "id": 525,
@@ -723,12 +756,14 @@
       "rating": 4.5,
       "date_added": "2026-02-11",
       "updated_at": "2026-06-30T20:00:00+00:00",
-      "read": {
-        "id": 825,
-        "started_at": "2026-06-21",
-        "finished_at": "2026-06-30",
-        "progress_pages": 336
-      }
+      "reads": [
+        {
+          "id": 825,
+          "started_at": "2026-06-21",
+          "finished_at": "2026-06-30",
+          "progress_pages": 336
+        }
+      ]
     },
     {
       "id": 526,
@@ -737,12 +772,14 @@
       "rating": 4,
       "date_added": "2026-01-20",
       "updated_at": "2026-06-08T20:00:00+00:00",
-      "read": {
-        "id": 826,
-        "started_at": "2026-05-30",
-        "finished_at": "2026-06-08",
-        "progress_pages": 389
-      }
+      "reads": [
+        {
+          "id": 826,
+          "started_at": "2026-05-30",
+          "finished_at": "2026-06-08",
+          "progress_pages": 389
+        }
+      ]
     },
     {
       "id": 527,
@@ -751,12 +788,14 @@
       "rating": 4.5,
       "date_added": "2026-01-05",
       "updated_at": "2026-05-11T20:00:00+00:00",
-      "read": {
-        "id": 827,
-        "started_at": "2026-04-28",
-        "finished_at": "2026-05-11",
-        "progress_pages": 352
-      }
+      "reads": [
+        {
+          "id": 827,
+          "started_at": "2026-04-28",
+          "finished_at": "2026-05-11",
+          "progress_pages": 352
+        }
+      ]
     },
     {
       "id": 528,
@@ -765,12 +804,14 @@
       "rating": 4,
       "date_added": "2025-12-14",
       "updated_at": "2026-04-02T20:00:00+00:00",
-      "read": {
-        "id": 828,
-        "started_at": "2026-03-18",
-        "finished_at": "2026-04-02",
-        "progress_pages": 480
-      }
+      "reads": [
+        {
+          "id": 828,
+          "started_at": "2026-03-18",
+          "finished_at": "2026-04-02",
+          "progress_pages": 480
+        }
+      ]
     },
     {
       "id": 529,
@@ -779,12 +820,14 @@
       "rating": 3.5,
       "date_added": "2025-11-30",
       "updated_at": "2026-03-01T20:00:00+00:00",
-      "read": {
-        "id": 829,
-        "started_at": "2026-02-24",
-        "finished_at": "2026-03-01",
-        "progress_pages": 180
-      }
+      "reads": [
+        {
+          "id": 829,
+          "started_at": "2026-02-24",
+          "finished_at": "2026-03-01",
+          "progress_pages": 180
+        }
+      ]
     },
     {
       "id": 531,
@@ -792,11 +835,14 @@
       "status": 4,
       "date_added": "2026-05-02",
       "updated_at": "2026-10-01T20:00:00+00:00",
-      "read": {
-        "id": 831,
-        "started_at": "2026-09-15",
-        "progress_pages": 230
-      }
+      "reads": [
+        {
+          "id": 831,
+          "started_at": "2026-09-15",
+          "progress_pages": 230
+        }
+      ],
+      "privacy": 2
     },
     {
       "id": 541,
@@ -804,11 +850,13 @@
       "status": 5,
       "date_added": "2026-04-01",
       "updated_at": "2026-08-09T20:00:00+00:00",
-      "read": {
-        "id": 841,
-        "started_at": "2026-07-30",
-        "progress_pages": 88
-      }
+      "reads": [
+        {
+          "id": 841,
+          "started_at": "2026-07-30",
+          "progress_pages": 88
+        }
+      ]
     },
     {
       "id": 542,
@@ -817,11 +865,20 @@
       "rating": 2.5,
       "date_added": "2026-03-14",
       "updated_at": "2026-05-02T20:00:00+00:00",
-      "read": {
-        "id": 842,
-        "started_at": "2026-04-25",
-        "progress_pages": 140
-      }
+      "reads": [
+        {
+          "id": 842,
+          "started_at": "2026-04-25",
+          "progress_pages": 140
+        }
+      ]
+    },
+    {
+      "id": 551,
+      "book": 427363,
+      "status": 6,
+      "date_added": "2026-06-12",
+      "updated_at": "2026-06-12T20:00:00+00:00"
     }
   ]
 }

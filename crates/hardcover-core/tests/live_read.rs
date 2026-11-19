@@ -23,10 +23,7 @@ fn me_library_and_lookups() {
     };
     let me = c.me().unwrap();
     let lib = c.library(me.id).unwrap();
-    assert!(
-        lib.iter()
-            .all(|e| e.user_id == me.id && e.status.is_shelf())
-    );
+    assert!(lib.iter().all(|e| e.user_id == me.id));
     let mut ids: Vec<_> = lib.iter().map(|e| e.user_book_id).collect();
     ids.dedup();
     assert_eq!(

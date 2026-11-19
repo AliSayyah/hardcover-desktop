@@ -148,7 +148,7 @@ fn library_paginates_by_keyset() {
         "https://assets.hardcover.app/edition/1001/cover.jpg"
     );
     assert_eq!(e.total_pages(), Some(400));
-    let read = e.current_read.as_ref().unwrap();
+    let read = e.current_read().unwrap();
     assert_eq!(read.progress_pages, Some(100));
     assert_eq!(read.progress_percent, Some(25.0));
     assert_eq!(read.started_at.unwrap().to_string(), "2024-02-01");
@@ -631,7 +631,7 @@ fn read_write_prefers_payload_entry_over_refetch() {
         1,
         "no refetch when the payload has the entry"
     );
-    let r = e.current_read.unwrap();
+    let r = e.current_read().unwrap().clone();
     assert_eq!(
         (r.id, r.progress_pages, r.progress_percent),
         (ReadId::new(91), Some(200), Some(50.0))
@@ -674,4 +674,336 @@ fn progress_without_open_read_moves_to_currently_reading_first() {
         reqs[2].json.as_ref().unwrap()["variables"],
         json!({"id": 9003, "read": {"progress_pages": 12}})
     );
+}
+
+fn ops(http: &FakeTransport) -> Vec<String> {
+    http.requests()
+        .iter()
+        .map(|r| {
+            r.json.as_ref().unwrap()["operationName"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect()
+}
+
+fn vars(http: &FakeTransport, ix: usize) -> Value {
+    http.requests()[ix].json.as_ref().unwrap()["variables"].clone()
+}
+
+fn raw_read(id: i64, started: Option<&str>, finished: Option<&str>) -> Value {
+    json!({"id": id, "started_at": started, "finished_at": finished, "progress": null,
+           "progress_pages": null, "progress_seconds": null, "edition_id": null, "edition": null})
+}
+
+#[test]
+fn entry_keeps_every_read_and_the_new_fields() {
+    let (c, http) = client(TestTokens::new(false));
+    let mut ub = user_book(3, 3);
+    ub["privacy_setting_id"] = json!(3);
+    ub["private_notes"] = json!("  Signed copy  ");
+    // Newest id first, as the query orders them: a past read added after the latest one.
+    ub["user_book_reads"] = json!([
+        raw_read(92, Some("2015-01-01"), Some("2015-02-01")),
+        raw_read(91, Some("2024-01-01"), Some("2024-02-01")),
+        raw_read(90, Some("2020-01-01"), Some("2020-03-01")),
+    ]);
+    ub["edition"] = json!({"id": 5003, "title": "Synthetic Edition", "pages": null, "audio_seconds": 36000,
+        "edition_format": "Audible Audio", "release_date": "2020-05-06", "isbn_13": "9780000000002",
+        "cached_image": {}, "reading_format": {"format": "Listened"}, "publisher": {"name": "Synthetic Audio"},
+        "language": {"language": "English"}});
+    http.push(200, &data(json!({"user_books_by_pk": ub})));
+    let e = c.entry_by_id(3).unwrap().unwrap();
+    let ids: Vec<i64> = e.reads.iter().map(|r| r.id.get()).collect();
+    assert_eq!(ids, [91, 90, 92], "most recent read first, by date");
+    assert_eq!(e.current_read().unwrap().id, ReadId::new(91));
+    assert_eq!(e.privacy, Some(Privacy::Private));
+    assert_eq!(e.private_notes.as_deref(), Some("  Signed copy  "));
+    let ed = e.edition.as_ref().unwrap();
+    assert_eq!(ed.length(), Some(Length::Seconds(36000)));
+    assert_eq!(ed.publisher.as_deref(), Some("Synthetic Audio"));
+    assert_eq!(ed.reading_format.as_deref(), Some("Listened"));
+    assert_eq!(ed.language.as_deref(), Some("English"));
+    assert_eq!(ed.release_date, Date::from_ymd_opt(2020, 5, 6));
+    assert_eq!(e.length(), Some(Length::Seconds(36000)));
+}
+
+#[test]
+fn library_page_asks_for_ignored_too() {
+    assert!(queries::LIBRARY_PAGE.contains("[1, 2, 3, 4, 5, 6]"));
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"user_books": [user_book(1, 6), user_book(2, 1)]})),
+    );
+    let lib = c.library(UserId::new(77)).unwrap();
+    assert_eq!(lib[0].status, ReadingStatus::Ignored);
+}
+
+#[test]
+fn book_editions_pages_by_offset() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"editions": [
+            {"id": 1, "title": "Synthetic", "pages": 320, "audio_seconds": null, "edition_format": "Paperback",
+             "release_date": "2001-02-03", "isbn_13": "9780000000001", "cached_image": {},
+             "reading_format": {"format": "Read"}, "publisher": {"name": "Synthetic House"}, "language": null},
+            {"id": 2, "title": null, "pages": 0, "audio_seconds": null, "edition_format": " ",
+             "release_date": null, "isbn_13": null, "cached_image": {}, "reading_format": null,
+             "publisher": null, "language": null}
+        ]})),
+    );
+    let editions = c.book_editions(BookId::new(1001), 50).unwrap();
+    assert_eq!(
+        vars(&http, 0),
+        json!({"bookId": 1001, "limit": EDITIONS_PER_PAGE, "offset": 50})
+    );
+    assert_eq!(editions.len(), 2);
+    assert_eq!(editions[0].format.as_deref(), Some("Paperback"));
+    assert_eq!(editions[0].publisher.as_deref(), Some("Synthetic House"));
+    assert_eq!(editions[0].length(), Some(Length::Pages(320)));
+    assert_eq!(
+        (editions[1].pages, editions[1].format.as_deref()),
+        (None, None)
+    );
+    assert_eq!(editions[1].length(), None);
+}
+
+/// `user_book(3, 2)` with its open read 9003 at 25% (page 100 of 400) on
+/// edition 5003, moved to `edition`.
+fn moved_entry(edition: Value) -> Value {
+    let mut ub = user_book(3, 2);
+    ub["edition"] = edition;
+    ub
+}
+
+#[test]
+fn set_edition_moves_the_open_read_at_the_same_percentage() {
+    let (c, http) = client(TestTokens::new(false));
+    let audio = json!({"id": 6000, "title": "Synthetic Audio", "pages": null, "audio_seconds": 36000,
+        "edition_format": "Audiobook", "cached_image": {}});
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": null, "id": 3, "user_book": moved_entry(audio.clone())}})),
+    );
+    let mut after = moved_entry(audio);
+    after["user_book_reads"][0]["edition_id"] = json!(6000);
+    http.push(
+        200,
+        &data(json!({"update_user_book_read": {"error": null, "id": 9003, "user_book_read": {
+            "id": 9003, "user_book_id": 3, "started_at": "2024-02-01", "finished_at": null,
+            "progress": 25.0, "progress_pages": null, "progress_seconds": 9000, "edition_id": 6000,
+            "edition": {"id": 6000, "title": null, "pages": null, "audio_seconds": 36000, "edition_format": "Audiobook"},
+            "user_book": after
+        }}})),
+    );
+    let change = c
+        .set_edition(UserBookId::new(3), EditionId::new(6000))
+        .unwrap();
+    assert!(change.read_left_behind.is_none());
+    let e = change.entry;
+    assert_eq!(ops(&http), ["UpdateUserBook", "UpdateUserBookRead"]);
+    assert_eq!(
+        vars(&http, 0),
+        json!({"id": 3, "object": {"edition_id": 6000}})
+    );
+    assert_eq!(
+        vars(&http, 1),
+        json!({"id": 9003, "read": {"edition_id": 6000, "progress_pages": null, "progress_seconds": 9000}})
+    );
+    let read = e.open_read().unwrap();
+    assert_eq!(read.edition_id, Some(EditionId::new(6000)));
+    assert_eq!(e.length(), Some(Length::Seconds(36000)));
+}
+
+#[test]
+fn set_edition_without_an_open_read_is_one_request() {
+    let (c, http) = client(TestTokens::new(false));
+    let mut ub = user_book(3, 3);
+    ub["user_book_reads"] = json!([raw_read(91, Some("2024-01-01"), Some("2024-02-01"))]);
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": null, "id": 3, "user_book": ub}})),
+    );
+    c.set_edition(UserBookId::new(3), EditionId::new(6000))
+        .unwrap();
+    assert_eq!(ops(&http), ["UpdateUserBook"]);
+}
+
+#[test]
+fn set_edition_keeps_the_change_when_moving_the_read_fails() {
+    let (c, http) = client(TestTokens::new(false));
+    let paper = json!({"id": 6001, "title": null, "pages": 200, "audio_seconds": null,
+        "edition_format": "Paperback", "cached_image": {}});
+    http.push(
+        200,
+        &data(
+            json!({"update_user_book": {"error": null, "id": 3, "user_book": moved_entry(paper)}}),
+        ),
+    );
+    http.push(500, "{}");
+    let change = c
+        .set_edition(UserBookId::new(3), EditionId::new(6001))
+        .unwrap();
+    assert!(change.read_left_behind.is_some());
+    let e = change.entry;
+    assert_eq!(
+        vars(&http, 1)["read"],
+        json!({"edition_id": 6001, "progress_pages": 50, "progress_seconds": null})
+    );
+    assert_eq!(e.edition.as_ref().unwrap().id, EditionId::new(6001));
+    assert_eq!(
+        e.open_read().unwrap().edition_id,
+        Some(EditionId::new(5003))
+    );
+}
+
+#[test]
+fn notes_and_privacy_update_the_entry() {
+    let (c, http) = client(TestTokens::new(false));
+    for _ in 0..3 {
+        http.push(
+            200,
+            &data(
+                json!({"update_user_book": {"error": null, "id": 3, "user_book": user_book(3, 3)}}),
+            ),
+        );
+    }
+    c.set_private_notes(UserBookId::new(3), "  Lent to Sam\n")
+        .unwrap();
+    c.set_private_notes(UserBookId::new(3), " \n ").unwrap();
+    c.set_privacy(UserBookId::new(3), Privacy::FollowersOnly)
+        .unwrap();
+    assert_eq!(
+        vars(&http, 0)["object"],
+        json!({"private_notes": "Lent to Sam"})
+    );
+    assert_eq!(vars(&http, 1)["object"], json!({"private_notes": null}));
+    assert_eq!(vars(&http, 2)["object"], json!({"privacy_setting_id": 2}));
+}
+
+#[test]
+fn add_read_needs_a_finish_after_the_start() {
+    let (c, http) = client(TestTokens::new(false));
+    let d = |y, m, d| Date::from_ymd_opt(y, m, d).unwrap();
+    assert!(matches!(
+        c.add_read(UserBookId::new(3), Some(d(2020, 2, 1)), d(2020, 1, 1), None),
+        Err(Error::InvalidInput(_))
+    ));
+    assert_eq!(http.requests().len(), 0);
+
+    // The nested entry does not list the new read yet; it is added.
+    let mut ub = user_book(3, 3);
+    ub["user_book_reads"] = json!([raw_read(91, Some("2024-01-01"), Some("2024-02-01"))]);
+    http.push(
+        200,
+        &data(json!({"insert_user_book_read": {"error": null, "id": 95, "user_book_read": {
+            "id": 95, "user_book_id": 3, "started_at": "2010-01-01", "finished_at": "2010-02-01",
+            "progress": null, "progress_pages": null, "progress_seconds": null, "edition_id": 5003,
+            "edition": null, "user_book": ub
+        }}})),
+    );
+    let e = c
+        .add_read(
+            UserBookId::new(3),
+            Some(d(2010, 1, 1)),
+            d(2010, 2, 1),
+            Some(EditionId::new(5003)),
+        )
+        .unwrap();
+    assert_eq!(
+        vars(&http, 0),
+        json!({"userBookId": 3, "read": {"started_at": "2010-01-01", "finished_at": "2010-02-01", "edition_id": 5003}})
+    );
+    let ids: Vec<i64> = e.reads.iter().map(|r| r.id.get()).collect();
+    assert_eq!(ids, [91, 95], "the past read goes after the latest one");
+    assert_eq!(e.current_read().unwrap().id, ReadId::new(91));
+}
+
+#[test]
+fn delete_read_reads_the_entry_back_without_it() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"delete_user_book_read": {"error": null, "id": 91}})),
+    );
+    // A stale read-back that still lists the deleted read.
+    let mut ub = user_book(3, 3);
+    ub["user_book_reads"] = json!([
+        raw_read(91, Some("2024-01-01"), Some("2024-02-01")),
+        raw_read(90, Some("2020-01-01"), Some("2020-02-01")),
+    ]);
+    http.push(200, &data(json!({"user_books_by_pk": ub})));
+    let e = c.delete_read(UserBookId::new(3), ReadId::new(91)).unwrap();
+    assert_eq!(ops(&http), ["DeleteUserBookRead", "UserBookById"]);
+    assert_eq!(vars(&http, 0), json!({"id": 91}));
+    assert_eq!(e.reads.len(), 1);
+    assert_eq!(e.current_read().unwrap().id, ReadId::new(90));
+
+    http.push(
+        200,
+        &data(json!({"delete_user_book_read": {"error": "Not yours", "id": null}})),
+    );
+    assert_eq!(
+        c.delete_read(UserBookId::new(3), ReadId::new(91)),
+        Err(Error::Api("Not yours".into()))
+    );
+    http.push(200, &data(json!({"delete_user_book_read": null})));
+    assert!(matches!(
+        c.delete_read(UserBookId::new(3), ReadId::new(91)),
+        Err(Error::Api(_))
+    ));
+    assert_eq!(http.remaining(), 0, "no read-back after a failed delete");
+}
+
+#[test]
+fn mark_owned_sends_the_edition() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"edition_owned": {"id": 77, "list_book": {"id": 77, "edition_id": 5003}}})),
+    );
+    c.mark_owned(EditionId::new(5003)).unwrap();
+    assert_eq!(vars(&http, 0), json!({"id": 5003}));
+    http.push(
+        200,
+        &data(json!({"edition_owned": {"id": null, "list_book": null}})),
+    );
+    assert!(matches!(
+        c.mark_owned(EditionId::new(5003)),
+        Err(Error::Api(_))
+    ));
+}
+
+#[test]
+fn progress_percent_on_an_audiobook_counts_time() {
+    let (c, http) = client(TestTokens::new(false));
+    // The book has a page count, but the entry is an audiobook.
+    http.push(
+        200,
+        &data(json!({"user_books": [{
+            "id": 3, "status_id": 2,
+            "book": {"pages": 300, "audio_seconds": null},
+            "edition": {"pages": null, "audio_seconds": 7200},
+            "user_book_reads": [{"id": 91, "edition": null}]
+        }]})),
+    );
+    http.push(200, &data(json!({"update_user_book_read": {"error": null, "id": 91, "user_book_read": {"id": 91, "user_book_id": 3}}})));
+    http.push(200, &data(json!({"user_books_by_pk": user_book(3, 2)})));
+    c.update_progress(UserBookId::new(3), None, ProgressUpdate::Percent(25.0))
+        .unwrap();
+    assert_eq!(
+        vars(&http, 1),
+        json!({"id": 91, "read": {"progress_seconds": 1800}})
+    );
+}
+
+#[test]
+fn an_unfinished_read_never_scales_to_the_last_unit() {
+    assert_eq!(super::scale(0.5, 300), 150);
+    assert_eq!(super::scale(0.997, 150), 149);
+    assert_eq!(super::scale(1.0, 150), 150);
+    assert_eq!(super::scale(0.5, 0), 0);
 }

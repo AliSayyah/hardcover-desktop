@@ -2,20 +2,29 @@
 //! something instantly on start and work offline.
 //!
 //! Entries are stored as JSON blobs of [`LibraryEntry`] keyed by `user_book_id`.
-//! The database carries a schema version (`PRAGMA user_version`); a file written
-//! by a different version is wiped and rebuilt, since everything in it can be
-//! re-downloaded.
+//! The database carries a schema version (`PRAGMA user_version`). An older
+//! file is upgraded in place by [`MIGRATIONS`], so the library still shows
+//! instantly after an update; any other version is wiped and rebuilt, since
+//! everything in it can be re-downloaded.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde_json::Value;
 
 use crate::api::{LibraryEntry, Timestamp, User, UserBookId, UserId};
 use crate::{Error, Result};
 
-/// Bump when the table layout or the JSON shape of the stored models changes.
-pub const SCHEMA_VERSION: i64 = 1;
+/// Bump when the table layout or the JSON shape of the stored models changes,
+/// and add a step to [`MIGRATIONS`] for the version being left.
+pub const SCHEMA_VERSION: i64 = 2;
+
+type Migration = fn(&Transaction<'_>) -> rusqlite::Result<()>;
+
+/// In-place upgrades, as `(version upgraded from, step)`, in order. A file
+/// older than the first step, or newer than this build, is wiped instead.
+const MIGRATIONS: &[(i64, Migration)] = &[(1, v1_to_v2)];
 
 const FILE_NAME: &str = "library.sqlite3";
 
@@ -58,10 +67,10 @@ impl LibraryCache {
         Self::init(Connection::open_in_memory()?, None)
     }
 
-    fn init(conn: Connection, path: Option<PathBuf>) -> Result<Self> {
+    fn init(mut conn: Connection, path: Option<PathBuf>) -> Result<Self> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version != SCHEMA_VERSION {
+        if version != SCHEMA_VERSION && migrate(&mut conn, version).is_err() {
             conn.execute_batch(
                 "DROP TABLE IF EXISTS library_entries;
                  DROP TABLE IF EXISTS sync_state;
@@ -213,6 +222,54 @@ impl LibraryCache {
     }
 }
 
+/// Upgrades a file at `version` to [`SCHEMA_VERSION`] in one transaction.
+/// `Err` (nothing changed) when there is no path from `version`.
+fn migrate(conn: &mut Connection, version: i64) -> rusqlite::Result<()> {
+    let first = MIGRATIONS.iter().position(|(from, _)| *from == version);
+    let Some(first) = first.filter(|_| version < SCHEMA_VERSION) else {
+        return Err(rusqlite::Error::InvalidQuery);
+    };
+    let tx = conn.transaction()?;
+    for (_, step) in &MIGRATIONS[first..] {
+        step(&tx)?;
+    }
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.commit()
+}
+
+/// Rewrites each entry's JSON in place with `edit`. Rows that are not JSON
+/// objects are left alone; loading skips them.
+fn rewrite_entries(
+    tx: &Transaction<'_>,
+    edit: impl Fn(&mut serde_json::Map<String, Value>),
+) -> rusqlite::Result<()> {
+    let rows: Vec<(i64, String)> = tx
+        .prepare("SELECT user_book_id, json FROM library_entries")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut update = tx.prepare("UPDATE library_entries SET json = ?2 WHERE user_book_id = ?1")?;
+    for (id, json) in rows {
+        let Ok(Value::Object(mut entry)) = serde_json::from_str(&json) else {
+            continue;
+        };
+        edit(&mut entry);
+        update.execute(params![id, Value::Object(entry).to_string()])?;
+    }
+    Ok(())
+}
+
+/// 0.1.x kept only the latest read, as `current_read`; entries now keep every
+/// read in `reads`. The other new fields default when absent.
+fn v1_to_v2(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    rewrite_entries(tx, |entry| {
+        let reads = match entry.remove("current_read") {
+            Some(read @ Value::Object(_)) => vec![read],
+            _ => Vec::new(),
+        };
+        entry.insert("reads".into(), Value::Array(reads));
+    })
+}
+
 fn to_json<T: serde::Serialize>(v: &T) -> Result<String> {
     serde_json::to_string(v).map_err(|e| Error::Storage(e.to_string()))
 }
@@ -231,7 +288,13 @@ mod tests {
         let mut read = ReadSession::new(ReadId::new(900 + id));
         read.started_at = Date::from_ymd_opt(2024, 1, 2);
         read.progress_percent = Some(12.5);
-        e.current_read = Some(read);
+        e.upsert_read(read);
+        let mut past = ReadSession::new(ReadId::new(950 + id));
+        past.started_at = Date::from_ymd_opt(2019, 5, 1);
+        past.finished_at = Date::from_ymd_opt(2019, 6, 1);
+        e.upsert_read(past);
+        e.private_notes = Some("Lent to a friend".into());
+        e.privacy = Some(Privacy::FollowersOnly);
         e.date_added = Date::from_ymd_opt(2023, 12, 31);
         e.updated_at = Some(chrono::Utc::now());
         e
@@ -305,6 +368,77 @@ mod tests {
         }
         let c = LibraryCache::open(&path).unwrap();
         assert!(c.load_library(UserId::new(1)).unwrap().is_empty());
+    }
+
+    /// A cache as 0.1.x wrote it: version 1, one `current_read` per entry.
+    fn write_v1_cache(path: &Path) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            r#"CREATE TABLE current_user (
+                   slot INTEGER PRIMARY KEY CHECK (slot = 0),
+                   user_id INTEGER NOT NULL,
+                   json TEXT NOT NULL
+               );
+               CREATE TABLE library_entries (
+                   user_book_id INTEGER PRIMARY KEY,
+                   user_id INTEGER NOT NULL,
+                   json TEXT NOT NULL
+               );
+               CREATE INDEX library_entries_user ON library_entries (user_id);
+               CREATE TABLE sync_state (
+                   user_id INTEGER PRIMARY KEY,
+                   last_synced_at TEXT NOT NULL
+               );
+               INSERT INTO current_user VALUES (0, 7, '{"id":7,"username":"reader","name":null,"avatar":null}');
+               INSERT INTO sync_state VALUES (7, '2026-10-01T08:00:00+00:00');
+               INSERT INTO library_entries VALUES (1, 7, '{"user_book_id":1,"user_id":7,"book":{"id":101,"title":"Synthetic One","subtitle":null,"authors":["Jane Quill"],"cover":null,"pages":320,"release_year":1999,"slug":"synthetic-one","average_rating":3.9,"users_count":12},"status":"CurrentlyReading","rating":null,"edition":{"id":5001,"title":null,"pages":400,"audio_seconds":null,"cover":null,"format":"Paperback"},"current_read":{"id":901,"started_at":"2026-09-01","finished_at":null,"progress_pages":120,"progress_seconds":null,"progress_percent":30.0,"edition_id":5001},"date_added":"2026-08-30","updated_at":"2026-09-02T10:00:00Z"}');
+               INSERT INTO library_entries VALUES (2, 7, '{"user_book_id":2,"user_id":7,"book":{"id":102,"title":"Synthetic Two","subtitle":null,"authors":[],"cover":null,"pages":null,"release_year":null,"slug":null,"average_rating":null,"users_count":null},"status":"WantToRead","rating":null,"edition":null,"current_read":null,"date_added":"2026-08-31","updated_at":null}');
+               INSERT INTO library_entries VALUES (3, 7, 'not json');
+               PRAGMA user_version = 1;"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_v1_cache_is_upgraded_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        write_v1_cache(&path);
+
+        let c = LibraryCache::open(&path).unwrap();
+        let version: i64 = c
+            .conn()
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let me = UserId::new(7);
+        assert_eq!(c.load_user().unwrap().unwrap().username, "reader");
+        assert!(c.last_synced_at(me).unwrap().is_some());
+
+        let loaded = c.load_library(me).unwrap();
+        assert_eq!(
+            loaded.len(),
+            2,
+            "the row that was not JSON is still skipped"
+        );
+        let reading = &loaded[0];
+        assert_eq!(reading.reads.len(), 1);
+        let read = reading.current_read().unwrap();
+        assert_eq!(read.id, ReadId::new(901));
+        assert_eq!(read.progress_pages, Some(120));
+        assert_eq!(read.edition_id, Some(EditionId::new(5001)));
+        assert_eq!(
+            reading.edition.as_ref().unwrap().format.as_deref(),
+            Some("Paperback")
+        );
+        assert_eq!(reading.privacy, None);
+        assert_eq!(reading.private_notes, None);
+        assert!(loaded[1].reads.is_empty());
+
+        // Reopening finds the current version and changes nothing.
+        drop(c);
+        let c = LibraryCache::open(&path).unwrap();
+        assert_eq!(c.load_library(me).unwrap(), loaded);
     }
 
     #[test]
