@@ -1354,6 +1354,59 @@ mod tests {
     }
 }
 
+/// The user's review of a library entry (`user_books.review_*`).
+///
+/// Not part of [`LibraryEntry`]: review text can be long, so the library sync
+/// leaves it out and the book page fetches it with [`crate::api::Client::review`].
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Review {
+    /// The review as Markdown (`review_markdown`).
+    pub markdown: Option<String>,
+    /// The review as plain text (`review_raw`). Shown when Hardcover has no
+    /// Markdown for a review.
+    pub plain: Option<String>,
+    pub has_spoilers: bool,
+    /// The day the review is dated.
+    pub reviewed_at: Option<Date>,
+    /// Hardcover's `has_review`. True with no text is a review kept in a form
+    /// this app can't read (only the website's own editor format).
+    #[serde(default)]
+    pub has_review: bool,
+}
+
+impl Review {
+    pub fn new(markdown: impl Into<String>, has_spoilers: bool, reviewed_at: Option<Date>) -> Self {
+        Self {
+            markdown: Some(markdown.into()),
+            plain: None,
+            has_spoilers,
+            reviewed_at,
+            has_review: true,
+        }
+    }
+
+    /// True if the entry has a review, readable here or not.
+    pub fn exists(&self) -> bool {
+        self.has_review || self.text().is_some()
+    }
+
+    /// The text to show and to edit: the Markdown, else the plain text.
+    pub fn text(&self) -> Option<&str> {
+        self.markdown.as_deref().or(self.plain.as_deref())
+    }
+}
+
+/// A library entry and its review, as a review write left them.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct ReviewedEntry {
+    /// `None` if the write's response had no entry and reading it back failed:
+    /// the review was written, and the entry was left as it was.
+    pub entry: Option<LibraryEntry>,
+    pub review: Review,
+}
+
 /// What [`crate::api::Client::set_edition`] did.
 #[derive(Debug)]
 pub struct EditionChange {

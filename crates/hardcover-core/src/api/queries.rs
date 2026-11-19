@@ -39,6 +39,17 @@ macro_rules! edition_fields {
     };
 }
 
+/// The user's review of an entry. Not part of `UserBookFields`: review text can
+/// be long, and only the book page shows it.
+macro_rules! review_fields {
+    () => {
+        "fragment ReviewFields on user_books {
+  review_markdown review_raw review_has_spoilers reviewed_at has_review
+}
+"
+    };
+}
+
 macro_rules! goal_fields {
     () => {
         "fragment GoalFields on goals {
@@ -308,6 +319,62 @@ pub(crate) const EDITION_OWNED: &str = "mutation EditionOwned($id: Int!) {
 }
 ";
 
+/// One entry's review, fetched when its book page opens.
+pub(crate) const USER_BOOK_REVIEW: &str = concat!(
+    "query UserBookReview($id: Int!) {
+  user_books_by_pk(id: $id) { id ...ReviewFields }
+}
+",
+    review_fields!()
+);
+
+/// Writes or clears the review. The review arguments are written out, not
+/// passed in `$object`, so the scope check sees that this needs `write:reviews`.
+/// The status goes too, as with a rating: see `Client::set_review`.
+pub(crate) const UPDATE_USER_BOOK_REVIEW: &str = concat!(
+    "mutation UpdateUserBookReview(
+  $id: Int!, $statusId: Int!, $markdown: String, $spoilers: Boolean!, $reviewedAt: date
+) {
+  update_user_book(id: $id, object: {
+    status_id: $statusId
+    review_markdown: $markdown
+    review_has_spoilers: $spoilers
+    reviewed_at: $reviewedAt
+  }) {
+    error id
+    user_book { ...UserBookFields ...ReviewFields }
+  }
+}
+",
+    user_book_fields!(),
+    book_summary_fields!(),
+    edition_fields!(),
+    review_fields!()
+);
+
+/// Deletes the review. `review_slate` (the website editor's form) is cleared
+/// too, so a review written on the website is gone as well. Like
+/// [`UPDATE_USER_BOOK_REVIEW`], it resends the status.
+pub(crate) const DELETE_USER_BOOK_REVIEW: &str = concat!(
+    "mutation DeleteUserBookReview($id: Int!, $statusId: Int!) {
+  update_user_book(id: $id, object: {
+    status_id: $statusId
+    review_markdown: null
+    review_slate: null
+    review_has_spoilers: false
+    reviewed_at: null
+  }) {
+    error id
+    user_book { ...UserBookFields ...ReviewFields }
+  }
+}
+",
+    user_book_fields!(),
+    book_summary_fields!(),
+    edition_fields!(),
+    review_fields!()
+);
+
 /// The user's goals that are not archived, the latest end date first.
 pub(crate) const GOALS: &str = concat!(
     "query Goals($userId: Int!) {
@@ -377,6 +444,9 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("DELETE_USER_BOOK_READ", DELETE_USER_BOOK_READ),
     ("BOOK_EDITIONS", BOOK_EDITIONS),
     ("EDITION_OWNED", EDITION_OWNED),
+    ("USER_BOOK_REVIEW", USER_BOOK_REVIEW),
+    ("UPDATE_USER_BOOK_REVIEW", UPDATE_USER_BOOK_REVIEW),
+    ("DELETE_USER_BOOK_REVIEW", DELETE_USER_BOOK_REVIEW),
     ("GOALS", GOALS),
     ("GOAL_BY_ID", GOAL_BY_ID),
     ("INSERT_GOAL", INSERT_GOAL),
@@ -476,6 +546,32 @@ mod tests {
             "{:#?}",
             report.notes
         );
+
+        // Written out with variable values, the review arguments are still seen.
+        let docs = usages(&[("UPDATE_USER_BOOK_REVIEW", UPDATE_USER_BOOK_REVIEW)]);
+        let report = sdl::check_scopes(&caps, &library_only, &docs).unwrap();
+        for arg in ["review_markdown", "review_has_spoilers", "reviewed_at"] {
+            assert!(
+                report
+                    .problems
+                    .iter()
+                    .any(|p| p.contains(&format!("`{arg}`"))),
+                "{arg}: {:#?}",
+                report.problems
+            );
+        }
+        let docs = usages(&[("DELETE_USER_BOOK_REVIEW", DELETE_USER_BOOK_REVIEW)]);
+        let report = sdl::check_scopes(&caps, &library_only, &docs).unwrap();
+        for arg in ["review_markdown", "review_slate", "reviewed_at"] {
+            assert!(
+                report
+                    .problems
+                    .iter()
+                    .any(|p| p.contains(&format!("`{arg}`"))),
+                "{arg}: {:#?}",
+                report.problems
+            );
+        }
 
         // `email` is a column gated by read:me:email.
         let docs = usages(&[("EMAIL", "query E { me { id email } }")]);

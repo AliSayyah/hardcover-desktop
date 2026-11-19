@@ -540,6 +540,118 @@ impl Client {
         self.update_user_book(id, json!({ "privacy_setting_id": privacy.id() }))
     }
 
+    /// The review of one of the user's entries; [`Review::default`] if it has
+    /// none or the entry is gone.
+    pub fn review(&self, id: UserBookId) -> Result<Review> {
+        #[derive(Deserialize)]
+        struct Data {
+            user_books_by_pk: Option<RawReview>,
+        }
+        let data: Data = self.query(
+            "UserBookReview",
+            queries::USER_BOOK_REVIEW,
+            json!({ "id": id.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        Ok(data
+            .user_books_by_pk
+            .map(RawReview::into_review)
+            .unwrap_or_default())
+    }
+
+    /// Writes the review, in Markdown, dated `reviewed_at`. Blank text is an
+    /// error: use [`Client::delete_review`]. Needs the `write:reviews` scope.
+    ///
+    /// Sends `keep_status` too, as [`Client::set_rating`] does: Hardcover
+    /// treats a bare rating as "I read this", and a review may be treated the
+    /// same way. Pass the status the UI currently shows.
+    pub fn set_review(
+        &self,
+        id: UserBookId,
+        markdown: &str,
+        has_spoilers: bool,
+        reviewed_at: Option<Date>,
+        keep_status: ReadingStatus,
+    ) -> Result<ReviewedEntry> {
+        let markdown = markdown.trim();
+        if markdown.is_empty() {
+            return Err(Error::InvalidInput("a review needs some text".into()));
+        }
+        self.update_review(
+            id,
+            "UpdateUserBookReview",
+            queries::UPDATE_USER_BOOK_REVIEW,
+            json!({
+                "markdown": markdown,
+                "spoilers": has_spoilers,
+                "reviewedAt": reviewed_at.map(|d| d.to_string()),
+            }),
+            keep_status,
+            Review::new(markdown, has_spoilers, reviewed_at),
+        )
+    }
+
+    /// Deletes the review: its text in every form the app can write
+    /// (`review_markdown` and the website's `review_slate`), its spoiler flag
+    /// and its date. The entry stays.
+    pub fn delete_review(
+        &self,
+        id: UserBookId,
+        keep_status: ReadingStatus,
+    ) -> Result<ReviewedEntry> {
+        self.update_review(
+            id,
+            "DeleteUserBookReview",
+            queries::DELETE_USER_BOOK_REVIEW,
+            json!({}),
+            keep_status,
+            Review::default(),
+        )
+    }
+
+    /// `sent` is the review as written, used when the payload has none: a
+    /// read right after a write can be stale.
+    fn update_review(
+        &self,
+        id: UserBookId,
+        op: &str,
+        doc: &str,
+        review: Value,
+        keep_status: ReadingStatus,
+        sent: Review,
+    ) -> Result<ReviewedEntry> {
+        #[derive(Deserialize)]
+        struct Data {
+            update_user_book: Option<ReviewedUserBookPayload>,
+        }
+        let mut vars = json!({ "id": id.get(), "statusId": keep_status.id() });
+        if let (Value::Object(vars), Value::Object(review)) = (&mut vars, review) {
+            vars.extend(review);
+        }
+        let data: Data = self.query(op, doc, vars, QUERY_TIMEOUT)?;
+        let p = data
+            .update_user_book
+            .ok_or_else(|| Error::Api("`update_user_book` returned null".into()))?;
+        if let Some(e) = p.error.filter(|e| !e.is_empty()) {
+            return Err(Error::Api(e));
+        }
+        if let Some(written) = p.user_book
+            && let Some(entry) = written.entry.into_entry()
+        {
+            return Ok(ReviewedEntry {
+                entry: Some(entry),
+                review: written.review.into_review(),
+            });
+        }
+        // No entry in the payload. The write succeeded, so a failed read-back
+        // only means the entry shown stays as it was.
+        let id = p.id.map_or(id, UserBookId::new);
+        Ok(ReviewedEntry {
+            entry: self.entry_by_id(id.get()).ok().flatten(),
+            review: sent,
+        })
+    }
+
     /// Puts `edition` on the user's Owned list. Repeating it is harmless.
     ///
     /// There is no way back with this app's scopes: taking an edition off the

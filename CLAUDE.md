@@ -89,6 +89,7 @@ The workspace has two crates, in `crates/*`.
   - Writes return the full entry, which replaces the local one and is upserted into the cache.
   - A sync that started before a write re-applies that write when the sync lands (`collection::merge_sync`).
   - `begin_write`/`end_write` track the writes in flight, per control.
+  - Reviews are not part of the sync (review text can be long). The model fetches an entry's review when a book page shows it, keeps it for the run, and fetches it again after the next sync. A review write's response replaces it. Each fetch and write bumps the slot's generation, so a fetch that finishes after a later write is dropped. The app writes only `review_markdown`: a review written on the website (only `review_slate`, with Hardcover's plain `review_raw`) is shown read-only, with a link to edit it on Hardcover.
 - `preferences.rs`: the `AppPreferences` global (`PreferencesModel`) and the theme. `follow_theme` re-applies the theme when the desktop's appearance or the preference changes. `UpdateModel` observes the model to start or stop automatic checks.
 - `settings_view.rs` (Settings dialog, `Ctrl+,`) and `about.rs` (About dialog). Both open from the account menu.
 - `goals/`: reading goals. `GoalsModel` loads the goals at start and on Refresh, and again 3 s after the library changes (outside a running sync), because Hardcover recalculates progress itself. `GoalsSection` is the sidebar's "Reading goal" section; `goal_view.rs` holds the goal dialog (target, delete) and the new-goal form. All of it hides without `read:goals`, and writes are disabled without `write:goals`. Goals are not cached.
@@ -101,7 +102,8 @@ The workspace has two crates, in `crates/*`.
 ## Hardcover API quirks the code relies on
 
 - Status ids: 1 Want to Read, 2 Currently Reading, 3 Read, 4 Paused, 5 Did Not Finish, 6 Ignored.
-- Setting a rating without a status moves the book to Read. `set_rating` therefore takes a `keep_status` and resends the current status.
+- Setting a rating without a status moves the book to Read. `set_rating` therefore takes a `keep_status` and resends the current status. `set_review` and `delete_review` do the same, as a precaution: whether a review moves the book is unverified.
+- Review arguments (`review_markdown`, `review_slate`, `review_has_spoilers`, `reviewed_at`) need `write:reviews`, which gates only those arguments, not an operation. `UPDATE_USER_BOOK_REVIEW` and `DELETE_USER_BOOK_REVIEW` write them out instead of passing them in `$object`, so the scope test sees them. `UserBookUpdateInput` has no `review_raw`; a delete clears `review_markdown` and `review_slate`. Reading other users' reviews needs `read:social`, which the app does not request.
 - Reading an entry right after a write can return stale data. Use the entry from the mutation's own response, and refetch only when it is missing.
 - Moving a book to Currently Reading starts a new read. A progress update with no open read moves the book to Currently Reading first.
 - An entry can have many reads. The current one is the newest unfinished read, else the most recently finished: a past read added later gets the highest id.

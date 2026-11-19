@@ -689,7 +689,11 @@
           "progress_pages": 528
         }
       ],
-      "private_notes": "Second time through. Read it again before the next film."
+      "private_notes": "Second time through. Read it again before the next film.",
+      "review": {
+        "markdown": "Better the second time. The opening is slow, but once the politics, the desert and the spice start to fit together I couldn't put it down.\n\nWhat stood out on this read:\n\n- how much is left unsaid between the characters\n- the appendices, which I skipped the first time\n\nOn to *Dune Messiah*.",
+        "reviewed_at": "2026-10-13"
+      }
     },
     {
       "id": 522,
@@ -871,7 +875,11 @@
           "started_at": "2026-04-25",
           "progress_pages": 140
         }
-      ]
+      ],
+      "review": {
+        "markdown": "I gave up at page 140. I enjoyed the chapters at sea, but the long detours into whale anatomy lost me. I'd like to try again some winter, maybe as an audiobook.",
+        "reviewed_at": "2026-05-02"
+      }
     },
     {
       "id": 551,

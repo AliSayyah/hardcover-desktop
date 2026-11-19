@@ -1517,3 +1517,246 @@ fn delete_goal_checks_the_payload() {
         Err(Error::Api("Not found".into()))
     );
 }
+
+// ----- reviews -----
+
+fn reviewed_user_book(id: i64, status_id: i64, review: Value) -> Value {
+    let mut entry = user_book(id, status_id);
+    entry
+        .as_object_mut()
+        .unwrap()
+        .extend(review.as_object().unwrap().clone());
+    entry
+}
+
+#[test]
+fn review_is_fetched_on_its_own() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"user_books_by_pk": {
+            "id": 3,
+            "review_markdown": "  A *quiet* book.\n\nSecond thought.  ",
+            "review_raw": "A quiet book. Second thought.",
+            "review_has_spoilers": true,
+            "reviewed_at": "2024-03-05T00:00:00",
+        }})),
+    );
+    let review = c.review(UserBookId::new(3)).unwrap();
+    assert_eq!(
+        review.markdown.as_deref(),
+        Some("A *quiet* book.\n\nSecond thought.")
+    );
+    assert_eq!(review.text(), review.markdown.as_deref());
+    assert!(review.has_spoilers);
+    assert_eq!(review.reviewed_at, Date::from_ymd_opt(2024, 3, 5));
+    let req = &http.requests()[0];
+    assert_eq!(
+        req.json.as_ref().unwrap()["operationName"],
+        "UserBookReview"
+    );
+    assert_eq!(vars(&http, 0), json!({"id": 3}));
+
+    // Plain text only: shown as it is.
+    http.push(
+        200,
+        &data(json!({"user_books_by_pk": {
+            "id": 3, "review_markdown": null, "review_raw": "Plain words.",
+            "review_has_spoilers": false, "reviewed_at": null,
+        }})),
+    );
+    let review = c.review(UserBookId::new(3)).unwrap();
+    assert!(review.exists());
+    assert_eq!(review.text(), Some("Plain words."));
+
+    // No review, a leftover flag, or no entry at all: nothing to show.
+    http.push(
+        200,
+        &data(json!({"user_books_by_pk": {
+            "id": 3, "review_markdown": " ", "review_raw": null,
+            "review_has_spoilers": true, "reviewed_at": "2024-03-05T00:00:00",
+        }})),
+    );
+    assert_eq!(c.review(UserBookId::new(3)).unwrap(), Review::default());
+    http.push(200, &data(json!({"user_books_by_pk": null})));
+    assert_eq!(c.review(UserBookId::new(3)).unwrap(), Review::default());
+
+    // A review Hardcover has but in no form this app reads.
+    http.push(
+        200,
+        &data(json!({"user_books_by_pk": {
+            "id": 3, "review_markdown": null, "review_raw": null,
+            "review_has_spoilers": true, "reviewed_at": "2024-03-05T00:00:00",
+            "has_review": true,
+        }})),
+    );
+    let review = c.review(UserBookId::new(3)).unwrap();
+    assert!(review.exists());
+    assert_eq!(review.text(), None);
+    assert!(review.has_spoilers);
+}
+
+#[test]
+fn set_review_keeps_the_status_and_uses_the_written_entry() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": null, "id": 3, "user_book": reviewed_user_book(3, 2, json!({
+            "review_markdown": "Loved the ending.",
+            "review_raw": "Loved the ending.",
+            "review_has_spoilers": false,
+            "reviewed_at": "2024-06-07T00:00:00",
+        }))}})),
+    );
+    let written = c
+        .set_review(
+            UserBookId::new(3),
+            "  Loved the ending.\n",
+            false,
+            Date::from_ymd_opt(2024, 6, 7),
+            ReadingStatus::CurrentlyReading,
+        )
+        .unwrap();
+    let entry = written.entry.as_ref().unwrap();
+    assert_eq!(entry.user_book_id, UserBookId::new(3));
+    assert_eq!(entry.status, ReadingStatus::CurrentlyReading);
+    assert_eq!(
+        written.review.markdown.as_deref(),
+        Some("Loved the ending.")
+    );
+    assert_eq!(written.review.reviewed_at, Date::from_ymd_opt(2024, 6, 7));
+    let reqs = http.requests();
+    assert_eq!(reqs.len(), 1, "no read-back");
+    assert_eq!(
+        reqs[0].json.as_ref().unwrap()["operationName"],
+        "UpdateUserBookReview"
+    );
+    assert_eq!(
+        vars(&http, 0),
+        json!({
+            "id": 3,
+            "statusId": 2,
+            "markdown": "Loved the ending.",
+            "spoilers": false,
+            "reviewedAt": "2024-06-07",
+        })
+    );
+
+    // Blank text is refused before any request.
+    assert!(matches!(
+        c.set_review(UserBookId::new(3), " \n", true, None, ReadingStatus::Read),
+        Err(Error::InvalidInput(_))
+    ));
+    assert_eq!(http.requests().len(), 1);
+}
+
+#[test]
+fn delete_review_clears_every_writable_form_and_reports_what_hardcover_kept() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": null, "id": 3, "user_book": reviewed_user_book(3, 3, json!({
+            "review_markdown": null, "review_raw": null,
+            "review_has_spoilers": false, "reviewed_at": null,
+        }))}})),
+    );
+    let written = c
+        .delete_review(UserBookId::new(3), ReadingStatus::Read)
+        .unwrap();
+    assert!(!written.review.exists());
+    let request = http.requests()[0].json.clone().unwrap();
+    assert_eq!(request["operationName"], "DeleteUserBookReview");
+    let query = request["query"].as_str().unwrap();
+    for cleared in [
+        "review_markdown: null",
+        "review_slate: null",
+        "review_has_spoilers: false",
+        "reviewed_at: null",
+    ] {
+        assert!(query.contains(cleared), "{cleared}");
+    }
+    assert_eq!(vars(&http, 0), json!({ "id": 3, "statusId": 3 }));
+
+    // Markdown Hardcover did not clear is reported as still there.
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": null, "id": 3, "user_book": reviewed_user_book(3, 3, json!({
+            "review_markdown": "Still here.", "review_raw": null,
+            "review_has_spoilers": false, "reviewed_at": null,
+        }))}})),
+    );
+    let written = c
+        .delete_review(UserBookId::new(3), ReadingStatus::Read)
+        .unwrap();
+    assert_eq!(written.review.markdown.as_deref(), Some("Still here."));
+
+    // Plain text left behind is Hardcover's own copy, not Markdown.
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": null, "id": 3, "user_book": reviewed_user_book(3, 3, json!({
+            "review_markdown": null, "review_raw": "Old words.",
+            "review_has_spoilers": false, "reviewed_at": null, "has_review": true,
+        }))}})),
+    );
+    let written = c
+        .delete_review(UserBookId::new(3), ReadingStatus::Read)
+        .unwrap();
+    assert!(written.review.exists());
+    assert_eq!(written.review.markdown, None);
+
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": "Not allowed", "id": null, "user_book": null}})),
+    );
+    assert_eq!(
+        c.delete_review(UserBookId::new(3), ReadingStatus::Read),
+        Err(Error::Api("Not allowed".into()))
+    );
+}
+
+#[test]
+fn review_write_without_an_entry_reads_the_entry_back_and_keeps_the_sent_review() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": null, "id": 3, "user_book": null}})),
+    );
+    http.push(200, &data(json!({"user_books_by_pk": user_book(3, 3)})));
+    let written = c
+        .set_review(
+            UserBookId::new(3),
+            " Short and sharp.\n",
+            true,
+            Date::from_ymd_opt(2024, 6, 7),
+            ReadingStatus::Read,
+        )
+        .unwrap();
+    assert_eq!(written.entry.unwrap().status, ReadingStatus::Read);
+    // The review is the one sent: reading it back so soon can be stale.
+    assert_eq!(
+        written.review,
+        Review::new("Short and sharp.", true, Date::from_ymd_opt(2024, 6, 7))
+    );
+    let ops: Vec<Value> = http
+        .requests()
+        .iter()
+        .map(|r| r.json.as_ref().unwrap()["operationName"].clone())
+        .collect();
+    assert_eq!(
+        ops,
+        vec![json!("UpdateUserBookReview"), json!("UserBookById")]
+    );
+
+    // A failed read-back doesn't turn the written review into an error.
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": null, "id": 3, "user_book": null}})),
+    );
+    http.push(500, "oops");
+    let written = c
+        .delete_review(UserBookId::new(3), ReadingStatus::Read)
+        .unwrap();
+    assert_eq!(written.entry, None);
+    assert_eq!(written.review, Review::default());
+    assert_eq!(http.remaining(), 0);
+}

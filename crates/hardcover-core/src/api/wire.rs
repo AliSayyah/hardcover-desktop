@@ -909,6 +909,56 @@ pub(crate) struct UserBookIdPayload {
     pub user_book: Option<RawUserBook>,
 }
 
+// ---------- reviews ----------
+
+/// `ReviewFields`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawReview {
+    pub review_markdown: Option<String>,
+    pub review_raw: Option<String>,
+    pub review_has_spoilers: Option<bool>,
+    /// A `timestamp`, though it is written as a `date`.
+    pub reviewed_at: Option<String>,
+    pub has_review: Option<bool>,
+}
+
+impl RawReview {
+    pub fn into_review(self) -> Review {
+        let markdown = non_empty(self.review_markdown);
+        let plain = non_empty(self.review_raw);
+        let readable = markdown.is_some() || plain.is_some();
+        let exists = readable || self.has_review.unwrap_or(false);
+        Review {
+            markdown,
+            plain,
+            has_review: exists,
+            // Without text, a leftover flag or date describes nothing.
+            has_spoilers: exists && self.review_has_spoilers.unwrap_or(false),
+            reviewed_at: self
+                .reviewed_at
+                .as_deref()
+                .and_then(parse_date)
+                .filter(|_| exists),
+        }
+    }
+}
+
+/// `user_book { ...UserBookFields ...ReviewFields }`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawReviewedUserBook {
+    #[serde(flatten)]
+    pub entry: RawUserBook,
+    #[serde(flatten)]
+    pub review: RawReview,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ReviewedUserBookPayload {
+    pub error: Option<String>,
+    pub id: Option<i64>,
+    pub user_book: Option<RawReviewedUserBook>,
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct ReadIdPayload {
     pub error: Option<String>,
