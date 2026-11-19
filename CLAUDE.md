@@ -133,11 +133,14 @@ Use the bundled `gpui-kit` and `gpui-kit-design-guides` skills, in `.claude/skil
 
 - `.github/workflows/ci.yml` runs on pull requests, on pushes to `master` and weekly:
   - fmt
-  - clippy with `-D warnings`, and the tests
+  - clippy with `-D warnings`, and the tests, as two parallel jobs
   - `cargo deny` (`deny.toml`)
   - desktop-entry and metainfo validation
   - actionlint
 - Clippy and the tests run in an `ubuntu:22.04` container, the same one the release builds in. `ci/install-build-deps.sh` holds the system packages; it is the single list for both.
+- `.github/actions/setup-rust` sets up every build job. Its caches are saved only from `master`; other branches restore them.
+  - apt: the Ubuntu mirrors sometimes stall for minutes, so the package lists and `.deb`s are cached under a monthly key. On an exact hit, CI jobs install without `apt-get update`. The release always updates (`fresh-packages: true`), so its packages are checked against freshly signed lists.
+  - zstd is installed after the apt cache is saved, so that cache stays gzip; it is restored before zstd exists. The cargo caches (`Swatinem/rust-cache`, one per job) then use zstd.
 - The toolchain is pinned in `rust-toolchain.toml`. Bump it on purpose, and fix any new clippy lints in the same commit.
 - Actions are pinned to commit SHAs; Dependabot updates them.
 - **To release:**

@@ -37,6 +37,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: dist
+          fresh-packages: true
 
       - run: cargo build --profile dist --locked -p hardcover-desktop
 
