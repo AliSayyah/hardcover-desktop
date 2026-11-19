@@ -11,8 +11,8 @@ use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::{ActiveTheme as _, IndexPath, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FontWeight, IntoElement, ParentElement as _,
-    Render, SharedString, Styled as _, Subscription, Task, Window, div,
+    AnyElement, AppContext as _, Context, Entity, FocusHandle, FontWeight, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
     prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::{AuthorBook, AuthorDetails, AuthorId};
@@ -20,7 +20,7 @@ use hardcover_core::{AuthorBook, AuthorDetails, AuthorId};
 use super::book_list::{
     CatalogBooks, CatalogRow, follow_list, new_list, read_summary, row_details,
 };
-use crate::app_state::{Services, cover_file};
+use crate::app_state::{Services, cover_thumbnail};
 use crate::format::error_message;
 use crate::library::model::LibraryModel;
 
@@ -99,6 +99,8 @@ pub struct AuthorView {
     pages: HashMap<AuthorId, Loaded>,
     loading: Option<AuthorId>,
     _task: Option<Task<()>>,
+    /// Holds focus while the page loads; see [`Self::focus`].
+    focus_when_ready: Option<FocusHandle>,
     order: BookOrder,
     order_select: Entity<SelectState<Vec<OrderOption>>>,
     bio_expanded: bool,
@@ -139,6 +141,7 @@ impl AuthorView {
             pages: HashMap::new(),
             loading: None,
             _task: None,
+            focus_when_ready: None,
             order: BookOrder::default(),
             order_select,
             bio_expanded: false,
@@ -158,8 +161,22 @@ impl AuthorView {
         cx.notify();
     }
 
-    pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.list.update(cx, |list, cx| list.focus(window, cx));
+    /// Focuses the book list, which renders only once the page has loaded.
+    /// Until then `fallback` holds focus, so Escape and Back keep working, and
+    /// the list takes over when the page arrives if `fallback` still has it.
+    pub fn focus(&mut self, fallback: &FocusHandle, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_ready() {
+            self.focus_when_ready = None;
+            self.list.update(cx, |list, cx| list.focus(window, cx));
+        } else {
+            self.focus_when_ready = Some(fallback.clone());
+            window.focus(fallback, cx);
+        }
+    }
+
+    fn is_ready(&self) -> bool {
+        self.current
+            .is_some_and(|id| matches!(self.pages.get(&id), Some(Loaded::Ready(_))))
     }
 
     fn load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -183,6 +200,12 @@ impl AuthorView {
                 };
                 this.pages.insert(id, page);
                 this.fill_list(window, cx);
+                if this.is_ready()
+                    && let Some(fallback) = this.focus_when_ready.take()
+                    && fallback.is_focused(window)
+                {
+                    this.list.update(cx, |list, cx| list.focus(window, cx));
+                }
                 cx.notify();
             });
         }));
@@ -227,7 +250,9 @@ impl AuthorView {
         let photo = author
             .photo
             .as_ref()
-            .and_then(|p| cover_file(&p.url, window, cx));
+            // Scaled on the cover-decoder thread like a row thumbnail, not decoded
+            // full size on the shared pool.
+            .and_then(|p| cover_thumbnail(&p.url, window, cx));
         let model = self.model.read(cx);
         let mut facts: Vec<String> = Vec::new();
         if let Some(years) = life_years(author) {
@@ -245,7 +270,10 @@ impl AuthorView {
                 .filter(|b| b.role.is_none())
                 .map(|b| model.entry_for_book(b.book.id).map(|e| e.status)),
         );
-        let long_bio = author.bio.as_ref().is_some_and(|b| b.len() > LONG_BIO);
+        let long_bio = author
+            .bio
+            .as_ref()
+            .is_some_and(|b| b.chars().count() > LONG_BIO);
         v_flex()
             .gap_4()
             .child(

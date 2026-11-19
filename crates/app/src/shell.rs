@@ -310,8 +310,16 @@ impl Workspace {
     /// The page's book list, or the page itself for a book.
     fn focus_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.pages.current() {
-            Some(Page::Series(_)) => self.series_page.update(cx, |p, cx| p.focus(window, cx)),
-            Some(Page::Author(_)) => self.author_page.update(cx, |p, cx| p.focus(window, cx)),
+            Some(Page::Series(_)) => {
+                let fallback = self.page_focus.clone();
+                self.series_page
+                    .update(cx, |p, cx| p.focus(&fallback, window, cx))
+            }
+            Some(Page::Author(_)) => {
+                let fallback = self.page_focus.clone();
+                self.author_page
+                    .update(cx, |p, cx| p.focus(&fallback, window, cx))
+            }
             Some(Page::Book(_)) => window.focus(&self.page_focus, cx),
             None => {}
         }

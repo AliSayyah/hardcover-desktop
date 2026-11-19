@@ -103,7 +103,11 @@ impl BookDetailView {
         let contributors = details.map(|d| d.contributors.as_slice()).unwrap_or(&[]);
         let authors: Vec<&Contributor> = contributors.iter().filter(|c| c.is_author()).collect();
         let others: Vec<&Contributor> = contributors.iter().filter(|c| !c.is_author()).collect();
-        let authors_line = if authors.is_empty() {
+        let authors_line = if authors.is_empty() && !others.is_empty() {
+            // Only non-author credits: the roles line below names everyone, and
+            // `book.authors` would repeat the same people without their roles.
+            div().into_any_element()
+        } else if authors.is_empty() {
             div()
                 .text_base()
                 .child(authors_text(&book.authors))
