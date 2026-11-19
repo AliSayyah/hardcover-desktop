@@ -1160,9 +1160,17 @@ impl BookDetailView {
                                         .gap_1()
                                         .text_sm()
                                         .text_color(muted)
+                                        // The "·" stays with the series link, so a
+                                        // wrapped row never starts with it.
                                         .when_some(series_link, |this, link| {
-                                            this.child(link)
-                                                .when(!facts.is_empty(), |this| this.child("·"))
+                                            this.child(
+                                                h_flex()
+                                                    .gap_1()
+                                                    .child(link)
+                                                    .when(!facts.is_empty(), |this| {
+                                                        this.child("·")
+                                                    }),
+                                            )
                                         })
                                         .when(!facts.is_empty(), |this| {
                                             this.child(facts.join(" · "))

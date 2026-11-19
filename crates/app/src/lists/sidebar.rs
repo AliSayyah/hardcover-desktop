@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use gpui_kit::component::sidebar::{SidebarGroup, SidebarMenu, SidebarMenuItem};
 use gpui_kit::component::{ActiveTheme as _, IconName};
-use gpui_kit::{App, Entity, ParentElement as _, Styled as _, Window, div};
+use gpui_kit::{App, Entity, ParentElement as _, StyleRefinement, Styled as _, Window, div};
 use hardcover_core::ListId;
 use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LISTS};
 
@@ -41,6 +41,17 @@ pub fn lists_group(
             let (id, count) = (list.id, list.books_count);
             let select = select.clone();
             SidebarMenuItem::new(list.name.clone())
+                // A long name ends in "…" rather than being cut mid-letter. The
+                // label's box is a row, where text keeps its natural width;
+                // as a stretching column it gets the box's width and can
+                // truncate.
+                .label_style(
+                    StyleRefinement::default()
+                        .flex_col()
+                        .items_stretch()
+                        .justify_center()
+                        .truncate(),
+                )
                 .icon(if list.is_owned() {
                     IconName::Folder
                 } else {
