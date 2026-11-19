@@ -11,7 +11,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use async_lock::Semaphore;
-use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, Asset, Global, RenderImage, Window};
 use hardcover_core::auth::{KeyringTokenStore, OAuthConfig, Session, StaticToken};
 use hardcover_core::covers::CoverCache;
@@ -104,23 +103,6 @@ pub fn startup() -> Startup {
         Err(e) => {
             eprintln!("hardcover: could not restore the saved session: {e}");
             Startup::SignedOut { cache }
-        }
-    }
-}
-
-/// Follows the system light/dark appearance. `HARDCOVER_THEME=light|dark`
-/// overrides it (development aid for screenshots).
-pub fn follow_appearance(window: &mut Window, cx: &mut App) {
-    match std::env::var("HARDCOVER_THEME").ok().as_deref() {
-        Some("dark") => Theme::change(ThemeMode::Dark, Some(window), cx),
-        Some("light") => Theme::change(ThemeMode::Light, Some(window), cx),
-        _ => {
-            Theme::sync_system_appearance(Some(window), cx);
-            window
-                .observe_window_appearance(|window, cx| {
-                    Theme::sync_system_appearance(Some(window), cx);
-                })
-                .detach();
         }
     }
 }

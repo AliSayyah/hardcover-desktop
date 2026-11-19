@@ -28,6 +28,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 - **Offline access:** your library and covers are cached on your computer, so they open instantly and stay readable without a connection.
 - **Secure sign-in:** you sign in through Hardcover in your browser (OAuth with PKCE). The app never sees your password, and the session is stored in your system keyring.
 - **Self-updating:** the app offers each new release and installs it in one click, after verifying its signature.
+- **Settings:** choose a light or dark theme or follow the system, and turn automatic update checks on or off. The app also remembers its window size.
 - **Keyboard first:**
 
   | Shortcut | Action |
@@ -35,6 +36,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
   | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search |
   | <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>5</kbd> | Go to a shelf |
   | <kbd>Ctrl</kbd>+<kbd>R</kbd> | Refresh the library |
+| <kbd>Ctrl</kbd>+<kbd>,</kbd> | Settings |
   | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
 
 ## Install
@@ -75,8 +77,10 @@ The app talks to Hardcover's API, and to GitHub to check for updates. It stores 
 | Sign-in session | System keyring, service `hardcover-desktop` |
 | Library cache | `~/.local/share/hardcover-desktop/` |
 | Cover images | `~/.cache/hardcover-desktop/covers/` |
+| Settings | `~/.config/hardcover-desktop/settings.json` |
+| Window size | `~/.local/state/hardcover-desktop/window.json` |
 
-Signing out (account menu → **Sign out…**) revokes the session and deletes the library cache. To turn off automatic update checks, set `HARDCOVER_NO_UPDATE_CHECK=1`. **Check for updates** in the account menu still works.
+Signing out (account menu → **Sign out…**, or in **Settings**) revokes the session and deletes the library cache; your settings stay. To turn off automatic update checks, switch them off in **Settings**, or set `HARDCOVER_NO_UPDATE_CHECK=1`. **Check for updates** in the account menu still works.
 
 ## Build from source
 

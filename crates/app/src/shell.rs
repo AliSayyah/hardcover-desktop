@@ -27,16 +27,19 @@ use gpui_kit::{
 use hardcover_core::ReadingStatus;
 use hardcover_core::store::LibraryCache;
 
+use crate::about::open_about;
 use crate::app_state::{CoverService, Services, Startup, cover_file, startup};
 use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
 use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
 use crate::search::search_view::SearchView;
+use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
+use crate::window_state::WindowStateSaver;
 use crate::{
-    FocusSearch, Refresh, ShowCurrentlyReading, ShowDidNotFinish, ShowPaused, ShowRead,
-    ShowWantToRead,
+    FocusSearch, OpenSettings, Refresh, ShowAbout, ShowCurrentlyReading, ShowDidNotFinish,
+    ShowPaused, ShowRead, ShowWantToRead,
 };
 
 // ----- top level -----
@@ -51,11 +54,31 @@ enum Screen {
 pub struct Shell {
     screen: Screen,
     cache: Option<Arc<LibraryCache>>,
+    window_state: WindowStateSaver,
     _subscription: Option<Subscription>,
+    _window_subscriptions: [Subscription; 2],
 }
 
 impl Shell {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        window_state: WindowStateSaver,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let window_subscriptions = [
+            cx.observe_window_bounds(window, |this, window, cx| {
+                this.window_state.bounds_changed(window, cx)
+            }),
+            cx.on_app_quit(|this, _| {
+                this.window_state.flush();
+                async {}
+            }),
+        ];
+        let shell = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |_, cx| {
+            let _ = shell.update(cx, |this, _| this.window_state.flush());
+            true
+        });
         cx.spawn_in(window, async move |this, cx| {
             let (startup, covers) = cx
                 .background_spawn(async move { (startup(), CoverService::open()) })
@@ -82,7 +105,9 @@ impl Shell {
         Self {
             screen: Screen::Starting,
             cache: None,
+            window_state,
             _subscription: None,
+            _window_subscriptions: window_subscriptions,
         }
     }
 
@@ -153,6 +178,8 @@ pub struct Workspace {
     library: Entity<LibraryView>,
     search: Entity<SearchView>,
     signing_out: bool,
+    /// The open Settings dialog's sign-out request.
+    _settings: Option<Subscription>,
     /// Re-renders periodically so "Updated 5 min ago" stays true.
     _clock: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -203,6 +230,7 @@ impl Workspace {
             library,
             search,
             signing_out: false,
+            _settings: None,
             _clock: clock,
             _subscriptions: subscriptions,
         }
@@ -239,6 +267,26 @@ impl Workspace {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, |m, cx| m.sync(cx));
+    }
+
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let model = self.model.clone();
+        let view = cx.new(|cx| SettingsView::new(model, cx));
+        self._settings = Some(cx.subscribe_in(
+            &view,
+            window,
+            |this, _, _: &SignOutRequested, window, cx| {
+                // One overlay at a time: the confirmation replaces Settings.
+                window.close_all_dialogs(cx);
+                this.confirm_sign_out(window, cx);
+            },
+        ));
+        window.open_dialog(cx, move |dialog, window, _| {
+            dialog
+                .title("Settings")
+                .w(rems(30.).to_pixels(window.rem_size()))
+                .child(view.clone())
+        });
     }
 
     fn confirm_sign_out(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -393,7 +441,11 @@ impl Workspace {
                 )),
                 cx,
             ),
-            UpdateEvent::Found => self.open_update_dialog(window, cx),
+            UpdateEvent::Found => {
+                // Found by "Check now" in Settings: show the release instead.
+                window.close_all_dialogs(cx);
+                self.open_update_dialog(window, cx)
+            }
             UpdateEvent::CheckFailed(message) => window.push_notification(
                 Notification::error(message.clone()).title("Couldn't check for updates"),
                 cx,
@@ -585,17 +637,26 @@ impl Workspace {
                         None => menu,
                     };
                     let updates_view = view.clone();
-                    menu.item(
-                        PopupMenuItem::new("Check for updates").on_click(move |_, _, cx| {
-                            let _ = updates_view.update(cx, |this, cx| this.check_for_updates(cx));
-                        }),
-                    )
-                    .separator()
-                    .item(
-                        PopupMenuItem::new("Sign out…").on_click(move |_, window, cx| {
-                            let _ = view.update(cx, |this, cx| this.confirm_sign_out(window, cx));
-                        }),
-                    )
+                    menu.separator()
+                        .menu_with_icon("Settings…", IconName::Settings, Box::new(OpenSettings))
+                        .item(
+                            PopupMenuItem::new("Check for updates").on_click(move |_, _, cx| {
+                                let _ =
+                                    updates_view.update(cx, |this, cx| this.check_for_updates(cx));
+                            }),
+                        )
+                        .menu_with_icon(
+                            "About Hardcover Desktop…",
+                            IconName::Info,
+                            Box::new(ShowAbout),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Sign out…").on_click(move |_, window, cx| {
+                                let _ =
+                                    view.update(cx, |this, cx| this.confirm_sign_out(window, cx));
+                            }),
+                        )
                 }),
         )
     }
@@ -623,6 +684,10 @@ impl Render for Workspace {
                 this.show(Destination::Search, window, cx)
             }))
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh(cx)))
+            .on_action(
+                cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
+            )
+            .on_action(cx.listener(|_, _: &ShowAbout, window, cx| open_about(window, cx)))
             .on_action(cx.listener(|this, _: &ShowCurrentlyReading, window, cx| {
                 this.show_shelf(ReadingStatus::CurrentlyReading, window, cx)
             }))
