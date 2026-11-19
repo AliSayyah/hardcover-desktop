@@ -48,12 +48,18 @@ fn period_label(period: TrendingPeriod) -> &'static str {
 /// The line under the title for a period.
 fn period_description(period: TrendingPeriod) -> &'static str {
     match period {
-        TrendingPeriod::Week => "The books the most readers finished on Hardcover this week.",
-        TrendingPeriod::Month => "The books the most readers finished on Hardcover this month.",
+        TrendingPeriod::Week => {
+            "The books the most readers finished on Hardcover in the last week."
+        }
+        TrendingPeriod::Month => {
+            "The books the most readers finished on Hardcover in the last month."
+        }
         TrendingPeriod::ThreeMonths => {
             "The books the most readers finished on Hardcover in the last three months."
         }
-        TrendingPeriod::Year => "The books the most readers finished on Hardcover this year.",
+        TrendingPeriod::Year => {
+            "The books the most readers finished on Hardcover in the last year."
+        }
         TrendingPeriod::AllTime => "The books the most readers have finished on Hardcover.",
     }
 }

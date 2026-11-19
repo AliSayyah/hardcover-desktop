@@ -427,7 +427,12 @@ impl SearchView {
             cx.notify();
             revision
         });
-        self.sync_list_selection(window, cx);
+        if T::KIND == SearchKind::Books {
+            self.sync_list_selection(window, cx);
+        } else {
+            // New results: nothing is chosen in them yet.
+            T::list(self).update(cx, |list, cx| list.set_selected_index(None, window, cx));
+        }
         let slot = T::KIND.index();
         let Some(revision) = revision else {
             // Blank query: nothing to fetch.

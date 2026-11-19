@@ -128,17 +128,19 @@ pub fn compute(entries: &[LibraryEntry], today: Date) -> ReadingStats {
 }
 
 /// The entry's finished reads that count: all of them, except the latest read
-/// of a book the reader did not finish.
+/// of a book the reader did not finish. An open read of such a book is the
+/// abandoned one, and isn't finished anyway.
 fn counted_reads(entry: &LibraryEntry) -> impl Iterator<Item = &ReadSession> {
-    let abandoned = (entry.status == ReadingStatus::DidNotFinish)
-        .then(|| {
-            entry
-                .reads
-                .iter()
-                .max_by(|a, b| a.date().cmp(&b.date()).then(a.id.cmp(&b.id)))
-                .map(|r| r.id)
-        })
-        .flatten();
+    let abandoned = (entry.status == ReadingStatus::DidNotFinish
+        && entry.reads.iter().all(ReadSession::is_finished))
+    .then(|| {
+        entry
+            .reads
+            .iter()
+            .max_by(|a, b| a.date().cmp(&b.date()).then(a.id.cmp(&b.id)))
+            .map(|r| r.id)
+    })
+    .flatten();
     entry
         .reads
         .iter()
@@ -160,13 +162,14 @@ fn read_pages(entry: &LibraryEntry, read: &ReadSession) -> Option<u32> {
     }
 }
 
-/// Consecutive years ending this year (or with a later finish), at most
-/// [`MAX_YEARS`] of them, and the books finished before the first one.
+/// Consecutive years ending this year, at most [`MAX_YEARS`] of them, and the
+/// books finished before the first one. Finishes dated in a later year are
+/// mistakes; they are left out rather than stretching the chart.
 fn year_range(per_year: &BTreeMap<i32, YearTotals>, this_year: i32) -> (Vec<YearTotals>, u32) {
-    let (Some(&first), Some(&last)) = (per_year.keys().next(), per_year.keys().next_back()) else {
+    let Some(&first) = per_year.keys().next() else {
         return (Vec::new(), 0);
     };
-    let last = last.max(this_year);
+    let last = this_year;
     let first = first.max(last - MAX_YEARS as i32 + 1);
     let years = (first..=last)
         .map(|year| {
@@ -249,6 +252,32 @@ mod tests {
         );
         let years: Vec<(i32, u32)> = stats.years.iter().map(|y| (y.year, y.books)).collect();
         assert_eq!(years, vec![(2024, 1), (2025, 0), (2026, 1)], "gaps filled");
+    }
+
+    #[test]
+    fn an_open_read_is_the_abandoned_one_for_a_dnf_book() {
+        let mut e = entry(1, ReadingStatus::DidNotFinish, Some(100));
+        e.reads = vec![
+            read(2, None, None),
+            read(1, Some("2020-01-01"), Some("2020-01-20")),
+        ];
+        let stats = compute(&[e], date(TODAY));
+        assert_eq!(stats.finished_reads, 1);
+    }
+
+    #[test]
+    fn a_finish_dated_in_a_later_year_does_not_move_the_chart() {
+        let mut e = entry(1, ReadingStatus::Read, None);
+        e.reads = vec![
+            read(1, None, Some("2025-03-01")),
+            read(2, None, Some("2062-03-01")),
+        ];
+        let stats = compute(&[e], date(TODAY));
+        assert_eq!(stats.years.last().map(|y| y.year), Some(2026));
+        assert_eq!(
+            stats.years.first().map(|y| (y.year, y.books)),
+            Some((2025, 1))
+        );
     }
 
     #[test]

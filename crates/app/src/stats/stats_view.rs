@@ -212,11 +212,11 @@ fn year_chart(
 }
 
 fn year_tooltip(y: &YearTotals) -> String {
-    format!(
-        "{} · {} pages",
-        books_count_text(y.books),
-        count_text(y.pages)
-    )
+    let pages = match y.pages {
+        1 => "1 page".to_owned(),
+        n => format!("{} pages", count_text(n)),
+    };
+    format!("{} · {pages}", books_count_text(y.books))
 }
 
 fn render_years(stats: &ReadingStats, cx: &App) -> impl IntoElement {
@@ -297,7 +297,15 @@ fn render_ratings(stats: &ReadingStats, cx: &App) -> impl IntoElement {
                     0 => String::new(),
                     n => n.to_string(),
                 })
-                .tooltip_title(|(ix, _)| format!("{} stars", half_stars(*ix)).into())
+                .tooltip_title(|(ix, _)| {
+                    let stars = half_stars(*ix);
+                    let unit = if matches!(stars.as_ref(), "1" | "½") {
+                        "star"
+                    } else {
+                        "stars"
+                    };
+                    format!("{stars} {unit}").into()
+                })
                 .tooltip_value(|(_, n), _| books_count_text(*n).into()),
         ),
     )
