@@ -14,7 +14,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     App, AppContext as _, Context, Entity, FontWeight, IntoElement, ParentElement as _, Render,
-    ScrollStrategy, SharedString, Styled as _, Subscription, Window, div,
+    ScrollStrategy, SharedString, StyleRefinement, Styled as _, Subscription, Window, div,
 };
 use hardcover_core::{LibraryEntry, ReadingStatus, UserBookId};
 
@@ -136,9 +136,9 @@ pub struct LibraryView {
     model: Entity<LibraryModel>,
     status: ReadingStatus,
     filter: Entity<InputState>,
-    sort: Entity<SelectState<Vec<SortOption>>>,
     order: SortOrder,
     list: Entity<ListState<ShelfDelegate>>,
+    pane: Entity<ShelfPane>,
     detail: Entity<BookDetailView>,
     /// The selected entry per shelf, so switching shelves keeps each one's place.
     selection: HashMap<ReadingStatus, UserBookId>,
@@ -167,6 +167,14 @@ impl LibraryView {
             )
         });
         let detail = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
+        let pane = cx.new(|cx| ShelfPane {
+            _model: cx.observe(&model, |_, _, cx| cx.notify()),
+            model: model.clone(),
+            status: ReadingStatus::CurrentlyReading,
+            filter: filter.clone(),
+            sort: sort.clone(),
+            list: list.clone(),
+        });
 
         let subscriptions = vec![
             cx.observe_in(&model, window, |this, _, window, cx| {
@@ -216,9 +224,9 @@ impl LibraryView {
             model,
             status: ReadingStatus::CurrentlyReading,
             filter,
-            sort,
             order: SortOrder::RecentlyUpdated,
             list,
+            pane,
             detail,
             selection: HashMap::new(),
             rows_key: None,
@@ -237,6 +245,10 @@ impl LibraryView {
     ) {
         if self.status != status {
             self.status = status;
+            self.pane.update(cx, |pane, cx| {
+                pane.status = status;
+                cx.notify();
+            });
             self.filter.update(cx, |f, cx| f.set_value("", window, cx));
             self.refresh_rows(window, cx);
         }
@@ -334,6 +346,8 @@ impl LibraryView {
             let ix = pos.map(IndexPath::new);
             if list.selected_index() != ix {
                 list.set_selected_index(ix, window, cx);
+                // The list sits in the cached shelf pane, so make sure it redraws.
+                cx.notify();
             }
         });
     }
@@ -345,8 +359,24 @@ impl LibraryView {
             }
         });
     }
+}
 
-    fn render_collection(&self, cx: &mut Context<Self>) -> impl IntoElement {
+/// The shelf's header, filter, sort and list, as a view of its own so
+/// [`LibraryView`] can cache it. Frames driven by the detail pane (its loading
+/// animation, its cover) then reuse the list instead of rendering every row
+/// again. Whatever changes the pane notifies it: the list, the filter and the
+/// sort are views inside it, and it observes the model for the count.
+struct ShelfPane {
+    model: Entity<LibraryModel>,
+    status: ReadingStatus,
+    filter: Entity<InputState>,
+    sort: Entity<SelectState<Vec<SortOption>>>,
+    list: Entity<ListState<ShelfDelegate>>,
+    _model: Subscription,
+}
+
+impl Render for ShelfPane {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let count = self.model.read(cx).count(self.status);
         v_flex()
             .size_full()
@@ -403,14 +433,18 @@ impl LibraryView {
 }
 
 impl Render for LibraryView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let rem = window.rem_size();
         h_resizable("library-split")
             .child(
                 resizable_panel()
                     .size(rem * 24.)
                     .size_range(rem * 16.0..rem * 40.)
-                    .child(self.render_collection(cx)),
+                    .child(
+                        self.pane
+                            .clone()
+                            .cached(StyleRefinement::default().size_full()),
+                    ),
             )
             .child(
                 resizable_panel()

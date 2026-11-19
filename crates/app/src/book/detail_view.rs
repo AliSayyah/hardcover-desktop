@@ -120,6 +120,10 @@ pub struct BookDetailView {
     subject: Option<Subject>,
     details: HashMap<BookId, Details>,
     details_loading: Option<BookId>,
+    /// The book whose details request is in flight, after [`DETAILS_DELAY`].
+    /// Only then does the placeholder animate: a pulse while arrowing past
+    /// books would redraw the window every frame for nothing.
+    details_fetching: Option<BookId>,
     _details_task: Option<Task<()>>,
     status: Entity<SelectState<Vec<StatusOption>>>,
     add_status: Entity<SelectState<Vec<StatusOption>>>,
@@ -193,6 +197,7 @@ impl BookDetailView {
             subject: None,
             details: HashMap::new(),
             details_loading: None,
+            details_fetching: None,
             _details_task: None,
             status,
             add_status,
@@ -288,17 +293,28 @@ impl BookDetailView {
         }
         self.details.remove(&book.id);
         self.details_loading = Some(book.id);
+        self.details_fetching = None;
         let client = Services::global(cx).client().clone();
         let id = book.id;
         // Replacing the task cancels a fetch for a book no longer shown.
         self._details_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(DETAILS_DELAY).await;
+            let fetching = this.update(cx, |this, cx| {
+                this.details_fetching = Some(id);
+                cx.notify();
+            });
+            if fetching.is_err() {
+                return;
+            }
             let result = cx
                 .background_spawn(async move { client.book_details(id) })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.details_loading == Some(id) {
                     this.details_loading = None;
+                }
+                if this.details_fetching == Some(id) {
+                    this.details_fetching = None;
                 }
                 let details = match result {
                     Ok(d) => Details::Loaded(Arc::new(d)),
@@ -933,12 +949,22 @@ impl BookDetailView {
                         .on_click(cx.listener(|this, _, _, cx| this.retry_details(cx))),
                 )
                 .into_any_element(),
-            None => v_flex()
+            None if self.details_fetching == Some(book.id) => v_flex()
                 .gap_2()
                 .child(Skeleton::new().h_4().w_full())
                 .child(Skeleton::new().h_4().w_full())
                 .child(Skeleton::new().h_4().w_2_3())
                 .into_any_element(),
+            // Waiting out the delay: the same placeholder, still.
+            None => {
+                let bar = || div().h_4().bg(cx.theme().skeleton);
+                v_flex()
+                    .gap_2()
+                    .child(bar().w_full())
+                    .child(bar().w_full())
+                    .child(bar().w_2_3())
+                    .into_any_element()
+            }
         };
         section("Description").child(body).into_any_element()
     }
