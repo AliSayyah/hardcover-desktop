@@ -1,0 +1,25 @@
+[package]
+name = "hardcover-core"
+version = "0.1.0"
+description = "GPUI-free core of hardcover-desktop: Hardcover GraphQL client, OAuth, library cache and cover cache"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+directories = "6"
+getrandom = "0.3"
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+ureq = { version = "3", features = ["json"] }
+url = "2"
+
+[dev-dependencies]
+apollo-compiler = "1"
+tempfile = "3"
