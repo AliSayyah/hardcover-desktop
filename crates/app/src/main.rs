@@ -106,7 +106,7 @@ fn main() {
             // Window geometry is a platform boundary: logical pixels, not rems.
             let size = Size::new(gpui_kit::px(1200.), gpui_kit::px(800.));
             let options = WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size, cx)),
+                window_bounds: Some(WindowBounds::centered(None, size, cx)),
                 window_min_size: Some(Size::new(gpui_kit::px(800.), gpui_kit::px(560.))),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Hardcover".into()),

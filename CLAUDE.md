@@ -92,6 +92,8 @@ The workspace has two crates, in `crates/*`.
 
 Use the bundled `gpui-kit` and `gpui-kit-design-guides` skills, in `.claude/skills`, before any UI or architecture work. When the skills and the crate disagree, the crate source wins: `~/.cargo/registry/src/index.crates.io-*/gpui-component-0.10.0`. For example, `ActiveTheme` is imported from `gpui_kit::component::ActiveTheme`.
 
+The app enables gpui-kit's `gpui-fast` feature, which swaps the GPUI backend for GPUI Fast; imports stay `gpui_kit::*`. Some APIs differ slightly from the default backend, for example `WindowBounds::centered` takes a display. GPUI Fast pins `wgpu` exactly, so keep `wgpu` in `Cargo.lock` at the version it asks for.
+
 ## CI and releases
 
 - `.github/workflows/ci.yml` runs on pull requests, on pushes to `master` and weekly:
