@@ -118,7 +118,7 @@ To try the app without an account, build it with the `demo` feature:
 cargo run -p hardcover-desktop --features demo
 ```
 
-It shows an invented library: made-up books, authors and covers, for a reader called `demo_reader`. The demo never reads your keyring, cache or settings and never goes online, and edits are refused. The screenshots above come from it.
+It shows a sample library of popular books for a reader called `demo_reader`. The books come with their real covers, downloaded from Hardcover; that is the only thing the demo fetches. It never reads your keyring, cache or settings, and edits are refused. The screenshots above come from it.
 
 The workspace has two crates:
 - `crates/hardcover-core`: the Hardcover GraphQL client, OAuth sign-in, the library and cover caches, and self-update. It has no GUI code.

@@ -81,10 +81,10 @@ pub fn startup() -> Startup {
     real_startup()
 }
 
-/// The invented library, with a cache that lives only in memory.
+/// The demo library, with a cache that lives only in memory.
 #[cfg(feature = "demo")]
 fn demo_startup() -> Startup {
-    eprintln!("hardcover: demo build, showing an invented library");
+    eprintln!("hardcover: demo build, showing the demo library");
     Startup::SignedIn {
         client: hardcover_core::demo::client(),
         session: None,

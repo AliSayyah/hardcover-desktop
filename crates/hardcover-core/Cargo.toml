@@ -8,7 +8,7 @@ publish = false
 repository.workspace = true
 
 [features]
-# An invented library for screenshots and trying the app without an account.
+# A sample library for screenshots and trying the app without an account.
 demo = []
 
 [dependencies]
