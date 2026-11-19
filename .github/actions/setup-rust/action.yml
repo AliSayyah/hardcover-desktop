@@ -58,6 +58,8 @@ runs:
           $sudo cp "$CACHE"/lists/* /var/lib/apt/lists/
         fi
         ci/install-build-deps.sh
+        # zstd is installed after the package cache is saved; see below.
+        $sudo apt-get install -y -qq --download-only zstd
         # Drop packages the archive has replaced, so the cache doesn't grow.
         $sudo apt-get autoclean -qq
         rm -rf "$CACHE"
@@ -72,6 +74,17 @@ runs:
       with:
         path: ${{ steps.apt.outputs.dir }}
         key: ${{ steps.apt.outputs.key }}
+
+    # With zstd present, the Actions cache compresses with it instead of gzip,
+    # which restores and saves the cargo cache several times faster. It comes
+    # after the package cache, which is restored before zstd is installed and
+    # so must stay gzip: a cache saved with zstd isn't found without it.
+    - name: Install zstd
+      shell: bash
+      run: |
+        sudo=
+        if [[ $(id -u) != 0 ]]; then sudo=sudo; fi
+        DEBIAN_FRONTEND=noninteractive $sudo apt-get install -y -qq --no-install-recommends zstd
 
     - name: Install rustup
       shell: bash
