@@ -21,6 +21,7 @@ use super::book_list::{
 };
 use super::navigation::{self, Page};
 use crate::app_state::Services;
+use crate::bidi::WrappingText;
 use crate::format::series_position_text;
 use crate::library::model::LibraryModel;
 
@@ -195,14 +196,15 @@ impl SeriesView {
                 div()
                     .text_2xl()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(series.name.clone()),
+                    .child(WrappingText::new(series.name.clone())),
             )
             .when_some(series.author.clone(), |this, author| {
                 this.child(
                     h_flex().gap_1().text_base().child("by").child(
                         Button::new("series-author")
-                            .link()
+                            .text()
                             .label(author.name.clone())
+                            .tooltip("Open the author")
                             .on_click(move |_, _, cx| {
                                 navigation::open(Page::Author(author.id), cx)
                             }),
@@ -221,8 +223,7 @@ impl SeriesView {
                         .pt_2()
                         .text_sm()
                         .text_color(muted)
-                        .line_clamp(3)
-                        .child(text),
+                        .child(WrappingText::new(text).line_clamp(3)),
                 )
             })
             .when_some(series.web_url(), |this, url| {

@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use gpui_kit::component::avatar::Avatar;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -20,10 +21,11 @@ use gpui_kit::component::{
     h_flex, v_flex,
 };
 use gpui_kit::{
-    AnyElement, AnyView, App, AppContext as _, Context, ElementId, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window,
-    div, prelude::FluentBuilder as _, rems,
+    Action, AnyElement, AnyView, App, AppContext as _, Context, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, Modifiers,
+    ModifiersChangedEvent, ParentElement as _, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
+    prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::store::LibraryCache;
 use hardcover_core::{ListId, ReadingStatus};
@@ -56,6 +58,10 @@ use crate::{
 
 /// Key context of a catalogue page, where Escape goes back.
 pub const PAGE_CONTEXT: &str = "CatalogPage";
+
+/// How long Ctrl must be held before the sidebar shows its shortcuts, so a
+/// quick Ctrl+1 doesn't flash them.
+const KEY_HINT_DELAY: Duration = Duration::from_millis(500);
 
 // ----- top level -----
 
@@ -192,6 +198,11 @@ pub struct Workspace {
     lists: Entity<ListsModel>,
     list_page: Entity<ListView>,
     signing_out: bool,
+    /// Whether the sidebar shows its keyboard shortcuts: only while Ctrl is
+    /// held, so the rest of the time the rows stay clean.
+    key_hints: bool,
+    /// Shows the hints once Ctrl has been held for [`KEY_HINT_DELAY`].
+    _key_hint_delay: Option<Task<()>>,
     /// The open Settings dialog's sign-out request.
     _settings: Option<Subscription>,
     /// Re-renders periodically so "Updated 5 min ago" stays true.
@@ -299,6 +310,8 @@ impl Workspace {
             lists,
             list_page,
             signing_out: false,
+            key_hints: false,
+            _key_hint_delay: None,
             _settings: None,
             _clock: clock,
             _subscriptions: subscriptions,
@@ -518,26 +531,68 @@ impl Workspace {
         .detach();
     }
 
+    /// Shows the sidebar's shortcuts after Ctrl has been held alone (Shift
+    /// may join it) for a moment, and hides them as soon as it's released.
+    fn modifiers_changed(&mut self, modifiers: Modifiers, cx: &mut Context<Self>) {
+        if !ctrl_held(modifiers) {
+            self._key_hint_delay = None;
+            if self.key_hints {
+                self.key_hints = false;
+                cx.notify();
+            }
+            return;
+        }
+        if self.key_hints || self._key_hint_delay.is_some() {
+            return;
+        }
+        self._key_hint_delay = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(KEY_HINT_DELAY).await;
+            let _ = this.update(cx, |this, cx| {
+                this._key_hint_delay = None;
+                this.key_hints = true;
+                cx.notify();
+            });
+        }));
+    }
+
     fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let model = self.model.read(cx);
         let view = cx.entity().downgrade();
-        let nav_item = |label: &'static str, icon: IconName, destination: Destination| {
-            let view = view.clone();
-            SidebarMenuItem::new(label)
-                .icon(icon)
-                .active(self.destination == destination)
-                .on_click(move |_, window, cx| {
-                    let _ = view.update(cx, |this, cx| this.show(destination, window, cx));
-                })
+        // The modifiers are read again here: a release while a dialog had
+        // focus never reached this view, and must not leave the hints up.
+        let key_hints = self.key_hints && ctrl_held(window.modifiers());
+        // While Ctrl is held, a destination's shortcut takes the place of its
+        // count. Read from the bindings, so the hint can't drift from them.
+        let hint = |action: &dyn Action| {
+            key_hints
+                .then(|| Kbd::global_binding_for_action(action, window))
+                .flatten()
         };
+        let nav_item =
+            |label: &'static str, icon: IconName, destination: Destination, action: &dyn Action| {
+                let view = view.clone();
+                let hint = hint(action);
+                SidebarMenuItem::new(label)
+                    .icon(icon)
+                    .active(self.destination == destination)
+                    .when_some(hint, |item, hint| item.suffix(move |_, _| hint.clone()))
+                    .on_click(move |_, window, cx| {
+                        let _ = view.update(cx, |this, cx| this.show(destination, window, cx));
+                    })
+            };
         let shelves = SIDEBAR_SHELVES.map(|status| {
             let count = model.count(status);
-            nav_item(
+            let action = shelf_action(status);
+            let item = nav_item(
                 status_label(status),
                 shelf_icon(status),
                 Destination::Shelf(status),
-            )
-            .suffix(move |_, cx| {
+                action.as_ref(),
+            );
+            if key_hints {
+                return item;
+            }
+            item.suffix(move |_, cx| {
                 div()
                     .text_xs()
                     .text_color(cx.theme().sidebar_foreground.opacity(0.7))
@@ -558,9 +613,24 @@ impl Workspace {
             )
             .child(NavSection::Menu(Box::new(
                 SidebarMenu::new()
-                    .child(nav_item("Search", IconName::Search, Destination::Search))
-                    .child(nav_item("Discover", IconName::Globe, Destination::Discover))
-                    .child(nav_item("Stats", IconName::ChartPie, Destination::Stats)),
+                    .child(nav_item(
+                        "Search",
+                        IconName::Search,
+                        Destination::Search,
+                        &FocusSearch,
+                    ))
+                    .child(nav_item(
+                        "Discover",
+                        IconName::Globe,
+                        Destination::Discover,
+                        &ShowDiscover,
+                    ))
+                    .child(nav_item(
+                        "Stats",
+                        IconName::ChartPie,
+                        Destination::Stats,
+                        &ShowStats,
+                    )),
             )))
             .child(NavSection::Group(
                 SidebarGroup::new("Library").child(SidebarMenu::new().children(shelves)),
@@ -894,6 +964,23 @@ impl Workspace {
     }
 }
 
+/// Ctrl alone, or with Shift (Discover and Stats): what the sidebar hints are for.
+fn ctrl_held(modifiers: Modifiers) -> bool {
+    modifiers.control && !modifiers.alt && !modifiers.platform && !modifiers.function
+}
+
+/// The action that shows a shelf, bound to Ctrl+1…6 in `main`.
+fn shelf_action(status: ReadingStatus) -> Box<dyn Action> {
+    match status {
+        ReadingStatus::CurrentlyReading => Box::new(ShowCurrentlyReading),
+        ReadingStatus::WantToRead => Box::new(ShowWantToRead),
+        ReadingStatus::Read => Box::new(ShowRead),
+        ReadingStatus::Paused => Box::new(ShowPaused),
+        ReadingStatus::DidNotFinish => Box::new(ShowDidNotFinish),
+        ReadingStatus::Ignored => Box::new(ShowIgnored),
+    }
+}
+
 fn shelf_icon(status: ReadingStatus) -> IconName {
     match status {
         ReadingStatus::CurrentlyReading => IconName::BookOpen,
@@ -911,6 +998,9 @@ impl Render for Workspace {
             .id("workspace")
             .key_context("Workspace")
             .track_focus(&self.focus_handle)
+            .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _, cx| {
+                this.modifiers_changed(event.modifiers, cx)
+            }))
             .size_full()
             .items_stretch()
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {

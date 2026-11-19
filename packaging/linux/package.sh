@@ -24,6 +24,8 @@ install -Dm644 "$here/$app_id.desktop" "$dir/share/applications/$app_id.desktop"
 install -Dm644 "$here/$app_id.metainfo.xml" "$dir/share/metainfo/$app_id.metainfo.xml"
 install -Dm644 "$root/assets/icon.svg" "$dir/share/icons/hicolor/scalable/apps/$app_id.svg"
 install -Dm644 "$root/LICENSE" "$dir/share/licenses/hardcover-desktop/LICENSE"
+# The bundled Inter font (SIL Open Font License); the licence must travel with it.
+install -Dm644 "$root/assets/fonts/inter/LICENSE.txt" "$dir/share/licenses/hardcover-desktop/Inter-LICENSE.txt"
 
 mkdir -p "$out"
 tar -C "$stage" --owner=0 --group=0 --numeric-owner -czf "$out/$name.tar.gz" "$name"

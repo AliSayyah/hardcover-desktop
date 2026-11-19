@@ -22,6 +22,7 @@ use super::book_list::{
     CatalogBooks, CatalogRow, follow_list, new_list, read_summary, row_details,
 };
 use crate::app_state::{Services, cover_thumbnail};
+use crate::bidi::WrappingText;
 use crate::library::model::LibraryModel;
 
 /// How an author's books are ordered.
@@ -297,7 +298,7 @@ impl AuthorView {
                                 div()
                                     .text_2xl()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(author.name.clone()),
+                                    .child(WrappingText::new(author.name.clone())),
                             )
                             .when(!facts.is_empty(), |this| {
                                 this.child(
@@ -325,12 +326,10 @@ impl AuthorView {
                     v_flex()
                         .gap_1()
                         .items_start()
-                        .child(
-                            div()
-                                .text_sm()
-                                .when(collapsed, |this| this.line_clamp(4))
-                                .child(bio),
-                        )
+                        .child(div().text_sm().child({
+                            let bio = WrappingText::new(bio);
+                            if collapsed { bio.line_clamp(4) } else { bio }
+                        }))
                         .when(long_bio, |this| {
                             this.child(
                                 Button::new("toggle-bio")
