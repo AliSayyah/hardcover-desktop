@@ -701,6 +701,15 @@ impl Workspace {
             .map(|u| format!("https://hardcover.app/@{}", u.username));
         let view = cx.entity().downgrade();
         let focus = self.focus_handle.clone();
+        // After "Later", the permissions notice is one menu item away.
+        let reauthorize = self.reauthorize.clone();
+        let offer_permissions = {
+            let notice = self.reauthorize.read(cx);
+            notice.is_dismissed() && {
+                let services = Services::global(cx);
+                services.session().is_some() && !services.missing_scopes().is_empty()
+            }
+        };
 
         // The dropdown wrapper sizes to its content; this block lets the
         // footer (and its hover surface) span the sidebar.
@@ -768,6 +777,15 @@ impl Workspace {
                         ),
                         None => menu,
                     };
+                    let menu =
+                        if offer_permissions {
+                            let reauthorize = reauthorize.clone();
+                            menu.item(PopupMenuItem::new("Grant new permissions…").on_click(
+                                move |_, _, cx| reauthorize.update(cx, |r, cx| r.show(cx)),
+                            ))
+                        } else {
+                            menu
+                        };
                     let updates_view = view.clone();
                     menu.separator()
                         .menu_with_icon("Settings…", IconName::Settings, Box::new(OpenSettings))

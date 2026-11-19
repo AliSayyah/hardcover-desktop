@@ -179,6 +179,11 @@ impl GoalsModel {
                 cx.notify();
                 match result {
                     Ok(value) => {
+                        // A load that started before the write would bring
+                        // back the old goals; the write's result is newer.
+                        this._load = None;
+                        this._reload = None;
+                        this.status = GoalsStatus::Loaded;
                         apply(this, value);
                         Ok(())
                     }

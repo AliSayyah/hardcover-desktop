@@ -173,6 +173,17 @@ impl Reauthorize {
         }
     }
 
+    /// Brings the notice back after "Later".
+    pub fn show(&mut self, cx: &mut Context<Self>) {
+        self.dismissed = false;
+        cx.notify();
+    }
+
+    /// True after "Later": the account menu then offers the notice again.
+    pub fn is_dismissed(&self) -> bool {
+        self.dismissed
+    }
+
     fn dismiss(&mut self, cx: &mut Context<Self>) {
         self.dismissed = true;
         cx.notify();
@@ -232,7 +243,7 @@ impl Render for Reauthorize {
                                 .ghost()
                                 .small()
                                 .label("Later")
-                                .tooltip("Ask again the next time the app starts")
+                                .tooltip("Hide this until the next start; the account menu brings it back")
                                 .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
                         ),
                 ),
