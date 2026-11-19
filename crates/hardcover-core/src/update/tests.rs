@@ -1,8 +1,6 @@
 //! Update tests. Releases, tarballs and signatures are made up per test, signed
 //! with a throwaway key.
 
-use std::io::Write as _;
-
 use serde_json::{Value, json};
 
 use super::*;

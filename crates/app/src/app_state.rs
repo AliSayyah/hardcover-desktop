@@ -457,12 +457,14 @@ pub(crate) fn decode_scaled(path: &Path, max_height: u32) -> Option<Arc<RenderIm
     // GPUI's sprite atlas expects BGRA.
     let bgra = match pixel_type {
         PixelType::U8x3 => pixels
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|p| [p[2], p[1], p[0], u8::MAX])
             .collect(),
         _ => {
             let mut pixels = pixels;
-            for pixel in pixels.chunks_exact_mut(4) {
+            for pixel in pixels.as_chunks_mut::<4>().0 {
                 pixel.swap(0, 2);
             }
             pixels
@@ -552,7 +554,7 @@ fn read_scaled(cover: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
             .into_rgba8();
         if format == image::ImageFormat::Jpeg {
             // Saved as RGB; GPUI wants BGRA.
-            for pixel in pixels.chunks_exact_mut(4) {
+            for pixel in pixels.as_chunks_mut::<4>().0 {
                 pixel.swap(0, 2);
             }
         }
@@ -572,11 +574,13 @@ fn write_scaled(cover: &Path, max_height: u32, image: &RenderImage) -> std::io::
     let bgra = image
         .as_bytes(0)
         .ok_or_else(|| std::io::Error::other("the image has no frame"))?;
-    let opaque = bgra.chunks_exact(4).all(|p| p[3] == u8::MAX);
+    let opaque = bgra.as_chunks::<4>().0.iter().all(|p| p[3] == u8::MAX);
     let mut encoded = Vec::new();
     let ext = if max_height > THUMBNAIL_HEIGHT && opaque {
         let rgb: Vec<u8> = bgra
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|p| [p[2], p[1], p[0]])
             .collect();
         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, SCALED_JPEG_QUALITY)
