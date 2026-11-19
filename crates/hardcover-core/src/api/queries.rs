@@ -192,7 +192,7 @@ pub(crate) const UPDATE_USER_BOOK_READ: &str = concat!(
     edition_fields!()
 );
 
-/// Deletes a read (and the journal entries it wrote). Asks only for the id:
+/// Deletes a read. Whether its journal entries go too is unverified. Asks only for the id:
 /// relations of a just-deleted row may not resolve, and an error there would
 /// hide a delete that happened. The client reads the entry back instead.
 pub(crate) const DELETE_USER_BOOK_READ: &str = "mutation DeleteUserBookRead($id: Int!) {

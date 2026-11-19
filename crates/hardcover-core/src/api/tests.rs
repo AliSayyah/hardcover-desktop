@@ -799,9 +799,11 @@ fn set_edition_moves_the_open_read_at_the_same_percentage() {
             "user_book": after
         }}})),
     );
-    let e = c
+    let change = c
         .set_edition(UserBookId::new(3), EditionId::new(6000))
         .unwrap();
+    assert!(change.read_left_behind.is_none());
+    let e = change.entry;
     assert_eq!(ops(&http), ["UpdateUserBook", "UpdateUserBookRead"]);
     assert_eq!(
         vars(&http, 0),
@@ -842,9 +844,11 @@ fn set_edition_keeps_the_change_when_moving_the_read_fails() {
         ),
     );
     http.push(500, "{}");
-    let e = c
+    let change = c
         .set_edition(UserBookId::new(3), EditionId::new(6001))
         .unwrap();
+    assert!(change.read_left_behind.is_some());
+    let e = change.entry;
     assert_eq!(
         vars(&http, 1)["read"],
         json!({"edition_id": 6001, "progress_pages": 50, "progress_seconds": null})
@@ -994,4 +998,12 @@ fn progress_percent_on_an_audiobook_counts_time() {
         vars(&http, 1),
         json!({"id": 91, "read": {"progress_seconds": 1800}})
     );
+}
+
+#[test]
+fn an_unfinished_read_never_scales_to_the_last_unit() {
+    assert_eq!(super::scale(0.5, 300), 150);
+    assert_eq!(super::scale(0.997, 150), 149);
+    assert_eq!(super::scale(1.0, 150), 150);
+    assert_eq!(super::scale(0.5, 0), 0);
 }

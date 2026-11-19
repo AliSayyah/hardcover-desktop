@@ -34,8 +34,8 @@ use gpui_kit::{
     prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::{
-    BookDetails, BookId, BookSummary, Client, Date, EditionSummary, Error, Length, LibraryEntry,
-    Privacy, ProgressUpdate, Rating, ReadId, ReadSession, ReadingStatus, UserBookId,
+    BookDetails, BookId, BookSummary, Client, Date, EditionChange, EditionSummary, Error, Length,
+    LibraryEntry, Privacy, ProgressUpdate, Rating, ReadId, ReadSession, ReadingStatus, UserBookId,
 };
 
 use super::edition_picker::{EditionChosen, EditionPicker};
@@ -498,33 +498,49 @@ impl BookDetailView {
 
     /// Runs one write on `id` in the background. The model applies the result
     /// whether or not this view still shows the book.
-    fn run_write(
+    fn run_write<W: Into<Written> + Send + 'static>(
         &mut self,
         id: UserBookId,
         kind: WriteKind,
         failure_title: &'static str,
-        op: impl FnOnce(&Client) -> Result<Option<LibraryEntry>, Error> + Send + 'static,
+        op: impl FnOnce(&Client) -> Result<W, Error> + Send + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let model = self.model.clone();
         if !model.update(cx, |m, cx| m.begin_write(id, kind, cx)) {
+            if kind == WriteKind::Notes {
+                window.push_notification(
+                    Notification::info(
+                        "Another change to this book is still being saved. Try again in a moment.",
+                    )
+                    .title("Notes not saved yet"),
+                    cx,
+                );
+            }
             self.revert_controls(window, cx);
             return;
         }
         let client = Services::global(cx).client().clone();
         cx.spawn_in(window, async move |this, cx| {
-            let result = cx.background_spawn(async move { op(&client) }).await;
+            let result = cx
+                .background_spawn(async move { op(&client).map(Into::into) })
+                .await;
             model.update(cx, |m, cx| {
                 m.end_write(id, cx);
                 match &result {
-                    Ok(Some(entry)) => m.apply_written(entry.clone(), cx),
-                    Ok(None) => m.apply_removed(id, cx),
+                    Ok(Written {
+                        entry: Some(entry), ..
+                    }) => m.apply_written(entry.clone(), cx),
+                    Ok(Written { entry: None, .. }) => m.apply_removed(id, cx),
                     Err(_) => {}
                 }
             });
             let _ = this.update_in(cx, |this, window, cx| match result {
-                Ok(_) => {
+                Ok(written) => {
+                    if let Some((title, message)) = written.warning {
+                        window.push_notification(Notification::warning(message).title(title), cx);
+                    }
                     if kind == WriteKind::Notes {
                         this.notes_saved = Some(id);
                         cx.notify();
@@ -770,7 +786,7 @@ impl BookDetailView {
             id,
             WriteKind::Edition,
             "Couldn't change the edition",
-            move |client| client.set_edition(id, edition.id).map(Some),
+            move |client| client.set_edition(id, edition.id),
             window,
             cx,
         );
@@ -849,7 +865,7 @@ impl BookDetailView {
         };
         let id = entry.user_book_id;
         let description: SharedString = format!(
-            "{}. Its progress and any journal entries it wrote are deleted from Hardcover.",
+            "{}. Its dates and progress are deleted from Hardcover.",
             read_dates_text(session.started_at, session.finished_at)
         )
         .into();
@@ -887,10 +903,14 @@ impl BookDetailView {
         };
         let id = entry.user_book_id;
         let title: SharedString = format!("Add “{}” to your Owned list?", entry.book.title).into();
-        let which = edition_text(&edition).map_or_else(
-            || "This edition".to_owned(),
-            |text| format!("The {text} edition"),
-        );
+        let which = edition
+            .format
+            .as_ref()
+            .or(edition.reading_format.as_ref())
+            .map_or_else(
+                || "This edition".to_owned(),
+                |format| format!("The {} edition", format.to_lowercase()),
+            );
         let description: SharedString = format!(
             "{which} goes on your Owned list on Hardcover and appears in your activity, \
              which others may see even if this book is private. To take it off the list, \
@@ -1653,6 +1673,39 @@ fn saving(cx: &App) -> impl IntoElement {
 }
 
 /// A titled region of the pane.
+/// The outcome of a write, for [`BookDetailView::run_write`]: the entry to
+/// apply (`None` when it was removed) and a warning to show despite success.
+struct Written {
+    entry: Option<LibraryEntry>,
+    warning: Option<(&'static str, String)>,
+}
+
+impl From<Option<LibraryEntry>> for Written {
+    fn from(entry: Option<LibraryEntry>) -> Self {
+        Self {
+            entry,
+            warning: None,
+        }
+    }
+}
+
+impl From<EditionChange> for Written {
+    fn from(change: EditionChange) -> Self {
+        Self {
+            entry: Some(change.entry),
+            warning: change.read_left_behind.map(|error| {
+                (
+                    "Edition changed, progress not moved",
+                    format!(
+                        "Your current read still counts progress against the old edition. {}",
+                        error_message(&error)
+                    ),
+                )
+            }),
+        }
+    }
+}
+
 fn section(title: &'static str) -> gpui_kit::Div {
     v_flex()
         .gap_3()

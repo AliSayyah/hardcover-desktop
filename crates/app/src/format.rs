@@ -115,10 +115,16 @@ pub fn duration_text(seconds: u32) -> String {
     }
 }
 
-/// "2:05" (hours and minutes), for an audiobook position field.
+/// "2:05" (hours and minutes), or "2:05:30" when the seconds are not zero, for
+/// an audiobook position field. Exact, so submitting the field unchanged writes
+/// the same position back.
 pub fn position_text(seconds: u32) -> String {
-    let minutes = seconds / 60;
-    format!("{}:{:02}", minutes / 60, minutes % 60)
+    let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    if s == 0 {
+        format!("{h}:{m:02}")
+    } else {
+        format!("{h}:{m:02}:{s:02}")
+    }
 }
 
 /// A position typed as "h:mm" or "h:mm:ss", in seconds.
@@ -360,6 +366,8 @@ mod tests {
         assert_eq!(duration_text(45 * 60 + 30), "45m");
         assert_eq!(duration_text(36_300), "10h 5m");
         assert_eq!(position_text(7_500), "2:05");
+        assert_eq!(position_text(7_530), "2:05:30");
+        assert_eq!(parse_position(&position_text(7_530)), Some(7_530));
         assert_eq!(parse_position("2:05"), Some(7_500));
         assert_eq!(parse_position(" 0:45:30 "), Some(2_730));
         assert_eq!(parse_position("2:75"), None);

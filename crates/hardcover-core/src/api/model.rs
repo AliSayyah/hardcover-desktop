@@ -783,3 +783,13 @@ mod tests {
         assert!(!p.has_more());
     }
 }
+
+/// What [`crate::api::Client::set_edition`] did.
+#[derive(Debug)]
+pub struct EditionChange {
+    /// The entry as of the change.
+    pub entry: LibraryEntry,
+    /// Why the open read could not move to the new edition, if it couldn't.
+    /// The edition change itself went through.
+    pub read_left_behind: Option<crate::Error>,
+}

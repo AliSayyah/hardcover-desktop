@@ -357,24 +357,35 @@ impl Client {
     /// request, with its progress converted at the same percentage: page 150 of
     /// 300 becomes 5 hours of a 10-hour audiobook. Otherwise progress would be
     /// counted against one edition and shown against the other. If that second
-    /// request fails, the edition change still stands and the returned entry
-    /// shows the read on its old edition, which is consistent on its own.
-    pub fn set_edition(&self, id: UserBookId, edition: EditionId) -> Result<LibraryEntry> {
+    /// request fails, the edition change still stands: the returned entry shows
+    /// the read on its old edition, which is consistent on its own, and
+    /// [`EditionChange::read_left_behind`] carries the error so the caller can
+    /// say so.
+    pub fn set_edition(&self, id: UserBookId, edition: EditionId) -> Result<EditionChange> {
         let entry = self.update_user_book(id, json!({ "edition_id": edition.get() }))?;
         let Some(read) = entry
             .open_read()
             .filter(|r| r.edition_id != Some(edition))
             .cloned()
         else {
-            return Ok(entry);
+            return Ok(EditionChange {
+                entry,
+                read_left_behind: None,
+            });
         };
         let fields = moved_read_fields(&read, edition, entry.edition.as_ref());
-        match self.update_read(read.id, Value::Object(fields)) {
-            Ok(written) => Ok(self
-                .entry_after_read_write(written, "edition change")
-                .unwrap_or(entry)),
-            Err(_) => Ok(entry),
-        }
+        Ok(match self.update_read(read.id, Value::Object(fields)) {
+            Ok(written) => EditionChange {
+                entry: self
+                    .entry_after_read_write(written, "edition change")
+                    .unwrap_or(entry),
+                read_left_behind: None,
+            },
+            Err(e) => EditionChange {
+                entry,
+                read_left_behind: Some(e),
+            },
+        })
     }
 
     /// Sets the entry's private notes; blank text clears them.
@@ -786,8 +797,16 @@ fn moved_read_fields(
     m
 }
 
+/// `fraction` of `total`, to the nearest unit. An unfinished read never lands
+/// on the last unit: progress at the end may finish the read on Hardcover and
+/// move the book to Read, which changing the edition must not do.
 fn scale(fraction: f64, total: u32) -> u32 {
-    ((fraction * f64::from(total)).round() as u32).min(total)
+    let units = (fraction * f64::from(total)).round() as u32;
+    if fraction < 1.0 {
+        units.min(total.saturating_sub(1))
+    } else {
+        units.min(total)
+    }
 }
 
 fn retry_after(resp: &HttpResponse) -> Option<Duration> {
