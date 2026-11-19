@@ -170,7 +170,9 @@ pub(crate) const UPDATE_USER_BOOK_READ: &str = concat!(
     book_summary_fields!()
 );
 
-#[cfg(test)]
+/// Every document the client sends, by name. Validated against
+/// `schema/hardcover.graphql` in the tests below and against the live schema by
+/// the `api_check` example.
 pub(crate) const ALL: &[(&str, &str)] = &[
     ("ME", ME),
     ("LIBRARY_PAGE", LIBRARY_PAGE),
@@ -188,50 +190,9 @@ pub(crate) const ALL: &[(&str, &str)] = &[
 ];
 
 #[cfg(test)]
-pub(crate) mod sdl {
-    use apollo_compiler::validation::Valid;
-    use apollo_compiler::{ExecutableDocument, Schema};
-
-    /// The introspected SDL, adapted for apollo-compiler: it re-declares the
-    /// built-in scalars and names its roots `query_root`/`mutation_root`.
-    pub fn schema() -> &'static Valid<Schema> {
-        static SCHEMA: std::sync::OnceLock<Valid<Schema>> = std::sync::OnceLock::new();
-        SCHEMA.get_or_init(load)
-    }
-
-    fn load() -> Valid<Schema> {
-        let raw = include_str!("../../../../schema/hardcover.graphql");
-        let mut sdl: String = raw
-            .lines()
-            .filter(|l| {
-                !matches!(
-                    l.trim(),
-                    "scalar Boolean"
-                        | "scalar Float"
-                        | "scalar Int"
-                        | "scalar String"
-                        | "scalar ID"
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        sdl.push_str(
-            "\nschema { query: query_root mutation: mutation_root subscription: subscription_root }\n",
-        );
-        Schema::parse_and_validate(sdl, "hardcover.graphql")
-            .unwrap_or_else(|e| panic!("schema/hardcover.graphql is invalid:\n{}", e.errors))
-    }
-
-    pub fn validate(schema: &Valid<Schema>, name: &str, doc: &str) -> Result<(), String> {
-        ExecutableDocument::parse_and_validate(schema, doc, format!("{name}.graphql"))
-            .map(|_| ())
-            .map_err(|e| e.errors.to_string())
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::sdl;
 
     #[test]
     fn every_document_validates_against_the_schema() {

@@ -18,7 +18,16 @@ HARDCOVER_TOKEN=... cargo test -p hardcover-core --test live_read -- --ignored
 HARDCOVER_TOKEN=... cargo run -p hardcover-core --example smoke   # read-only
 cargo run -p hardcover-core --example oauth_login                 # CLI sign-in, stores the session in the keyring
 cargo run -p hardcover-core --example oauth_check -- <book-id>    # scope + write cycle on a book NOT in the library
+cargo run -p hardcover-core --example api_check                   # check the live API for changes; updates schema/
+cargo run -p hardcover-core --example api_check -- --check        # same, without writing; exit 1 on any change
 ```
+
+`api_check` is local only and is not run in CI. It uses `HARDCOVER_TOKEN` if set, otherwise the app's keyring session; both see the same schema. It does three things:
+1. Introspects the live schema and lists added, removed and changed types and fields.
+2. Validates every document in `queries::ALL` against the live schema.
+3. Checks the public scope map (`https://api.hardcover.app/capabilities.json`): `auth::DEFAULT_SCOPES` must still grant every top-level field the app uses.
+
+It then rewrites `schema/hardcover.graphql` and `schema/hardcover-capabilities.json`; review the change with `git diff schema/`. It exits non-zero if a document breaks or a scope no longer covers it. Never edit `schema/` by hand.
 
 Environment variables (see `.env.example`; `.env` is gitignored and must never be committed):
 - `HARDCOVER_TOKEN`: a personal access token. For development only: it bypasses OAuth in the app, and the examples and live tests use it.
@@ -35,7 +44,7 @@ The workspace has two crates, in `crates/*`.
 **`hardcover-core`** has no GPUI dependency, and every call in it is **synchronous and blocking**: there is no async runtime.
 - `api`: `Client` over the GraphQL endpoint `https://api.hardcover.app/v1/graphql`.
   - `queries.rs` holds every GraphQL document as a const. A unit test validates each one against `schema/hardcover.graphql`, an introspected SDL loaded through apollo-compiler.
-  - When you add or change a query, register it in `queries::ALL` so the test covers it.
+  - When you add or change a query, register it in `queries::ALL` so the test and `api_check` cover it. `api/sdl.rs` holds the validator; `api_check` includes the same file through `#[path]`, because apollo-compiler is a dev-dependency.
   - `wire.rs` holds the raw response shapes; `model.rs` holds the public types.
 - `http.rs`: a small transport seam. Production uses ureq. `http::fake::FakeTransport` scripts responses for the tests in `api/tests.rs`.
   - All fixtures must be synthetic: no real user data.
