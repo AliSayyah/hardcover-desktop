@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Runs on an invented library instead of your account: for screenshots and
+# trying the app without signing in. See the README.
+demo = ["hardcover-core/demo"]
+
 [dependencies]
 async-channel = "2"
 async-lock = "3"

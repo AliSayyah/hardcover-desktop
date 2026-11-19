@@ -73,6 +73,28 @@ pub enum Startup {
 
 /// Blocking: reads the environment, the keyring and opens the caches.
 pub fn startup() -> Startup {
+    // Decided before anything real is opened, so a demo build never shows or
+    // writes the account's library.
+    #[cfg(feature = "demo")]
+    return demo_startup();
+    #[cfg(not(feature = "demo"))]
+    real_startup()
+}
+
+/// The invented library, with a cache that lives only in memory.
+#[cfg(feature = "demo")]
+fn demo_startup() -> Startup {
+    eprintln!("hardcover: demo build, showing an invented library");
+    Startup::SignedIn {
+        client: hardcover_core::demo::client(),
+        session: None,
+        cache: LibraryCache::open_in_memory().ok().map(Arc::new),
+    }
+}
+
+// Unused in demo builds, which never read the real account.
+#[cfg_attr(feature = "demo", allow(dead_code))]
+fn real_startup() -> Startup {
     let cache = match LibraryCache::open_default() {
         Ok(cache) => Some(Arc::new(cache)),
         Err(e) => {
@@ -131,7 +153,13 @@ impl Global for CoverService {}
 impl CoverService {
     /// Blocking: creates the cache directory.
     pub fn open() -> Self {
-        let cache = match CoverCache::open_default() {
+        #[cfg(feature = "demo")]
+        let cache = hardcover_core::demo::cover_cache(
+            std::env::temp_dir().join("hardcover-desktop-demo-covers"),
+        );
+        #[cfg(not(feature = "demo"))]
+        let cache = CoverCache::open_default();
+        let cache = match cache {
             Ok(cache) => Some(Arc::new(cache)),
             Err(e) => {
                 eprintln!("hardcover: cover cache unavailable: {e}");
