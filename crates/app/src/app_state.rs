@@ -6,7 +6,8 @@
 //! [`CoverService`] lives for the whole run, [`Services`] only while signed in.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -148,7 +149,7 @@ pub struct CoverService {
 impl Global for CoverService {}
 
 impl CoverService {
-    /// Blocking: creates the cache directory.
+    /// Blocking: creates the cache directory and clears out stale scaled copies.
     pub fn open() -> Self {
         let cache = match CoverCache::open_default() {
             Ok(cache) => Some(Arc::new(cache)),
@@ -157,6 +158,9 @@ impl CoverService {
                 None
             }
         };
+        if let Some(cache) = &cache {
+            remove_stale_scaled(cache.dir());
+        }
         Self {
             cache,
             downloads: Arc::new(Semaphore::new(COVER_DOWNLOADS)),
@@ -230,7 +234,7 @@ impl CoverDecoder {
                     // The requester may have gone away; nothing to do then.
                     let _ = job
                         .reply
-                        .send_blocking(decode_scaled(&job.path, job.max_height));
+                        .send_blocking(load_or_decode(&job.path, job.max_height));
                 }
             });
         if let Err(e) = spawned {
@@ -398,6 +402,152 @@ fn scaled_size(src_width: u32, src_height: u32, max_height: u32) -> (u32, u32) {
     (fit(src_width), fit(src_height))
 }
 
+// ----- scaled copies -----
+
+/// Scaled copies of covers live in `scaled/<version>/` under the cover cache.
+const SCALED_DIR: &str = "scaled";
+/// Bump whenever [`decode_scaled`] changes its output: copies made by an
+/// older build are then ignored, and deleted at the next start.
+const SCALED_VERSION: &str = "v1";
+/// A temporary file older than this was left by a write that never finished.
+const STALE_TEMP_AGE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+/// JPEG quality of saved detail-size copies.
+const SCALED_JPEG_QUALITY: u8 = 92;
+
+/// The cover scaled to `max_height`, from its saved copy when there is one.
+/// Otherwise the cover is decoded and a copy is saved, so the next run skips
+/// the decode: a relaunch then shows covers without decoding any of them.
+fn load_or_decode(path: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
+    if let Some(image) = read_scaled(path, max_height) {
+        return Some(image);
+    }
+    let image = decode_scaled(path, max_height)?;
+    if let Err(e) = write_scaled(path, max_height, &image) {
+        // The cover still shows; the next run decodes it again. Said once,
+        // since the cause (say, a read-only cache) usually affects them all.
+        static WARNED: AtomicBool = AtomicBool::new(false);
+        if !WARNED.swap(true, Ordering::Relaxed) {
+            eprintln!("hardcover: could not save a scaled cover: {e}");
+        }
+    }
+    Some(image)
+}
+
+/// `covers/scaled/v<N>/<cover file>-<height>.<ext>`.
+fn scaled_path(cover: &Path, max_height: u32, ext: &str) -> Option<PathBuf> {
+    let name = cover.file_name()?.to_str()?;
+    Some(
+        cover
+            .parent()?
+            .join(SCALED_DIR)
+            .join(SCALED_VERSION)
+            .join(format!("{name}-{max_height}.{ext}")),
+    )
+}
+
+fn read_scaled(cover: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
+    [
+        ("qoi", image::ImageFormat::Qoi),
+        ("jpg", image::ImageFormat::Jpeg),
+    ]
+    .into_iter()
+    .find_map(|(ext, format)| {
+        let bytes = std::fs::read(scaled_path(cover, max_height, ext)?).ok()?;
+        // The JPEG decoder fills in a truncated file (say, one cut short by a
+        // crash) instead of failing, so check that it is complete. A short
+        // QOI file fails to decode on its own.
+        if format == image::ImageFormat::Jpeg && !bytes.ends_with(&[0xFF, 0xD9]) {
+            return None;
+        }
+        let mut pixels = image::load_from_memory_with_format(&bytes, format)
+            .ok()?
+            .into_rgba8();
+        if format == image::ImageFormat::Jpeg {
+            // Saved as RGB; GPUI wants BGRA.
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+        }
+        Some(Arc::new(RenderImage::new(vec![image::Frame::new(pixels)])))
+    })
+}
+
+/// Saves a scaled cover next to the originals. Thumbnails are small, so they
+/// are kept lossless: QOI of the BGRA pixels as they are. Larger copies are
+/// high-quality JPEG when opaque, about a fifth of the size; a cover with
+/// transparency stays QOI.
+fn write_scaled(cover: &Path, max_height: u32, image: &RenderImage) -> std::io::Result<()> {
+    use image::ImageEncoder as _;
+
+    let size = image.size(0);
+    let (width, height) = (size.width.0 as u32, size.height.0 as u32);
+    let bgra = image
+        .as_bytes(0)
+        .ok_or_else(|| std::io::Error::other("the image has no frame"))?;
+    let opaque = bgra.chunks_exact(4).all(|p| p[3] == u8::MAX);
+    let mut encoded = Vec::new();
+    let ext = if max_height > THUMBNAIL_HEIGHT && opaque {
+        let rgb: Vec<u8> = bgra
+            .chunks_exact(4)
+            .flat_map(|p| [p[2], p[1], p[0]])
+            .collect();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, SCALED_JPEG_QUALITY)
+            .encode(&rgb, width, height, image::ExtendedColorType::Rgb8)
+            .map_err(std::io::Error::other)?;
+        "jpg"
+    } else {
+        image::codecs::qoi::QoiEncoder::new(&mut encoded)
+            .write_image(bgra, width, height, image::ExtendedColorType::Rgba8)
+            .map_err(std::io::Error::other)?;
+        "qoi"
+    };
+    let path = scaled_path(cover, max_height, ext)
+        .ok_or_else(|| std::io::Error::other("the cover path has no file name"))?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    // Written aside and renamed, so a reader never sees half a file.
+    let mut tmp = path.clone().into_os_string();
+    tmp.push(format!(".{}.tmp", std::process::id()));
+    let tmp = PathBuf::from(tmp);
+    let written = std::fs::write(&tmp, encoded).and_then(|()| std::fs::rename(&tmp, &path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
+}
+
+/// Deletes scaled copies made by older builds, and temporary files left by
+/// writes that never finished. Blocking; errors are ignored, as the copies
+/// are only a cache.
+fn remove_stale_scaled(cover_dir: &Path) {
+    let scaled = cover_dir.join(SCALED_DIR);
+    let Ok(versions) = std::fs::read_dir(&scaled) else {
+        return;
+    };
+    for entry in versions.flatten() {
+        if entry.file_name() != SCALED_VERSION {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+    let Ok(copies) = std::fs::read_dir(scaled.join(SCALED_VERSION)) else {
+        return;
+    };
+    for entry in copies.flatten() {
+        let path = entry.path();
+        // Recent ones may belong to another running instance.
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > STALE_TEMP_AGE);
+        if path.extension().is_some_and(|ext| ext == "tmp") && stale {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 /// The cover file for `url`, starting a background load on first use. The
 /// calling view re-renders when it finishes.
 pub fn cover_file(url: &str, window: &mut Window, cx: &mut App) -> Option<Arc<Path>> {
@@ -430,5 +580,154 @@ pub fn release_cover_image(
     cx.remove_asset::<CoverImage>(&url.to_owned());
     if let Some(image) = image {
         cx.drop_image(image, Some(window));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cover-like test image: a gradient, with an optional transparent corner.
+    fn sample(path: &Path, width: u32, height: u32, transparent: bool) {
+        let image = image::RgbaImage::from_fn(width, height, |x, y| {
+            let alpha = if transparent && x < 10 && y < 10 {
+                0
+            } else {
+                255
+            };
+            image::Rgba([(x * 255 / width) as u8, (y * 255 / height) as u8, 90, alpha])
+        });
+        image.save(path).unwrap();
+    }
+
+    fn pixels(image: &RenderImage) -> (u32, u32, Vec<u8>) {
+        let size = image.size(0);
+        (
+            size.width.0 as u32,
+            size.height.0 as u32,
+            image.as_bytes(0).unwrap().to_vec(),
+        )
+    }
+
+    fn max_channel_diff(a: &[u8], b: &[u8]) -> u8 {
+        a.iter().zip(b).map(|(x, y)| x.abs_diff(*y)).max().unwrap()
+    }
+
+    #[test]
+    fn scaled_size_keeps_the_old_rounding_and_never_enlarges() {
+        assert_eq!(scaled_size(300, 450, 144), (96, 144));
+        // `DynamicImage::resize` fitted 99x143.7 inside 99x144.
+        assert_eq!(scaled_size(1000, 1449, 144), (99, 143));
+        assert_eq!(scaled_size(300, 450, 480), (300, 450));
+        assert_eq!(scaled_size(1, 5000, 144), (1, 144));
+    }
+
+    #[test]
+    fn thumbnails_are_saved_losslessly_and_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.png");
+        sample(&cover, 300, 450, false);
+
+        let decoded = load_or_decode(&cover, THUMBNAIL_HEIGHT).unwrap();
+        let saved = scaled_path(&cover, THUMBNAIL_HEIGHT, "qoi").unwrap();
+        assert!(saved.is_file());
+        assert_eq!(
+            saved.parent().unwrap(),
+            dir.path().join(SCALED_DIR).join(SCALED_VERSION)
+        );
+
+        let reused = read_scaled(&cover, THUMBNAIL_HEIGHT).unwrap();
+        assert_eq!(pixels(&reused), pixels(&decoded));
+        // No temporary files left behind.
+        assert_eq!(
+            std::fs::read_dir(saved.parent().unwrap()).unwrap().count(),
+            1
+        );
+    }
+
+    #[test]
+    fn opaque_detail_covers_are_saved_as_jpeg() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.png");
+        sample(&cover, 600, 900, false);
+
+        let decoded = load_or_decode(&cover, COVER_HEIGHT).unwrap();
+        assert!(scaled_path(&cover, COVER_HEIGHT, "jpg").unwrap().is_file());
+        let (w, h, original) = pixels(&decoded);
+        let (rw, rh, reused) = pixels(&read_scaled(&cover, COVER_HEIGHT).unwrap());
+        assert_eq!((rw, rh), (w, h));
+        // Same channel order as the decode, within JPEG's loss.
+        assert!(max_channel_diff(&original, &reused) < 24);
+    }
+
+    #[test]
+    fn transparent_detail_covers_stay_lossless() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.png");
+        sample(&cover, 600, 900, true);
+
+        let decoded = load_or_decode(&cover, COVER_HEIGHT).unwrap();
+        assert!(scaled_path(&cover, COVER_HEIGHT, "qoi").unwrap().is_file());
+        let reused = read_scaled(&cover, COVER_HEIGHT).unwrap();
+        assert_eq!(pixels(&reused), pixels(&decoded));
+    }
+
+    #[test]
+    fn a_truncated_jpeg_copy_is_not_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.png");
+        sample(&cover, 600, 900, false);
+        load_or_decode(&cover, COVER_HEIGHT).unwrap();
+        let saved = scaled_path(&cover, COVER_HEIGHT, "jpg").unwrap();
+        let bytes = std::fs::read(&saved).unwrap();
+        std::fs::write(&saved, &bytes[..bytes.len() / 2]).unwrap();
+
+        assert!(read_scaled(&cover, COVER_HEIGHT).is_none());
+    }
+
+    #[test]
+    fn stale_versions_and_temp_files_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let scaled = dir.path().join(SCALED_DIR);
+        let old = scaled.join("v0");
+        let current = scaled.join(SCALED_VERSION);
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(old.join("a-144.qoi"), b"x").unwrap();
+        let copy = current.join("a-144.qoi");
+        let fresh_tmp = current.join("b-144.qoi.1.tmp");
+        let stale_tmp = current.join("c-144.qoi.2.tmp");
+        for path in [&copy, &fresh_tmp, &stale_tmp] {
+            std::fs::write(path, b"x").unwrap();
+        }
+        let long_ago = std::time::SystemTime::now() - STALE_TEMP_AGE * 2;
+        std::fs::File::options()
+            .write(true)
+            .open(&stale_tmp)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+
+        remove_stale_scaled(dir.path());
+
+        assert!(!old.exists());
+        assert!(copy.exists());
+        assert!(fresh_tmp.exists());
+        assert!(!stale_tmp.exists());
+    }
+
+    #[test]
+    fn a_corrupt_copy_is_decoded_again_and_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.png");
+        sample(&cover, 300, 450, false);
+        let saved = scaled_path(&cover, THUMBNAIL_HEIGHT, "qoi").unwrap();
+        std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+        std::fs::write(&saved, b"not an image").unwrap();
+
+        assert!(read_scaled(&cover, THUMBNAIL_HEIGHT).is_none());
+        let decoded = load_or_decode(&cover, THUMBNAIL_HEIGHT).unwrap();
+        let reused = read_scaled(&cover, THUMBNAIL_HEIGHT).unwrap();
+        assert_eq!(pixels(&reused), pixels(&decoded));
     }
 }
