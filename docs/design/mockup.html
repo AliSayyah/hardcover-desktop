@@ -386,6 +386,26 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .demo-list { width: 232px; background: var(--sidebar); border-radius: var(--r-box); padding: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2); }
 .demo-list .nav.focus { margin: 3px 0; }
 .boxed { border: 1px solid var(--border); border-radius: var(--r-box); }
+/* ---------- Series ---------- */
+.series-page { max-width: 896px; }
+.series-page .group-label { padding-top: var(--s-24); padding-bottom: var(--s-4); }
+/* A series row is a sequence row: no fill, a hairline between rows, 16 above and below. */
+.sr { display: flex; gap: var(--s-24); align-items: flex-start; padding: var(--s-16) 0; border-top: 1px solid var(--border); }
+.sr:first-child { border-top: 0; }
+/* The next lane: 240 wide on every row, so the lanes line up down the page. */
+.nx { width: 240px; flex: none; display: flex; gap: var(--s-12); align-items: flex-start; }
+.nx-ghost { margin-left: calc(-1 * var(--s-8)); }
+/* The strip: the series as a row of sm covers. */
+.strip { display: flex; gap: var(--s-4); }
+.sb-it { width: 40px; flex: none; display: flex; flex-direction: column; align-items: center; gap: var(--s-4); }
+.sb-it .mslot { width: var(--cv-sm); background: transparent; }
+.sb-it .mslot:has(i) { background: var(--track); }
+.pos { display: flex; align-items: center; gap: var(--s-2); font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); white-space: nowrap; }
+.sb-it.next .pos { color: var(--fg); font-weight: 600; }
+.slot { width: var(--cv-sm); height: calc(var(--cv-sm) * 1.5); flex: none; border: 1px dashed var(--border-strong); border-radius: var(--r-cover-s); display: flex; align-items: center; justify-content: center; color: var(--fg-muted); }
+.fwrap { position: relative; }
+.fmenu { position: absolute; top: calc(100% + var(--s-4)); right: 0; width: 200px; z-index: 2; }
+.fmenu .ck { width: var(--icon); height: var(--icon); flex: none; display: flex; }
 </style>
 </head>
 <body>
@@ -491,11 +511,11 @@ function cover(b, size, lift = false, state = "") {
 }
 
 // ---------- Sidebar ----------
-function sidebar(active) {
+function sidebar(active, series = 5) {
   const item = (icon, label, n, key) => `<div class="nav${active === key ? " sel" : ""}">${ic(icon)}<span class="lab">${label}</span>${n != null ? `<span class="n">${n}</span>` : ""}</div>`;
   return `<aside class="sb">
     <div class="brand">${ic("book")}Hardcover</div>
-    ${item("home", "Home", null, "home")}${item("search", "Search", null, "search")}${item("globe", "Discover", null, "discover")}${item("pie", "Stats", null, "stats")}
+    ${item("home", "Home", null, "home")}${item("search", "Search", null, "search")}${item("globe", "Discover", null, "discover")}${item("library", "Series", series, "series")}${item("pie", "Stats", null, "stats")}
     <div class="label">Library</div>
     ${item("book", "Currently reading", 3, "cr")}${item("inbox", "Want to read", 8, "wtr")}${item("check", "Read", 9, "read")}${item("pause", "Paused", 1, "paused")}${item("ban", "Did not finish", 2, "dnf")}${item("eyeoff", "Ignored", 1, "ign")}
     <div class="label">Reading goal</div>
@@ -847,6 +867,168 @@ function tokensScales() {
 }
 
 // ---------- Assemble ----------
+// ---------- Screen: Series (the started series and the next step in each) ----------
+const OL = isbn => `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg?default=false`;
+Object.assign(P, {
+  checkmark: '<path d="M20 6 9 17l-5-5"/>',
+  library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+});
+const K = {
+  wor: { t: "Words of Radiance", a: "Brandon Sanderson", c: OL("9780765326362") },
+  ob:  { t: "Oathbringer", a: "Brandon Sanderson", c: OL("9780765326379") },
+  row: { t: "Rhythm of War", a: "Brandon Sanderson", c: OL("9780765326386") },
+  wat: { t: "Wind and Truth", a: "Brandon Sanderson", c: OL("9781250319180") },
+  sl6: { t: "Untitled Stormlight Archive #6", a: "Brandon Sanderson" },
+  cod: { t: "Children of Dune", a: "Frank Herbert", c: C("edition/30825973/a2fec259-e3b1-4d17-8755-2bbe0af30ca9.jpg") },
+  ged: { t: "God Emperor of Dune", a: "Frank Herbert", c: C("external_data/30542666/b90d2d32426e5bf180573b4e97421db3307c93e0.jpeg") },
+  hod: { t: "Heretics of Dune", a: "Frank Herbert", c: OL("9780441328003") },
+  chd: { t: "Chapterhouse: Dune", a: "Frank Herbert", c: OL("9780441102679") },
+  if:  { t: "Iron Flame", a: "Rebecca Yarros", c: OL("9781649374172") },
+  os:  { t: "Onyx Storm", a: "Rebecca Yarros", c: OL("9781649374189") },
+  em4: { t: "Untitled Empyrean #4", a: "Rebecca Yarros" },
+  woa: { t: "The Well of Ascension", a: "Brandon Sanderson", c: OL("9780765316882") },
+  hoa: { t: "The Hero of Ages", a: "Brandon Sanderson", c: OL("9780765316899") },
+  mn:  { t: "Untitled Mistborn Novella", a: "Brandon Sanderson" },
+  fot: { t: "The Fellowship of the Ring", a: "J.R.R. Tolkien", c: OL("9780547928210") },
+  tt:  { t: "The Two Towers", a: "J.R.R. Tolkien", c: OL("9780547928203") },
+  rk:  { t: "The Return of the King", a: "J.R.R. Tolkien", c: OL("9780547928197") },
+};
+const fa = n => String(n).replace(/\d/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
+const KEL = Array.from({ length: 10 }, (_, i) => ({ t: `کلیدر ${fa(i + 1)}`, a: "محمود دولت‌آبادی", rtl: true }));
+
+// st: read | cr (with pct) | wtr | paused | dnf | none (not in your library) | soon (not out yet)
+const SERIES = [
+  { name: "The Stormlight Archive", a: "Brandon Sanderson", g: "progress", when: "Reading now",
+    books: [[B.wok, 1, "cr", 42], [K.wor, 2, "none"], [K.ob, 3, "none"], [K.row, 4, "none"], [K.wat, 5, "none"], [K.sl6, 6, "soon"]],
+    next: { kind: "reading", b: B.wok, pos: 1, line: "Page 418 of 1,007 · 42%" } },
+  { name: "Dune", a: "Frank Herbert", g: "progress", when: "Last finished Sep 28",
+    books: [[B.dune, 1, "read"], [B.dm, 2, "read"], [K.cod, 3, "wtr"], [K.ged, 4, "wtr"], [K.hod, 5, "none"], [K.chd, 6, "none"]],
+    next: { kind: "start", b: K.cod, pos: 3 } },
+  { name: "The Empyrean", a: "Rebecca Yarros", g: "waiting", when: "Caught up since Feb 2",
+    books: [[B.fw, 1, "read"], [K.if, 2, "read"], [K.os, 3, "read"], [K.em4, 4, "soon"]],
+    next: { kind: "waiting", b: K.em4, pos: 4, d: "Nov 26", soon: "In 6 days", onShelf: true } },
+  { name: "The Mistborn Saga: The Original Trilogy", a: "Brandon Sanderson", g: "stalled", when: "Last finished Mar 9, 2025",
+    books: [[B.mist, 1, "read"], [K.woa, 2, "none"], [K.hoa, 3, "none"], [K.mn, 3.5, "soon"]],
+    next: { kind: "add", b: K.woa, pos: 2 } },
+  { name: "کلیدر", a: "محمود دولت‌آبادی", rtl: true, g: "stalled", when: "Paused since Jun 2024",
+    books: KEL.map((b, i) => [b, i + 1, i < 2 ? "read" : i === 2 ? "paused" : "none"]),
+    next: { kind: "paused", b: KEL[2], pos: 3, line: "Paused at page 140 of 412" } },
+  { name: "The Lord of the Rings", a: "J.R.R. Tolkien", g: "done", when: "Finished Jan 12, 2025",
+    books: [[K.fot, 1, "read"], [K.tt, 2, "read"], [K.rk, 3, "read"]] },
+];
+const GROUPS = [
+  ["progress", "In progress", 2],
+  ["waiting", "Waiting for the next book", 1],
+  ["stalled", "Not touched in a year", 2],
+  ["done", "Finished", 1],
+];
+const STATUS_ICON = { read: "check", cr: "book", wtr: "inbox", paused: "pause", dnf: "ban" };
+const dirAttr = o => o.rtl ? ' dir="rtl"' : "";
+const rtlCls = o => o.rtl ? " rtl" : "";
+const released = s => s.books.filter(([, , st]) => st !== "soon");
+const readCount = s => s.books.filter(([, , st]) => st === "read").length;
+const facts = s => {
+  const out = released(s).length, soon = s.books.find(([, , st]) => st === "soon");
+  return `${readCount(s)} of ${out} read${soon && s.next?.kind !== "waiting" ? ` · #${soon[1]} not out yet` : ""}`;
+};
+
+// ---------- Series tracker: shared parts ----------
+// The filter: a select beside the filter input. "Not finished" is the default, so ~200 finished
+// series don't bury the ones that need you; the choice is kept for the session.
+const FILTERS = [["Not finished", 5], ["Finished", 1], ["All series", 6]];
+function pageHead(filter = "Not finished", open = false) {
+  const n = FILTERS.find(([f]) => f === filter)[1];
+  const menu = open ? `<div class="popover fmenu">${FILTERS.map(([f, c]) => `<div class="menu-item${f === filter ? " hover" : ""}"><span class="ck">${f === filter ? ic("checkmark") : ""}</span><span class="fill">${f}</span><span class="small muted num">${c}</span></div>`).join("")}</div>` : "";
+  return `<div class="row-c g-16"><div class="fill">
+      <div class="row-b g-8"><span class="page-title">Series</span><span class="muted num">${n}</span></div>
+      <div class="muted mt-4">The series you've started, and what's next in each.</div>
+    </div>
+    <div class="row-c g-8">
+      <div class="input" style="width:var(--w-select)">${ic("search")}Filter series</div>
+      <div class="fwrap"><span class="select${open ? " btn pressed" : ""}" style="width:var(--w-select)">${filter}${ic("down", "xs")}</span>${menu}</div>
+    </div></div>`;
+}
+// The next lane: the one thing to do in a series. 240 wide, kept on every row so the lanes line up.
+function nextLane(s) {
+  const n = s.next;
+  if (!n) return `<div class="nx"></div>`;
+  const head = { reading: "Reading", start: "Next", add: "Next", waiting: "Next", paused: "Paused" }[n.kind];
+  const act = {
+    reading: `<span class="btn sm">Update progress…</span>`,
+    start: `<span class="btn sm">Start reading</span>`,
+    add: `<span class="btn sm ghost nx-ghost">${ic("plus", "xs")}Want to read</span>`,
+    paused: `<span class="btn sm">Update progress…</span>`,
+    waiting: n.onShelf ? `<span class="chip">${ic("inbox", "xs")}Want to read</span>` : `<span class="btn sm ghost nx-ghost">${ic("plus", "xs")}Want to read</span>`,
+  }[n.kind];
+  const line = n.kind === "waiting" ? `<div class="num"><span class="strong">${n.d}</span><span class="small muted"> · ${n.soon}</span></div>` : n.line ? `<div class="small muted num">${n.line}</div>` : "";
+  return `<div class="nx">${cover(n.b, "sm")}<div class="fill col">
+      <div class="small muted num">${head} · #${n.pos}</div>
+      <div class="strong one-line${rtlCls(n.b)}"${dirAttr(n.b)}><span class="textbtn">${n.b.t}</span></div>
+      ${line}<div class="mt-8 row-c">${act}</div>
+    </div></div>`;
+}
+const seriesName = s => `<div class="title-18 one-line${rtlCls(s)}"${dirAttr(s)}><span class="textbtn">${s.name}</span></div>`;
+const seriesFacts = s => `<div class="muted one-line num"><span${dirAttr(s)}>${s.a}</span> · ${facts(s)}</div>`;
+
+// ---------- The strip: the series as a shelf of covers ----------
+// Every book in order at sm, with its position and status icon under it. A book that isn't in
+// your library is an empty slot; one that isn't out yet is a slot with its date.
+function strip(s) {
+  return `<div class="strip">${s.books.map(([b, pos, st, pct]) => {
+    const isNext = s.next && s.next.b === b;
+    const body = st === "none" || st === "soon"
+      ? `<div class="slot${st === "soon" ? " soon" : ""}">${st === "soon" ? ic("clock", "xs") : ""}</div>`
+      : cover(b, "sm");
+    const meter = `<div class="bar thin mslot">${st === "cr" ? `<i style="width:${pct}%"></i>` : ""}</div>`;
+    const mark = STATUS_ICON[st] ? ic(STATUS_ICON[st], "xs") : "";
+    return `<div class="sb-it${isNext ? " next" : ""}">${body}${meter}<div class="pos num">${mark}<span>${pos}</span></div></div>`;
+  }).join("")}</div>`;
+}
+function rowB(s) {
+  return `<div class="sr top">
+    <div class="fill col">
+      ${seriesName(s)}
+      <div class="muted one-line num"><span${dirAttr(s)}>${s.a}</span> · ${facts(s)} · ${s.when}</div>
+      <div class="mt-12">${strip(s)}</div>
+    </div>
+    ${nextLane(s)}
+  </div>`;
+}
+
+function seriesPage(filter = "Not finished", open = false) {
+  const shown = { "Not finished": ["progress", "waiting", "stalled"], "Finished": ["done"], "All series": ["progress", "waiting", "stalled", "done"] }[filter];
+  const hidden = filter === "Not finished" ? `<div class="row-c g-8 mt-24 hidden-note"><span class="muted">1 finished series isn't shown.</span><span class="btn sm ghost">Show finished</span></div>` : "";
+  return sidebar("series") + `<div class="main"><div class="scroll page"><div class="series-page">
+    ${pageHead(filter, open)}
+    ${GROUPS.filter(([g]) => shown.includes(g)).map(([g, label, n]) => {
+      const rows = SERIES.filter(s => s.g === g);
+      return `<div class="row-b g-8 group-label"><span class="label">${label}</span><span class="small muted num">${n}</span></div>
+        <div class="col">${rows.map(rowB).join("")}</div>`;
+    }).join("")}
+    ${hidden}
+  </div></div></div>`;
+}
+function seriesEmpty() {
+  return sidebar("series", null) + `<div class="main"><div class="scroll page" style="display:flex;flex-direction:column">
+    <div class="series-page" style="width:100%">${pageHead().replace('<span class="muted num">5</span>', "")}</div>
+    ${emptyState("library", "No series yet", "When you read a book that belongs to a series, the series shows here with what comes next.")}
+  </div></div>`;
+}
+// The strip's states, side by side at 2× so they can be read.
+function legend() {
+  const cell = (label, inner) => `<div class="col g-8" style="align-items:center;width:150px">${inner}<span class="small muted" style="text-align:center">${label}</span></div>`;
+  const it = (b, pos, st, pct) => `<div class="strip">${strip({ books: [[b, pos, st, pct]], next: null }).replace(/^<div class="strip">|<\/div>$/g, "")}</div>`;
+  return `<div class="page" style="flex:1"><div class="row-c g-24" style="transform:scale(2);transform-origin:top left;width:50%">
+    ${cell("Read", it(B.dune, 1, "read"))}
+    ${cell("Reading, with its progress", it(B.wok, 1, "cr", 42))}
+    ${cell("On Want to read", it(K.cod, 3, "wtr"))}
+    ${cell("Paused", it(KEL[2], 3, "paused"))}
+    ${cell("Not in your library", it(K.hod, 5, "none"))}
+    ${cell("Not out yet", it(K.em4, 4, "soon"))}
+  </div></div>`;
+}
+
 const shots = [
   ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail; Coming soon closes the main column (scrolled content shown in full)", "light", 1020, home()],
   ["Home", "dark", "dark", 1020, home()],
@@ -855,6 +1037,11 @@ const shots = [
   ["Book page over Discover", "light · the rail starts at the top; scrolled content shown in full", "light", 920, bookPage()],
   ["Book page, scrolled to Reviews", "dark · other readers' reviews: a byline that opens their profile, muted stars, a collapsed long review, a spoiler, a Persian review", "dark", 900, reviewsPage()],
   ["Coming soon", "light · the full list over Home, grouped by month, then by year", "light", 760, upcomingPage()],
+  ["Series", "light · the default filter, Not finished: finished series are left out, and a line at the foot says how many", "light", 1150, seriesPage()],
+  ["Series, choosing a filter", "dark · the filter select open: Not finished, Finished, All series, each with its count · a Persian series (کلیدر) on the leading edge, running right to left", "dark", 1150, seriesPage("Not finished", true)],
+  ["Series, filtered to Finished", "light · the same rows; a finished series has no next step, so its lane stays empty", "light", 760, seriesPage("Finished")],
+  ["The marks under each book", "light · drawn at 2× · the icon and position carry the state; colour never does", "light", 330, legend()],
+  ["Series: empty", "light · nobody has started a series yet", "light", 760, seriesEmpty()],
   ["Library: empty states", "light · a filter with no matches and no book selected, in the app's own copy", "light", 760, library("none")],
   ["Tokens: colour, elevation and states", "both themes", null, 2300, tokensTheme("light", "Light") + tokensTheme("dark", "Dark")],
   ["Tokens: type, space, shape and size", "the same in both themes", null, 1328, tokensScales()],
