@@ -1,7 +1,6 @@
 //! One book in a collection list: cover thumbnail, title, authors and a fixed
 //! trailing lane. Shared by the library shelves and search results.
 
-use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     App, IntoElement, ObjectFit, ParentElement as _, RenderOnce, SharedString, Styled as _,
@@ -10,7 +9,8 @@ use gpui_kit::{
 use hardcover_core::{BookSummary, LibraryEntry, ReadingStatus};
 
 use crate::app_state::cover_thumbnail;
-use crate::format::{authors_text, progress_summary, rating_text, status_label};
+use crate::chip::StatusChip;
+use crate::format::{authors_text, progress_summary, rating_text};
 
 /// What the trailing lane shows.
 #[derive(Clone)]
@@ -21,7 +21,7 @@ pub enum Trailing {
     /// The user's rating.
     Rating(SharedString),
     /// Library status of a search result.
-    Status(SharedString),
+    Status(ReadingStatus),
 }
 
 #[derive(IntoElement)]
@@ -66,7 +66,7 @@ impl BookRow {
             secondary: secondary.into(),
             cover_url: book.cover.as_ref().map(|c| c.url.clone()),
             placeholder: IconName::BookOpen,
-            trailing: status.map_or(Trailing::None, |s| Trailing::Status(status_label(s).into())),
+            trailing: status.map_or(Trailing::None, Trailing::Status),
         }
     }
 }
@@ -101,7 +101,7 @@ impl BookRow {
             secondary: details.into(),
             cover_url: book.cover.as_ref().map(|c| c.url.clone()),
             placeholder: IconName::BookOpen,
-            trailing: status.map_or(Trailing::None, |s| Trailing::Status(status_label(s).into())),
+            trailing: status.map_or(Trailing::None, Trailing::Status),
         }
     }
 }
@@ -183,11 +183,9 @@ impl RenderOnce for BookRow {
                         )
                         .child(text),
                 ),
-                Trailing::Status(text) => this.child(
-                    div()
-                        .flex_shrink_0()
-                        .child(Tag::secondary().small().child(text)),
-                ),
+                Trailing::Status(status) => {
+                    this.child(div().flex_shrink_0().child(StatusChip(status)))
+                }
             })
     }
 }

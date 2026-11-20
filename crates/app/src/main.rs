@@ -5,6 +5,7 @@ mod app_state;
 mod bidi;
 mod book;
 mod catalog;
+mod chip;
 #[cfg(test)]
 mod cover_quality_tests;
 mod fonts;
