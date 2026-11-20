@@ -370,7 +370,7 @@ impl GoalView {
             ))
             .map(|this| {
                 if count == 0 {
-                    this.child(div().text_color(muted).child("None yet."))
+                    this.child(div().text_color(muted).child("None yet"))
                 } else {
                     // Five and a half rows: a row cut in half says the list
                     // scrolls, as a hover-only scrollbar can't.
