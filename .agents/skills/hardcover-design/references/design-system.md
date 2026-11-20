@@ -754,13 +754,19 @@ The foundation is in place: the palette on the kit's theme
 The shared components are built, in `crates/app/src/ui/` (its module doc
 lists each with what to use it for): the object bar, panel, rail, blocks,
 headers and the greeting, sequences, list rows, lanes, the property list,
-the meter, empty states, skeletons, text buttons, byline links, nav rows,
-avatars and the kit fixes. The demo build shows them all on one page with
+the meter, empty states, skeletons, text buttons, byline links, external
+links, nav rows, avatars, row focus and the kit fixes. The demo build shows them all on one page with
 `HARDCOVER_GALLERY=1`. Only drop-in swaps are done: the empty states
 (`empty_state`), every meter and skeleton, the book titles on Home and in
 Coming soon, the reviewers' avatars and bylines, and the full page's Back
-bar. The account and author avatars are still the kit's. The screens below
-still need their layouts moved onto the rest.
+bar. The account avatar is still the kit's.
+
+The collections are done: the shelves (header, filter and sort, list rows
+with their lanes, empty and loading states), search (its sections, author
+and series rows), Discover, list pages, series and author pages (the
+author's large `ui::Avatar`) and Stats (display figures, sections, charts on
+the theme's chart tokens) are on the system's rows, headers, type roles and
+tokens. The screens below still need their layouts moved onto the rest.
 
 1. **Book pane and page.**
    - The full page has its object bar (`ui::ObjectBar`, Back plus the
@@ -793,9 +799,10 @@ still need their layouts moved onto the rest.
    - a dialog keeps the kit's shadow.
 5. **Type.** The roles exist as helpers (`design::TypeRoles`: `.page_title()`,
    `.body_strong()`, `.caption(cx)`, `.display_24()`, `.tabular()`, ...), but
-   the screens still set sizes with `text_sm`/`text_lg`/`text_2xl` at GPUI's
-   default line height and without tabular figures. Move each screen to the
-   roles as it is redesigned.
+   the book pane and page, the sidebar and shell, the dialogs, Settings,
+   About and sign-in still set sizes with `text_sm`/`text_lg`/`text_2xl` at
+   GPUI's default line height and without tabular figures. Move each screen
+   to the roles as it is redesigned.
 6. **Reviews.** Reviews sit 20 apart without hairlines (`ui::Sequence`
    with `RowSpacing::Reviews` is the system's); the review text is
    `text_sm` at the default line height rather than `reader`.

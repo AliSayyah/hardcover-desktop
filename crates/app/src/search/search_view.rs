@@ -24,12 +24,12 @@ use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListSta
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, h_resizable, resizable_panel, v_flex,
+    Icon, IconName, IndexPath, Sizable as _, h_resizable, resizable_panel, v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task,
-    WeakEntity, Window, actions, div, prelude::FluentBuilder as _,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window,
+    actions, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{AuthorHit, BookId, BookSummary, Client, SearchHits, SeriesHit};
@@ -37,13 +37,14 @@ use hardcover_core::{AuthorHit, BookId, BookSummary, Client, SearchHits, SeriesH
 use crate::app_state::Services;
 use crate::book::detail_view::{BookDetailView, Subject};
 use crate::catalog::navigation::{self, Page};
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{author_hit_details, series_hit_details};
-use crate::library::book_row::BookRow;
+use crate::library::book_row::{BookRow, loading_rows};
 use crate::library::model::LibraryModel;
 use crate::search::library_matches::{counts_as_shelved, library_matches};
 use crate::search::results::{Hit, Phase, SearchResults};
-use crate::ui::empty_state;
 use crate::ui::kit::RaisedField as _;
+use crate::ui::{ListRow as _, RowFocus, empty_state};
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
 
@@ -156,11 +157,10 @@ impl SearchHit for AuthorHit {
     }
 
     fn row(&self, _: &LibraryModel) -> BookRow {
-        BookRow::for_hit(
+        BookRow::for_author(
             self.name.clone(),
             author_hit_details(self),
             self.photo.as_ref().map(|p| p.url.clone()),
-            IconName::User,
         )
     }
 
@@ -189,12 +189,7 @@ impl SearchHit for SeriesHit {
     }
 
     fn row(&self, _: &LibraryModel) -> BookRow {
-        BookRow::for_hit(
-            self.name.clone(),
-            series_hit_details(self),
-            None,
-            IconName::GalleryVerticalEnd,
-        )
+        BookRow::for_series(self.name.clone(), series_hit_details(self))
     }
 
     fn hint() -> &'static str {
@@ -217,6 +212,7 @@ pub struct ResultsDelegate<T: SearchHit> {
     library_keys: HashSet<T::Key>,
     model: Entity<LibraryModel>,
     view: WeakEntity<SearchView>,
+    focus: RowFocus,
 }
 
 impl<T: SearchHit> ResultsDelegate<T> {
@@ -305,44 +301,42 @@ impl<T: SearchHit> ListDelegate for ResultsDelegate<T> {
         if !self.has_library() {
             return None;
         }
-        Some(
-            div()
-                .px_3()
-                .pt_2()
-                .pb_1()
-                .text_xs()
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(cx.theme().muted_foreground)
-                .child(if section == 0 {
-                    "In your library"
-                } else {
-                    "On Hardcover"
-                }),
-        )
+        // A `label` on the rows' text spine. Both headers are the same
+        // height: the virtual list measures one and assumes it for the rest.
+        Some(div().px_2().pt_3().pb_1().label(cx).child(if section == 0 {
+            "In your library"
+        } else {
+            "On Hardcover"
+        }))
     }
 
     fn render_item(
         &mut self,
         ix: IndexPath,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
+        let focused = self.focus.shows_focus(ix, window);
+        let selected = self.focus.is_selected(ix);
         let hit = self.hit_at(ix)?;
+        let row = hit.row(self.model.read(cx)).selected(selected);
         Some(
             ListItem::new(hit.row_id())
+                .list_row(focused, cx)
                 .accessibility_label(hit.name())
-                .child(hit.row(self.model.read(cx))),
+                .child(row),
         )
     }
 
     fn set_selected_index(
         &mut self,
-        _: Option<IndexPath>,
+        ix: Option<IndexPath>,
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) {
         // Book selection is owned by `SearchView`, keyed by book id; authors
-        // and series open on confirm.
+        // and series open on confirm. The rows only draw it.
+        self.focus.select(ix);
     }
 
     fn render_empty(
@@ -369,6 +363,20 @@ impl<T: SearchHit> ListDelegate for ResultsDelegate<T> {
                 ),
             };
         empty_state(icon, title, description)
+    }
+
+    /// Skeleton rows while the first page is on its way and the library
+    /// has nothing to show meanwhile.
+    fn loading(&self, _: &App) -> bool {
+        matches!(self.results.phase(), Phase::Searching) && self.is_empty()
+    }
+
+    fn render_loading(
+        &mut self,
+        _: &mut Window,
+        _: &mut Context<ListState<Self>>,
+    ) -> impl IntoElement {
+        loading_rows()
     }
 
     fn has_more(&self, _: &App) -> bool {
@@ -674,15 +682,19 @@ impl SearchView {
             SearchKind::Series => results_status(&self.series, cx),
         };
         let view = cx.entity().downgrade();
+        let colors = colors(cx);
+        // The shelf's header: padding 12/16 and a hairline under it.
         v_flex()
             .size_full()
             .min_w_0()
             .child(
                 v_flex()
-                    .gap_2()
-                    .p_3()
+                    .flex_none()
+                    .gap_3()
+                    .px_4()
+                    .py_3()
                     .border_b_1()
-                    .border_color(cx.theme().border)
+                    .border_color(colors.border)
                     .child(
                         div()
                             .key_context(KEY_CONTEXT)
@@ -693,10 +705,7 @@ impl SearchView {
                                 Input::new(&self.input)
                                     .raised_field(false, cx)
                                     .cleanable(true)
-                                    .prefix(
-                                        Icon::new(IconName::Search)
-                                            .text_color(cx.theme().muted_foreground),
-                                    )
+                                    .prefix(Icon::new(IconName::Search).text_color(colors.fg_muted))
                                     .when(busy, |this| this.suffix(Spinner::new().small())),
                             ),
                     )
@@ -714,8 +723,9 @@ impl SearchView {
                     .child(
                         div()
                             .h_4()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
+                            .caption(cx)
+                            .tabular()
+                            .truncate()
                             .children(status),
                     ),
             )
@@ -748,7 +758,7 @@ fn new_results_list<T: SearchHit>(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<ListState<ResultsDelegate<T>>> {
-    cx.new(|cx| {
+    let list = cx.new(|cx| {
         ListState::new(
             ResultsDelegate {
                 results: SearchResults::default(),
@@ -756,11 +766,14 @@ fn new_results_list<T: SearchHit>(
                 library_keys: HashSet::new(),
                 model: model.clone(),
                 view: view.clone(),
+                focus: RowFocus::default(),
             },
             window,
             cx,
         )
-    })
+    });
+    RowFocus::attach(&list, |d| &mut d.focus, cx);
+    list
 }
 
 /// Focuses `list` if it has results, selecting its first row if none is.
@@ -808,7 +821,7 @@ fn results_status<T: SearchHit>(
     (
         status,
         busy,
-        List::new(list).size_full().p_1().into_any_element(),
+        List::new(list).size_full().p_2().into_any_element(),
     )
 }
 
@@ -818,7 +831,7 @@ impl Render for SearchView {
         h_resizable("search-split")
             .child(
                 resizable_panel()
-                    .size(rem * 24.)
+                    .size(rem * size::LIST.0)
                     .size_range(rem * 16.0..rem * 40.)
                     .child(self.render_results(cx)),
             )

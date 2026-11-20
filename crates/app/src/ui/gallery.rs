@@ -387,7 +387,12 @@ fn blocks_and_properties(cx: &App) -> AnyElement {
                 Block::new("Reviews")
                     .action(div().caption(cx).child("12 reviews"))
                     .child(reviews),
-            ),
+            )
+            .child(Block::new("External link").child(ExternalLink::new(
+                "g-external",
+                "Open on Hardcover",
+                "https://hardcover.app",
+            ))),
     )
 }
 

@@ -1,30 +1,36 @@
 //! An author page: photo, bio and their most-read books.
+//!
+//! The header puts the author's photo where a book has its cover, a large
+//! `ui::Avatar` (initials on `accent-soft` without one), beside their name
+//! in `display-24`, the facts, how many of their books the reader has read
+//! and "Open on Hardcover". The bio follows in `prose`, then "Books" with
+//! the order, and the books as catalogue rows.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::ui::Skeleton;
-use gpui_kit::component::avatar::Avatar;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::link::Link;
-use gpui_kit::component::list::{List, ListState};
+use gpui_kit::component::list::ListState;
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
-use gpui_kit::component::{ActiveTheme as _, IndexPath, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{IndexPath, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FocusHandle, FontWeight, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
-    prelude::FluentBuilder as _, rems,
+    AnyElement, AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement as _,
+    Render, SharedString, Styled as _, Subscription, Task, Window, div,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{AuthorBook, AuthorDetails, AuthorId};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, follow_list, new_list, read_summary, row_details,
+    CatalogBooks, CatalogRow, follow_list, load_failed, new_list, page_body, page_header,
+    page_list, read_summary, row_details,
 };
-use crate::app_state::{Services, cover_thumbnail};
+use crate::app_state::Services;
 use crate::bidi::WrappingText;
+use crate::design::{TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
 use crate::ui::kit::RaisedField as _;
+use crate::ui::{Avatar, AvatarSize, ExternalLink, SectionHeader, Skeleton};
 
 /// How an author's books are ordered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -244,19 +250,8 @@ impl AuthorView {
         });
     }
 
-    fn render_header(
-        &self,
-        author: &AuthorDetails,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
-        let photo = author
-            .photo
-            .as_ref()
-            // Scaled on the cover-decoder thread like a row thumbnail, not decoded
-            // full size on the shared pool.
-            .and_then(|p| cover_thumbnail(&p.url, window, cx));
+    fn render_header(&self, author: &AuthorDetails, cx: &mut Context<Self>) -> AnyElement {
+        let muted = colors(cx).fg_muted;
         let model = self.model.read(cx);
         let mut facts: Vec<String> = Vec::new();
         if let Some(years) = life_years(author) {
@@ -264,7 +259,10 @@ impl AuthorView {
         }
         match author.books_count.filter(|n| *n > 0) {
             Some(1) => facts.push("1 book on Hardcover".into()),
-            Some(n) => facts.push(format!("{n} books on Hardcover")),
+            Some(n) => facts.push(format!(
+                "{} books on Hardcover",
+                crate::format::count_text(n)
+            )),
             None => {}
         }
         let summary = read_summary(
@@ -279,16 +277,17 @@ impl AuthorView {
             .as_ref()
             .is_some_and(|b| b.chars().count() > LONG_BIO);
         v_flex()
-            .gap_4()
+            .gap_6()
             .child(
                 h_flex()
-                    .gap_4()
+                    .gap_6()
                     .items_start()
                     .child(
-                        Avatar::new()
-                            .large()
-                            .name(author.name.clone())
-                            .when_some(photo, |this, path| this.src(path)),
+                        // Scaled on the cover-decoder thread like a row
+                        // thumbnail, not decoded full size on the shared pool.
+                        Avatar::new(author.name.clone())
+                            .size(AvatarSize::Xl)
+                            .image(author.photo.as_ref().map(|p| p.url.clone())),
                     )
                     .child(
                         v_flex()
@@ -297,27 +296,27 @@ impl AuthorView {
                             .gap_1()
                             .child(
                                 div()
-                                    .text_2xl()
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .display_24()
                                     .child(WrappingText::new(author.name.clone())),
                             )
                             .when(!facts.is_empty(), |this| {
                                 this.child(
-                                    div().text_sm().text_color(muted).child(facts.join(" · ")),
+                                    div()
+                                        .body()
+                                        .tabular()
+                                        .text_color(muted)
+                                        .child(facts.join(" · ")),
                                 )
                             })
                             .when_some(summary, |this, summary| {
-                                this.child(div().text_sm().child(summary))
+                                this.child(div().body().tabular().child(summary))
                             })
                             .when_some(author.web_url(), |this, url| {
-                                this.child(
-                                    div().pt_1().child(
-                                        Link::new("author-on-hardcover")
-                                            .href(url)
-                                            .text_sm()
-                                            .child("Open on Hardcover"),
-                                    ),
-                                )
+                                this.child(div().pt_3().child(ExternalLink::new(
+                                    "author-on-hardcover",
+                                    "Open on Hardcover",
+                                    url,
+                                )))
                             }),
                     ),
             )
@@ -325,9 +324,9 @@ impl AuthorView {
                 let collapsed = long_bio && !self.bio_expanded;
                 this.child(
                     v_flex()
-                        .gap_1()
+                        .gap_2()
                         .items_start()
-                        .child(div().text_sm().child({
+                        .child(div().max_w(size::PROSE).prose().child({
                             let bio = WrappingText::new(bio);
                             if collapsed { bio.line_clamp(4) } else { bio }
                         }))
@@ -335,11 +334,11 @@ impl AuthorView {
                             this.child(
                                 Button::new("toggle-bio")
                                     .ghost()
-                                    .xsmall()
+                                    .small()
                                     .label(if self.bio_expanded {
                                         "Show less"
                                     } else {
-                                        "Show more"
+                                        "Read more"
                                     })
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.bio_expanded = !this.bio_expanded;
@@ -350,22 +349,13 @@ impl AuthorView {
                 )
             })
             .child(
-                h_flex()
-                    .gap_2()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Books"),
-                    )
-                    .child(
-                        div().flex_shrink_0().w_40().child(
-                            Select::new(&self.order_select)
-                                .small()
-                                .raised_field(false, cx),
-                        ),
+                SectionHeader::new("Books").action(
+                    div().w(size::SELECT_SMALL).child(
+                        Select::new(&self.order_select)
+                            .small()
+                            .raised_field(false, cx),
                     ),
+                ),
             )
             .into_any_element()
     }
@@ -382,7 +372,7 @@ impl AuthorView {
 }
 
 impl Render for AuthorView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.current.and_then(|id| match self.pages.get(&id) {
             Some(Loaded::Ready(author)) => Some(Ok(author.clone())),
             Some(Loaded::Failed(message)) => Some(Err(message.clone())),
@@ -390,51 +380,35 @@ impl Render for AuthorView {
         });
         let ready = matches!(current, Some(Ok(_)));
         let header = match current {
-            Some(Ok(author)) => self.render_header(&author, window, cx),
-            Some(Err(message)) => h_flex()
-                .gap_2()
-                .text_sm()
-                .child(div().text_color(cx.theme().muted_foreground).child(message))
-                .child(
-                    Button::new("retry-author")
-                        .small()
-                        .label("Try again")
-                        .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
-                )
-                .into_any_element(),
+            Some(Ok(author)) => self.render_header(&author, cx),
+            Some(Err(message)) => load_failed(
+                message,
+                Button::new("retry-author")
+                    .small()
+                    .label("Try again")
+                    .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
+                cx,
+            )
+            .into_any_element(),
             None => h_flex()
-                .gap_4()
-                .child(Skeleton::circle().size_12())
+                .gap_6()
+                .items_start()
+                .child(Skeleton::circle().size(size::AVATAR_LARGE))
                 .child(
                     v_flex()
                         .gap_2()
-                        .child(Skeleton::line().h_8().w_64())
-                        .child(Skeleton::line().h_4().w_48()),
+                        .child(Skeleton::line().h_7().w_64())
+                        .child(Skeleton::line().w_48())
+                        .child(Skeleton::line().w_32()),
                 )
                 .into_any_element(),
         };
         v_flex()
             .size_full()
             .min_w_0()
-            .child(
-                div()
-                    .w_full()
-                    .max_w(rems(48.))
-                    .px_6()
-                    .pt_6()
-                    .pb_3()
-                    .child(header),
-            )
+            .child(page_header().child(header))
             .when(ready, |this| {
-                this.child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .w_full()
-                        .max_w(rems(48.))
-                        .px_3()
-                        .child(List::new(&self.list).size_full().p_1()),
-                )
+                this.child(page_body().child(page_list(&self.list)))
             })
     }
 }

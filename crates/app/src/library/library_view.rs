@@ -1,4 +1,11 @@
-//! A library shelf: the filtered, sorted collection beside the detail pane.
+//! A library shelf (`hardcover-design`, Screens → Shelf): the filtered,
+//! sorted collection beside the book pane.
+//!
+//! - **Header:** padding 12/16 and a hairline under it: the shelf's name with
+//!   its count, then the filter (filling the width) and the sort, 8 apart.
+//! - **Rows:** list rows, inset 8 ([`BookRow`] in a `ui::ListRow`).
+//! - **Split:** the list is 384 wide by default, 256 to 640, and the pane
+//!   takes the rest.
 
 use std::collections::HashMap;
 
@@ -6,22 +13,23 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, h_flex, h_resizable,
-    resizable_panel, v_flex,
+    Icon, IconName, IndexPath, h_flex, h_resizable, resizable_panel, v_flex,
 };
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, FontWeight, IntoElement, ParentElement as _, Render,
-    ScrollStrategy, SharedString, StyleRefinement, Styled as _, Subscription, Window, div,
+    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, ScrollStrategy,
+    SharedString, StyleRefinement, Styled as _, Subscription, Window, div,
 };
 use hardcover_core::{LibraryEntry, ReadingStatus, UserBookId};
 
-use super::book_row::BookRow;
+use super::book_row::{BookRow, loading_rows};
 use super::collection::{SortOrder, shelf_rows};
 use super::model::{LibraryModel, SyncStatus};
 use crate::book::detail_view::{BookDetailView, Subject};
+use crate::chip::status_icon;
+use crate::design::{colors, size};
 use crate::format::status_label;
-use crate::ui::empty_state;
 use crate::ui::kit::RaisedField as _;
+use crate::ui::{ListRow as _, PageHeader, RowFocus, empty_state};
 
 #[derive(Clone)]
 pub struct SortOption(SortOrder, SharedString);
@@ -39,8 +47,9 @@ impl SelectItem for SortOption {
 }
 
 /// The empty state the list shows, decided by the view.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct EmptyCopy {
+    icon: IconName,
     title: SharedString,
     description: SharedString,
 }
@@ -50,6 +59,7 @@ pub struct ShelfDelegate {
     rows: Vec<LibraryEntry>,
     loading: bool,
     empty: EmptyCopy,
+    focus: RowFocus,
 }
 
 impl ShelfDelegate {
@@ -68,24 +78,27 @@ impl ListDelegate for ShelfDelegate {
     fn render_item(
         &mut self,
         ix: IndexPath,
-        _: &mut Window,
-        _: &mut Context<ListState<Self>>,
+        window: &mut Window,
+        cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
         let entry = self.rows.get(ix.row)?;
         Some(
             ListItem::new(("library-book", entry.user_book_id.get() as u64))
+                .list_row(self.focus.shows_focus(ix, window), cx)
                 .accessibility_label(entry.book.title.clone())
-                .child(BookRow::for_entry(entry)),
+                .child(BookRow::for_entry(entry).selected(self.focus.is_selected(ix))),
         )
     }
 
     fn set_selected_index(
         &mut self,
-        _: Option<IndexPath>,
+        ix: Option<IndexPath>,
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) {
-        // Selection is owned by `LibraryView`, keyed by `user_book_id`.
+        // Selection is owned by `LibraryView`, keyed by `user_book_id`; the
+        // rows only draw it.
+        self.focus.select(ix);
     }
 
     fn render_empty(
@@ -94,10 +107,18 @@ impl ListDelegate for ShelfDelegate {
         _: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
         empty_state(
-            IconName::Inbox,
+            self.empty.icon.clone(),
             self.empty.title.clone(),
             self.empty.description.clone(),
         )
+    }
+
+    fn render_loading(
+        &mut self,
+        _: &mut Window,
+        _: &mut Context<ListState<Self>>,
+    ) -> impl IntoElement {
+        loading_rows()
     }
 
     fn loading(&self, _: &App) -> bool {
@@ -133,12 +154,18 @@ impl LibraryView {
                 ShelfDelegate {
                     rows: Vec::new(),
                     loading: true,
-                    empty: EmptyCopy::default(),
+                    empty: EmptyCopy {
+                        icon: IconName::Inbox,
+                        title: SharedString::default(),
+                        description: SharedString::default(),
+                    },
+                    focus: RowFocus::default(),
                 },
                 window,
                 cx,
             )
         });
+        RowFocus::attach(&list, |d| &mut d.focus, cx);
         let detail = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
         let pane = cx.new(|cx| ShelfPane {
             _model: cx.observe(&model, |_, _, cx| cx.notify()),
@@ -278,6 +305,7 @@ impl LibraryView {
         let shelf = status_label(self.status);
         let empty = if !query.trim().is_empty() {
             EmptyCopy {
+                icon: IconName::Search,
                 title: "No matches".into(),
                 description: format!("No books in {shelf} match “{}”.", query.trim()).into(),
             }
@@ -285,11 +313,13 @@ impl LibraryView {
             && entries.is_empty()
         {
             EmptyCopy {
+                icon: IconName::CircleAlert,
                 title: "Couldn't load your library".into(),
                 description: message.clone(),
             }
         } else {
             EmptyCopy {
+                icon: status_icon(self.status),
                 title: format!("No books in {shelf}").into(),
                 description: match self.status {
                     ReadingStatus::Ignored => {
@@ -356,52 +386,43 @@ struct ShelfPane {
 impl Render for ShelfPane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let count = self.model.read(cx).count(self.status);
+        let colors = colors(cx);
         v_flex()
             .size_full()
             .min_w_0()
             .child(
                 v_flex()
+                    .flex_none()
                     .gap_3()
-                    .p_3()
+                    .px_4()
+                    .py_3()
                     .border_b_1()
-                    .border_color(cx.theme().border)
+                    .border_color(colors.border)
                     .child(
                         h_flex()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .text_lg()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(status_label(self.status)),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(count.to_string()),
-                            ),
+                            .h(size::CONTROL)
+                            .child(PageHeader::new(status_label(self.status)).count(count as u32)),
                     )
                     .child(
                         h_flex()
                             .gap_2()
                             .child(
-                                div().flex_1().min_w_0().child(
+                                // At the list's narrowest the sort gives way
+                                // first, down to a small select.
+                                div().flex_1().min_w_20().child(
                                     Input::new(&self.filter)
-                                        .small()
                                         .raised_field(false, cx)
                                         .cleanable(true)
                                         .prefix(
-                                            Icon::new(IconName::Search)
-                                                .small()
-                                                .text_color(cx.theme().muted_foreground),
+                                            Icon::new(IconName::Search).text_color(colors.fg_muted),
                                         ),
                                 ),
                             )
                             .child(
                                 div()
-                                    .flex_shrink_0()
-                                    .w_40()
-                                    .child(Select::new(&self.sort).small().raised_field(false, cx)),
+                                    .w(size::SELECT)
+                                    .min_w(size::SELECT_SMALL)
+                                    .child(Select::new(&self.sort).raised_field(false, cx)),
                             ),
                     ),
             )
@@ -409,7 +430,7 @@ impl Render for ShelfPane {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .child(List::new(&self.list).size_full().p_1()),
+                    .child(List::new(&self.list).size_full().p_2()),
             )
     }
 }
@@ -420,7 +441,7 @@ impl Render for LibraryView {
         h_resizable("library-split")
             .child(
                 resizable_panel()
-                    .size(rem * 24.)
+                    .size(rem * size::LIST.0)
                     .size_range(rem * 16.0..rem * 40.)
                     .child(
                         self.pane

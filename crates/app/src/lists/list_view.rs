@@ -1,21 +1,24 @@
 //! A list's page: its name, details and books in the list's order. Enter or a
 //! click opens a book; Delete or a row's remove button takes it off the list.
 //! Books load a page at a time as the list scrolls.
+//!
+//! The header has the list's name as the page title with Edit… and Delete…
+//! on its trailing edge, the facts, the description (the reader's own words,
+//! in `reader`) and "Open on Hardcover"; the books are catalogue rows in the
+//! catalogue pages' frame (`catalog::book_list`).
 
 use std::collections::HashMap;
 
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
-use gpui_kit::component::link::Link;
-use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
+use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex,
-    v_flex,
+    Disableable as _, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
-    prelude::FluentBuilder as _, rems,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LISTS};
 use hardcover_core::{LIST_BOOKS_PER_PAGE, ListBook, ListBookId, ListId, UserList};
@@ -25,13 +28,16 @@ use super::model::{ListsEvent, ListsModel};
 use crate::RemoveFromList;
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
-use crate::catalog::book_list::row_details;
+use crate::catalog::book_list::{
+    load_failed, page_body, page_header, page_list, page_loading, row_details,
+};
 use crate::catalog::navigation::{self, Page};
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{authors_text, needs_permission};
 use crate::library::book_row::BookRow;
 use crate::library::model::LibraryModel;
 use crate::ui::kit::open_alert_dialog;
-use crate::ui::{empty_state, empty_state_with_action};
+use crate::ui::{ExternalLink, ListRow as _, RowFocus, empty_state, empty_state_with_action};
 
 /// Key context of a list's page, where Delete takes the selected book off.
 pub const KEY_CONTEXT: &str = "ListPage";
@@ -73,6 +79,7 @@ pub struct ListBooks {
     /// Lists opened this session, so going back to one costs no request.
     pages: HashMap<ListId, BooksPage>,
     _fetch: Option<Task<()>>,
+    focus: RowFocus,
 }
 
 impl ListBooks {
@@ -221,9 +228,10 @@ impl ListDelegate for ListBooks {
     fn render_item(
         &mut self,
         ix: IndexPath,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
+        let focused = self.focus.shows_focus(ix, window);
         let list = self.current?;
         let book = self.book(ix.row)?.clone();
         let lists = self.lists.read(cx);
@@ -251,13 +259,14 @@ impl ListDelegate for ListBooks {
         let lists = self.lists.clone();
         Some(
             ListItem::new(("list-book", book.id.get() as u64))
+                .list_row(focused, cx)
                 .accessibility_label(book.book.title.clone())
                 .child(BookRow::for_catalog(&book.book, details, status))
                 .suffix(move |_, _| {
                     let (lists, book) = (lists.clone(), book.clone());
                     Button::new(("remove-list-book", book.id.get() as u64))
                         .ghost()
-                        .xsmall()
+                        .small()
                         .icon(IconName::Close)
                         .tooltip(remove_tooltip.clone())
                         .disabled(busy || !can_write)
@@ -268,10 +277,11 @@ impl ListDelegate for ListBooks {
 
     fn set_selected_index(
         &mut self,
-        _: Option<IndexPath>,
+        ix: Option<IndexPath>,
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) {
+        self.focus.select(ix);
     }
 
     fn render_empty(
@@ -303,6 +313,14 @@ impl ListDelegate for ListBooks {
 
     fn loading(&self, _: &App) -> bool {
         self.page().is_none_or(|p| p.loading && p.books.is_empty())
+    }
+
+    fn render_loading(
+        &mut self,
+        _: &mut Window,
+        _: &mut Context<ListState<Self>>,
+    ) -> impl IntoElement {
+        page_loading()
     }
 
     fn has_more(&self, _: &App) -> bool {
@@ -340,11 +358,13 @@ impl ListView {
                     current: None,
                     pages: HashMap::new(),
                     _fetch: None,
+                    focus: RowFocus::default(),
                 },
                 window,
                 cx,
             )
         });
+        RowFocus::attach(&list, |d| &mut d.focus, cx);
         let subscriptions = vec![
             cx.observe(&lists, |_, _, cx| cx.notify()),
             // Status tags follow library changes.
@@ -458,13 +478,10 @@ impl ListView {
     }
 
     fn render_header(&self, list: &UserList, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
+        let muted = colors(cx).fg_muted;
         let can_write = Services::global(cx).has_scope(WRITE_LISTS);
         let writing = self.lists.read(cx).is_writing();
-        let mut facts = vec![match list.books_count {
-            1 => "1 book".to_owned(),
-            n => format!("{n} books"),
-        }];
+        let mut facts = vec![crate::format::books_count_text(list.books_count)];
         if list.ranked {
             facts.push("Ranked".into());
         }
@@ -501,7 +518,6 @@ impl ListView {
                 .gap_2()
                 .child(
                     Button::new("edit-list")
-                        .outline()
                         .small()
                         .label("Edit…")
                         .disabled(!can_write || writing)
@@ -512,7 +528,6 @@ impl ListView {
                 )
                 .child(
                     Button::new("delete-list")
-                        .ghost()
                         .danger()
                         .small()
                         .label("Delete…")
@@ -524,65 +539,60 @@ impl ListView {
                 )
         });
         v_flex()
-            .gap_1()
+            .gap_4()
             .child(
-                h_flex()
-                    .items_start()
-                    .justify_between()
-                    .gap_4()
+                v_flex()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .items_start()
+                            .justify_between()
+                            .gap_4()
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .page_title()
+                                    .child(WrappingText::new(list.name.clone())),
+                            )
+                            .children(actions),
+                    )
                     .child(
                         div()
-                            .min_w_0()
-                            .text_2xl()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(WrappingText::new(list.name.clone())),
+                            .body()
+                            .tabular()
+                            .text_color(muted)
+                            .child(facts.join(" · ")),
                     )
-                    .children(actions),
+                    .when(list.is_owned(), |this| {
+                        this.child(div().body().text_color(muted).child(
+                            "The editions you own. Mark a book owned, or not, from its page.",
+                        ))
+                    }),
             )
-            .child(div().text_sm().text_color(muted).child(facts.join(" · ")))
-            .when(list.is_owned(), |this| {
-                this.child(
-                    div()
-                        .text_sm()
-                        .text_color(muted)
-                        .child("The editions you own. Mark a book owned, or not, from its page."),
-                )
-            })
             .when_some(list.description.clone(), |this, text| {
                 this.child(
                     div()
-                        .pt_2()
-                        .text_sm()
-                        .text_color(muted)
+                        .max_w(size::PROSE)
+                        .reader()
                         .child(WrappingText::new(text).line_clamp(3)),
                 )
             })
             .when_some(url, |this, url| {
-                this.child(
-                    div().pt_2().child(
-                        Link::new("list-on-hardcover")
-                            .href(url)
-                            .text_sm()
-                            .child("Open on Hardcover"),
-                    ),
-                )
+                this.child(ExternalLink::new(
+                    "list-on-hardcover",
+                    "Open on Hardcover",
+                    url,
+                ))
             })
             .when_some(error, |this, message| {
-                this.child(
-                    h_flex()
-                        .pt_2()
-                        .gap_2()
-                        .text_sm()
-                        .child(div().text_color(muted).child(message))
-                        .child(
-                            Button::new("retry-list")
-                                .small()
-                                .label("Try again")
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.retry(window, cx)),
-                                ),
-                        ),
-                )
+                this.child(load_failed(
+                    message,
+                    Button::new("retry-list")
+                        .small()
+                        .label("Try again")
+                        .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
+                    cx,
+                ))
             })
     }
 }
@@ -603,23 +613,8 @@ impl Render for ListView {
             .size_full()
             .min_w_0()
             .when_some(list, |this, list| {
-                this.child(
-                    div()
-                        .w_full()
-                        .max_w(rems(48.))
-                        .px_6()
-                        .pt_6()
-                        .pb_3()
-                        .child(self.render_header(&list, cx)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .max_w(rems(48.))
-                        .px_3()
-                        .child(List::new(&self.list).size_full().p_1()),
-                )
+                this.child(page_header().child(self.render_header(&list, cx)))
+                    .child(page_body().child(page_list(&self.list)))
             })
     }
 }
