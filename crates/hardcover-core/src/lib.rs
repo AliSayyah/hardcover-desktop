@@ -24,6 +24,7 @@ pub mod update;
 mod http;
 mod ratelimit;
 
+pub use api::UpcomingBook;
 pub use api::{
     AuthorBook, AuthorDetails, AuthorHit, AuthorId, AuthorRef, BookDetails, BookId, BookSummary,
     Client, Contributor, Cover, Date, EDITIONS_PER_PAGE, EditionChange, EditionId, EditionSummary,

@@ -58,6 +58,9 @@ const MEMBERSHIPS_MAX_PAGES: usize = 5;
 pub const LIST_BOOKS_PER_PAGE: u32 = 100;
 /// Reviews per page in [`Client::book_reviews`].
 pub const REVIEWS_PER_PAGE: u32 = 10;
+/// Rows [`Client::upcoming_in_series`] asks for. A library of 210 series had
+/// 27 in 2026.
+const UPCOMING_ROWS_LIMIT: u32 = 200;
 
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
@@ -441,6 +444,38 @@ impl Client {
             data.books.into_iter().map(RawBook::into_summary).collect();
         books.sort_by_key(|b| ids.iter().position(|id| *id == b.id.get()));
         Ok(books)
+    }
+
+    /// Books in these series released after `after`, the soonest first, in
+    /// one request. A book listed under several of the series comes once,
+    /// naming each. Merged duplicates, compilations and partial books are
+    /// left out. No series, no request.
+    pub fn upcoming_in_series(
+        &self,
+        series: &[SeriesId],
+        after: Date,
+    ) -> Result<Vec<UpcomingBook>> {
+        let mut ids: Vec<i64> = series.iter().map(|s| s.get()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        #[derive(Deserialize)]
+        struct Data {
+            book_series: Vec<RawUpcomingRow>,
+        }
+        let data: Data = self.query(
+            "UpcomingInSeries",
+            queries::UPCOMING_IN_SERIES,
+            json!({
+                "series": ids,
+                "after": after.format("%Y-%m-%d").to_string(),
+                "limit": UPCOMING_ROWS_LIMIT,
+            }),
+            QUERY_TIMEOUT,
+        )?;
+        Ok(upcoming_books(data.book_series))
     }
 
     // ----- writes -----

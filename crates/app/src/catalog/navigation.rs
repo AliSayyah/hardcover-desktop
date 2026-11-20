@@ -1,4 +1,4 @@
-//! Catalogue pages (a series, an author, a book) and the history of the ones
+//! Catalogue pages (a series, an author, a book, the books coming soon) and the history of the ones
 //! opened since the last sidebar destination.
 //!
 //! Any view can open a page through the [`Navigator`] global; the workspace
@@ -16,6 +16,8 @@ pub enum Page {
     /// A book opened from a series, an author or similar books. Shown as the
     /// library entry when the book is in the library.
     Book(BookSummary),
+    /// Every book still to come in the reader's series, opened from Home.
+    Upcoming,
 }
 
 impl Page {

@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use chrono::Duration;
 use hardcover_core::{
-    Date, Goal, GoalMetric, Length, LibraryEntry, ReadingStatus, SeriesId, UserBookId,
+    BookId, Date, Goal, GoalMetric, Length, LibraryEntry, ReadingStatus, SeriesId, UserBookId,
 };
 
 /// A read younger than this, in days, has no pace yet: one evening's reading
@@ -75,8 +75,11 @@ pub struct SeriesNext {
     pub after_position: f32,
 }
 
-pub fn compute(entries: &[LibraryEntry], today: Date) -> Digest {
+/// `unreleased` holds the books not out yet (see [`is_released`]): "Up next"
+/// suggests only books the reader can start.
+pub fn compute(entries: &[LibraryEntry], today: Date, unreleased: &HashSet<BookId>) -> Digest {
     let shelf = |status: ReadingStatus| entries.iter().filter(move |e| e.status == status);
+    let released = |e: &LibraryEntry| is_released(e, today, unreleased);
 
     let mut reading: Vec<&LibraryEntry> = shelf(ReadingStatus::CurrentlyReading).collect();
     reading.sort_by(|a, b| {
@@ -101,7 +104,7 @@ pub fn compute(entries: &[LibraryEntry], today: Date) -> Digest {
         })
         .map(|e| e.user_book_id);
 
-    let series_next = series_next(entries);
+    let series_next = series_next(entries, &released);
     let mut want: Vec<&LibraryEntry> = shelf(ReadingStatus::WantToRead).collect();
     want.sort_by(|a, b| {
         b.date_added
@@ -111,6 +114,7 @@ pub fn compute(entries: &[LibraryEntry], today: Date) -> Digest {
     let up_next = want
         .iter()
         .filter(|e| series_next.as_ref().is_none_or(|n| n.id != e.user_book_id))
+        .filter(|e| released(e))
         .take(UP_NEXT_ROWS)
         .map(|e| e.user_book_id)
         .collect();
@@ -123,6 +127,15 @@ pub fn compute(entries: &[LibraryEntry], today: Date) -> Digest {
         up_next,
         want_to_read: want.len(),
     }
+}
+
+/// Whether the entry's book is out: not among the upcoming books (`unreleased`,
+/// which know the day), and not dated to a later year. The library knows only
+/// the year, which also covers the time before the upcoming books load.
+pub fn is_released(entry: &LibraryEntry, today: Date, unreleased: &HashSet<BookId>) -> bool {
+    use chrono::Datelike as _;
+    !unreleased.contains(&entry.book.id)
+        && entry.book.release_year.is_none_or(|y| y <= today.year())
 }
 
 /// Pages per day since the open read started, and the finish that implies.
@@ -165,7 +178,13 @@ fn idle_days(entry: &LibraryEntry, today: Date) -> Option<i64> {
 /// it would cost a request per series. So a book counts as next only if the
 /// finished one is at most one position before it (2 after 1, or after 1.5),
 /// in case the books between are missing from the library.
-fn series_next(entries: &[LibraryEntry]) -> Option<SeriesNext> {
+///
+/// A book not out yet is never next, and doesn't hold back a later one that
+/// is (a novella announced after the next novel came out).
+fn series_next(
+    entries: &[LibraryEntry],
+    released: &dyn Fn(&LibraryEntry) -> bool,
+) -> Option<SeriesNext> {
     let in_series = |e: &LibraryEntry, series: SeriesId| {
         e.series
             .iter()
@@ -175,7 +194,7 @@ fn series_next(entries: &[LibraryEntry]) -> Option<SeriesNext> {
     let mut best: Option<(Option<Date>, SeriesNext)> = None;
     for next in entries
         .iter()
-        .filter(|e| e.status == ReadingStatus::WantToRead)
+        .filter(|e| e.status == ReadingStatus::WantToRead && released(e))
     {
         for series in &next.series {
             let (Some(id), Some(position)) = (series.id, series.position) else {
@@ -194,6 +213,7 @@ fn series_next(entries: &[LibraryEntry]) -> Option<SeriesNext> {
             // reader ignored or gave up on doesn't hold the next one back.
             let unread_between = entries.iter().any(|e| {
                 e.user_book_id != next.user_book_id
+                    && released(e)
                     && matches!(
                         e.status,
                         ReadingStatus::WantToRead
@@ -412,7 +432,7 @@ mod tests {
         let mut b = reading(2, 300, Some("2026-11-01"), Some(50));
         b.updated_at = Some(at("2026-11-19"));
         let c = reading(3, 300, None, None);
-        let d = compute(&[a, b, c], today);
+        let d = compute(&[a, b, c], today, &HashSet::new());
         let ids: Vec<i64> = d.reading.iter().map(|r| r.id.get()).collect();
         assert_eq!(ids, [2, 1, 3]);
         assert_eq!(d.reading[0].idle_days, None);
@@ -428,7 +448,11 @@ mod tests {
         );
         let two = in_series(entry(2, ReadingStatus::WantToRead, Some(300)), 7, Some(2.0));
         let four = in_series(entry(4, ReadingStatus::WantToRead, Some(300)), 7, Some(4.0));
-        let d = compute(&[one.clone(), two.clone(), four.clone()], day("2026-11-20"));
+        let d = compute(
+            &[one.clone(), two.clone(), four.clone()],
+            day("2026-11-20"),
+            &HashSet::new(),
+        );
         let next = d.series_next.expect("book 2 is next");
         assert_eq!((next.id.get(), next.after.get()), (2, 1));
         assert_eq!((next.position, next.after_position), (2.0, 1.0));
@@ -437,7 +461,11 @@ mod tests {
         assert!(!d.up_next.contains(&next.id));
 
         // Book 4 is not next after book 1: 2 and 3 may be missing.
-        let d = compute(&[one.clone(), four.clone()], day("2026-11-20"));
+        let d = compute(
+            &[one.clone(), four.clone()],
+            day("2026-11-20"),
+            &HashSet::new(),
+        );
         assert_eq!(d.series_next, None);
 
         // A novella at 1.5 comes first, and then 2 follows it.
@@ -445,26 +473,84 @@ mod tests {
         let d = compute(
             &[one.clone(), two.clone(), novella.clone()],
             day("2026-11-20"),
+            &HashSet::new(),
         );
         assert_eq!(d.series_next.unwrap().id.get(), 3);
         let read_novella = finished(
             in_series(entry(3, ReadingStatus::Read, Some(90)), 7, Some(1.5)),
             "2026-11-01",
         );
-        let d = compute(&[one.clone(), two.clone(), read_novella], day("2026-11-20"));
+        let d = compute(
+            &[one.clone(), two.clone(), read_novella],
+            day("2026-11-20"),
+            &HashSet::new(),
+        );
         let next = d.series_next.unwrap();
         assert_eq!((next.id.get(), next.after_position), (2, 1.5));
 
         // An ignored novella between them doesn't hold book 2 back.
         let ignored = in_series(entry(3, ReadingStatus::Ignored, Some(90)), 7, Some(1.5));
-        let d = compute(&[one.clone(), two.clone(), ignored], day("2026-11-20"));
+        let d = compute(
+            &[one.clone(), two.clone(), ignored],
+            day("2026-11-20"),
+            &HashSet::new(),
+        );
         assert_eq!(d.series_next.unwrap().id.get(), 2);
 
         // Book 2 being read (or paused) leaves nothing to suggest.
         let mut reading_two = two.clone();
         reading_two.status = ReadingStatus::CurrentlyReading;
-        let d = compute(&[one.clone(), reading_two], day("2026-11-20"));
+        let d = compute(
+            &[one.clone(), reading_two],
+            day("2026-11-20"),
+            &HashSet::new(),
+        );
         assert_eq!(d.series_next, None);
+    }
+
+    #[test]
+    fn a_book_not_out_yet_is_not_up_next() {
+        let today = day("2026-11-20");
+        let one = finished(
+            in_series(entry(1, ReadingStatus::Read, Some(400)), 7, Some(1.0)),
+            "2026-10-12",
+        );
+        let mut two = in_series(entry(2, ReadingStatus::WantToRead, None), 7, Some(2.0));
+        two.date_added = Some(day("2026-11-01"));
+        let mut other = entry(5, ReadingStatus::WantToRead, Some(200));
+        other.date_added = Some(day("2026-10-01"));
+        let ids = |v: &[UserBookId]| v.iter().map(|i| i.get()).collect::<Vec<_>>();
+
+        // Out on a day the upcoming books know: neither the pick nor a row.
+        let unreleased = HashSet::from([BookId::new(2)]);
+        let d = compute(
+            &[one.clone(), two.clone(), other.clone()],
+            today,
+            &unreleased,
+        );
+        assert_eq!(d.series_next, None);
+        assert_eq!(ids(&d.up_next), [5]);
+        assert_eq!(d.want_to_read, 2, "the shelf still counts it");
+
+        // Dated to a later year, before the upcoming books load.
+        let mut next_year = two.clone();
+        next_year.book.release_year = Some(2027);
+        let d = compute(
+            &[one.clone(), next_year, other.clone()],
+            today,
+            &HashSet::new(),
+        );
+        assert_eq!(d.series_next, None);
+        let mut this_year = two.clone();
+        this_year.book.release_year = Some(2026);
+        let d = compute(&[one.clone(), this_year], today, &HashSet::new());
+        assert_eq!(d.series_next.unwrap().id.get(), 2);
+
+        // A novella still to come doesn't hold back the next book.
+        let novella = in_series(entry(3, ReadingStatus::WantToRead, None), 7, Some(1.5));
+        let unreleased = HashSet::from([BookId::new(3)]);
+        let d = compute(&[one.clone(), two.clone(), novella], today, &unreleased);
+        assert_eq!(d.series_next.unwrap().id.get(), 2);
     }
 
     #[test]
@@ -474,7 +560,10 @@ mod tests {
             "2026-10-12",
         );
         let two = in_series(entry(2, ReadingStatus::WantToRead, None), 7, Some(2.0));
-        assert_eq!(compute(&[one, two], day("2026-11-20")).series_next, None);
+        assert_eq!(
+            compute(&[one, two], day("2026-11-20"), &HashSet::new()).series_next,
+            None
+        );
 
         let mut one = finished(entry(1, ReadingStatus::Read, None), "2026-10-12");
         let mut two = entry(2, ReadingStatus::WantToRead, None);
@@ -483,7 +572,10 @@ mod tests {
         one.series.push(s.clone());
         s.position = Some(2.0);
         two.series.push(s);
-        assert_eq!(compute(&[one, two], day("2026-11-20")).series_next, None);
+        assert_eq!(
+            compute(&[one, two], day("2026-11-20"), &HashSet::new()).series_next,
+            None
+        );
     }
 
     #[test]
@@ -498,7 +590,7 @@ mod tests {
             "2026-09-01",
         );
         let b2 = in_series(entry(4, ReadingStatus::WantToRead, None), 8, Some(2.0));
-        let d = compute(&[a1, a2, b1, b2], day("2026-11-20"));
+        let d = compute(&[a1, a2, b1, b2], day("2026-11-20"), &HashSet::new());
         assert_eq!(d.series_next.unwrap().id.get(), 4);
     }
 
@@ -518,7 +610,7 @@ mod tests {
             e
         })
         .collect();
-        let d = compute(&books, day("2026-11-20"));
+        let d = compute(&books, day("2026-11-20"), &HashSet::new());
         let ids = |v: &[UserBookId]| v.iter().map(|i| i.get()).collect::<Vec<_>>();
         assert_eq!(ids(&d.up_next), [4, 2, 3]);
         assert_eq!(d.want_to_read, 5);
@@ -530,11 +622,11 @@ mod tests {
         a.updated_at = Some(at("2026-10-01"));
         let mut b = entry(2, ReadingStatus::Paused, None);
         b.updated_at = Some(at("2026-09-01"));
-        let d = compute(&[a, b], day("2026-11-20"));
+        let d = compute(&[a, b], day("2026-11-20"), &HashSet::new());
         assert_eq!(d.paused.map(|i| i.get()), Some(1));
         assert_eq!(d.paused_count, 2);
         assert!(!d.is_empty());
-        assert!(compute(&[], day("2026-11-20")).is_empty());
+        assert!(compute(&[], day("2026-11-20"), &HashSet::new()).is_empty());
     }
 
     fn rated(mut e: LibraryEntry, stars: f32) -> LibraryEntry {
@@ -611,7 +703,7 @@ mod tests {
         let today = day("2026-11-20");
         let soon = reading(1, 476, Some("2026-11-01"), Some(312)); // Dec 1
         let late = reading(2, 1007, Some("2026-10-20"), Some(418)); // January
-        let d = compute(&[soon, late], today);
+        let d = compute(&[soon, late], today, &HashSet::new());
         let year = goal(GoalMetric::Books, "2026-01-01", "2026-12-31");
         assert_eq!(finishing_by(&year, &d, today), 1);
         let november = goal(GoalMetric::Books, "2026-01-01", "2026-11-30");
@@ -623,7 +715,7 @@ mod tests {
         // An idle book's finish date isn't trusted.
         let mut idle = reading(3, 476, Some("2026-11-01"), Some(312));
         idle.updated_at = Some(at("2026-11-10"));
-        let d = compute(&[idle], today);
+        let d = compute(&[idle], today, &HashSet::new());
         assert!(d.reading[0].pace.and_then(|p| p.finish).is_some());
         assert_eq!(finishing_by(&year, &d, today), 0);
     }

@@ -2183,3 +2183,89 @@ fn book_reviews_count_reads_the_aggregate() {
     let body = http.requests()[0].json.clone().unwrap();
     assert_eq!(body["operationName"], "BookReviewsCount");
 }
+
+#[test]
+fn upcoming_in_series_merges_books_and_names_every_series() {
+    let (c, http) = client(TestTokens::new(false));
+    let today: Date = "2026-11-20".parse().unwrap();
+    assert!(c.upcoming_in_series(&[], today).unwrap().is_empty());
+    assert_eq!(http.requests().len(), 0, "no series, no request");
+
+    let upcoming = |id: i64, title: &str, date: Option<&str>, partial: Option<bool>| {
+        let mut b = book(id, title);
+        b["release_date"] = json!(date);
+        b["is_partial_book"] = json!(partial);
+        b
+    };
+    let series = |id: i64, name: &str| json!({ "id": id, "name": name, "slug": null });
+    http.push(
+        200,
+        &data(json!({ "book_series": [
+            {"position": 2.5, "compilation": false, "series": series(41, "Lantern Cycle"),
+             "book": upcoming(201, "The Ember Interlude", Some("2026-12-08"), Some(false))},
+            {"position": null, "compilation": false, "series": series(42, "Tidewright"),
+             "book": upcoming(202, "Salt Roads", Some("2026-12-20"), None)},
+            {"position": 3.0, "compilation": false, "series": series(43, "Tidewright Reading Order"),
+             "book": upcoming(202, "Salt Roads", Some("2026-12-20"), None)},
+            {"position": 1.0, "compilation": true, "series": series(41, "Lantern Cycle"),
+             "book": upcoming(203, "Lantern Cycle Omnibus", Some("2027-01-05"), Some(false))},
+            {"position": 4.0, "compilation": false, "series": series(41, "Lantern Cycle"),
+             "book": upcoming(204, "Lantern, Part One", Some("2027-02-01"), Some(true))},
+            {"position": 5.0, "compilation": false, "series": series(41, "Lantern Cycle"),
+             "book": upcoming(205, "Untitled Lantern Cycle #5", None, None)},
+            {"position": 6.0, "compilation": false, "series": series(41, "Lantern Cycle"),
+             "book": null},
+            {"position": 6.0, "compilation": false, "series": series(41, "Lantern Cycle"),
+             "book": upcoming(206, "Untitled Lantern Cycle #6", Some("2030-01-01"), None)}
+        ]})),
+    );
+    let ids = [
+        SeriesId::new(43),
+        SeriesId::new(41),
+        SeriesId::new(42),
+        SeriesId::new(41),
+    ];
+    let books = c.upcoming_in_series(&ids, today).unwrap();
+
+    let req = &http.requests()[0];
+    let body = req.json.as_ref().unwrap();
+    assert_eq!(body["operationName"], "UpcomingInSeries");
+    assert_eq!(
+        body["variables"]["series"],
+        json!([41, 42, 43]),
+        "sorted, once each"
+    );
+    assert_eq!(body["variables"]["after"], "2026-11-20");
+    assert_eq!(body["variables"]["limit"], 200);
+
+    let titles: Vec<&str> = books.iter().map(|b| b.book.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        [
+            "The Ember Interlude",
+            "Salt Roads",
+            "Untitled Lantern Cycle #6"
+        ]
+    );
+    let ember = &books[0];
+    assert_eq!(ember.release_date, "2026-12-08".parse::<Date>().unwrap());
+    assert_eq!(ember.book.authors, ["Jane Quill"]);
+    assert_eq!(ember.series.len(), 1);
+    assert_eq!(ember.series[0].id, Some(SeriesId::new(41)));
+    assert_eq!(ember.series[0].position, Some(2.5));
+
+    // Listed under two series: one book, naming both.
+    let salt = &books[1];
+    let names: Vec<(&str, Option<f32>)> = salt
+        .series
+        .iter()
+        .map(|s| (s.name.as_str(), s.position))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("Tidewright", None),
+            ("Tidewright Reading Order", Some(3.0))
+        ]
+    );
+}

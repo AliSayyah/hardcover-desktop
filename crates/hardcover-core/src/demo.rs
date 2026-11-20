@@ -21,6 +21,11 @@
 //! each period: newest release for a week, average rating for a month, number
 //! of ratings for three months, and number of readers for a year or all time.
 //!
+//! Some series have books still to come: placeholder titles (like
+//! Hardcover's own "Untitled …" books), no cover or description, and release
+//! dates a fixed number of days from today. They are on their series pages
+//! and answer `UpcomingInSeries` and `BookDetails`.
+//!
 //! [`cover_cache`] downloads the catalogue's covers from Hardcover, the demo's
 //! only network access; any other URL is refused. Reads work; every write
 //! fails with a "read-only" error. Only built with the `demo` feature (and in
@@ -84,6 +89,32 @@ struct Catalogue {
     library: Vec<Entry>,
     goals: Vec<DemoGoal>,
     lists: Vec<DemoList>,
+    #[serde(default)]
+    upcoming: Vec<Upcoming>,
+}
+
+/// A book not yet released in one of the catalogue's series. Placeholder
+/// titles like Hardcover's own, no cover and no description; the date is a
+/// number of days from today, so the demo never goes stale. Ids are far above
+/// any Hardcover book id the catalogue uses.
+#[derive(Deserialize)]
+struct Upcoming {
+    id: i64,
+    title: String,
+    /// A series of the catalogue, by name.
+    series: String,
+    position: Option<f64>,
+    days: i64,
+}
+
+impl Upcoming {
+    fn release_date(&self) -> chrono::NaiveDate {
+        today() + chrono::Duration::days(self.days)
+    }
+}
+
+fn today() -> chrono::NaiveDate {
+    chrono::Local::now().date_naive()
 }
 
 #[derive(Deserialize)]
@@ -275,6 +306,18 @@ impl Catalogue {
     fn entry(&self, id: i64) -> Option<&Entry> {
         self.library.iter().find(|e| e.id == id)
     }
+
+    fn upcoming(&self, id: i64) -> Option<&Upcoming> {
+        self.upcoming.iter().find(|u| u.id == id)
+    }
+
+    /// The author of a series: that of its first book in the catalogue.
+    fn series_author(&self, series: &str) -> Option<&str> {
+        self.books
+            .iter()
+            .find(|b| b.series.as_ref().is_some_and(|s| s.name == series))
+            .map(|b| b.author.as_str())
+    }
 }
 
 // ----- wire shapes -----
@@ -410,6 +453,103 @@ fn book_summary(book: &Book) -> Value {
     })
 }
 
+/// `BookSummaryFields` for an upcoming book, plus its `release_date`.
+fn upcoming_summary(catalogue: &Catalogue, book: &Upcoming) -> Value {
+    let date = book.release_date();
+    let contributors: Vec<Value> = catalogue
+        .series_author(&book.series)
+        .map(|name| {
+            json!({
+                "author": { "id": catalogue.author_id(name), "name": name },
+                "contribution": null,
+            })
+        })
+        .into_iter()
+        .collect();
+    json!({
+        "id": book.id,
+        "title": book.title,
+        "subtitle": null,
+        "slug": slug(&book.title),
+        "pages": null,
+        "release_year": chrono::Datelike::year(&date),
+        "release_date": date.format("%Y-%m-%d").to_string(),
+        "rating": null,
+        "users_count": null,
+        "cached_image": {},
+        "cached_contributors": contributors,
+    })
+}
+
+/// An upcoming book's `book_series` row, in `series` shape.
+fn upcoming_series(catalogue: &Catalogue, book: &Upcoming) -> Value {
+    json!({
+        "id": catalogue.series_id(&book.series),
+        "name": book.series,
+        "slug": slug(&book.series),
+    })
+}
+
+/// `book_series` for `UpcomingInSeries`: the upcoming books in the series
+/// asked for, released after `after`, the soonest first.
+fn upcoming_rows(catalogue: &Catalogue, vars: &Value) -> Value {
+    let series: Vec<i64> = vars["series"]
+        .as_array()
+        .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
+        .unwrap_or_default();
+    let after = vars["after"]
+        .as_str()
+        .and_then(|d| d.parse::<chrono::NaiveDate>().ok())
+        .unwrap_or_else(today);
+    let limit = usize::try_from(vars["limit"].as_i64().unwrap_or(200)).unwrap_or_default();
+    let mut books: Vec<&Upcoming> = catalogue
+        .upcoming
+        .iter()
+        .filter(|u| series.contains(&catalogue.series_id(&u.series)))
+        .filter(|u| u.release_date() > after)
+        .collect();
+    books.sort_by_key(|u| (u.release_date(), u.id));
+    let rows: Vec<Value> = books
+        .into_iter()
+        .take(limit)
+        .map(|u| {
+            let mut book = upcoming_summary(catalogue, u);
+            book["is_partial_book"] = json!(false);
+            json!({
+                "position": u.position,
+                "compilation": false,
+                "series": upcoming_series(catalogue, u),
+                "book": book,
+            })
+        })
+        .collect();
+    json!({ "book_series": rows })
+}
+
+/// `books_by_pk` for an upcoming book: no description (none is made up for
+/// a real series' unreleased book), no tags, no similar books.
+fn upcoming_details(catalogue: &Catalogue, book: &Upcoming) -> Value {
+    let mut details = upcoming_summary(catalogue, book);
+    let extra = json!({
+        "description": null,
+        "editions_count": null,
+        "ratings_count": null,
+        "cached_tags": {},
+        "ratings_distribution": [],
+        "alternative_titles": [],
+        "cached_similar_book_ids": [],
+        "book_series": [{
+            "position": book.position,
+            "featured": true,
+            "series": upcoming_series(catalogue, book),
+        }],
+    });
+    if let (Some(map), Value::Object(extra)) = (details.as_object_mut(), extra) {
+        map.extend(extra);
+    }
+    details
+}
+
 /// `UserBookFields`.
 fn user_book(catalogue: &Catalogue, entry: &Entry) -> Option<Value> {
     let book = catalogue.book(entry.book)?;
@@ -508,7 +648,7 @@ fn series_page(catalogue: &Catalogue, id: i64) -> Option<Value> {
     let author = books
         .first()
         .map(|b| json!({ "id": catalogue.author_id(&b.author), "name": b.author }));
-    let rows: Vec<Value> = books
+    let mut rows: Vec<Value> = books
         .iter()
         .map(|b| {
             let mut book = book_summary(b);
@@ -520,6 +660,18 @@ fn series_page(catalogue: &Catalogue, id: i64) -> Option<Value> {
             })
         })
         .collect();
+    // Books still to come are on the series page, as on Hardcover.
+    rows.extend(
+        catalogue
+            .upcoming
+            .iter()
+            .filter(|u| u.series == name)
+            .map(|u| {
+                let mut book = upcoming_summary(catalogue, u);
+                book["is_partial_book"] = json!(false);
+                json!({ "position": u.position, "compilation": false, "book": book })
+            }),
+    );
     Some(json!({
         "id": id,
         "name": name,
@@ -676,9 +828,12 @@ fn answer(op: &str, vars: &Value) -> Value {
         "SearchSeries" => search_series(catalogue, vars),
         "BooksTrending" => trending(catalogue, vars),
         "BookDetails" => json!({
-            "books_by_pk": catalogue.book(int("id")).map(book_details),
+            "books_by_pk": catalogue.book(int("id")).map(book_details).or_else(|| {
+                catalogue.upcoming(int("id")).map(|u| upcoming_details(catalogue, u))
+            }),
         }),
         "SeriesPage" => json!({ "series_by_pk": series_page(catalogue, int("id")) }),
+        "UpcomingInSeries" => upcoming_rows(catalogue, vars),
         "AuthorPage" => json!({ "authors_by_pk": author_page(catalogue, int("id")) }),
         "BooksByIds" => {
             let ids: Vec<i64> = vars["ids"]
@@ -1374,6 +1529,58 @@ mod tests {
         assert!(err.to_string().contains(READ_ONLY), "{err}");
         let err = client.remove_from_list(dune[0].id).unwrap_err();
         assert!(err.to_string().contains(READ_ONLY), "{err}");
+    }
+
+    #[test]
+    fn upcoming_books_follow_the_library_series() {
+        let catalogue = &*CATALOGUE;
+        for u in &catalogue.upcoming {
+            assert!(catalogue.book(u.id).is_none(), "{} is a catalogue id", u.id);
+            assert_ne!(
+                catalogue.series_id(&u.series),
+                0,
+                "{} has no series",
+                u.title
+            );
+            assert!(u.days > 0, "{} is already out", u.title);
+        }
+        assert!(
+            catalogue.upcoming.iter().any(|u| u.days <= 14),
+            "Home shows one soon"
+        );
+
+        let client = client();
+        let library = client.library(client.me().unwrap().id).unwrap();
+        let series: Vec<crate::SeriesId> = library
+            .iter()
+            .flat_map(|e| e.series.iter().filter_map(|s| s.id))
+            .collect();
+        let today = today();
+        let books = client.upcoming_in_series(&series, today).unwrap();
+        assert_eq!(books.len(), catalogue.upcoming.len());
+        assert!(
+            books
+                .windows(2)
+                .all(|w| w[0].release_date <= w[1].release_date)
+        );
+        assert!(
+            books
+                .iter()
+                .all(|b| b.release_date > today && b.book.cover.is_none())
+        );
+        assert!(books.iter().all(|b| !b.series.is_empty()));
+        // Only the series asked for; none, no books.
+        let first = books[0].series[0].id.unwrap();
+        let one = client.upcoming_in_series(&[first], today).unwrap();
+        assert!(one.iter().all(|b| b.series[0].id == Some(first)));
+        assert!(one.len() < books.len());
+
+        // Its page opens, with no description, and its series lists it.
+        let details = client.book_details(books[0].book.id).unwrap();
+        assert_eq!(details.release_date, Some(books[0].release_date));
+        assert!(details.description.is_none());
+        let page = client.series(first).unwrap();
+        assert!(page.books.iter().any(|b| b.book.id == books[0].book.id));
     }
 
     #[test]

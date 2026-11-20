@@ -1,7 +1,8 @@
 //! The Home destination, shown at launch: the books being read with their
-//! pace, books finished lately to rate, the reading goal, and what to read
-//! next. Everything comes from the library on this computer and the goals
-//! already loaded; Home asks Hardcover for nothing until the reader acts.
+//! pace, books finished lately to rate, the reading goal, what to read next,
+//! and what is coming soon in the reader's series. Everything comes from the
+//! library on this computer and the goals and upcoming books already loaded;
+//! Home asks Hardcover for nothing until the reader acts.
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -26,6 +27,7 @@ use hardcover_core::{
     Client, Date, Error, Goal, GoalMetric, LibraryEntry, Rating, ReadingStatus, UserBookId,
 };
 
+use super::coming_soon::coming_soon_card;
 use super::digest::{
     Digest, Reading, SeriesNext, ToRate, compute, finished_per_month, finishing_by, to_rate,
 };
@@ -41,14 +43,17 @@ use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
 use crate::library::library_view::empty_state;
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
 
 pub struct HomeView {
     model: Entity<LibraryModel>,
     goals: Entity<GoalsModel>,
+    upcoming: Entity<UpcomingModel>,
     focus_handle: FocusHandle,
-    /// The digest and the library revision and date it was computed for.
-    computed: Option<(u64, Date, Rc<Digest>)>,
+    /// The digest and the library revision, upcoming books' revision and
+    /// date it was computed for.
+    computed: Option<((u64, u64, Date), Rc<Digest>)>,
     /// Books rated on Home since it was last opened from the sidebar: their
     /// rows stay, so the rating can still be changed.
     rated_here: HashSet<UserBookId>,
@@ -67,15 +72,18 @@ impl HomeView {
     pub fn new(
         model: Entity<LibraryModel>,
         goals: Entity<GoalsModel>,
+        upcoming: Entity<UpcomingModel>,
         cx: &mut Context<Self>,
     ) -> Self {
         let subscriptions = vec![
             cx.observe(&model, |_, _, cx| cx.notify()),
             cx.observe(&goals, |_, _, cx| cx.notify()),
+            cx.observe(&upcoming, |_, _, cx| cx.notify()),
         ];
         Self {
             model,
             goals,
+            upcoming,
             focus_handle: cx.focus_handle(),
             computed: None,
             rated_here: HashSet::new(),
@@ -99,12 +107,14 @@ impl HomeView {
 
     fn digest(&mut self, today: Date, cx: &App) -> Rc<Digest> {
         let model = self.model.read(cx);
-        let revision = model.revision();
+        let upcoming = self.upcoming.read(cx);
+        let key = (model.revision(), upcoming.revision(), today);
         match &self.computed {
-            Some((r, d, digest)) if *r == revision && *d == today => digest.clone(),
+            Some((k, digest)) if *k == key => digest.clone(),
             _ => {
-                let digest = Rc::new(compute(model.entries(), today));
-                self.computed = Some((revision, today, digest.clone()));
+                let unreleased = upcoming.unreleased(today);
+                let digest = Rc::new(compute(model.entries(), today, &unreleased));
+                self.computed = Some((key, digest.clone()));
                 digest
             }
         }
@@ -797,7 +807,8 @@ impl Render for HomeView {
         // A rating stays on screen only while it is being saved.
         self.saving_ratings
             .retain(|id, _| model.pending_write(*id) == Some(WriteKind::Rating));
-        if digest.is_empty() && rate_rows.is_empty() && goal.is_none() {
+        let coming_soon = coming_soon_card(&self.upcoming, &self.model, today, cx);
+        if digest.is_empty() && rate_rows.is_empty() && goal.is_none() && coming_soon.is_none() {
             return root
                 .child(empty_state(
                     IconName::LayoutDashboard,
@@ -807,7 +818,9 @@ impl Render for HomeView {
                 ))
                 .into_any_element();
         }
-        let up_next = (digest.want_to_read > 0).then(|| self.render_up_next(&digest, window, cx));
+        // Want to Read books that are all still to come leave nothing to suggest.
+        let up_next = (digest.series_next.is_some() || !digest.up_next.is_empty())
+            .then(|| self.render_up_next(&digest, window, cx));
         let goal_card = goal.map(|g| self.render_goal(&g, &digest, today, cx));
         let reading = self.render_reading(&digest, today, window, cx);
         let rate = (!rate_rows.is_empty())
@@ -848,7 +861,8 @@ impl Render for HomeView {
                                 .children(goal_card.map(|c| c.flex_1().min_w(rems(18.))))
                                 .children(up_next.map(|c| c.flex_1().min_w(rems(18.)))),
                         )
-                    }),
+                    })
+                    .children(coming_soon),
             )
             .into_any_element()
     }
@@ -879,7 +893,7 @@ fn section(title: &'static str, count: Option<usize>, cx: &App) -> gpui_kit::Div
     )
 }
 
-fn card(cx: &App) -> gpui_kit::Div {
+pub(super) fn card(cx: &App) -> gpui_kit::Div {
     v_flex()
         .gap_2p5()
         .p_4()

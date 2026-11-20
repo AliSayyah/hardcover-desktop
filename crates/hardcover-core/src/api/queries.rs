@@ -226,6 +226,28 @@ pub(crate) const BOOKS_BY_IDS: &str = concat!(
     book_summary_fields!()
 );
 
+/// Books in these series released after `$after`, the soonest first. Merged
+/// duplicates are filtered here; the client merges a book listed under two
+/// series and drops partial books and compilations.
+pub(crate) const UPCOMING_IN_SERIES: &str = concat!(
+    "query UpcomingInSeries($series: [Int!]!, $after: date!, $limit: Int!) {
+  book_series(
+    where: {
+      series_id: {_in: $series}
+      book: {release_date: {_gt: $after}, canonical_id: {_is_null: true}}
+    }
+    order_by: [{book: {release_date: asc}}, {book_id: asc}]
+    limit: $limit
+  ) {
+    position compilation
+    series { id name slug }
+    book { ...BookSummaryFields release_date is_partial_book }
+  }
+}
+",
+    book_summary_fields!()
+);
+
 /// Lengths needed to turn a percentage into pages/seconds, plus the read to update.
 /// `$reads` selects either one read by id or the unfinished read.
 pub(crate) const PROGRESS_CONTEXT: &str =
@@ -607,6 +629,7 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("DELETE_LIST_BOOK", DELETE_LIST_BOOK),
     ("BOOK_REVIEWS", BOOK_REVIEWS),
     ("BOOK_REVIEWS_COUNT", BOOK_REVIEWS_COUNT),
+    ("UPCOMING_IN_SERIES", UPCOMING_IN_SERIES),
 ];
 
 #[cfg(test)]

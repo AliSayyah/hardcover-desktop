@@ -21,6 +21,7 @@ mod shell;
 mod sign_in;
 mod star;
 mod stats;
+mod upcoming;
 mod update;
 
 use gpui_kit::{
