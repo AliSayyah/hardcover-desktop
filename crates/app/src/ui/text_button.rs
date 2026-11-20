@@ -28,6 +28,7 @@ use gpui_kit::{
 };
 
 use super::focus::{FocusTreatment as _, control_radius, focus_visible, keyed_focus};
+use super::reveal::probe;
 use hardcover_core::BookSummary;
 
 use crate::bidi::{WrappingText, is_rtl};
@@ -132,36 +133,38 @@ impl RenderOnce for TextButton {
 
         // A row, so the button keeps its content's width instead of
         // stretching; it may still shrink, and its label truncates.
-        div().flex().min_w_0().max_w_full().child(
-            BaseButton::new(self.id)
-                .track_focus(&focus)
-                .accessibility_label(label.clone())
-                .relative()
-                .min_w_0()
-                .max_w_full()
-                .justify_start()
-                .text_left()
-                .rounded(radius)
-                .text_color(cx.theme().foreground)
-                .body_strong()
-                .when(underline, |this| this.hover(|style| style.underline()))
-                .when_some(on_click, |this, handler| {
-                    this.on_click(move |event, window, cx| handler(event, window, cx))
-                })
-                .refine_style(&self.style)
-                .when(focused, |this| this.focus_ring_around(radius, cx))
-                .child(if wrap {
-                    div()
-                        .min_w_0()
-                        .child(
-                            WrappingText::new(label)
-                                .when_some(line_clamp, |this, lines| this.line_clamp(lines))
-                                .when_some(width, |this, width| this.width(width)),
-                        )
-                        .into_any_element()
-                } else {
-                    div().min_w_0().truncate().child(label).into_any_element()
-                }),
+        probe(
+            div().flex().min_w_0().max_w_full().child(
+                BaseButton::new(self.id)
+                    .track_focus(&focus)
+                    .accessibility_label(label.clone())
+                    .relative()
+                    .min_w_0()
+                    .max_w_full()
+                    .justify_start()
+                    .text_left()
+                    .rounded(radius)
+                    .text_color(cx.theme().foreground)
+                    .body_strong()
+                    .when(underline, |this| this.hover(|style| style.underline()))
+                    .when_some(on_click, |this, handler| {
+                        this.on_click(move |event, window, cx| handler(event, window, cx))
+                    })
+                    .refine_style(&self.style)
+                    .when(focused, |this| this.focus_ring_around(radius, cx))
+                    .child(if wrap {
+                        div()
+                            .min_w_0()
+                            .child(
+                                WrappingText::new(label)
+                                    .when_some(line_clamp, |this, lines| this.line_clamp(lines))
+                                    .when_some(width, |this, width| this.width(width)),
+                            )
+                            .into_any_element()
+                    } else {
+                        div().min_w_0().truncate().child(label).into_any_element()
+                    }),
+            ),
         )
     }
 }

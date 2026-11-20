@@ -19,6 +19,7 @@ use gpui_kit::{
 };
 
 use super::focus::{FocusTreatment as _, control_radius, focus_visible, keyed_focus};
+use super::reveal::probe;
 use crate::bidi::is_rtl;
 use crate::design::TypeRoles as _;
 
@@ -52,22 +53,24 @@ impl RenderOnce for BylineLink {
         let radius = control_radius(cx);
         let underline = !is_rtl(&self.name);
         let url = self.url;
-        div().flex().min_w_0().child(
-            BaseButton::new(self.id)
-                .role(Role::Link)
-                .track_focus(&focus)
-                .accessibility_label(self.name.clone())
-                .relative()
-                .min_w_0()
-                .justify_start()
-                .rounded(radius)
-                .cursor_pointer()
-                .text_color(cx.theme().foreground)
-                .body_strong()
-                .when(underline, |this| this.hover(|style| style.underline()))
-                .on_click(move |_, _, cx| cx.open_url(&url))
-                .when(focused, |this| this.focus_ring_around(radius, cx))
-                .child(div().min_w_0().truncate().child(self.name)),
+        probe(
+            div().flex().min_w_0().child(
+                BaseButton::new(self.id)
+                    .role(Role::Link)
+                    .track_focus(&focus)
+                    .accessibility_label(self.name.clone())
+                    .relative()
+                    .min_w_0()
+                    .justify_start()
+                    .rounded(radius)
+                    .cursor_pointer()
+                    .text_color(cx.theme().foreground)
+                    .body_strong()
+                    .when(underline, |this| this.hover(|style| style.underline()))
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+                    .when(focused, |this| this.focus_ring_around(radius, cx))
+                    .child(div().min_w_0().truncate().child(self.name)),
+            ),
         )
     }
 }

@@ -29,6 +29,7 @@ use crate::design::{TypeRoles as _, colors, size};
 use crate::format::average_rating_text;
 use crate::library::book_row::{BookRow, loading_rows};
 use crate::library::model::LibraryModel;
+use crate::ui::reveal::RevealScroll as _;
 use crate::ui::{ListRow as _, RowFocus, empty_state, on_keyboard_entry, select_first_row};
 
 /// The top of a page: inset 32 on three sides, 16 above the list (whose
@@ -60,6 +61,7 @@ pub fn page_header_scrolling(
         .overflow_y_scroll()
         .track_scroll(scroll)
         .child(content)
+        .reveals_focus(scroll)
 }
 
 /// Back to the top of a [`page_header_scrolling`], for another page.

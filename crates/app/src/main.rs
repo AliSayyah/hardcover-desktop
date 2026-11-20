@@ -152,6 +152,7 @@ fn main() {
             let bundled_fonts = fonts::init(cx);
             design::theme::init(bundled_fonts, cx);
             bind_keys(cx);
+            ui::kit::bind_keys(cx);
             if let Some(exe) = &exe {
                 cx.set_restart_path(exe.clone());
             }

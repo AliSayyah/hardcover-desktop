@@ -23,6 +23,7 @@ use gpui_kit::{
 };
 
 use super::kit::{PopoverSurface as _, RaisedField as _, open_alert_dialog, open_dialog};
+use super::reveal::RevealScroll as _;
 use super::*;
 use crate::bidi::WrappingText;
 use crate::chip::StatusChip;
@@ -142,7 +143,8 @@ impl Render for Gallery {
                             .p_8()
                             .child(main)
                             .child(rail(self.selected_nav, cx)),
-                    ),
+                    )
+                    .reveals_focus(&self.scroll),
             )
     }
 }

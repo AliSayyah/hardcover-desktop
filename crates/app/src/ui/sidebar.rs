@@ -30,16 +30,15 @@ use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Icon, IconName, Selectable};
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Div, ElementId, FontWeight, InteractiveElement, Interactivity,
-    IntoElement, ParentElement as _, RenderOnce, Role, ScrollHandle, SharedString, Stateful,
+    AnyElement, App, ClickEvent, Div, ElementId, FocusHandle, FontWeight, InteractiveElement,
+    Interactivity, IntoElement, ParentElement as _, RenderOnce, Role, SharedString, Stateful,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder as _,
 };
 
 use super::Meter;
-use super::focus::{
-    FocusTreatment as _, control_radius, focus_visible, keyed_focus, reveal_on_focus,
-};
+use super::focus::{FocusTreatment as _, control_radius, focus_visible, keyed_focus};
+use super::reveal::probe;
 use crate::design::type_roles::Family;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
@@ -84,7 +83,6 @@ pub struct GoalRow {
     percent: f32,
     pace: Option<f32>,
     accessibility_label: Option<SharedString>,
-    reveal_in: Option<ScrollHandle>,
     on_click: Option<ClickHandler>,
 }
 
@@ -104,15 +102,8 @@ impl GoalRow {
             percent,
             pace: None,
             accessibility_label: None,
-            reveal_in: None,
             on_click: None,
         }
-    }
-
-    /// The scroller the row sits in, as [`super::NavRow::reveal_in`].
-    pub fn reveal_in(mut self, scroll: &ScrollHandle) -> Self {
-        self.reveal_in = Some(scroll.clone());
-        self
     }
 
     /// The pace tick, at `percent` of the way. `None` draws none.
@@ -147,60 +138,58 @@ impl RenderOnce for GoalRow {
             .accessibility_label
             .unwrap_or_else(|| format!("{}, {}", self.label, self.count).into());
         let meter_id = ElementId::NamedChild(std::sync::Arc::new(self.id.clone()), "meter".into());
-        let reveal = self
-            .reveal_in
-            .map(|scroll| reveal_on_focus(self.id.clone(), &focus, &scroll, window, cx));
-        BaseButton::new(self.id)
-            .track_focus(&focus)
-            .accessibility_label(label)
-            .relative()
-            .flex_col()
-            .items_stretch()
-            .justify_center()
-            .gap_1()
-            .w_full()
-            .h(size::ROW_TALL)
-            .px_2()
-            .rounded(radius)
-            .text_color(colors.fg)
-            .body()
-            .hover(|style| style.bg(colors.hover))
-            .active(|style| style.bg(colors.selected))
-            .when_some(on_click, |this, handler| {
-                this.on_click(move |event, window, cx| handler(event, window, cx))
-            })
-            .when(focused, |this| this.focus_ring(radius, cx))
-            .children(reveal)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        // The mockup's target isn't in the kit's icon set;
-                        // the calendar stands for the goal's period.
-                        Icon::new(IconName::Calendar)
-                            .size_4()
-                            .flex_none()
-                            .text_color(colors.fg_muted),
-                    )
-                    .child(div().flex_1().min_w_0().truncate().child(self.label))
-                    .child(
-                        div()
-                            .flex_none()
-                            .pl_2()
-                            .caption(cx)
-                            .baseline_on(TypeRole::Caption, TypeRole::Body)
-                            .tabular()
-                            .child(self.count),
-                    ),
-            )
-            // From the label spine: past the 16 icon and its 8 gap.
-            .child(
-                div()
-                    .pl_6()
-                    .child(Meter::new(meter_id, self.percent).thin().pace(self.pace)),
-            )
+        probe(
+            BaseButton::new(self.id)
+                .track_focus(&focus)
+                .accessibility_label(label)
+                .relative()
+                .flex_col()
+                .items_stretch()
+                .justify_center()
+                .gap_1()
+                .w_full()
+                .h(size::ROW_TALL)
+                .px_2()
+                .rounded(radius)
+                .text_color(colors.fg)
+                .body()
+                .hover(|style| style.bg(colors.hover))
+                .active(|style| style.bg(colors.selected))
+                .when_some(on_click, |this, handler| {
+                    this.on_click(move |event, window, cx| handler(event, window, cx))
+                })
+                .when(focused, |this| this.focus_ring(radius, cx))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            // The mockup's target isn't in the kit's icon set;
+                            // the calendar stands for the goal's period.
+                            Icon::new(IconName::Calendar)
+                                .size_4()
+                                .flex_none()
+                                .text_color(colors.fg_muted),
+                        )
+                        .child(div().flex_1().min_w_0().truncate().child(self.label))
+                        .child(
+                            div()
+                                .flex_none()
+                                .pl_2()
+                                .caption(cx)
+                                .baseline_on(TypeRole::Caption, TypeRole::Body)
+                                .tabular()
+                                .child(self.count),
+                        ),
+                )
+                // From the label spine: past the 16 icon and its 8 gap.
+                .child(
+                    div()
+                        .pl_6()
+                        .child(Meter::new(meter_id, self.percent).thin().pace(self.pace)),
+                ),
+        )
     }
 }
 
@@ -214,6 +203,7 @@ pub struct AccountRow {
     name: SharedString,
     status: AnyElement,
     status_tooltip: Option<SharedString>,
+    focus: Option<FocusHandle>,
     open: bool,
 }
 
@@ -234,8 +224,17 @@ impl AccountRow {
             name: name.into(),
             status: status.into_any_element(),
             status_tooltip: None,
+            focus: None,
             open: false,
         }
+    }
+
+    /// The row's focus, kept by its view, so the menu and the dialogs it
+    /// opens can give focus back to the row (`PopupMenu::action_context`).
+    /// Without one the row keeps its own.
+    pub fn focus(mut self, focus: &FocusHandle) -> Self {
+        self.focus = Some(focus.clone());
+        self
     }
 
     /// More about the sync line, such as why it failed.
@@ -274,7 +273,10 @@ impl DropdownMenu for AccountRow {}
 impl RenderOnce for AccountRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = colors(cx);
-        let focus = keyed_focus(self.id.clone(), window, cx);
+        let focus = match self.focus {
+            Some(focus) => focus,
+            None => keyed_focus(self.id.clone(), window, cx),
+        };
         let focused = focus_visible(&focus, window);
         let radius = control_radius(cx);
         let status_id =

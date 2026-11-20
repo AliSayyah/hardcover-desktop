@@ -35,8 +35,8 @@ pub fn open_progress(
     let input = view.read(cx).input.clone();
     open_dialog(window, cx, move |dialog, window, _| {
         let ok_view = view.clone();
-        // Enter anywhere in the dialog confirms. The dialog stays open until
-        // the write succeeds, and closes itself then.
+        // Enter in the field saves; on a button it presses that button. The
+        // dialog stays open until the write succeeds, and closes itself then.
         dialog
             .title("Update progress")
             // One field and its commit: the confirmation width, not a form's.
@@ -181,6 +181,11 @@ impl Render for ProgressDialog {
                         this.child(div().body().tabular().text_color(muted).child(total))
                     })
                     .child(div().flex_1())
+                    .child(
+                        Button::new("cancel-progress")
+                            .label("Cancel")
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
                     .child(
                         Button::new("save-progress")
                             .primary()

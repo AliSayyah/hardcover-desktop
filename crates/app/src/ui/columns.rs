@@ -26,6 +26,7 @@ use gpui_kit::{
 };
 
 use super::Rail;
+use super::reveal::probe;
 use crate::design::{colors, size};
 
 /// The narrowest the main column gets beside the rail (400): a lead book's
@@ -88,7 +89,7 @@ pub fn folds(width: Pixels, rem_size: Pixels, wide_gap: bool) -> bool {
 impl RenderOnce for Columns {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let gap = if self.wide_gap { WIDE_GAP } else { GAP };
-        let main = div().flex().flex_col().flex_1().min_w_0().child(self.main);
+        let main = probe(div().flex().flex_col().flex_1().min_w_0().child(self.main));
         if self.rail.is_empty() {
             return div().flex().w_full().child(main).into_any_element();
         }
@@ -118,11 +119,13 @@ impl RenderOnce for Columns {
                     .border_t_1()
                     .border_color(border)
                     .children(self.rail.into_iter().enumerate().map(move |(ix, section)| {
-                        div()
-                            .when(ix > 0, |this| {
-                                this.mt_6().pt_6().border_t_1().border_color(border)
-                            })
-                            .child(section)
+                        probe(
+                            div()
+                                .when(ix > 0, |this| {
+                                    this.mt_6().pt_6().border_t_1().border_color(border)
+                                })
+                                .child(section),
+                        )
                     })),
             )
             .into_any_element()

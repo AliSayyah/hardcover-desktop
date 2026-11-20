@@ -5,9 +5,9 @@
 //! Choosing an edition emits [`EditionChosen`]; the detail view makes the write.
 
 use crate::ui::Skeleton;
+use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex,
     v_flex,
@@ -185,7 +185,7 @@ impl Render for EditionPicker {
                 v_flex()
                     .id("edition-list")
                     .max_h(rems(24.))
-                    .overflow_y_scrollbar()
+                    .scroll_y_revealing_focus()
                     .gap_0p5()
                     .children(rows)
                     .when(self.loading && self.editions.is_empty(), |this| {

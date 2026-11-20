@@ -39,7 +39,7 @@ use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{authors_text, needs_permission};
 use crate::library::book_row::BookRow;
 use crate::library::model::LibraryModel;
-use crate::ui::kit::open_alert_dialog;
+use crate::ui::kit::{open_alert_dialog, row_action};
 use crate::ui::{
     ExternalLink, ListRow as _, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
     select_first_row,
@@ -272,13 +272,17 @@ impl ListDelegate for ListBooks {
                 .child(BookRow::for_catalog(&book.book, details, status))
                 .suffix(move |_, _| {
                     let (lists, book) = (lists.clone(), book.clone());
-                    Button::new(("remove-list-book", book.id.get() as u64))
-                        .ghost()
-                        .small()
-                        .icon(IconName::Close)
-                        .tooltip(remove_tooltip.clone())
-                        .disabled(busy || !can_write)
-                        .on_click(move |_, window, cx| remove_book(&lists, list, &book, window, cx))
+                    row_action(
+                        Button::new(("remove-list-book", book.id.get() as u64))
+                            .ghost()
+                            .small()
+                            .icon(IconName::Close)
+                            .tooltip(remove_tooltip.clone())
+                            .disabled(busy || !can_write)
+                            .on_click(move |_, window, cx| {
+                                remove_book(&lists, list, &book, window, cx)
+                            }),
+                    )
                 }),
         )
     }

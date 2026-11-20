@@ -5,7 +5,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::IconName;
-use gpui_kit::{App, Div, Entity, ParentElement as _, ScrollHandle, SharedString, Window, div};
+use gpui_kit::{App, Div, Entity, ParentElement as _, SharedString, Window, div};
 use hardcover_core::ListId;
 use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LISTS};
 
@@ -19,11 +19,9 @@ use crate::ui::{NavRow, sidebar_label};
 pub type SelectList = Rc<dyn Fn(ListId, &mut Window, &mut App)>;
 
 /// The section, once the session can read lists and they have loaded (or
-/// failed to) at least once. `active` is the list shown, if any; `scroll` is
-/// the sidebar's scroller.
+/// failed to) at least once. `active` is the list shown, if any.
 pub fn lists_section(
     lists: &Entity<ListsModel>,
-    scroll: &ScrollHandle,
     active: Option<ListId>,
     select: SelectList,
     cx: &App,
@@ -51,23 +49,24 @@ pub fn lists_section(
         )
         .selected(active == Some(id))
         .count(count_text(count))
-        .reveal_in(scroll)
         .on_click(move |_, window, cx| select(id, window, cx))
     });
-    let retry = (matches!(model.status(), ListsStatus::Failed(_)) && model.lists().is_empty())
-        .then(|| {
-            let lists = lists.clone();
-            NavRow::new(
-                "nav-lists-retry",
-                IconName::CircleAlert,
-                "Couldn't load. Try again",
-            )
-            .reveal_in(scroll)
-            .on_click(move |_, _, cx| lists.update(cx, |m, cx| m.load(cx)))
-        });
+    let failed = match model.status() {
+        ListsStatus::Failed(message) if model.lists().is_empty() => Some(message.clone()),
+        _ => None,
+    };
+    let retry = failed.map(|message| {
+        let lists = lists.clone();
+        NavRow::new(
+            "nav-lists-retry",
+            IconName::CircleAlert,
+            "Try loading your lists again",
+        )
+        .tooltip(Some(format!("Couldn't load your lists. {message}")))
+        .on_click(move |_, _, cx| lists.update(cx, |m, cx| m.load(cx)))
+    });
     let new_list = lists.clone();
     let create = NavRow::new("nav-new-list", IconName::Plus, "New list…")
-        .reveal_in(scroll)
         .muted(true)
         .disabled(!can_write)
         .tooltip((!can_write).then(|| needs_permission(WRITE_LISTS)))

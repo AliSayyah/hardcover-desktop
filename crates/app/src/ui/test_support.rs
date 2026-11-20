@@ -26,7 +26,10 @@ pub fn host(
     cx: &mut TestAppContext,
     build: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
 ) -> &mut VisualTestContext {
-    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        crate::ui::kit::bind_keys(cx);
+    });
     let (_, cx) = cx.add_window_view(|_, _| Host(Box::new(build)));
     redraw(cx);
     cx

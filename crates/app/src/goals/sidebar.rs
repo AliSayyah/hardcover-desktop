@@ -5,8 +5,8 @@
 use chrono::Datelike as _;
 use gpui_kit::component::IconName;
 use gpui_kit::{
-    App, Context, Entity, IntoElement, ParentElement as _, Render, ScrollHandle, SharedString,
-    Subscription, Window, div,
+    App, Context, Entity, IntoElement, ParentElement as _, Render, SharedString, Subscription,
+    Window, div,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_GOALS};
 use hardcover_core::{Date, Goal};
@@ -21,8 +21,6 @@ use crate::ui::{GoalRow, NavRow, sidebar_label};
 pub struct GoalsSection {
     goals: Entity<GoalsModel>,
     library: Entity<LibraryModel>,
-    /// The sidebar's scroller, so a focused row scrolls into view.
-    scroll: ScrollHandle,
     _subscription: Subscription,
 }
 
@@ -30,14 +28,12 @@ impl GoalsSection {
     pub fn new(
         goals: Entity<GoalsModel>,
         library: Entity<LibraryModel>,
-        scroll: ScrollHandle,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
             _subscription: cx.observe(&goals, |_, _, cx| cx.notify()),
             goals,
             library,
-            scroll,
         }
     }
 
@@ -101,7 +97,6 @@ impl Render for GoalsSection {
                     percent,
                 )
                 .pace(pace_percent(goal, today))
-                .reveal_in(&self.scroll)
                 .accessibility_label(accessible)
                 .on_click(move |_, window, cx| {
                     open_goal(goals.clone(), library.clone(), id, window, cx)
@@ -112,21 +107,20 @@ impl Render for GoalsSection {
         let count = rows.len();
         if rows.is_empty() {
             rows.push(match model.status() {
-                GoalsStatus::Failed(_) if model.goals().is_empty() => {
+                GoalsStatus::Failed(message) if model.goals().is_empty() => {
                     let goals = goals.clone();
                     NavRow::new(
                         "goal-retry",
                         IconName::CircleAlert,
-                        "Couldn't load. Try again",
+                        "Try loading your goal again",
                     )
-                    .reveal_in(&self.scroll)
+                    .tooltip(Some(format!("Couldn't load your reading goal. {message}")))
                     .on_click(move |_, _, cx| goals.update(cx, |m, cx| m.load(cx)))
                     .into_any_element()
                 }
                 _ => {
                     let goals = goals.clone();
                     NavRow::new("goal-new", IconName::Plus, "Set a reading goal…")
-                        .reveal_in(&self.scroll)
                         .muted(true)
                         .disabled(!can_write)
                         .tooltip((!can_write).then(|| needs_permission(WRITE_GOALS)))

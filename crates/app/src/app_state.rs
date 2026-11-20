@@ -640,6 +640,13 @@ fn remove_stale_scaled(cover_dir: &Path) {
     }
 }
 
+/// The cached file for `url`, undecoded, starting a background load on first
+/// use: for an image the cover pipeline can't decode (an SVG avatar), which
+/// GPUI's `img` draws itself. The calling view re-renders when it finishes.
+pub fn cover_file(url: &str, window: &mut Window, cx: &mut App) -> Option<Arc<Path>> {
+    window.use_asset::<CoverFile>(&url.to_owned(), cx).flatten()
+}
+
 /// The row thumbnail for `url`, starting a background load on first use. The
 /// calling view re-renders when it finishes.
 pub fn cover_thumbnail(url: &str, window: &mut Window, cx: &mut App) -> Option<Arc<RenderImage>> {

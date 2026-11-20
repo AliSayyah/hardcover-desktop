@@ -49,7 +49,9 @@ use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::stats::stats_view::StatsView;
-use crate::ui::kit::{open_alert_dialog, open_dialog};
+use crate::ui::focus::{remember_focus, return_focus};
+use crate::ui::kit::{open_alert_dialog, open_alert_dialog_on_result, open_dialog};
+use crate::ui::reveal::RevealScroll as _;
 use crate::ui::{
     AccountRow, Avatar, BackTo, NavRow, ObjectBar, back_label, brand_row, sidebar_label, tools_of,
 };
@@ -212,6 +214,9 @@ pub struct Workspace {
     /// The sidebar's destinations, which scroll between the brand and the
     /// account; a row that gains focus scrolls into view in it.
     sidebar_scroll: ScrollHandle,
+    /// The account row's focus: where the account menu, and the dialogs it
+    /// opens, give focus back.
+    account_focus: FocusHandle,
     lists: Entity<ListsModel>,
     list_page: Entity<ListView>,
     upcoming: Entity<UpcomingModel>,
@@ -260,8 +265,7 @@ impl Workspace {
         let reauthorize = cx.new(|_| Reauthorize::new(model.clone()));
         let goals = cx.new(|cx| GoalsModel::new(model.clone(), cx));
         let sidebar_scroll = ScrollHandle::new();
-        let goals_section = cx
-            .new(|cx| GoalsSection::new(goals.clone(), model.clone(), sidebar_scroll.clone(), cx));
+        let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
         let upcoming = cx.new(|cx| UpcomingModel::new(model.clone(), cx));
         let upcoming_page = cx.new(|cx| UpcomingView::new(upcoming.clone(), model.clone(), cx));
         let home = cx.new(|cx| HomeView::new(model.clone(), goals.clone(), upcoming.clone(), cx));
@@ -345,6 +349,7 @@ impl Workspace {
             goals,
             goals_section,
             sidebar_scroll,
+            account_focus: cx.focus_handle().tab_stop(true),
             lists,
             list_page,
             upcoming,
@@ -360,8 +365,11 @@ impl Workspace {
         }
     }
 
+    /// At launch focus sits on the workspace itself, ahead of the sidebar, so
+    /// Tab walks the window in its visual order: the sidebar, then Home.
+    /// Home binds no keys of its own, so nothing waits on its focus.
     fn focus_initial(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.home.update(cx, |h, cx| h.focus(window, cx));
+        window.focus(&self.focus_handle, cx);
     }
 
     /// Focuses the current destination's primary control.
@@ -415,21 +423,27 @@ impl Workspace {
     // ----- catalogue pages -----
 
     fn open_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pages.push(page) {
+        let from = remember_focus(window, cx);
+        if self.pages.push(page, from) {
             self.show_page(window, cx);
         }
     }
 
-    /// Back to the previous page, or to the destination after the first one.
+    /// Back to the previous page, or to the destination after the first one,
+    /// with focus on the control that opened the page left; on the page's or
+    /// the destination's own focus if that control is gone.
     fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.pages.pop() {
+        let Some(opener) = self.pages.pop() else {
             return;
-        }
+        };
         if self.pages.current().is_some() {
             self.show_page(window, cx);
         } else {
             self.focus_destination(window, cx);
             cx.notify();
+        }
+        if let Some(opener) = opener {
+            return_focus(opener, window, cx);
         }
     }
 
@@ -666,7 +680,6 @@ impl Workspace {
                        action: &dyn Action| {
             let view = view.clone();
             NavRow::new(id, icon, label)
-                .reveal_in(&self.sidebar_scroll)
                 .selected(self.destination == destination)
                 .hint(hint(action))
                 .on_click(move |_, window, cx| {
@@ -691,7 +704,6 @@ impl Workspace {
             .then(|| self.goals_section.clone());
         let lists = lists_section(
             &self.lists,
-            &self.sidebar_scroll,
             match self.destination {
                 Destination::List(id) => Some(id),
                 _ => None,
@@ -785,7 +797,8 @@ impl Workspace {
                             .children(shelves)
                             .children(goals)
                             .children(lists),
-                    ),
+                    )
+                    .reveals_focus(&self.sidebar_scroll),
             )
             .child(
                 v_flex()
@@ -892,7 +905,7 @@ impl Workspace {
             )
         }
         .into();
-        open_alert_dialog(window, cx, move |alert, _, _| {
+        open_alert_dialog_on_result(window, cx, move |alert, _, _| {
             let updates = updates.clone();
             let page_url = page_url.clone();
             let notes = notes.clone();
@@ -905,7 +918,7 @@ impl Workspace {
                             div()
                                 .id("release-notes")
                                 .max_h(rems(18.))
-                                .overflow_y_scrollbar()
+                                .scroll_y_revealing_focus()
                                 .child(TextView::markdown("release-notes-text", notes.clone())),
                         )
                     })
@@ -979,7 +992,7 @@ impl Workspace {
             .as_ref()
             .map(|u| format!("https://hardcover.app/@{}", u.username));
         let view = cx.entity().downgrade();
-        let focus = self.focus_handle.clone();
+        let focus = self.account_focus.clone();
         // After "Later", the permissions notice is one menu item away.
         let reauthorize = self.reauthorize.clone();
         let offer_permissions = {
@@ -996,10 +1009,14 @@ impl Workspace {
             .child(div().min_w_0().truncate().tabular().child(status_text));
 
         AccountRow::new("account", avatar, username, status)
+            .focus(&self.account_focus)
             .status_tooltip(sync_tooltip)
             // Above the row, so the row shows that its menu is open.
             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
                 let view = view.clone();
+                let focus = focus.clone();
+                // Menu commands run from the row, so the dialogs they open
+                // give focus back to it.
                 let menu = menu.action_context(focus.clone()).menu_with_icon(
                     "Refresh library",
                     IconName::RefreshCw,
@@ -1015,10 +1032,11 @@ impl Workspace {
                 };
                 let menu = if offer_permissions {
                     let reauthorize = reauthorize.clone();
-                    menu.item(
-                        PopupMenuItem::new("Grant new permissions…")
-                            .on_click(move |_, _, cx| reauthorize.update(cx, |r, cx| r.show(cx))),
-                    )
+                    menu.item(PopupMenuItem::new("Sign in again…").on_click(
+                        move |_, window, cx| {
+                            reauthorize.update(cx, |r, cx| r.sign_in_again(window, cx))
+                        },
+                    ))
                 } else {
                     menu
                 };
@@ -1038,6 +1056,7 @@ impl Workspace {
                     .separator()
                     .item(
                         PopupMenuItem::new("Sign out…").on_click(move |_, window, cx| {
+                            window.focus(&focus, cx);
                             let _ = view.update(cx, |this, cx| this.confirm_sign_out(window, cx));
                         }),
                     )
