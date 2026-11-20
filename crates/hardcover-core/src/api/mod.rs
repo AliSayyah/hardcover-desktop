@@ -1024,14 +1024,14 @@ impl Client {
         struct Data {
             insert_goal: Option<GoalPayload>,
         }
-        let object = json!({
-            "metric": goal.metric.api_name(),
-            "goal": goal.target,
-            "description": description,
-            "start_date": goal.start.to_string(),
-            "end_date": goal.end.to_string(),
-            "conditions": {},
-        });
+        let object = goal_object(
+            &goal.metric,
+            goal.target,
+            goal.start,
+            goal.end,
+            description,
+            json!({}),
+        );
         let data: Data = self.query(
             "InsertGoal",
             queries::INSERT_GOAL,
@@ -1064,15 +1064,15 @@ impl Client {
         struct Data {
             update_goal: Option<GoalPayload>,
         }
-        let mut object = json!({
-            "metric": goal.metric.api_name(),
-            "goal": goal.target,
-            "description": description,
-            "start_date": goal.start.to_string(),
-            "end_date": goal.end.to_string(),
-            "conditions": conditions,
-            "archived": goal.archived,
-        });
+        let mut object = goal_object(
+            &goal.metric,
+            goal.target,
+            goal.start,
+            goal.end,
+            description,
+            conditions,
+        );
+        object["archived"] = json!(goal.archived);
         // Sent back as read, even an id this version doesn't know: left out,
         // the goal would get the account's default privacy.
         if let Some(privacy) = goal.privacy_id {
@@ -1639,6 +1639,24 @@ fn goal_description(description: Option<&str>) -> Result<&str> {
         .map(str::trim)
         .filter(|d| !d.is_empty())
         .ok_or_else(|| Error::InvalidInput("a goal needs a description".into()))
+}
+
+fn goal_object(
+    metric: &GoalMetric,
+    target: u32,
+    start: Date,
+    end: Date,
+    description: &str,
+    conditions: Value,
+) -> Value {
+    json!({
+        "metric": metric.api_name(),
+        "goal": target,
+        "description": description,
+        "start_date": start.to_string(),
+        "end_date": end.to_string(),
+        "conditions": conditions,
+    })
 }
 
 /// The name to send: Hardcover needs one to make a list's slug.
