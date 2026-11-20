@@ -1014,11 +1014,7 @@ impl Client {
     /// Creates a goal for every book (no conditions), with the account's
     /// default privacy. Hardcover calculates its progress right away.
     pub fn create_goal(&self, goal: &NewGoal) -> Result<Goal> {
-        if goal.target == 0 || goal.end < goal.start {
-            return Err(Error::InvalidInput(
-                "a goal needs a target above zero and an end after its start".into(),
-            ));
-        }
+        validate_goal_dates(goal.target, goal.start, goal.end)?;
         let description = goal_description(Some(&goal.description))?;
         #[derive(Deserialize)]
         struct Data {
@@ -1054,11 +1050,7 @@ impl Client {
                 "this goal has conditions the app can't keep; change it on hardcover.app".into(),
             )
         })?;
-        if goal.target == 0 || goal.end < goal.start {
-            return Err(Error::InvalidInput(
-                "a goal needs a target above zero and an end after its start".into(),
-            ));
-        }
+        validate_goal_dates(goal.target, goal.start, goal.end)?;
         let description = goal_description(goal.description.as_deref())?;
         #[derive(Deserialize)]
         struct Data {
@@ -1639,6 +1631,15 @@ fn goal_description(description: Option<&str>) -> Result<&str> {
         .map(str::trim)
         .filter(|d| !d.is_empty())
         .ok_or_else(|| Error::InvalidInput("a goal needs a description".into()))
+}
+
+fn validate_goal_dates(target: u32, start: Date, end: Date) -> Result<()> {
+    if target == 0 || end < start {
+        return Err(Error::InvalidInput(
+            "a goal needs a target above zero and an end after its start".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn goal_object(
