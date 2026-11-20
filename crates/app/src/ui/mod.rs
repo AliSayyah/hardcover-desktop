@@ -57,14 +57,18 @@ mod surfaces;
 mod test_support;
 mod text_button;
 
-pub use avatar::{Avatar, AvatarSize, initials};
-pub use byline_link::BylineLink;
-pub use empty_state::{EmptyState, empty_state, empty_state_with_action};
-pub use headers::{Greeting, PageHeader, SectionHeader, date_line, greeting, greeting_at, see_all};
-pub use meter::Meter;
-pub use nav_row::NavRow;
-pub use object_bar::{BackTo, ObjectBar, ObjectTools, back_label, tools_of};
-pub use rows::{Lane, ListRow, PropertyList, RowSpacing, Sequence};
-pub use skeleton::{Skeleton, SkeletonRow, SkeletonText};
-pub use surfaces::{Block, Rail, RailSection, blocks, panel};
-pub use text_button::TextButton;
+// Some components have no screen yet; the screen waves will use them.
+#[allow(unused_imports)]
+pub use self::{
+    avatar::{Avatar, AvatarSize, initials},
+    byline_link::BylineLink,
+    empty_state::{EmptyState, empty_state, empty_state_with_action},
+    headers::{Greeting, PageHeader, SectionHeader, date_line, greeting, greeting_at, see_all},
+    meter::Meter,
+    nav_row::NavRow,
+    object_bar::{BackTo, ObjectBar, ObjectTools, back_label, tools_of},
+    rows::{Lane, ListRow, PropertyList, RowSpacing, Sequence},
+    skeleton::{Skeleton, SkeletonRow, SkeletonText},
+    surfaces::{Block, Rail, RailSection, blocks, panel},
+    text_button::TextButton,
+};

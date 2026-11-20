@@ -163,7 +163,7 @@ mod tests {
             let chosen = chosen.clone();
             move |_, _| {
                 div()
-                    .children((0..2).map(|ix| {
+                    .children((0..2usize).map(|ix| {
                         let chosen = chosen.clone();
                         NavRow::new(("nav", ix), IconName::BookOpen, "Shelf")
                             .count("3")

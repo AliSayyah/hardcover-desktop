@@ -155,7 +155,7 @@ pub enum BackTo<'a> {
 mod tests {
     use super::*;
     use crate::ui::test_support::{counter, has_focus, host, press, tab};
-    use gpui_kit::{IntoElement as _, TestAppContext};
+    use gpui_kit::TestAppContext;
 
     #[gpui_kit::test]
     fn back_is_a_button_that_runs_its_handler(cx: &mut TestAppContext) {
