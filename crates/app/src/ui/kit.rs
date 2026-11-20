@@ -1,5 +1,5 @@
 //! Where the kit's components miss the system and the theme can't reach
-//! (`hardcover-design`, Migration status → States and the kit). Each fix is a
+//! (`hardcover-design`, Kit limits). Each fix is a
 //! style the kit lets the app refine; use them wherever the kit component
 //! appears.
 //!
@@ -23,14 +23,25 @@
 //! - [`OnTextSpine`]: a quiet button (ghost, or a danger label) that starts a
 //!   line puts its label, not its padding, on the content's leading edge.
 //!
-//! What can't be fixed without patching the kit:
+//! What can't be fixed without patching the kit (the same list as the
+//! system's "Kit limits"):
 //! - **Menus** (`PopupMenu`: dropdown and context menus) and the **Select
 //!   dropdown** take no style from outside: they round at 6, not 8, and keep
-//!   the kit's shadow.
+//!   the kit's shadow, not `shadow-popover`.
+//! - **Menu items** are 26 high (one every 28 with the gap), not 32, and
+//!   their icons are 12, not 16: the menu sets both itself. An element item
+//!   only gets a minimum height, and rebuilding every item as one would lose
+//!   the kit's icon slot, check marks and key hints, and mix two heights.
 //! - **Menu hover in dark mode** stays at 10%: the kit reads one colour
 //!   (`accent`) for menu items and ghost buttons, and halves it for ghost
 //!   buttons in dark mode. The theme picks 10% so ghost buttons get the
 //!   system's 5%.
+//! - **A disabled switch** fades its track only, not its thumb.
+//! - **Radios** draw their outline in `border-strong` and halve it when
+//!   disabled; a style reaches the radio's row, not its circle. An
+//!   unchecked disabled radio is faint, most in dark mode, so the app avoids
+//!   one where it can (Settings shows a theme fixed by `HARDCOVER_THEME` as
+//!   a value); a form's radios are disabled only while it saves.
 //! - **`DatePicker`** paints its field on an inner element the style doesn't
 //!   reach, so it stays paper.
 //! - **A dialog's shadow** is set after its style is applied, so it keeps

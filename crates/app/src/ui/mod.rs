@@ -39,7 +39,7 @@
 //! | [`Stars`] | A rating shown, not set: Hardcover's average, another reader's rating (muted, never gold) |
 //! | [`brand_row`], [`sidebar_label`], [`GoalRow`], [`AccountRow`] | The sidebar's other parts: the brand, a section label, the reading goal, the account menu's trigger |
 //! | [`Avatar`] | A person: their picture, else initials on their colour or `accent-soft` |
-//! | [`focus`] | The focus ring and edge, for a component that tracks its own focus; giving focus back after a page |
+//! | [`focus`] | The focus ring, edge and row treatment, for a component that tracks its own focus; giving focus back after a page |
 //! | [`reveal`] | Keeping the focused element in view: the opt-in on a scrolling region, and [`reveal::probe`] |
 //! | [`kit`] | Fixes for the kit's own components: raised fields, small controls, dialogs and their keys, quiet buttons on the text spine |
 //!
