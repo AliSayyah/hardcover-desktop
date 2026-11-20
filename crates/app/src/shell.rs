@@ -596,7 +596,7 @@ impl Workspace {
             let action = shelf_action(status);
             let item = nav_item(
                 status_label(status),
-                shelf_icon(status),
+                crate::chip::status_icon(status),
                 Destination::Shelf(status),
                 action.as_ref(),
             );
@@ -995,17 +995,6 @@ fn shelf_action(status: ReadingStatus) -> Box<dyn Action> {
         ReadingStatus::Paused => Box::new(ShowPaused),
         ReadingStatus::DidNotFinish => Box::new(ShowDidNotFinish),
         ReadingStatus::Ignored => Box::new(ShowIgnored),
-    }
-}
-
-fn shelf_icon(status: ReadingStatus) -> IconName {
-    match status {
-        ReadingStatus::CurrentlyReading => IconName::BookOpen,
-        ReadingStatus::WantToRead => IconName::Inbox,
-        ReadingStatus::Read => IconName::CircleCheck,
-        ReadingStatus::Paused => IconName::Pause,
-        ReadingStatus::DidNotFinish => IconName::Ban,
-        ReadingStatus::Ignored => IconName::EyeOff,
     }
 }
 

@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, FontWeight, IntoElement, ObjectFit, ParentElement as _,
@@ -19,6 +18,7 @@ use super::{BookDetailView, Details, section};
 use crate::app_state::{Services, cover_thumbnail};
 use crate::bidi::WrappingText;
 use crate::catalog::navigation::{self, Page};
+use crate::chip::{TAG_HEIGHT, TagChip};
 use crate::format::{authors_text, series_position_text};
 
 /// Similar books fetched for one book.
@@ -255,33 +255,40 @@ impl BookDetailView {
     }
 
     fn render_tags(&self, details: &BookDetails, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let groups: Vec<(&'static str, &[String])> = [
-            ("Genres", details.genres.as_slice()),
-            ("Moods", details.moods.as_slice()),
-            ("Content warnings", details.content_warnings.as_slice()),
-            ("Other tags", details.tags.as_slice()),
+        // The label, the tags, and whether they are content warnings.
+        let groups: Vec<(&'static str, &[String], bool)> = [
+            ("Genres", details.genres.as_slice(), false),
+            ("Moods", details.moods.as_slice(), false),
+            (
+                "Content warnings",
+                details.content_warnings.as_slice(),
+                true,
+            ),
+            ("Other tags", details.tags.as_slice(), false),
         ]
         .into_iter()
-        .filter(|(_, tags)| !tags.is_empty())
+        .filter(|(_, tags, _)| !tags.is_empty())
         .collect();
         if groups.is_empty() {
             return None;
         }
         let hidden: usize = groups
             .iter()
-            .map(|(_, tags)| tags.len().saturating_sub(TAGS_SHOWN))
+            .map(|(_, tags, _)| tags.len().saturating_sub(TAGS_SHOWN))
             .sum();
         let expanded = self.tags_expanded;
         let muted = cx.theme().muted_foreground;
         Some(
             section("Tags")
-                .children(groups.into_iter().map(|(label, tags)| {
+                .children(groups.into_iter().map(|(label, tags, warning)| {
                     let shown = if expanded {
                         tags.len()
                     } else {
                         tags.len().min(TAGS_SHOWN)
                     };
-                    // The label column lines up with the form labels above.
+                    // The label column lines up with the form labels above, and
+                    // the label's line height is a chip's, so the label sits on
+                    // the first row of chips.
                     h_flex()
                         .items_start()
                         .child(
@@ -290,14 +297,15 @@ impl BookDetailView {
                                 .w(rems(6.))
                                 .pr_2()
                                 .text_sm()
+                                .line_height(rems(TAG_HEIGHT))
                                 .text_color(muted)
                                 .child(label),
                         )
                         .child(
-                            h_flex().flex_1().min_w_0().flex_wrap().gap_1().children(
+                            h_flex().flex_1().min_w_0().flex_wrap().gap_1p5().children(
                                 tags[..shown]
                                     .iter()
-                                    .map(|t| Tag::secondary().small().child(t.clone())),
+                                    .map(|t| TagChip::new(t.clone()).warning(warning)),
                             ),
                         )
                 }))
