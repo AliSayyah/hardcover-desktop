@@ -18,9 +18,9 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
@@ -974,7 +974,7 @@ impl Render for HomeView {
         let width = (window.viewport_size().width - size::SIDEBAR.to_pixels(rem))
             .min(rems(MAX_WIDTH).to_pixels(rem))
             - rems(4.).to_pixels(rem);
-        root.overflow_y_scrollbar()
+        root.scroll_y_revealing_focus()
             .child(
                 page().child(header).child(
                     div().pt_6().child(

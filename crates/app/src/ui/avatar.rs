@@ -1,9 +1,9 @@
 //! Avatar (`hardcover-design`, Reviews and Sidebar): a person as a circle.
 //!
 //! In order of preference:
-//! 1. their picture, through the cover pipeline (decoded and scaled on the
-//!    cover-decoder thread, like a list cover; a format it can't decode, such
-//!    as SVG, falls through);
+//! 1. their picture: a raster one through the cover pipeline (decoded and
+//!    scaled on the cover-decoder thread, like a list cover), an SVG (many
+//!    Hardcover avatars) drawn from its cached file by GPUI;
 //! 2. their initials on their Hardcover colour (`cached_image.color`), in
 //!    white or ink, whichever reads ([`data_color`], [`text_on_data`]);
 //! 3. their initials in `accent` on `accent-soft`.
@@ -13,16 +13,16 @@
 //!
 //! ```ignore
 //! Avatar::new(name)
-//!     .image(reviewer.raster_avatar().map(|a| a.url.clone()))
+//!     .image(user.avatar.as_ref().map(|a| a.url.clone()))
 //!     .data_color(reviewer.color)
 //! ```
 
 use gpui_kit::{
-    App, FontWeight, IntoElement, ObjectFit, ParentElement as _, RenderOnce, SharedString,
-    Styled as _, StyledImage as _, Window, div, img,
+    App, FontWeight, ImageSource, IntoElement, ObjectFit, ParentElement as _, RenderOnce,
+    SharedString, Styled as _, StyledImage as _, Window, div, img,
 };
 
-use crate::app_state::cover_thumbnail;
+use crate::app_state::{cover_file, cover_thumbnail};
 use crate::design::color::{data_color, text_on_data};
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors, size};
@@ -58,8 +58,7 @@ impl Avatar {
         }
     }
 
-    /// The picture's URL. Pass only raster images the cover pipeline can
-    /// decode.
+    /// The picture's URL: a raster image or an SVG.
     pub fn image(mut self, url: Option<impl Into<SharedString>>) -> Self {
         self.image = url.map(Into::into);
         self
@@ -84,10 +83,13 @@ impl RenderOnce for Avatar {
             AvatarSize::Md => size::AVATAR,
             AvatarSize::Xl => size::AVATAR_LARGE,
         };
-        let picture = self
-            .image
-            .as_deref()
-            .and_then(|url| cover_thumbnail(url, window, cx));
+        let picture = self.image.as_deref().and_then(|url| {
+            if is_svg(url) {
+                cover_file(url, window, cx).map(ImageSource::from)
+            } else {
+                cover_thumbnail(url, window, cx).map(ImageSource::from)
+            }
+        });
         let circle = div()
             .flex()
             .flex_none()
@@ -122,6 +124,12 @@ impl RenderOnce for Avatar {
     }
 }
 
+/// Whether `url` names an SVG, which the cover pipeline can't decode.
+fn is_svg(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or_default();
+    path.to_ascii_lowercase().ends_with(".svg")
+}
+
 /// One or two letters for an avatar: the first letter of the first and last
 /// words. "@user" counts from the letter after the "@".
 pub fn initials(name: &str) -> String {
@@ -150,5 +158,14 @@ mod tests {
         assert_eq!(initials("@quill_reads"), "Q");
         assert_eq!(initials("شیرین"), "ش");
         assert_eq!(initials(""), "");
+    }
+
+    #[test]
+    fn svg_pictures_skip_the_cover_pipeline() {
+        assert!(is_svg(
+            "https://assets.hardcover.app/users/1/avatar.SVG?v=2"
+        ));
+        assert!(!is_svg("https://assets.hardcover.app/users/1/avatar.png"));
+        assert!(!is_svg("https://assets.hardcover.app/svg/avatar.jpg#x.svg"));
     }
 }

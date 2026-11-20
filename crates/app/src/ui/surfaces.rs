@@ -17,6 +17,7 @@ use gpui_kit::{
 };
 
 use super::focus::box_radius;
+use super::reveal::probe;
 use crate::design::{TypeRoles as _, colors, size};
 
 /// A panel: `surface` fill, `r-box` corners, 16 inset, no border or shadow.
@@ -79,11 +80,13 @@ impl RenderOnce for Rail {
                     .into_iter()
                     .enumerate()
                     .map(move |(ix, section)| {
-                        div()
-                            .when(ix > 0, |this| {
-                                this.mt_6().pt_6().border_t_1().border_color(border)
-                            })
-                            .child(section)
+                        probe(
+                            div()
+                                .when(ix > 0, |this| {
+                                    this.mt_6().pt_6().border_t_1().border_color(border)
+                                })
+                                .child(section),
+                        )
                     }),
             )
     }
@@ -98,7 +101,7 @@ fn title_row(title: Div, action: Option<AnyElement>) -> Div {
         .min_h(size::CONTROL_SMALL)
         .gap_2()
         .child(title.flex_1().min_w_0())
-        .children(action.map(|action| div().flex_none().child(action)))
+        .children(action.map(|action| probe(div().flex_none().child(action))))
 }
 
 /// One section of a [`Rail`]: a `label` title, an optional small trailing
@@ -140,7 +143,7 @@ impl RenderOnce for RailSection {
             .flex_col()
             .gap_2()
             .child(title_row(div().label(cx).child(self.title), self.action))
-            .children(self.children)
+            .children(self.children.into_iter().map(probe))
     }
 }
 
@@ -191,7 +194,7 @@ impl RenderOnce for Block {
             .w_full()
             .gap_2()
             .child(title_row(div().heading().child(self.heading), self.action))
-            .children(self.children)
+            .children(self.children.into_iter().map(probe))
     }
 }
 

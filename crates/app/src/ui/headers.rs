@@ -19,6 +19,7 @@ use gpui_kit::{
     SharedString, Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 
+use super::reveal::probe;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
 /// A destination's title. See the module doc.
@@ -188,7 +189,10 @@ impl RenderOnce for SectionHeader {
                     .truncate()
                     .child(self.title),
             )
-            .children(self.action.map(|action| div().flex_none().child(action)))
+            .children(
+                self.action
+                    .map(|action| probe(div().flex_none().child(action))),
+            )
     }
 }
 

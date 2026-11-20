@@ -8,7 +8,6 @@ use gpui_kit::component::form::{Field, Form};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::{Radio, RadioGroup};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Disableable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     App, AppContext as _, Axis, Context, Entity, InteractiveElement as _, IntoElement,
@@ -28,8 +27,9 @@ use crate::format::{
 };
 use crate::library::model::LibraryModel;
 use crate::ui::Meter;
-use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::{OnTextSpine as _, RaisedField as _};
 use crate::ui::kit::{open_alert_dialog, open_dialog};
+use crate::ui::reveal::RevealScroll as _;
 
 fn today() -> Date {
     chrono::Local::now().date_naive()
@@ -160,9 +160,14 @@ impl GoalView {
         let Some(goal) = self.goals.read(cx).goal(self.id).cloned() else {
             return;
         };
-        let Some(target) = self.new_target(&goal, cx) else {
+        let Some(target) = parse_target(&self.target.read(cx).value()) else {
+            self.error = Some("Enter a target above 0.".into());
+            cx.notify();
             return;
         };
+        if target == goal.target {
+            return;
+        }
         let mut edited = goal.clone();
         edited.target = target;
         edited.description = Some(retargeted_description(&goal, target));
@@ -316,6 +321,7 @@ impl GoalView {
                         .child(div().child(unit))
                         .child(
                             Button::new("save-goal-target")
+                                .primary()
                                 .label("Save")
                                 .loading(writing)
                                 .disabled(reason.is_some() || writing || !changed)
@@ -366,12 +372,14 @@ impl GoalView {
                 if count == 0 {
                     this.child(div().text_color(muted).child("None yet."))
                 } else {
+                    // Five and a half rows: a row cut in half says the list
+                    // scrolls, as a hover-only scrollbar can't.
                     this.child(
                         v_flex()
                             .id("goal-finished-books")
                             .gap_1()
-                            .max_h(rems(12.))
-                            .overflow_y_scrollbar()
+                            .max_h(rems(8.25))
+                            .scroll_y_revealing_focus()
                             .children(rows),
                     )
                 }
@@ -396,16 +404,23 @@ impl Render for GoalView {
             .gap_6()
             .body()
             .child(self.render_summary(&goal, cx))
-            .child(self.render_target(&goal, label_width(window), cx))
+            // The error right under the field it is about, where a short
+            // dialog still shows it (a field's own row doesn't wrap).
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(self.render_target(&goal, label_width(window), cx))
+                    .when_some(self.error.clone(), |this, error| {
+                        this.child(div().text_color(colors(cx).danger).child(error))
+                    }),
+            )
             .child(self.render_finished(&goal, cx))
-            .when_some(self.error.clone(), |this, error| {
-                this.child(div().text_color(colors(cx).danger).child(error))
-            })
             .child(
                 h_flex().child(
                     Button::new("delete-goal")
                         .danger()
                         .label("Delete goal…")
+                        .on_text_spine(false)
                         .disabled(!can_write || writing)
                         .when(!can_write, |this| {
                             this.tooltip(needs_permission(WRITE_GOALS))

@@ -14,8 +14,8 @@
 
 use std::rc::Rc;
 
+use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::chart::BarChart;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, InteractiveElement as _,
@@ -95,7 +95,7 @@ impl Render for StatsView {
                 ))
                 .into_any_element();
         }
-        root.overflow_y_scrollbar()
+        root.scroll_y_revealing_focus()
             .child(
                 v_flex()
                     .w_full()

@@ -185,7 +185,7 @@ impl Render for SignInView {
                     div()
                         .caption(cx)
                         .text_center()
-                        .child("If the browser didn't open, copy this link into it."),
+                        .child("If the browser didn't open, paste this link into it."),
                 )
                 .child(
                     h_flex()

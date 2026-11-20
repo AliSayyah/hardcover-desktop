@@ -22,8 +22,8 @@
 //! | [`Greeting`], [`greeting`], [`date_line`] | Home's header: the date over "Good morning" |
 //! | [`SectionHeader`], [`see_all`] | A section's title on Home or a page, with "See all 5" |
 //! | [`Sequence`], [`RowSpacing`] | Read-only rows between hairlines: Continue reading, Coming soon, reviews |
-//! | [`ListRow`] | The list row treatment on a collection's `ListItem`: padding, fills, focus edge |
-//! | [`RowFocus`], [`on_keyboard_entry`], [`select_first_row`], [`enter_list`] | A collection delegate's copy of its list's focus and selection, for `ListRow`'s focus edge; the list as a tab stop that lands on a row |
+//! | [`ListRow`] | The list row treatment on a collection's `ListItem`: padding, fills, focus ring and edge |
+//! | [`RowFocus`], [`on_keyboard_entry`], [`select_first_row`], [`enter_list`] | A collection delegate's copy of its list's focus and selection, for `ListRow`'s focus treatment; the list as a tab stop that lands on a row |
 //! | [`Lane`] | A fixed, right-aligned lane for trailing figures or actions, kept when empty |
 //! | [`SeriesStrip`], [`StripItem`] | A series as a row of sm covers, each with its shelf's icon and position under it; the next one in ink; "+N" for the rest |
 //! | [`CoverSlot`] | A dashed place the size of a cover, for a book not in the library (empty) or not out yet (a clock) |
@@ -39,7 +39,8 @@
 //! | [`Stars`] | A rating shown, not set: Hardcover's average, another reader's rating (muted, never gold) |
 //! | [`brand_row`], [`sidebar_label`], [`GoalRow`], [`AccountRow`] | The sidebar's other parts: the brand, a section label, the reading goal, the account menu's trigger |
 //! | [`Avatar`] | A person: their picture, else initials on their colour or `accent-soft` |
-//! | [`focus`] | The focus ring and edge, for a component that tracks its own focus |
+//! | [`focus`] | The focus ring and edge, for a component that tracks its own focus; giving focus back after a page |
+//! | [`reveal`] | Keeping the focused element in view: the opt-in on a scrolling region, and [`reveal::probe`] |
 //! | [`kit`] | Fixes for the kit's own components: raised fields and dialogs, the popover surface |
 //!
 //! Each component's module doc says when to use it, with an example.
@@ -63,6 +64,7 @@ mod meter;
 mod month_bars;
 mod nav_row;
 mod object_bar;
+pub mod reveal;
 mod row_focus;
 mod rows;
 mod series_strip;

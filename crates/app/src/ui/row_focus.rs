@@ -9,7 +9,7 @@
 //! list calls on every change, a click and a confirm included).
 //!
 //! - [`RowFocus::shows_focus`]: the row is the selected one and the list
-//!   shows keyboard focus, so it takes the focus edge.
+//!   shows keyboard focus, so it takes the focus treatment.
 //! - [`RowFocus::is_selected`]: the row is the selected one, so its trailing
 //!   figures turn from `fg-muted` to `fg`, as on a selected nav row.
 //!

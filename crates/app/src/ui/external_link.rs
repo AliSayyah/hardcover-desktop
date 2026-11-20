@@ -21,6 +21,7 @@ use gpui_kit::{
 };
 
 use super::focus::{FocusTreatment as _, control_radius, focus_visible, keyed_focus};
+use super::reveal::probe;
 use crate::design::{TypeRoles as _, colors};
 
 /// A link that opens the browser. See the module doc.
@@ -53,27 +54,29 @@ impl RenderOnce for ExternalLink {
         let radius = control_radius(cx);
         let accent = colors(cx).accent;
         let url = self.url;
-        div().flex().min_w_0().child(
-            BaseButton::new(self.id)
-                .role(Role::Link)
-                .track_focus(&focus)
-                .accessibility_label(self.label.clone())
-                .relative()
-                .min_w_0()
-                .gap_1()
-                .items_center()
-                .rounded(radius)
-                .cursor_pointer()
-                .body()
-                .text_color(accent)
-                .on_click(move |_, _, cx| cx.open_url(&url))
-                .when(focused, |this| this.focus_ring_around(radius, cx))
-                .child(div().min_w_0().truncate().underline().child(self.label))
-                .child(
-                    Icon::new(IconName::ExternalLink)
-                        .size_3()
-                        .text_color(accent),
-                ),
+        probe(
+            div().flex().min_w_0().child(
+                BaseButton::new(self.id)
+                    .role(Role::Link)
+                    .track_focus(&focus)
+                    .accessibility_label(self.label.clone())
+                    .relative()
+                    .min_w_0()
+                    .gap_1()
+                    .items_center()
+                    .rounded(radius)
+                    .cursor_pointer()
+                    .body()
+                    .text_color(accent)
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+                    .when(focused, |this| this.focus_ring_around(radius, cx))
+                    .child(div().min_w_0().truncate().underline().child(self.label))
+                    .child(
+                        Icon::new(IconName::ExternalLink)
+                            .size_3()
+                            .text_color(accent),
+                    ),
+            ),
         )
     }
 }

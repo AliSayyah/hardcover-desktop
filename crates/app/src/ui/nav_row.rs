@@ -16,8 +16,8 @@
 //! - Disabled ([`NavRow::disabled`]): 50% opacity, no hover or press, out of
 //!   the Tab order, with the reason in its tooltip ([`NavRow::tooltip`],
 //!   usually `format::needs_permission`).
-//! - In a scroller, [`NavRow::reveal_in`] scrolls the row into view when it
-//!   gains focus.
+//! - In a scroller that reveals focus ([`super::reveal`]), the row is shown
+//!   when it gains focus.
 //!
 //! ```ignore
 //! NavRow::new("nav-home", IconName::LayoutDashboard, "Home")
@@ -34,13 +34,12 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
     AnyElement, App, ClickEvent, ElementId, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, RenderOnce, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Window, div, prelude::FluentBuilder as _,
+    ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Window, div, prelude::FluentBuilder as _,
 };
 
-use super::focus::{
-    FocusTreatment as _, control_radius, focus_visible, keyed_focus, reveal_on_focus,
-};
+use super::focus::{FocusTreatment as _, control_radius, focus_visible, keyed_focus};
+use super::reveal::probe;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -57,7 +56,6 @@ pub struct NavRow {
     muted: bool,
     disabled: bool,
     tooltip: Option<SharedString>,
-    reveal_in: Option<ScrollHandle>,
     on_click: Option<ClickHandler>,
 }
 
@@ -77,7 +75,6 @@ impl NavRow {
             muted: false,
             disabled: false,
             tooltip: None,
-            reveal_in: None,
             on_click: None,
         }
     }
@@ -119,13 +116,6 @@ impl NavRow {
         self
     }
 
-    /// The scroller the row sits in: it scrolls to show the row when the row
-    /// gains focus ([`super::focus::reveal_on_focus`]).
-    pub fn reveal_in(mut self, scroll: &ScrollHandle) -> Self {
-        self.reveal_in = Some(scroll.clone());
-        self
-    }
-
     pub fn on_click(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -145,9 +135,6 @@ impl RenderOnce for NavRow {
         let disabled = self.disabled;
         let on_click = self.on_click;
         let tooltip = self.tooltip;
-        let reveal = self
-            .reveal_in
-            .map(|scroll| reveal_on_focus(self.id.clone(), &focus, &scroll, window, cx));
         let trailing: Option<AnyElement> = match (self.hint, self.count) {
             (Some(hint), _) => Some(hint),
             (None, Some(count)) => Some(
@@ -162,7 +149,7 @@ impl RenderOnce for NavRow {
             (None, None) => None,
         };
 
-        BaseButton::new(self.id)
+        let row = BaseButton::new(self.id)
             .track_focus(&focus)
             .selected(selected)
             .disabled(disabled)
@@ -192,14 +179,14 @@ impl RenderOnce for NavRow {
                 this.on_click(move |event, window, cx| handler(event, window, cx))
             })
             .when(focused, |this| this.focus_ring(radius, cx))
-            .children(reveal)
             .child(self.icon.size_4().flex_none().text_color(if selected {
                 colors.accent
             } else {
                 colors.fg_muted
             }))
             .child(div().flex_1().min_w_0().truncate().child(self.label))
-            .children(trailing.map(|t| div().flex_none().pl_2().child(t)))
+            .children(trailing.map(|t| div().flex_none().pl_2().child(t)));
+        probe(row)
     }
 }
 

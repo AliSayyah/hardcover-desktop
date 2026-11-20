@@ -198,10 +198,12 @@ impl Reauthorize {
         }
     }
 
-    /// Brings the notice back after "Later".
-    pub fn show(&mut self, cx: &mut Context<Self>) {
+    /// "Sign in again…" from the account menu, after "Later": brings the
+    /// notice back and starts the sign-in.
+    pub fn sign_in_again(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dismissed = false;
         cx.notify();
+        self.start(window, cx);
     }
 
     /// True after "Later": the account menu then offers the notice again.

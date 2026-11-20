@@ -10,8 +10,8 @@
 //! - **Failed:** one muted sentence with "Try again".
 //! - **Empty:** the empty state.
 
+use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::Button;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{IconName, Sizable as _, h_flex};
 use gpui_kit::{
     AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -169,7 +169,7 @@ impl Render for UpcomingView {
             _ => None,
         };
 
-        root.overflow_y_scrollbar()
+        root.scroll_y_revealing_focus()
             .child(
                 column()
                     .child(PageHeader::new("Coming soon").line(count))

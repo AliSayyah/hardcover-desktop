@@ -6,7 +6,7 @@
 //!   [`super::TextButton`]s.
 //! - [`ListRow`]: the list row of a collection you select from (a shelf,
 //!   search results, a list): padding 8, `r-box`, gap 12, the `hover` and
-//!   `selected` fills, the focus edge. On the kit's `ListItem`.
+//!   `selected` fills, the focus ring and edge. On the kit's `ListItem`.
 //! - [`Lane`]: a fixed, right-aligned lane for trailing figures or actions,
 //!   kept even when a row has nothing for it, so columns stay aligned.
 //! - [`PropertyList`]: key and value rows ("Edition", "Owned", "Privacy").
@@ -19,6 +19,7 @@ use gpui_kit::{
 };
 
 use super::focus::{FocusTreatment as _, box_radius};
+use super::reveal::probe;
 use crate::design::{TypeRoles as _, colors, size};
 
 /// The space above and below each row of a [`Sequence`].
@@ -78,15 +79,17 @@ impl RenderOnce for Sequence {
             .flex_col()
             .w_full()
             .children(self.rows.into_iter().enumerate().map(move |(ix, row)| {
-                div()
-                    .w_full()
-                    .map(|this| match spacing {
-                        RowSpacing::Rows => this.py_3(),
-                        RowSpacing::Reviews => this.py_4(),
-                    })
-                    .when(ix == 0 && flush_top, |this| this.pt_0())
-                    .when(ix > 0, |this| this.border_t_1().border_color(border))
-                    .child(row)
+                probe(
+                    div()
+                        .w_full()
+                        .map(|this| match spacing {
+                            RowSpacing::Rows => this.py_3(),
+                            RowSpacing::Reviews => this.py_4(),
+                        })
+                        .when(ix == 0 && flush_top, |this| this.pt_0())
+                        .when(ix > 0, |this| this.border_t_1().border_color(border))
+                        .child(row),
+                )
             }))
     }
 }
@@ -96,10 +99,11 @@ impl RenderOnce for Sequence {
 /// - padding 8, `r-box` corners, children 12 apart, rows 2 apart;
 /// - `hover` on the pointer and `selected` on the current row (the theme's
 ///   `list_hover` and `list_active`, which the list applies itself);
-/// - with `focused`, the 1 px accent edge inside the row. The kit's list
-///   clips each row, so a row never takes the outer ring. Pass whether this
-///   row is the selected one and its list shows keyboard focus
-///   ([`super::focus::focus_visible`] on the list's focus handle).
+/// - with `focused`, the focus ring outside and the 1 px accent edge inside
+///   ([`super::focus::FocusTreatment::focus_row`]), drawn over the list
+///   that clips the row. Pass whether this row is the selected one and its
+///   list shows keyboard focus ([`super::focus::focus_visible`] on the
+///   list's focus handle).
 ///
 /// ```ignore
 /// ListItem::new(("library-book", id))
@@ -117,7 +121,7 @@ impl ListRow for ListItem {
             .mb_0p5()
             .rounded(box_radius(cx))
             .text_color(cx.theme().foreground)
-            .when(focused, |this| this.focus_edge(cx))
+            .when(focused, |this| this.focus_row(box_radius(cx), cx))
     }
 }
 
@@ -183,19 +187,21 @@ impl ParentElement for Lane {
 
 impl RenderOnce for Lane {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_none()
-            .when_some(self.width, |this, width| this.w(width))
-            .map(|this| {
-                if self.stacked {
-                    this.flex_col().items_end().gap_1()
-                } else {
-                    this.items_center().justify_end().gap_2()
-                }
-            })
-            .text_right()
-            .children(self.children)
+        probe(
+            div()
+                .flex()
+                .flex_none()
+                .when_some(self.width, |this, width| this.w(width))
+                .map(|this| {
+                    if self.stacked {
+                        this.flex_col().items_end().gap_1()
+                    } else {
+                        this.items_center().justify_end().gap_2()
+                    }
+                })
+                .text_right()
+                .children(self.children),
+        )
     }
 }
 
@@ -248,28 +254,30 @@ impl RenderOnce for PropertyList {
             .gap_2()
             .body()
             .children(self.rows.into_iter().map(move |(key, value)| {
-                h_flex()
-                    .w_full()
-                    .items_start()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .w(key_width)
-                            .h(size::CONTROL_SMALL)
-                            .pr_2()
-                            .text_color(muted)
-                            .child(div().min_w_0().truncate().child(key)),
-                    )
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .min_h(size::CONTROL_SMALL)
-                            .gap_2()
-                            .child(value),
-                    )
+                probe(
+                    h_flex()
+                        .w_full()
+                        .items_start()
+                        .child(
+                            div()
+                                .flex()
+                                .flex_none()
+                                .items_center()
+                                .w(key_width)
+                                .h(size::CONTROL_SMALL)
+                                .pr_2()
+                                .text_color(muted)
+                                .child(div().min_w_0().truncate().child(key)),
+                        )
+                        .child(
+                            h_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .min_h(size::CONTROL_SMALL)
+                                .gap_2()
+                                .child(value),
+                        ),
+                )
             }))
     }
 }

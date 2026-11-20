@@ -8,6 +8,8 @@
 use gpui_kit::{App, AppContext as _, Entity, EventEmitter, Global};
 use hardcover_core::{AuthorId, BookSummary, SeriesId};
 
+use crate::ui::focus::FocusReturn;
+
 /// A catalogue page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Page {
@@ -29,10 +31,11 @@ impl Page {
     }
 }
 
-/// Pages opened since the last sidebar destination, oldest first.
-#[derive(Debug, Default)]
+/// Pages opened since the last sidebar destination, oldest first, each
+/// with where focus was when it opened, for Back to return to.
+#[derive(Default)]
 pub struct PageStack {
-    pages: Vec<Page>,
+    pages: Vec<(Page, Option<FocusReturn>)>,
 }
 
 impl PageStack {
@@ -40,31 +43,32 @@ impl PageStack {
     const MAX: usize = 50;
 
     pub fn current(&self) -> Option<&Page> {
-        self.pages.last()
+        self.pages.last().map(|(page, _)| page)
     }
 
     /// The page under the current one: where Back goes. `None` when Back
     /// returns to the destination.
     pub fn previous(&self) -> Option<&Page> {
-        self.pages.len().checked_sub(2).map(|ix| &self.pages[ix])
+        self.pages.len().checked_sub(2).map(|ix| &self.pages[ix].0)
     }
 
-    /// Opens `page`. Opening the page already shown does nothing; returns
-    /// whether the current page changed.
-    pub fn push(&mut self, page: Page) -> bool {
+    /// Opens `page` from where focus is (`from`). Opening the page already
+    /// shown does nothing; returns whether the current page changed.
+    pub fn push(&mut self, page: Page, from: Option<FocusReturn>) -> bool {
         if self.current().is_some_and(|p| p.same_target(&page)) {
             return false;
         }
         if self.pages.len() == Self::MAX {
             self.pages.remove(0);
         }
-        self.pages.push(page);
+        self.pages.push((page, from));
         true
     }
 
-    /// Leaves the current page. `false` if there was none.
-    pub fn pop(&mut self) -> bool {
-        self.pages.pop().is_some()
+    /// Leaves the current page: `None` if there was none, else where focus
+    /// was when it opened.
+    pub fn pop(&mut self) -> Option<Option<FocusReturn>> {
+        self.pages.pop().map(|(_, from)| from)
     }
 
     pub fn clear(&mut self) {
@@ -116,28 +120,31 @@ mod tests {
     fn push_skips_the_current_page_and_pop_returns() {
         let mut stack = PageStack::default();
         assert!(stack.current().is_none());
-        assert!(stack.push(Page::Series(SeriesId::new(1))));
+        assert!(stack.push(Page::Series(SeriesId::new(1)), None));
         assert!(stack.previous().is_none(), "Back goes to the destination");
-        assert!(!stack.push(Page::Series(SeriesId::new(1))));
-        assert!(stack.push(Page::Author(AuthorId::new(2))));
+        assert!(!stack.push(Page::Series(SeriesId::new(1)), None));
+        assert!(stack.push(Page::Author(AuthorId::new(2)), None));
         let book = BookSummary::new(BookId::new(3), "A Book");
-        assert!(stack.push(Page::Book(book.clone())));
+        assert!(stack.push(Page::Book(book.clone()), None));
         let mut renamed = book.clone();
         renamed.title = "Same book, other copy".into();
-        assert!(!stack.push(Page::Book(renamed)), "the same book by id");
         assert!(
-            stack.push(Page::Series(SeriesId::new(1))),
+            !stack.push(Page::Book(renamed), None),
+            "the same book by id"
+        );
+        assert!(
+            stack.push(Page::Series(SeriesId::new(1)), None),
             "may recur deeper"
         );
 
         assert_eq!(stack.previous(), Some(&Page::Book(book.clone())));
-        assert!(stack.pop());
+        assert!(stack.pop().is_some());
         assert_eq!(stack.current(), Some(&Page::Book(book)));
-        assert!(stack.pop());
-        assert!(stack.pop());
+        assert!(stack.pop().is_some());
+        assert!(stack.pop().is_some());
         assert_eq!(stack.current(), Some(&Page::Series(SeriesId::new(1))));
-        assert!(stack.pop());
-        assert!(!stack.pop());
+        assert!(stack.pop().is_some());
+        assert!(stack.pop().is_none());
         assert!(stack.current().is_none());
     }
 
@@ -145,14 +152,14 @@ mod tests {
     fn history_is_bounded_and_clears() {
         let mut stack = PageStack::default();
         for id in 0..(PageStack::MAX as i64 + 10) {
-            stack.push(Page::Author(AuthorId::new(id)));
+            stack.push(Page::Author(AuthorId::new(id)), None);
         }
         let mut depth = 0;
-        while stack.pop() {
+        while stack.pop().is_some() {
             depth += 1;
         }
         assert_eq!(depth, PageStack::MAX);
-        stack.push(Page::Author(AuthorId::new(1)));
+        stack.push(Page::Author(AuthorId::new(1)), None);
         stack.clear();
         assert!(stack.current().is_none());
     }

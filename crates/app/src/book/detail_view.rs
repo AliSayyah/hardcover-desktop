@@ -23,10 +23,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{IconName, WindowExt as _, v_flex};
 use gpui_kit::{
@@ -993,7 +993,7 @@ impl BookDetailView {
                     .id(("book-detail", book.id.get() as u64))
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scrollbar()
+                    .scroll_y_revealing_focus()
                     .px_6()
                     .pb_6()
                     .child(content),
@@ -1049,7 +1049,7 @@ impl BookDetailView {
         div()
             .id(("book-detail", book.id.get() as u64))
             .size_full()
-            .overflow_y_scrollbar()
+            .scroll_y_revealing_focus()
             .child(
                 div().w_full().p_8().tab_group().child(
                     Columns::new(main)
