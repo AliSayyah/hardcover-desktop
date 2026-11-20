@@ -1074,6 +1074,14 @@ pub(crate) struct RawReviewedUserBook {
     pub review: RawReview,
 }
 
+/// `user_books { id ...ReviewFields }`: one of the export's reviews.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawEntryReview {
+    pub id: i64,
+    #[serde(flatten)]
+    pub review: RawReview,
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct ReviewedUserBookPayload {
     pub error: Option<String>,

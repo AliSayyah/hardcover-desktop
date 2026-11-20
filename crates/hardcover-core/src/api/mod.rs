@@ -56,6 +56,9 @@ const MEMBERSHIPS_PAGE_SIZE: u32 = 1_000;
 const MEMBERSHIPS_MAX_PAGES: usize = 5;
 /// Books per page in [`Client::list_books`].
 pub const LIST_BOOKS_PER_PAGE: u32 = 100;
+/// Reviews per request in [`Client::reviews`]: the library sync's page size,
+/// which Hardcover is known to serve whole.
+pub const REVIEWS_PAGE_SIZE: u32 = 100;
 
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
@@ -568,6 +571,43 @@ impl Client {
             .user_books_by_pk
             .map(RawReview::into_review)
             .unwrap_or_default())
+    }
+
+    /// Every review the signed-in user has written, with its entry's id, in
+    /// pages of [`REVIEWS_PAGE_SIZE`] by id: one request per page. `on_page`
+    /// sees the count so far after each page; returning `false` stops early,
+    /// with what was fetched until then.
+    pub fn reviews(
+        &self,
+        mut on_page: impl FnMut(usize) -> bool,
+    ) -> Result<Vec<(UserBookId, Review)>> {
+        #[derive(Deserialize)]
+        struct Data {
+            user_books: Vec<RawEntryReview>,
+        }
+        let me = self.my_id()?;
+        let mut all = Vec::new();
+        let mut after = 0_i64;
+        loop {
+            let data: Data = self.query(
+                "UserBookReviews",
+                queries::USER_BOOK_REVIEWS,
+                json!({ "userId": me.get(), "afterId": after, "limit": REVIEWS_PAGE_SIZE }),
+                QUERY_TIMEOUT,
+            )?;
+            let fetched = data.user_books.len();
+            for raw in data.user_books {
+                after = after.max(raw.id);
+                let review = raw.review.into_review();
+                if review.exists() {
+                    all.push((UserBookId::new(raw.id), review));
+                }
+            }
+            let go_on = on_page(all.len());
+            if fetched < REVIEWS_PAGE_SIZE as usize || !go_on {
+                return Ok(all);
+            }
+        }
     }
 
     /// Writes the review, in Markdown, dated `reviewed_at`. Blank text is an

@@ -481,6 +481,21 @@ pub(crate) const DELETE_USER_BOOK_REVIEW: &str = concat!(
     review_fields!()
 );
 
+/// Keyset pagination over the user's own entries that have a review, for the
+/// export. Scoped to the user: ids are global, and other readers' reviews are
+/// readable with `read:social`.
+pub(crate) const USER_BOOK_REVIEWS: &str = concat!(
+    "query UserBookReviews($userId: Int!, $afterId: Int!, $limit: Int!) {
+  user_books(
+    where: {user_id: {_eq: $userId}, id: {_gt: $afterId}, has_review: {_eq: true}}
+    order_by: {id: asc}
+    limit: $limit
+  ) { id ...ReviewFields }
+}
+",
+    review_fields!()
+);
+
 /// The user's goals that are not archived, the latest end date first.
 pub(crate) const GOALS: &str = concat!(
     "query Goals($userId: Int!) {
@@ -568,6 +583,7 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("DELETE_LIST", DELETE_LIST),
     ("INSERT_LIST_BOOK", INSERT_LIST_BOOK),
     ("DELETE_LIST_BOOK", DELETE_LIST_BOOK),
+    ("USER_BOOK_REVIEWS", USER_BOOK_REVIEWS),
 ];
 
 #[cfg(test)]

@@ -9,6 +9,7 @@
 //! - [`covers`]: on-disk cache of cover images.
 //! - [`prefs`]: the user's preferences, a small JSON file.
 //! - [`update`]: self-update from signed GitHub releases.
+//! - [`export`]: the library as a Goodreads-style CSV or a full JSON backup.
 //! - `demo` (with the `demo` feature): a sample library of popular books, served without an account.
 
 pub mod api;
@@ -17,6 +18,7 @@ pub mod covers;
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;
 pub mod error;
+pub mod export;
 pub mod prefs;
 pub mod store;
 pub mod update;

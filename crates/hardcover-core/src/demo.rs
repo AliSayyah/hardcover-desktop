@@ -745,6 +745,32 @@ fn answer(op: &str, vars: &Value) -> Value {
                 }),
             }),
         }),
+        "UserBookReviews" => {
+            let after = int("afterId");
+            let limit = usize::try_from(int("limit")).unwrap_or_default();
+            let mut entries: Vec<&Entry> = catalogue
+                .library
+                .iter()
+                .filter(|e| mine() && e.id > after)
+                .collect();
+            entries.sort_by_key(|e| e.id);
+            let rows: Vec<Value> = entries
+                .into_iter()
+                .filter_map(|e| {
+                    let r = e.review.as_ref()?;
+                    Some(json!({
+                        "id": e.id,
+                        "review_markdown": r.markdown,
+                        "review_raw": null,
+                        "review_has_spoilers": r.spoilers,
+                        "reviewed_at": format!("{}T00:00:00", r.reviewed_at),
+                        "has_review": true,
+                    }))
+                })
+                .take(limit)
+                .collect();
+            json!({ "user_books": rows })
+        }
         "Goals" => json!({
             "goals": catalogue.goals.iter()
                 .filter(|_| mine())

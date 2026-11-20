@@ -2098,3 +2098,62 @@ fn remove_from_list_takes_the_row_id() {
         Err(Error::Api(_))
     ));
 }
+
+// ----- export -----
+
+#[test]
+fn reviews_page_by_keyset_for_the_signed_in_user() {
+    let (c, http) = client(TestTokens::new(false));
+    me_reply(&http);
+    let review = |id: i64| {
+        json!({"id": id, "review_markdown": format!("Synthetic review {id}."), "review_raw": null,
+               "review_has_spoilers": id % 2 == 0, "reviewed_at": "2024-03-05T00:00:00",
+               "has_review": true})
+    };
+    let first: Vec<Value> = (1..=REVIEWS_PAGE_SIZE as i64).map(review).collect();
+    http.push(200, &data(json!({ "user_books": first })));
+    // A row whose review is gone by now is skipped.
+    http.push(
+        200,
+        &data(
+            json!({ "user_books": [review(500), {"id": 501, "review_markdown": null,
+            "review_raw": null, "review_has_spoilers": false, "reviewed_at": null,
+            "has_review": false}] }),
+        ),
+    );
+    let mut counts = Vec::new();
+    let reviews = c
+        .reviews(|n| {
+            counts.push(n);
+            true
+        })
+        .unwrap();
+    assert_eq!(reviews.len(), REVIEWS_PAGE_SIZE as usize + 1);
+    assert_eq!(counts, [100, 101]);
+    assert_eq!(reviews[100].0, UserBookId::new(500));
+    assert_eq!(reviews[100].1.text(), Some("Synthetic review 500."));
+    assert!(reviews[1].1.has_spoilers);
+    let req = &http.requests()[1];
+    assert_eq!(
+        req.json.as_ref().unwrap()["operationName"],
+        "UserBookReviews"
+    );
+    assert_eq!(
+        vars(&http, 1),
+        json!({"userId": 77, "afterId": 0, "limit": REVIEWS_PAGE_SIZE})
+    );
+    assert_eq!(
+        vars(&http, 2),
+        json!({"userId": 77, "afterId": 100, "limit": REVIEWS_PAGE_SIZE})
+    );
+
+    // Stopping after a page sends no more requests.
+    http.push(
+        200,
+        &data(json!({ "user_books": (1..=100).map(review).collect::<Vec<_>>() })),
+    );
+    let reviews = c.reviews(|_| false).unwrap();
+    assert_eq!(reviews.len(), 100);
+    assert_eq!(http.remaining(), 0);
+    assert_eq!(http.requests().len(), 4);
+}

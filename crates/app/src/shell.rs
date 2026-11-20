@@ -37,6 +37,7 @@ use crate::catalog::author_view::AuthorView;
 use crate::catalog::discover_view::DiscoverView;
 use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
 use crate::catalog::series_view::SeriesView;
+use crate::export::open_export;
 use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
 use crate::goals::model::GoalsModel;
 use crate::goals::sidebar::GoalsSection;
@@ -956,8 +957,16 @@ impl Workspace {
                             menu
                         };
                     let updates_view = view.clone();
+                    let export_view = view.clone();
                     menu.separator()
                         .menu_with_icon("Settings…", IconName::Settings, Box::new(OpenSettings))
+                        .item(PopupMenuItem::new("Export library…").on_click(
+                            move |_, window, cx| {
+                                let _ = export_view.update(cx, |this, cx| {
+                                    open_export(this.model.clone(), window, cx)
+                                });
+                            },
+                        ))
                         .item(
                             PopupMenuItem::new("Check for updates").on_click(move |_, _, cx| {
                                 let _ =

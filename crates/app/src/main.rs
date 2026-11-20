@@ -8,6 +8,7 @@ mod catalog;
 mod chip;
 #[cfg(test)]
 mod cover_quality_tests;
+mod export;
 mod fonts;
 mod format;
 mod goals;
