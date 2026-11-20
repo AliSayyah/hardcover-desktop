@@ -41,13 +41,9 @@
 //! | [`Avatar`] | A person: their picture, else initials on their colour or `accent-soft` |
 //! | [`focus`] | The focus ring and edge, for a component that tracks its own focus; giving focus back after a page |
 //! | [`reveal`] | Keeping the focused element in view: the opt-in on a scrolling region, and [`reveal::probe`] |
-//! | [`kit`] | Fixes for the kit's own components: raised fields and dialogs, the popover surface |
+//! | [`kit`] | Fixes for the kit's own components: raised fields, small controls, dialogs and their keys, quiet buttons on the text spine |
 //!
 //! Each component's module doc says when to use it, with an example.
-
-// The foundation for the screens still migrating to the system: some parts
-// have no user yet, and the screen waves will use them.
-#![allow(dead_code)]
 
 mod avatar;
 mod byline_link;
@@ -76,26 +72,29 @@ mod surfaces;
 mod test_support;
 mod text_button;
 
-// Some components have no screen yet; the screen waves will use them.
-#[allow(unused_imports)]
 pub use self::{
-    avatar::{Avatar, AvatarSize, initials},
+    avatar::{Avatar, AvatarSize},
     byline_link::BylineLink,
     columns::{Columns, folds},
     cover_shelf::CoverShelf,
     empty_state::{EmptyState, empty_state, empty_state_with_action},
     external_link::ExternalLink,
-    headers::{Greeting, PageHeader, SectionHeader, date_line, greeting, greeting_at, see_all},
+    headers::{Greeting, PageHeader, SectionHeader, date_line, greeting_at, see_all},
     meter::Meter,
     month_bars::MonthBars,
     nav_row::NavRow,
     object_bar::{BackTo, ObjectBar, ObjectTools, back_label, tools_of},
     row_focus::{RowFocus, enter_list, on_keyboard_entry, select_first_row},
     rows::{Lane, ListRow, PropertyList, RowSpacing, Sequence},
-    series_strip::{CoverSlot, SeriesStrip, StripItem},
+    series_strip::{SeriesStrip, StripItem},
     sidebar::{AccountRow, GoalRow, brand_row, sidebar_label},
     skeleton::{Skeleton, SkeletonRow, SkeletonText},
     stars::Stars,
     surfaces::{Block, Rail, RailSection, blocks, panel},
     text_button::TextButton,
 };
+// Parts only the gallery names: `greeting` is Home's greeting for the current
+// time (Home passes its own clock to `greeting_at`), and a lone `CoverSlot`
+// is drawn by `SeriesStrip` on screens.
+#[cfg(feature = "demo")]
+pub use self::{headers::greeting, series_strip::CoverSlot};

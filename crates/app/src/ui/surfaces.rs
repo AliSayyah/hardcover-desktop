@@ -51,6 +51,9 @@ impl Rail {
     }
 
     /// The next section, under a hairline.
+    // Screens pass their sections at once ([`Rail::sections`]); the gallery
+    // builds its rail one at a time.
+    #[cfg_attr(not(feature = "demo"), allow(dead_code))]
     pub fn section(mut self, section: impl IntoElement) -> Self {
         self.sections.push(section.into_any_element());
         self

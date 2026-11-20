@@ -824,6 +824,7 @@ fn wrapping_text(cx: &App) -> AnyElement {
                 h_flex()
                     .items_start()
                     .gap_4()
+                    .child(Cover::new(CoverSize::Xs, "The Way of Kings"))
                     .child(Cover::new(
                         CoverSize::Md,
                         "Tomorrow, and Tomorrow, and Tomorrow",

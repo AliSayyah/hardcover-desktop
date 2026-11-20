@@ -83,12 +83,6 @@ impl ObjectBar {
         self
     }
 
-    /// One tool, after any already given.
-    pub fn tool(mut self, tool: impl IntoElement) -> Self {
-        self.tools.push(tool.into_any_element());
-        self
-    }
-
     /// The hairline under the bar, and the page's insets: for a page over a
     /// destination. Without it the bar has the pane's insets.
     pub fn hairline(mut self, hairline: bool) -> Self {

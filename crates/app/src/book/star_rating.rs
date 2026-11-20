@@ -118,9 +118,6 @@ impl StarRating {
 
     /// The 16 px stars of a row (Home's "Rate what you finished"), instead
     /// of the book page's 20.
-    // Home's rating row (`home/home_view.rs`) is its user; it moves onto
-    // this in its own change.
-    #[allow(dead_code)]
     pub fn small(mut self) -> Self {
         self.small = true;
         self
