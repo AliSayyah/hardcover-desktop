@@ -360,6 +360,23 @@ fn install_refuses_a_release_that_is_not_newer() {
 // ----- install kind -----
 
 #[test]
+fn extracted_appimage_does_not_offer_tarball_updates() {
+    let appdir = tempfile::tempdir().unwrap();
+    let prefix = appdir.path().join("usr");
+    fs::create_dir_all(prefix.join("bin")).unwrap();
+    fs::create_dir_all(prefix.join("share/applications")).unwrap();
+    fs::write(
+        prefix.join(format!("share/applications/{APP_ID}.desktop")),
+        "",
+    )
+    .unwrap();
+    let exe = prefix.join("bin").join(BINARY);
+    fs::write(&exe, "").unwrap();
+    std::os::unix::fs::symlink(&exe, appdir.path().join("AppRun")).unwrap();
+    assert_eq!(InstallKind::detect(&exe), InstallKind::Other);
+}
+
+#[test]
 fn detects_an_unpacked_tarball_in_a_writable_prefix() {
     let prefix = old_install();
     let exe = prefix.path().join("bin/hardcover-desktop");

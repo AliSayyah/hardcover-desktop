@@ -150,6 +150,15 @@ impl InstallKind {
         let Some(prefix) = bin.parent() else {
             return Self::Other;
         };
+        // AppImages have this layout even when extracted into a writable
+        // directory. APPIMAGE can also be inherited from an unrelated launcher.
+        if prefix.file_name().is_some_and(|n| n == "usr")
+            && prefix
+                .parent()
+                .is_some_and(|dir| dir.join("AppRun").is_file())
+        {
+            return Self::Other;
+        }
         let packaged = exe.file_name().is_some_and(|n| n == BINARY)
             && bin.file_name().is_some_and(|n| n == "bin")
             && prefix

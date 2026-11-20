@@ -27,7 +27,7 @@ cargo run -p hardcover-core --example api_check -- --check        # same, withou
 The `justfile` wraps these; `just` lists the recipes.
 - `just check` runs fmt-check, clippy (`-D warnings`) and the tests.
 - `just ci` adds `cargo deny`, the packaging validation and actionlint.
-- `just package` builds the release tarball into `target/package/`.
+- `just package` builds the release tarball into `target/package/`. `just appimage` and `just flatpak` package the same payload for their respective runtimes.
 - `just api-check` is `api_check --check`; `just schema-update` is the run that rewrites `schema/`.
 - `just release patch` makes a whole release, from the PR to the published GitHub release (below, under CI and releases).
 - Only the live-API recipes load `.env`; `just run` never does, so a token there can't bypass OAuth.
@@ -225,7 +225,7 @@ Two skills live in `.claude/skills`:
 
   It merges only a PR from this repository (never a fork's), into master, whose diff is exactly the bump (`Cargo.lock` and `crates/app/Cargo.toml` +1 −1, the metainfo +1) and whose head holds the expected version; anything else stops it before CI is even awaited. Keep that check in step if the bump ever changes more files.
 
-  `release.yml` checks that the three versions agree, builds with `--profile dist` (thin LTO, stripped), packs a tarball (`packaging/linux/package.sh`) and creates the GitHub release. Running it by hand builds the tarball as an artifact without publishing anything.
+  `release.yml` checks that the three versions agree, builds with `--profile dist` (thin LTO, stripped), then packages the tarball, AppImage, Flatpak, and tarball installer. A tag publishes the signed downloads. Running it by hand produces unsigned workflow artifacts.
 
 ## Self-update
 

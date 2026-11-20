@@ -1,17 +1,13 @@
-## Install
+## Install on Linux (x86_64)
 
-Download `hardcover-desktop-<version>-x86_64-linux.tar.gz` and unpack it into `~/.local`:
+- **Tarball installer.** Download `install.sh` and run `bash install.sh` to install the latest stable release under `~/.local`. For this exact release, download its `.tar.gz` and matching `.tar.gz.minisig` and pass the archive to `bash install.sh ./<filename>.tar.gz`. The installer verifies the signature. The installed app can update itself.
+- **AppImage.** Download the `.AppImage`, run `chmod +x <filename>.AppImage`, and launch `./<filename>.AppImage`. If FUSE is unavailable, add `--appimage-extract-and-run`. Replace the file to update.
+- **Flatpak.** Download the `.flatpak`, install it with `flatpak install --user ./<filename>.flatpak`, and launch `flatpak run io.github.alisayyah.HardcoverDesktop`. Install each new bundle the same way. Flatpak gets the Freedesktop runtime from Flathub.
 
-```sh
-tar -xzf hardcover-desktop-*-x86_64-linux.tar.gz -C ~/.local --strip-components=1
-```
+All formats need Wayland or X11, Vulkan or OpenGL graphics, and a Secret Service keyring to store your sign-in. The tarball and AppImage require host glibc 2.35 or newer. The Flatpak runtime supplies glibc.
 
-This installs `~/.local/bin/hardcover-desktop` with its desktop entry, icon and metainfo, so the app appears in your launcher. Installed this way, the app updates itself: it offers each new release and installs it in one click.
-
-To check the download first, verify its signature with [minisign](https://jedisct1.github.io/minisign/):
+Each download has a matching `.minisig`. To verify a file, save its signature in the same directory, then run:
 
 ```sh
-minisign -Vm hardcover-desktop-*-x86_64-linux.tar.gz -P RWQmH1HvOAVP+8piXBk3ZC+nqzBVFZFcynEg8NUsgQDCSYYAkrSkPRXW
+minisign -Vm FILENAME -P RWQmH1HvOAVP+8piXBk3ZC+nqzBVFZFcynEg8NUsgQDCSYYAkrSkPRXW
 ```
-
-Requires x86_64 Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later), Vulkan or OpenGL graphics drivers, and a Secret Service keyring such as GNOME Keyring or KWallet to store your sign-in.

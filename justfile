@@ -45,6 +45,16 @@ dist:
 package: dist
     packaging/linux/package.sh "$({{ just_executable() }} version)" target/dist/{{ app }} target/package
 
+# AppImage with bundled desktop libraries. Use Ubuntu 22.04 for release builds.
+[group('build')]
+appimage: package
+    packaging/linux/package-appimage.sh "target/package/{{ app }}-$({{ just_executable() }} version)-x86_64-linux.tar.gz"
+
+# Single-file Freedesktop Flatpak bundle. Requires the flatpak CLI.
+[group('build')]
+flatpak: package
+    packaging/linux/package-flatpak.sh "target/package/{{ app }}-$({{ just_executable() }} version)-x86_64-linux.tar.gz"
+
 # Print the app's version, from crates/app/Cargo.toml
 [group('build')]
 version:
