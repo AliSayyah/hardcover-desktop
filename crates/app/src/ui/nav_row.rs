@@ -146,3 +146,36 @@ impl RenderOnce for NavRow {
             .children(trailing.map(|t| div().flex_none().pl_2().child(t)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::ui::test_support::{host, press, tab};
+    use gpui_kit::TestAppContext;
+
+    #[gpui_kit::test]
+    fn each_row_reports_its_own_press(cx: &mut TestAppContext) {
+        let chosen = Rc::new(Cell::new(None));
+        let cx = host(cx, {
+            let chosen = chosen.clone();
+            move |_, _| {
+                div()
+                    .children((0..2).map(|ix| {
+                        let chosen = chosen.clone();
+                        NavRow::new(("nav", ix), IconName::BookOpen, "Shelf")
+                            .count("3")
+                            .selected(ix == 0)
+                            .on_click(move |_, _, _| chosen.set(Some(ix)))
+                    }))
+                    .into_any_element()
+            }
+        });
+        tab(cx);
+        tab(cx);
+        press(cx, "enter");
+        assert_eq!(chosen.get(), Some(1));
+    }
+}

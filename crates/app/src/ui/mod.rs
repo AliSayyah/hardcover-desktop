@@ -53,6 +53,8 @@ mod object_bar;
 mod rows;
 mod skeleton;
 mod surfaces;
+#[cfg(test)]
+mod test_support;
 mod text_button;
 
 pub use avatar::{Avatar, AvatarSize, initials};

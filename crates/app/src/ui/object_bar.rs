@@ -154,6 +154,29 @@ pub enum BackTo<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::test_support::{counter, has_focus, host, press, tab};
+    use gpui_kit::{IntoElement as _, TestAppContext};
+
+    #[gpui_kit::test]
+    fn back_is_a_button_that_runs_its_handler(cx: &mut TestAppContext) {
+        let (backs, on_back) = counter();
+        let cx = host(cx, move |_, _| {
+            ObjectBar::new()
+                .hairline(true)
+                .back("Home", on_back.clone())
+                .into_any_element()
+        });
+        tab(cx);
+        press(cx, "enter");
+        assert_eq!(backs.get(), 1);
+    }
+
+    #[gpui_kit::test]
+    fn a_bar_without_back_or_tools_takes_no_focus(cx: &mut TestAppContext) {
+        let cx = host(cx, |_, _| ObjectBar::new().into_any_element());
+        tab(cx);
+        assert!(!has_focus(cx));
+    }
 
     #[test]
     fn back_names_where_it_goes() {

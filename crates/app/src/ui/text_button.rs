@@ -134,3 +134,28 @@ impl RenderOnce for TextButton {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::test_support::{counter, host, press, tab};
+    use gpui_kit::TestAppContext;
+
+    #[gpui_kit::test]
+    fn tab_reaches_it_and_enter_and_space_press_it(cx: &mut TestAppContext) {
+        let (presses, on_press) = counter();
+        let cx = host(cx, move |_, _| {
+            TextButton::new("title", "Project Hail Mary")
+                .on_click(on_press.clone())
+                .into_any_element()
+        });
+        // Nothing is focused yet, so a key reaches no button.
+        press(cx, "enter");
+        assert_eq!(presses.get(), 0);
+
+        tab(cx);
+        press(cx, "enter");
+        press(cx, "space");
+        assert_eq!(presses.get(), 2);
+    }
+}
