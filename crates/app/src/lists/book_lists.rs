@@ -17,6 +17,7 @@ use hardcover_core::{BookId, BookSummary, EditionSummary, LibraryEntry};
 use super::list_dialog::open_new_list;
 use super::model::ListsModel;
 use crate::app_state::Services;
+use crate::design::TypeRoles as _;
 use crate::format::needs_permission;
 use crate::ui::kit::open_alert_dialog;
 
@@ -76,6 +77,7 @@ pub fn lists_button(book: &BookSummary, cx: &App) -> Option<AnyElement> {
             .ghost()
             .icon(IconName::GalleryVerticalEnd)
             .label("Lists")
+            .dropdown_caret(true)
             .dropdown_menu(move |menu, _, cx| {
                 let model = lists.read(cx);
                 let can_write = Services::global(cx).has_scope(WRITE_LISTS);
@@ -253,7 +255,7 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
                         }
                     }),
             )
-            .children(note.map(|note| div().min_w_0().text_sm().text_color(muted).child(note)))
+            .children(note.map(|note| div().min_w_0().body().text_color(muted).child(note)))
             .into_any_element(),
     )
 }

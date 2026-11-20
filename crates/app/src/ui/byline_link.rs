@@ -5,7 +5,7 @@
 //! the underline, which GPUI on Linux draws beside it.
 //!
 //! Only for names that open the browser. An in-app destination is a
-//! [`super::TextButton`]; "Open on Hardcover" is the kit's accent `Link`.
+//! [`super::TextButton`]; "Open on Hardcover" is an [`super::ExternalLink`].
 //!
 //! ```ignore
 //! BylineLink::new(("reviewer", id), name, profile_url)

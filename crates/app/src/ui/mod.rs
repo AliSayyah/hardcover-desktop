@@ -30,9 +30,10 @@
 //! | [`EmptyState`], [`empty_state`] | A region with nothing to show: icon, title, one sentence, a button |
 //! | [`Skeleton`], [`SkeletonText`], [`SkeletonRow`] | Content still loading: pulsing shapes, lines, a row |
 //! | [`TextButton`] | In-app navigation inside content: a book title, an author, a series |
+//! | [`ExternalLink`] | Something that opens the browser: "Open on Hardcover" (accent, underlined, the external-link icon) |
 //! | [`BylineLink`] | A person's name that opens their Hardcover profile in the browser |
-//! | [`ExternalLink`] | A link that opens the browser: "Open on Hardcover" |
 //! | [`NavRow`] | A sidebar destination: icon, label, count or shortcut, selected state |
+//! | [`Stars`] | A rating shown, not set: Hardcover's average, another reader's rating (muted, never gold) |
 //! | [`Avatar`] | A person: their picture, else initials on their colour or `accent-soft` |
 //! | [`focus`] | The focus ring and edge, for a component that tracks its own focus |
 //! | [`kit`] | Fixes for the kit's own components: raised fields and dialogs, the popover surface |
@@ -60,6 +61,7 @@ mod object_bar;
 mod row_focus;
 mod rows;
 mod skeleton;
+mod stars;
 mod surfaces;
 #[cfg(test)]
 mod test_support;
@@ -81,6 +83,7 @@ pub use self::{
     row_focus::RowFocus,
     rows::{Lane, ListRow, PropertyList, RowSpacing, Sequence},
     skeleton::{Skeleton, SkeletonRow, SkeletonText},
+    stars::Stars,
     surfaces::{Block, Rail, RailSection, blocks, panel},
     text_button::TextButton,
 };

@@ -14,7 +14,8 @@
 //!
 //! Its type is set like any element's (`.title_18()`, `.body_strong()`); it
 //! is `body-strong` until told otherwise. The label is one truncated line,
-//! or wraps with [`TextButton::wrap`].
+//! or wraps with [`TextButton::wrap`], at most a few lines with
+//! [`TextButton::line_clamp`] (similar books' titles).
 
 use std::rc::Rc;
 
@@ -42,6 +43,7 @@ pub struct TextButton {
     label: SharedString,
     style: StyleRefinement,
     wrap: bool,
+    line_clamp: Option<usize>,
     on_click: Option<ClickHandler>,
 }
 
@@ -53,6 +55,7 @@ impl TextButton {
             label: label.into(),
             style: StyleRefinement::default(),
             wrap: false,
+            line_clamp: None,
             on_click: None,
         }
     }
@@ -83,6 +86,15 @@ impl TextButton {
         self.wrap = true;
         self
     }
+
+    /// Wraps the label onto at most `lines` lines (similar books' titles).
+    /// The clamp is the label's own, so the focus ring outside it is never
+    /// clipped.
+    pub fn line_clamp(mut self, lines: usize) -> Self {
+        self.wrap = true;
+        self.line_clamp = Some(lines);
+        self
+    }
 }
 
 impl Styled for TextButton {
@@ -100,6 +112,7 @@ impl RenderOnce for TextButton {
         // such a label goes without (`hardcover-design`, Byline link).
         let underline = !is_rtl(&self.label);
         let wrap = self.wrap;
+        let line_clamp = self.line_clamp;
         let label = self.label.clone();
         let on_click = self.on_click;
 
@@ -126,7 +139,10 @@ impl RenderOnce for TextButton {
                 .child(if wrap {
                     div()
                         .min_w_0()
-                        .child(WrappingText::new(label))
+                        .child(
+                            WrappingText::new(label)
+                                .when_some(line_clamp, |this, lines| this.line_clamp(lines)),
+                        )
                         .into_any_element()
                 } else {
                     div().min_w_0().truncate().child(label).into_any_element()

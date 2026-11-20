@@ -7,10 +7,15 @@
 //! value clears it, and the keyboard steps by half a star.
 //!
 //! Controlled: the owner passes the value and receives requested changes.
+//!
+//! The stars are 20 px (16 in a row, [`StarRating::small`]), 2 apart, in `gold` (the user's own rating is the only
+//! gold in the app) over `star-empty`. Keyboard focus shows the system's ring
+//! (`ui::focus`). An unrated control reads "Rate" beside it; that word is the
+//! owner's to place.
 
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme as _, h_flex};
+use gpui_kit::component::h_flex;
 use gpui_kit::{
     App, ElementId, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _,
     RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, actions, div,
@@ -20,6 +25,7 @@ use hardcover_core::Rating;
 
 use crate::design::colors;
 use crate::star;
+use crate::ui::focus::{FocusTreatment as _, control_radius, focus_visible};
 
 /// Key context of the control; its bindings live in `main`.
 pub const KEY_CONTEXT: &str = "StarRating";
@@ -75,6 +81,7 @@ pub struct StarRating {
     id: SharedString,
     value: Option<Rating>,
     disabled: bool,
+    small: bool,
     on_change: Option<ChangeHandler>,
 }
 
@@ -84,6 +91,7 @@ impl StarRating {
             id: id.into(),
             value: None,
             disabled: false,
+            small: false,
             on_change: None,
         }
     }
@@ -95,6 +103,16 @@ impl StarRating {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// The 16 px stars of a row (Home's "Rate what you finished"), instead
+    /// of the book page's 20.
+    // Home's rating row (`home/home_view.rs`) is its user; it moves onto
+    // this in its own change.
+    #[allow(dead_code)]
+    pub fn small(mut self) -> Self {
+        self.small = true;
         self
     }
 
@@ -123,10 +141,12 @@ impl RenderOnce for StarRating {
         let hover = window.use_keyed_state(self.child_id("hover"), cx, |_, _| None::<f32>);
         let hovered = if self.disabled { None } else { *hover.read(cx) };
         let shown = hovered.unwrap_or_else(|| self.value.map_or(0.0, Rating::value));
-        let is_focused = focus.is_focused(window);
+        let focused = focus_visible(&focus, window);
+        let radius = control_radius(cx);
 
         let value = self.value;
         let disabled = self.disabled;
+        let small = self.small;
         let on_change = self.on_change.clone();
         let request = move |next: Option<Rating>, window: &mut Window, cx: &mut App| {
             if let Some(handler) = &on_change
@@ -153,7 +173,7 @@ impl RenderOnce for StarRating {
             .relative()
             .gap_0p5()
             .p_0p5()
-            .rounded(cx.theme().radius)
+            .rounded(radius)
             .aria_label(label)
             .when(!disabled, |this| {
                 let request = Rc::new(request);
@@ -223,45 +243,42 @@ impl RenderOnce for StarRating {
                                     }
                                 })
                         };
-                        render_star(n, shown, filled_color, empty_color)
+                        render_star(n, shown, small, filled_color, empty_color)
                             .child(half(false))
                             .child(half(true))
                     }))
             })
             .when(disabled, |this| {
-                this.opacity(0.5)
-                    .children((1..=STARS).map(|n| render_star(n, shown, filled_color, empty_color)))
-            })
-            .when(is_focused, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .rounded(cx.theme().radius)
-                        .border_1()
-                        .border_color(cx.theme().ring),
+                this.opacity(0.5).children(
+                    (1..=STARS).map(|n| render_star(n, shown, small, filled_color, empty_color)),
                 )
             })
+            .when(focused, |this| this.focus_ring(radius, cx))
     }
 }
 
 fn render_star(
     position: u8,
     value: f32,
+    small: bool,
     filled: gpui_kit::Hsla,
     empty: gpui_kit::Hsla,
 ) -> gpui_kit::Div {
-    let fill = star_fill(value, position);
+    let size = |this: gpui_kit::Div| if small { this.size_4() } else { this.size_5() };
+    let star = || {
+        let icon = star::icon().flex_shrink_0();
+        if small { icon.size_4() } else { icon.size_5() }
+    };
     div()
         .relative()
         .flex_shrink_0()
-        .size_5()
-        .map(|this| match fill {
-            StarFill::Full => this.child(star::icon().size_5().text_color(filled)),
-            StarFill::Empty => this.child(star::icon().size_5().text_color(empty)),
+        .map(size)
+        .map(|this| match star_fill(value, position) {
+            StarFill::Full => this.child(star().text_color(filled)),
+            StarFill::Empty => this.child(star().text_color(empty)),
             // An empty star with its leading half filled. Both are the same
             // solid shape, so the split is clean.
-            StarFill::Half => this.child(star::icon().size_5().text_color(empty)).child(
+            StarFill::Half => this.child(star().text_color(empty)).child(
                 div()
                     .absolute()
                     .top_0()
@@ -269,7 +286,7 @@ fn render_star(
                     .h_full()
                     .w(relative(0.5))
                     .overflow_hidden()
-                    .child(star::icon().size_5().flex_shrink_0().text_color(filled)),
+                    .child(star().text_color(filled)),
             ),
         })
 }

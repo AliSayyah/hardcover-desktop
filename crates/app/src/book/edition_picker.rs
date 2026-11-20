@@ -13,7 +13,7 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FontWeight,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
     Task, Window, div, prelude::FluentBuilder as _, rems,
 };
@@ -21,6 +21,7 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookId, EDITIONS_PER_PAGE, EditionId, EditionSummary};
 
 use crate::app_state::Services;
+use crate::design::TypeRoles as _;
 use crate::format::edition_text;
 use crate::ui::kit::open_dialog;
 
@@ -144,14 +145,17 @@ impl EditionPicker {
                             .gap_0p5()
                             .child(
                                 div()
-                                    .text_sm()
-                                    .when(current, |this| this.font_weight(FontWeight::SEMIBOLD))
+                                    .map(|this| {
+                                        if current {
+                                            this.body_strong()
+                                        } else {
+                                            this.body()
+                                        }
+                                    })
                                     .child(headline),
                             )
                             .when(!details.is_empty(), |this| {
-                                this.child(
-                                    div().text_xs().text_color(muted).child(details.join(" · ")),
-                                )
+                                this.child(div().caption(cx).child(details.join(" · ")))
                             }),
                     )
                     .when(current, |this| {
@@ -197,7 +201,7 @@ impl Render for EditionPicker {
             .when(empty, |this| {
                 this.child(
                     div()
-                        .text_sm()
+                        .body()
                         .text_color(muted)
                         .child("Hardcover lists no editions for this book."),
                 )
@@ -206,7 +210,7 @@ impl Render for EditionPicker {
                 this.child(
                     h_flex()
                         .gap_2()
-                        .text_sm()
+                        .body()
                         .child(div().text_color(muted).child(error))
                         .child(
                             Button::new("retry-editions")

@@ -17,6 +17,8 @@ use gpui_kit::{
 };
 use hardcover_core::{Date, ReadId, ReadSession};
 
+use crate::design::TypeRoles as _;
+
 /// What the dialog is for.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ReadDialogKind {
@@ -87,7 +89,7 @@ impl ReadDialog {
     /// Opens `view` in a dialog.
     pub fn open(view: Entity<Self>, window: &mut Window, cx: &mut App) {
         let (title, confirm) = match view.read(cx).kind {
-            ReadDialogKind::Add => ("Add a read", "Add"),
+            ReadDialogKind::Add => ("Add a past read", "Add"),
             ReadDialogKind::Edit { .. } => ("Change read dates", "Save"),
         };
         open_dialog(window, cx, move |dialog: Dialog, window, _| {
@@ -176,7 +178,7 @@ impl Render for ReadDialog {
                     ),
             )
             .when_some(self.error.clone(), |this, error| {
-                this.child(div().text_sm().text_color(cx.theme().danger).child(error))
+                this.child(div().body().text_color(cx.theme().danger).child(error))
             })
     }
 }
