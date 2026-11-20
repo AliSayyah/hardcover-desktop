@@ -21,7 +21,7 @@ use hardcover_core::{Date, Goal, GoalId, GoalMetric, NewGoal};
 use super::model::GoalsModel;
 use super::sidebar::pace_percent;
 use crate::app_state::Services;
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{
     goal_amount, goal_description, goal_pace, goal_period, goal_unit, needs_permission,
     retargeted_description,
@@ -238,15 +238,23 @@ impl GoalView {
             .child(
                 h_flex()
                     .gap_2()
-                    .items_baseline()
                     .child(
                         div()
                             .display_30()
                             .child(goal_amount(&goal.metric, goal.progress)),
                     )
-                    .child(div().flex_1().text_color(colors.fg_muted).child(target))
                     .child(
                         div()
+                            .flex_1()
+                            .body()
+                            .baseline_on(TypeRole::Body, TypeRole::Display30)
+                            .text_color(colors.fg_muted)
+                            .child(target),
+                    )
+                    .child(
+                        div()
+                            .body()
+                            .baseline_on(TypeRole::Body, TypeRole::Display30)
                             .text_color(colors.fg_muted)
                             .tabular()
                             .child(format!("{percent:.0}%")),

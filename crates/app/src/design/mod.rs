@@ -29,4 +29,4 @@ pub mod theme;
 pub mod type_roles;
 
 pub use color::colors;
-pub use type_roles::TypeRoles;
+pub use type_roles::{TypeRole, TypeRoles};

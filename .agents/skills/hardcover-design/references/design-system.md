@@ -129,6 +129,12 @@ Every size has a fixed line height.
   Both are static faces.
 - No letter-spacing anywhere: GPUI has none, and the Display cut does the
   tightening.
+- Text of different sizes in one row shares a baseline: a count beside a
+  page title, "of 12 books" beside a display figure, a sidebar count beside
+  its label. In GPUI, centre the row and put each smaller run on the lead's
+  baseline with `baseline_on(TypeRole::…, lead)`; `items_baseline()` aligns
+  the bottoms of the line boxes instead, because GPUI's text reports no
+  baseline to the layout.
 - No all-caps labels. Hierarchy comes from size, weight and colour.
 - Use tabular figures wherever numbers stack or change in place:
   percentages, page counts, counts in the sidebar, dates in lists. Use lining

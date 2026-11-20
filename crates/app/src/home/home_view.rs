@@ -45,7 +45,7 @@ use crate::book::star_rating::StarRating;
 use crate::catalog::navigation::Page;
 use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverArt, CoverSize, detail_art};
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{
     ProgressSummary, authors_text, books_count_text, count_text, goal_amount, goal_pace,
     goal_period, goal_unit, needs_permission, progress_summary, rating_text, series_position_text,
@@ -741,14 +741,20 @@ impl HomeView {
             )
             .child(
                 h_flex()
-                    .items_baseline()
                     .gap_2()
                     .child(
                         div()
                             .display_30()
                             .child(goal_amount(&goal.metric, goal.progress)),
                     )
-                    .child(div().body().tabular().text_color(muted).child(target_text)),
+                    .child(
+                        div()
+                            .body()
+                            .baseline_on(TypeRole::Body, TypeRole::Display30)
+                            .tabular()
+                            .text_color(muted)
+                            .child(target_text),
+                    ),
             )
             .child(
                 div().pt_1().child(

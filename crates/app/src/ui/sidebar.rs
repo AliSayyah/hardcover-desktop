@@ -41,7 +41,7 @@ use super::focus::{
     FocusTreatment as _, control_radius, focus_visible, keyed_focus, reveal_on_focus,
 };
 use crate::design::type_roles::Family;
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -190,6 +190,7 @@ impl RenderOnce for GoalRow {
                             .flex_none()
                             .pl_2()
                             .caption(cx)
+                            .baseline_on(TypeRole::Caption, TypeRole::Body)
                             .tabular()
                             .child(self.count),
                     ),

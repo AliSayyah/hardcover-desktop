@@ -19,7 +19,7 @@ use gpui_kit::{
     SharedString, Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
 /// A destination's title. See the module doc.
 ///
@@ -66,7 +66,6 @@ impl RenderOnce for PageHeader {
             .min_w_0()
             .child(
                 h_flex()
-                    .items_baseline()
                     .gap_2()
                     .min_w_0()
                     .child(div().page_title().min_w_0().truncate().child(self.title))
@@ -75,6 +74,7 @@ impl RenderOnce for PageHeader {
                             div()
                                 .flex_none()
                                 .body()
+                                .baseline_on(TypeRole::Body, TypeRole::PageTitle)
                                 .tabular()
                                 .text_color(muted)
                                 .child(count),

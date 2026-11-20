@@ -41,7 +41,7 @@ use gpui_kit::{
 use super::focus::{
     FocusTreatment as _, control_radius, focus_visible, keyed_focus, reveal_on_focus,
 };
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -149,6 +149,7 @@ impl RenderOnce for NavRow {
             (None, Some(count)) => Some(
                 div()
                     .caption(cx)
+                    .baseline_on(TypeRole::Caption, TypeRole::Body)
                     .tabular()
                     .when(selected, |this| this.text_color(colors.fg))
                     .child(count)
