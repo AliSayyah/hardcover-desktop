@@ -2,12 +2,12 @@
 
 use std::sync::{Arc, LazyLock};
 
-use gpui_kit::component::link::Link;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{App, Image, ImageFormat, ParentElement as _, Styled as _, Window, div, img};
 use hardcover_core::update::REPOSITORY;
 
 use crate::design::{TypeRoles as _, size};
+use crate::ui::ExternalLink;
 use crate::ui::kit::open_dialog;
 
 /// The app icon, as installed with the desktop entry.
@@ -48,22 +48,25 @@ pub fn open_about(window: &mut Window, cx: &mut App) {
                 ))
                 .child(
                     h_flex()
-                        .gap_4()
-                        .child(
-                            Link::new("about-hardcover")
-                                .href("https://hardcover.app")
-                                .child("hardcover.app"),
-                        )
-                        .child(
-                            Link::new("about-source")
-                                .href(repository.clone())
-                                .child("Source code"),
-                        )
-                        .child(
-                            Link::new("about-issues")
-                                .href(format!("{repository}/issues"))
-                                .child("Report a problem"),
-                        ),
+                        .flex_wrap()
+                        .justify_center()
+                        .gap_x_4()
+                        .gap_y_1()
+                        .child(ExternalLink::new(
+                            "about-hardcover",
+                            "hardcover.app",
+                            "https://hardcover.app",
+                        ))
+                        .child(ExternalLink::new(
+                            "about-source",
+                            "Source code",
+                            repository.clone(),
+                        ))
+                        .child(ExternalLink::new(
+                            "about-issues",
+                            "Report a problem",
+                            format!("{repository}/issues"),
+                        )),
                 )
                 .child(
                     div()
