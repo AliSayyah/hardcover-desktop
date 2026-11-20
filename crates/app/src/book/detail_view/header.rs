@@ -14,7 +14,7 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, IconName, Sizable as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, IconName, Side, Sizable as _, h_flex, v_flex,
 };
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, IntoElement, ParentElement as _, SharedString,
@@ -298,7 +298,9 @@ impl BookDetailView {
             .when(!can_write, |this| {
                 this.tooltip(needs_permission(WRITE_LIBRARY))
             })
-            .dropdown_menu(move |mut menu, _, _| {
+            .dropdown_menu(move |menu, _, _| {
+                // The tick trails, so each status keeps its icon.
+                let mut menu = menu.check_side(Side::Right);
                 for option in ReadingStatus::ALL {
                     let view = view.clone();
                     menu = menu.item(
@@ -324,8 +326,10 @@ impl BookDetailView {
                     })),
             )
             .map(|this| match rating {
-                None if pending == Some(WriteKind::Rating) => this.child(saving(cx)),
-                None => this.child(div().body().text_color(colors(cx).fg_muted).child("Rate")),
+                None if pending != Some(WriteKind::Rating) => {
+                    this.child(div().body().text_color(colors(cx).fg_muted).child("Rate"))
+                }
+                None => this,
                 Some(_) => this.child(
                     Button::new("clear-rating")
                         .ghost()
@@ -337,6 +341,9 @@ impl BookDetailView {
                             cx.listener(|this, _, window, cx| this.change_rating(None, window, cx)),
                         ),
                 ),
+            })
+            .when(pending == Some(WriteKind::Rating), |this| {
+                this.child(saving(cx))
             });
         h_flex()
             .flex_wrap()

@@ -419,7 +419,7 @@ fn render_breakdown(details: &BookDetails, cx: &mut Context<BookDetailView>) -> 
                 .child(
                     h_flex()
                         .flex_shrink_0()
-                        .w_8()
+                        .w_10()
                         .justify_end()
                         .gap_0p5()
                         .child(rating_label(rating))

@@ -89,7 +89,7 @@ impl ReadDialog {
     /// Opens `view` in a dialog.
     pub fn open(view: Entity<Self>, window: &mut Window, cx: &mut App) {
         let (title, confirm) = match view.read(cx).kind {
-            ReadDialogKind::Add => ("Add a read", "Add"),
+            ReadDialogKind::Add => ("Add a past read", "Add"),
             ReadDialogKind::Edit { .. } => ("Change read dates", "Save"),
         };
         open_dialog(window, cx, move |dialog: Dialog, window, _| {
