@@ -160,4 +160,4 @@ With [just](https://github.com/casey/just) installed, `just check` runs all thre
 
 [MIT](LICENSE). Hardcover is a trademark of its owners; this project only uses its public API.
 
-The interface font, [Inter](https://rsms.me/inter/), is bundled under the [SIL Open Font License](assets/fonts/inter/LICENSE.txt).
+The bundled fonts are under the SIL Open Font License: [Inter](https://rsms.me/inter/) ([licence](assets/fonts/inter/LICENSE.txt)), [Literata](https://github.com/googlefonts/literata) ([licence](assets/fonts/literata/LICENSE.txt)) and [Vazirmatn](https://github.com/rastikerdar/vazirmatn) ([licence](assets/fonts/vazirmatn/LICENSE.txt)).
