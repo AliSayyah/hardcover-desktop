@@ -45,15 +45,10 @@ dist:
 package: dist
     packaging/linux/package.sh "$({{ just_executable() }} version)" target/dist/{{ app }} target/package
 
-# The AppImage, from the release tarball, in target/package/. Bundles this system's libraries: release builds use Ubuntu 22.04
+# The AppImage and its .zsync, from the release tarball, in target/package/. Bundles this system's libraries: release builds use Ubuntu 22.04
 [group('build')]
 appimage: package
     packaging/linux/package-appimage.sh "target/package/{{ app }}-$({{ just_executable() }} version)-x86_64-linux.tar.gz"
-
-# The Flatpak bundle (Freedesktop runtime), from the release tarball, in target/package/. Needs the flatpak CLI
-[group('build')]
-flatpak: package
-    packaging/linux/package-flatpak.sh "target/package/{{ app }}-$({{ just_executable() }} version)-x86_64-linux.tar.gz"
 
 # Print the app's version, from crates/app/Cargo.toml
 [group('build')]

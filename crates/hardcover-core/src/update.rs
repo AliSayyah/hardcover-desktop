@@ -1,26 +1,33 @@
 //! Self-update from GitHub releases.
 //!
-//! The app updates itself only when it runs from an unpacked release tarball
-//! (`<prefix>/bin/hardcover-desktop` next to `<prefix>/share/applications/…`)
-//! in a prefix it can write to, such as `~/.local` (where `install.sh` puts
-//! it). Other installs only learn that a newer version exists: a Flatpak, an
-//! AppImage (even one extracted into a writable directory), a distribution
-//! package or a development build.
+//! The app updates itself in two kinds of install ([`InstallKind`]):
+//! - an unpacked release tarball (`<prefix>/bin/hardcover-desktop` next to
+//!   `<prefix>/share/applications/…`) in a prefix it can write to, such as
+//!   `~/.local`, where `install.sh` puts it;
+//! - an AppImage in a directory it can write to.
+//!
+//! Other installs only learn that a newer version exists: a Flatpak, a
+//! distribution package, a development build, or a file this user can't
+//! replace.
 //!
 //! Trust chain for an install:
-//! 1. The release tarball must be signed by the key in `packaging/minisign.pub`.
+//! 1. The release file (tarball or AppImage) must be signed by the key in
+//!    `packaging/minisign.pub`.
 //! 2. The signature's trusted comment names the signed file, and that name must
-//!    be the tarball name for the advertised version and this architecture. A
-//!    valid signature for an older tarball therefore can't be replayed as a
-//!    newer release.
-//! 3. The advertised version must be newer than the running one, and the
-//!    archive's top-level directory must carry the same name as the tarball.
-//! 4. Only regular files under `bin/hardcover-desktop` and `share/` are
-//!    unpacked, with plain relative paths and a total size cap.
+//!    be the file name for the advertised version and this architecture. A
+//!    valid signature for an older release therefore can't be replayed as a
+//!    newer one.
+//! 3. The advertised version must be newer than the running one.
+//! 4. A tarball's top-level directory must carry the same name as the tarball,
+//!    and only regular files under `bin/hardcover-desktop` and `share/` are
+//!    unpacked, with plain relative paths and a total size cap. An AppImage
+//!    must carry the AppImage type 2 magic bytes.
 //!
-//! Files are staged inside the prefix and renamed into place, the binary last,
-//! so every file is replaced atomically. Replacing the running executable is
-//! safe on Linux; the new version runs after a restart.
+//! Tarball files are staged inside the prefix and renamed into place, the
+//! binary last, so every file is replaced atomically. An AppImage is written
+//! next to the running one and renamed over it, keeping its path (and so its
+//! name, launchers and the restart path). Replacing a running executable or a
+//! mounted AppImage is safe on Linux; the new version runs after a restart.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -50,6 +57,7 @@ pub fn release_public_key() -> &'static str {
 const APP_ID: &str = "io.github.alisayyah.HardcoverDesktop";
 const BINARY: &str = "hardcover-desktop";
 const MAX_TARBALL_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_APPIMAGE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 512 * 1024 * 1024;
 const STAGING_DIR: &str = ".hardcover-desktop-update";
 
@@ -135,16 +143,59 @@ impl fmt::Display for Version {
 pub enum InstallKind {
     /// Unpacked from a release tarball into a writable prefix.
     Tarball { prefix: PathBuf },
-    /// Anything else: a Flatpak, an AppImage, a package, a development build,
-    /// or a prefix this user can't write to. Updates are announced, not installed.
+    /// Run from an AppImage, the file at `path`, in a writable directory.
+    AppImage { path: PathBuf },
+    /// Anything else: a Flatpak, a package, a development build, or a prefix
+    /// or AppImage this user can't write to. Updates are announced, not installed.
     Other,
+}
+
+/// What the AppImage runtime tells the program it starts, from the environment.
+#[derive(Debug, Default)]
+pub(crate) struct LaunchEnv {
+    /// `FLATPAK_ID` is set.
+    pub flatpak: bool,
+    /// `APPIMAGE`: the AppImage file.
+    pub appimage: Option<PathBuf>,
+    /// `APPDIR`: where the AppImage is mounted or extracted.
+    pub appdir: Option<PathBuf>,
+}
+
+impl LaunchEnv {
+    fn current() -> Self {
+        Self {
+            flatpak: std::env::var_os("FLATPAK_ID").is_some(),
+            appimage: std::env::var_os("APPIMAGE").map(PathBuf::from),
+            appdir: std::env::var_os("APPDIR").map(PathBuf::from),
+        }
+    }
 }
 
 impl InstallKind {
     /// Classifies the executable at `exe` (resolve it once, at startup).
     pub fn detect(exe: &Path) -> Self {
-        if std::env::var_os("FLATPAK_ID").is_some() {
+        Self::detect_in(exe, &LaunchEnv::current())
+    }
+
+    pub(crate) fn detect_in(exe: &Path, env: &LaunchEnv) -> Self {
+        if env.flatpak {
             return Self::Other;
+        }
+        let exe = exe.canonicalize().unwrap_or_else(|_| exe.to_owned());
+        // `APPIMAGE` and `APPDIR` are inherited by everything an AppImage
+        // starts (a terminal, an editor), so they describe this program only
+        // when its own executable is inside `APPDIR`. Without that check, an
+        // update could overwrite another application's AppImage.
+        let appdir = env.appdir.as_deref().and_then(|d| d.canonicalize().ok());
+        if appdir.is_some_and(|dir| exe.starts_with(dir)) {
+            return match env.appimage.as_deref().and_then(|f| f.canonicalize().ok()) {
+                Some(file)
+                    if is_appimage_file(&file) && file.parent().is_some_and(is_writable_dir) =>
+                {
+                    Self::AppImage { path: file }
+                }
+                _ => Self::Other,
+            };
         }
         let Some(bin) = exe.parent() else {
             return Self::Other;
@@ -152,15 +203,14 @@ impl InstallKind {
         let Some(prefix) = bin.parent() else {
             return Self::Other;
         };
-        // An AppImage holds the tarball's layout under `usr/`, next to its
-        // `AppRun`. Mounted, it is read-only; extracted (FUSE missing, or
-        // `--appimage-extract-and-run`) it is writable, and an update would
-        // land in a temporary directory. The `APPIMAGE` variable is no test:
-        // a program started from an AppImage inherits it.
+        // An AppDir extracted by hand (`--appimage-extract`) and run without
+        // the runtime has the tarball's layout under `usr/`, next to
+        // `AppRun`; updating it as a tarball would leave its bundled
+        // libraries behind.
         if prefix.file_name().is_some_and(|n| n == "usr")
             && prefix
                 .parent()
-                .is_some_and(|dir| dir.join("AppRun").is_file())
+                .is_some_and(|dir| dir.join("AppRun").exists())
         {
             return Self::Other;
         }
@@ -180,8 +230,41 @@ impl InstallKind {
     }
 
     pub fn can_self_update(&self) -> bool {
-        matches!(self, Self::Tarball { .. })
+        !matches!(self, Self::Other)
     }
+
+    /// The release file this install updates from, if the release has one.
+    pub fn asset<'a>(&self, release: &'a Release) -> Option<&'a Asset> {
+        match self {
+            Self::Tarball { .. } => release.tarball.as_ref(),
+            Self::AppImage { .. } => release.appimage.as_ref(),
+            Self::Other => None,
+        }
+    }
+
+    /// What a restart must run instead of the executable, if anything. An
+    /// AppImage's executable is gone once it exits (the runtime unmounts or
+    /// deletes it), so a restart runs the AppImage file.
+    pub fn restart_path(&self) -> Option<&Path> {
+        match self {
+            Self::AppImage { path } => Some(path),
+            Self::Tarball { .. } | Self::Other => None,
+        }
+    }
+}
+
+/// Whether `path` is an AppImage: an ELF file with the type 2 magic bytes
+/// (`AI` and 2 at offset 8), as the AppImage specification defines.
+fn is_appimage_file(path: &Path) -> bool {
+    let mut head = [0u8; 11];
+    fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok()
+        && is_appimage(&head)
+}
+
+fn is_appimage(bytes: &[u8]) -> bool {
+    bytes.len() >= 11 && bytes[..4] == *b"\x7fELF" && bytes[8..11] == *b"AI\x02"
 }
 
 fn is_writable_dir(dir: &Path) -> bool {
@@ -206,7 +289,9 @@ pub struct Release {
     /// The release page on GitHub.
     pub page_url: String,
     /// The tarball for this architecture, if the release has one.
-    pub asset: Option<Asset>,
+    pub tarball: Option<Asset>,
+    /// The AppImage for this architecture, if the release has one.
+    pub appimage: Option<Asset>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,6 +304,14 @@ pub struct Asset {
 /// The tarball name a release of `version` uses on this architecture.
 pub fn tarball_name(version: &Version) -> String {
     format!("{BINARY}-{version}-{}-linux.tar.gz", std::env::consts::ARCH)
+}
+
+/// The AppImage name a release of `version` uses on this architecture.
+pub fn appimage_name(version: &Version) -> String {
+    format!(
+        "{BINARY}-{version}-{}-linux.AppImage",
+        std::env::consts::ARCH
+    )
 }
 
 #[derive(Deserialize)]
@@ -316,14 +409,14 @@ impl Updater {
         if version <= *current {
             return Ok(None);
         }
-        let name = tarball_name(&version);
         let url_of = |n: &str| {
             wire.assets
                 .iter()
                 .find(|a| a.name == n)
                 .map(|a| a.browser_download_url.clone())
         };
-        let asset = match (url_of(&name), url_of(&format!("{name}.minisig"))) {
+        // A file counts only with its signature beside it.
+        let signed = |name: String| match (url_of(&name), url_of(&format!("{name}.minisig"))) {
             (Some(url), Some(signature_url)) => Some(Asset {
                 name,
                 url,
@@ -332,40 +425,74 @@ impl Updater {
             _ => None,
         };
         Ok(Some(Release {
+            tarball: signed(tarball_name(&version)),
+            appimage: signed(appimage_name(&version)),
             version,
             notes: wire.body.unwrap_or_default(),
             page_url: wire.html_url,
-            asset,
         }))
     }
 
-    /// Downloads, verifies and installs `release` into `prefix`. The running
-    /// app keeps its old code until it restarts.
-    pub fn install(&self, release: &Release, current: &Version, prefix: &Path) -> Result<()> {
+    /// Downloads, verifies and installs `release` over the install `target`.
+    /// The running app keeps its old code until it restarts.
+    pub fn install(
+        &self,
+        release: &Release,
+        current: &Version,
+        target: &InstallKind,
+    ) -> Result<()> {
         if release.version <= *current {
             return Err(update_error("the release is not newer than this version"));
         }
-        let asset = release
-            .asset
-            .as_ref()
-            .ok_or_else(|| update_error("the release has no build for this computer"))?;
-        let expected_name = tarball_name(&release.version);
+        match target {
+            InstallKind::Tarball { prefix } => {
+                let expected_name = tarball_name(&release.version);
+                let tarball = self.fetch_verified(
+                    release.tarball.as_ref(),
+                    &expected_name,
+                    MAX_TARBALL_BYTES,
+                )?;
+                let top = expected_name.trim_end_matches(".tar.gz");
+                let staging = prefix.join(STAGING_DIR);
+                let result = unpack(&tarball, top, &staging)
+                    .and_then(|files| place(&staging, prefix, &files));
+                let _ = fs::remove_dir_all(&staging);
+                result
+            }
+            InstallKind::AppImage { path } => {
+                let image = self.fetch_verified(
+                    release.appimage.as_ref(),
+                    &appimage_name(&release.version),
+                    MAX_APPIMAGE_BYTES,
+                )?;
+                if !is_appimage(&image) {
+                    return Err(update_error("the update is not an AppImage"));
+                }
+                replace_file(path, &image)
+            }
+            InstallKind::Other => Err(update_error("this copy can't update itself")),
+        }
+    }
+
+    /// Downloads `asset` and its signature, and checks the signature was made
+    /// with the release key for `expected_name`.
+    fn fetch_verified(
+        &self,
+        asset: Option<&Asset>,
+        expected_name: &str,
+        limit: u64,
+    ) -> Result<Vec<u8>> {
+        let asset =
+            asset.ok_or_else(|| update_error("the release has no build for this computer"))?;
         if asset.name != expected_name {
             return Err(update_error(
                 "the release's file name doesn't match its version",
             ));
         }
-
         let signature = self.download(&asset.signature_url, 64 * 1024)?;
-        let tarball = self.download(&asset.url, MAX_TARBALL_BYTES)?;
-        verify(&self.public_key, &tarball, &signature, &expected_name)?;
-
-        let top = expected_name.trim_end_matches(".tar.gz");
-        let staging = prefix.join(STAGING_DIR);
-        let result =
-            unpack(&tarball, top, &staging).and_then(|files| place(&staging, prefix, &files));
-        let _ = fs::remove_dir_all(&staging);
-        result
+        let data = self.download(&asset.url, limit)?;
+        verify(&self.public_key, &data, &signature, expected_name)?;
+        Ok(data)
     }
 
     fn download(&self, url: &str, limit: u64) -> Result<Vec<u8>> {
@@ -485,6 +612,25 @@ fn place(staging: &Path, prefix: &Path, files: &[PathBuf]) -> Result<()> {
         fs::rename(staging.join(rel), &dest).map_err(io_error)?;
     }
     Ok(())
+}
+
+/// Writes `data` next to `path` and renames it over `path`, executable.
+fn replace_file(path: &Path, data: &[u8]) -> Result<()> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| update_error("the AppImage has no directory"))?;
+    let temp = dir.join(format!("{STAGING_DIR}-{}", std::process::id()));
+    let result = (|| {
+        let mut out = fs::File::create(&temp).map_err(io_error)?;
+        out.write_all(data).map_err(io_error)?;
+        out.sync_all().map_err(io_error)?;
+        set_mode(&temp, 0o755)?;
+        fs::rename(&temp, path).map_err(io_error)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
 }
 
 #[cfg(unix)]

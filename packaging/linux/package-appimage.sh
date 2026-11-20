@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
-# Builds the AppImage from the release tarball, next to it.
+# Builds the AppImage from the release tarball, and its .zsync, next to it.
 #
 #   packaging/linux/package-appimage.sh <out-dir>/hardcover-desktop-<version>-x86_64-linux.tar.gz
 #
 # Run it on the distribution the binary was built on (Ubuntu 22.04 for a
 # release): linuxdeploy bundles the libraries the binary links from this
 # system, so they must match the glibc it was built against.
+#
+# The AppImage carries the standard update information, pointing at the latest
+# GitHub release's .zsync, so AppImageUpdate, AppImageLauncher, Gear Lever and
+# the like can update it. The app's own updater uses the minisign signature.
 set -euo pipefail
+
+die() { echo "error: $*" >&2; exit 1; }
 
 [[ $# == 1 ]] || { echo "usage: $0 <release tarball>" >&2; exit 2; }
 archive=$(realpath "$1")
 name=$(basename "$archive" .tar.gz)
 out=$(realpath "$(dirname "$archive")")
-if [[ $name != *-x86_64-linux || $(uname -m) != x86_64 ]]; then
-    echo "error: needs an x86_64 release tarball, on x86_64: $1" >&2
-    exit 1
-fi
+[[ $name == *-x86_64-linux && $(uname -m) == x86_64 ]] ||
+    die "needs an x86_64 release tarball, on x86_64: $1"
+update_info="gh-releases-zsync|AliSayyah|hardcover-desktop|latest|hardcover-desktop-*-x86_64-linux.AppImage.zsync"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work"
@@ -41,7 +46,16 @@ c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  linuxdeploy
 DIGESTS
 chmod +x linuxdeploy
 export LDAI_RUNTIME_FILE="$work/runtime" LDAI_OUTPUT="$work/$name.AppImage"
+export LDAI_UPDATE_INFORMATION="$update_info"
 ./linuxdeploy --appimage-extract-and-run --appdir AppDir --output appimage
 chmod +x "$name.AppImage"
 ./"$name.AppImage" --appimage-extract-and-run --version
-mv -- "$name.AppImage" "$out/"
+
+# The update information is embedded, and the .zsync names this file (its URL
+# is relative to the .zsync's own).
+[[ $(./"$name.AppImage" --appimage-updateinformation) == "$update_info" ]] ||
+    die "the AppImage lacks its update information"
+[[ -f $name.AppImage.zsync ]] || die "no $name.AppImage.zsync was written"
+grep -qxF "URL: $name.AppImage" "$name.AppImage.zsync" ||
+    die "$name.AppImage.zsync points at another file"
+mv -- "$name.AppImage" "$name.AppImage.zsync" "$out/"

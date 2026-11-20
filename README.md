@@ -41,7 +41,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 - **Stats:** books and pages you finished each year, re-reads included, how long a book takes you, how you rate and what is on each shelf, worked out from your library without going online.
 - **Offline access:** your library and covers are cached on your computer, so they open instantly and stay readable without a connection.
 - **Secure sign-in:** you sign in through Hardcover in your browser (OAuth with PKCE). The app never sees your password, and the session is stored in your system keyring.
-- **Updates:** the app tells you about each new release. Installed under `~/.local` (by the installer, or the tarball unpacked by hand), it installs the release in one click, after verifying its signature.
+- **Self-updating:** the app tells you about each new release and installs it in one click, after verifying its signature, whether you installed it with the installer or run the AppImage.
 - **Settings:** choose a light or dark theme or follow the system, and turn automatic update checks on or off.
 
 <picture>
@@ -71,15 +71,9 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 
 ## Install
 
-Every release on [GitHub](https://github.com/AliSayyah/hardcover-desktop/releases/latest) comes in three forms for x86_64 Linux, all the same app:
+Every release on [GitHub](https://github.com/AliSayyah/hardcover-desktop/releases/latest) comes in two forms for x86_64 Linux, the same app in each: the [installer](#installer), which puts it in `~/.local`, and an [AppImage](#appimage), a single file to run from anywhere. Either way the app updates itself, in one click, after verifying the new release's signature.
 
-| | Updates | Needs |
-| --- | --- | --- |
-| [Installer](#installer) (`~/.local`) | in the app, in one click | glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later) |
-| [AppImage](#appimage) | download the new file | glibc 2.35 or newer |
-| [Flatpak](#flatpak) | install the new bundle | Flatpak; the runtime comes from Flathub |
-
-Each also needs Wayland or X11, Vulkan or OpenGL graphics drivers, and a Secret Service keyring, such as GNOME Keyring or KWallet, to store your sign-in.
+Both need x86_64 Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later), Wayland or X11, Vulkan or OpenGL graphics drivers, and a Secret Service keyring, such as GNOME Keyring or KWallet, to store your sign-in.
 
 ### Installer
 
@@ -113,22 +107,13 @@ chmod +x hardcover-desktop-*-x86_64-linux.AppImage
 ./hardcover-desktop-*-x86_64-linux.AppImage
 ```
 
-Without FUSE, add `--appimage-extract-and-run`. To update, replace the file with the new release's; to uninstall, delete it.
+Without FUSE, add `--appimage-extract-and-run`. To uninstall, delete the file.
 
-### Flatpak
-
-Download the `.flatpak` bundle, then install and run it:
-
-```sh
-flatpak install --user hardcover-desktop-*-x86_64-linux.flatpak
-flatpak run io.github.alisayyah.HardcoverDesktop
-```
-
-Flatpak offers to install the Freedesktop runtime from Flathub the first time. To update, install the new release's bundle the same way. To uninstall, run `flatpak uninstall --user io.github.alisayyah.HardcoverDesktop`.
+The app updates the AppImage in place: the new release replaces the file and keeps its name, so shortcuts to it keep working (the version in the name stays the one you downloaded; **About** shows the one you run). It needs to be able to write to the AppImage's folder; otherwise it only tells you about new releases. The AppImage also carries the standard update information, so tools such as [AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate), AppImageLauncher and Gear Lever can update it too.
 
 ### Checking a download
 
-Every download, the installer included, has a `.minisig` signature next to it on the release. To check a file yourself with [minisign](https://jedisct1.github.io/minisign/), download its `.minisig` into the same directory and run:
+Every download, the installer included, has a `.minisig` signature next to it on the release (the AppImage's `.zsync` is for update tools, not a download). To check a file yourself with [minisign](https://jedisct1.github.io/minisign/), download its `.minisig` into the same directory and run:
 
 ```sh
 minisign -Vm <file> -P RWQmH1HvOAVP+8piXBk3ZC+nqzBVFZFcynEg8NUsgQDCSYYAkrSkPRXW
@@ -144,8 +129,6 @@ The app talks to Hardcover's API, and to GitHub to check for updates. It stores 
 | Library cache | `~/.local/share/hardcover-desktop/` |
 | Cover images | `~/.cache/hardcover-desktop/covers/` |
 | Settings | `~/.config/hardcover-desktop/settings.json` |
-
-The Flatpak keeps the library cache, covers and settings under `~/.var/app/io.github.alisayyah.HardcoverDesktop/` instead; the session is in the same keyring.
 
 Signing out (account menu → **Sign out…**, or in **Settings**) revokes the session and deletes the library cache; your settings stay. To turn off automatic update checks, switch them off in **Settings**, or set `HARDCOVER_NO_UPDATE_CHECK=1`. **Check for updates** in the account menu still works.
 
