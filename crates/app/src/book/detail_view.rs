@@ -41,6 +41,7 @@ use hardcover_core::{
 };
 
 use self::catalog_sections::Similar;
+use self::community_reviews::CommunityReviews;
 use self::review_section::ReviewEditor;
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
@@ -56,6 +57,7 @@ use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 
 mod catalog_sections;
+mod community_reviews;
 mod review_section;
 
 /// What the pane shows.
@@ -208,6 +210,7 @@ pub struct BookDetailView {
     /// "Show all tags" was pressed for the book shown.
     tags_expanded: bool,
     review: ReviewEditor,
+    community_reviews: CommunityReviews,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -296,6 +299,7 @@ impl BookDetailView {
                 ),
             ];
         subscriptions.extend(review_subscriptions);
+        subscriptions.push(Self::observe_review_scope(cx));
         // The list menu and the Owned switch follow the user's lists.
         if let Some(lists) = ListsModel::global(cx) {
             subscriptions.push(cx.observe(&lists, |_, _, cx| cx.notify()));
@@ -328,6 +332,7 @@ impl BookDetailView {
             _similar_task: None,
             tags_expanded: false,
             review,
+            community_reviews: CommunityReviews::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -354,6 +359,7 @@ impl BookDetailView {
         self._similar_task = None;
         self.similar_loading = None;
         self.load_similar(cx);
+        self.community_reviews_subject_changed(cx);
         cx.notify();
     }
 
@@ -516,6 +522,7 @@ impl BookDetailView {
                 };
                 this.details.insert(id, details);
                 this.load_similar(cx);
+                this.load_community_reviews(cx);
                 cx.notify();
             });
         }));

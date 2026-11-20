@@ -56,6 +56,8 @@ const MEMBERSHIPS_PAGE_SIZE: u32 = 1_000;
 const MEMBERSHIPS_MAX_PAGES: usize = 5;
 /// Books per page in [`Client::list_books`].
 pub const LIST_BOOKS_PER_PAGE: u32 = 100;
+/// Reviews per page in [`Client::book_reviews`].
+pub const REVIEWS_PER_PAGE: u32 = 10;
 
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
@@ -1375,6 +1377,73 @@ impl Client {
         data.lists_by_pk
             .map(RawList::into_list)
             .ok_or_else(|| Error::Decode(format!("list {id} not found after `{field}`")))
+    }
+
+    // ----- other readers' reviews -----
+
+    /// A page of other readers' reviews of `book`, the most liked first, then
+    /// the newest. `me` (the signed-in user) is left out. `offset` is the
+    /// previous page's [`ReviewsPage::next_offset`], 0 for the first. Asks
+    /// for one row more than a page, so `has_more` is never a guess. Needs
+    /// `read:social`.
+    pub fn book_reviews(&self, book: BookId, me: UserId, offset: u32) -> Result<ReviewsPage> {
+        #[derive(Deserialize)]
+        struct Data {
+            user_books: Vec<RawCommunityReview>,
+        }
+        let data: Data = self.query(
+            "BookReviews",
+            queries::BOOK_REVIEWS,
+            json!({
+                "bookId": book.get(),
+                "me": me.get(),
+                "limit": REVIEWS_PER_PAGE + 1,
+                "offset": offset,
+            }),
+            QUERY_TIMEOUT,
+        )?;
+        let has_more = data.user_books.len() > REVIEWS_PER_PAGE as usize;
+        let rows: Vec<RawCommunityReview> = data
+            .user_books
+            .into_iter()
+            .take(REVIEWS_PER_PAGE as usize)
+            .collect();
+        let read = u32::try_from(rows.len()).unwrap_or(REVIEWS_PER_PAGE);
+        Ok(ReviewsPage {
+            reviews: rows
+                .into_iter()
+                .filter_map(RawCommunityReview::into_review)
+                .collect(),
+            next_offset: offset + read,
+            has_more,
+        })
+    }
+
+    /// How many reviews [`Client::book_reviews`] pages through.
+    pub fn book_reviews_count(&self, book: BookId, me: UserId) -> Result<u32> {
+        #[derive(Deserialize)]
+        struct Data {
+            user_books_aggregate: RawAggregate,
+        }
+        #[derive(Deserialize)]
+        struct RawAggregate {
+            aggregate: Option<RawCount>,
+        }
+        #[derive(Deserialize)]
+        struct RawCount {
+            count: Option<u32>,
+        }
+        let data: Data = self.query(
+            "BookReviewsCount",
+            queries::BOOK_REVIEWS_COUNT,
+            json!({ "bookId": book.get(), "me": me.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        Ok(data
+            .user_books_aggregate
+            .aggregate
+            .and_then(|a| a.count)
+            .unwrap_or(0))
     }
 
     // ----- transport -----

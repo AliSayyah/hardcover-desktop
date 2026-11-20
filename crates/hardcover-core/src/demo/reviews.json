@@ -1,0 +1,94 @@
+{
+  "reviewers": [
+    { "id": 9001, "username": "marigold_pages", "name": "Marigold Ashby", "color": "#3f6e8c" },
+    { "id": 9002, "username": "orbitalnoodle", "name": "", "color": "#8c5a3f" },
+    { "id": 9003, "username": "fen_reads", "name": "Fen Okafor", "color": "#5b7d3a" },
+    { "id": 9004, "username": "shirin_ketab", "name": "شیرین", "color": "#7a4b8f" },
+    { "id": 9005, "username": "lanternfish", "name": "Theo Lantern", "color": "#a3473f" },
+    { "id": 9006, "username": "quietshelf", "name": "Ines Varga" },
+    { "id": 9007, "username": "pagewright", "name": "Bram Holloway", "color": "#2f7a73" },
+    { "id": 9008, "username": "nightowl_ana", "name": "Ana Petrov", "color": "#6b6f8f" },
+    { "id": 9009, "username": "dogeared", "name": "", "color": "#9a7b2e" },
+    { "id": 9010, "username": "salt_and_spine", "name": "Rowan Sato", "color": "#4d6a9c" },
+    { "id": 9011, "username": "milo_reads_slow", "name": "Milo Brandt", "color": "#8a4f6d" },
+    { "id": 9012, "username": "cloudberry", "name": "Juno Achterberg", "color": "#3c7d52" }
+  ],
+  "reviews": [
+    {
+      "id": 70001, "book": 427578, "user": 9001, "rating": 5.0, "likes": 48, "reviewed_at": "2026-03-14",
+      "text": "I went in knowing almost nothing and that was the right call. The science is dense but never dull, and the friendship at the centre of it carried me through every chapter.\n\nThe pacing is what impressed me most. Every time a problem is solved, a bigger one is waiting behind it, and the flashbacks arrive exactly when you need them to make sense of the present.\n\nI also liked that the narrator is competent without being a superhero. He gets things wrong, he panics, he talks himself down, and then he does the maths. That made the stakes feel real to me.\n\nIf you enjoy problem-solving stories, read this. If you don't, read it anyway: it might change your mind. I finished it on a train and had to stare out of the window for a while afterwards."
+    },
+    {
+      "id": 70002, "book": 427578, "user": 9002, "rating": 4.5, "likes": 31, "reviewed_at": "2026-05-02",
+      "text": "Funny, warm and very nerdy. Some of the jokes land better than others, but the heart of it is solid."
+    },
+    {
+      "id": 70003, "book": 427578, "user": 9003, "rating": 4.0, "likes": 22, "reviewed_at": "2026-06-19", "spoilers": true,
+      "text": "The reveal halfway through about why he was on the ship in the first place changed how I read everything before it.\n\nI did not see it coming, and I liked him more for it, not less."
+    },
+    {
+      "id": 70004, "book": 427578, "user": 9004, "rating": 5.0, "likes": 17, "reviewed_at": "2026-07-08",
+      "text": "کتابی پرکشش و پر از امید. دوستی دو شخصیت اصلی را خیلی دوست داشتم و تا صفحهٔ آخر نتوانستم کتاب را زمین بگذارم.\n\nترجمهٔ فارسی هم روان بود و اصطلاحات علمی را خوب توضیح داده بود."
+    },
+    {
+      "id": 70005, "book": 427578, "user": 9005, "rating": null, "likes": 12, "reviewed_at": "2026-04-11",
+      "text": "Not rating this one yet: I listened to the audiobook and want to read it on paper before I decide. The narration was excellent, though."
+    },
+    {
+      "id": 70006, "book": 427578, "user": 9006, "rating": 3.5, "likes": 9, "reviewed_at": null,
+      "text": "3.5 ★"
+    },
+    {
+      "id": 70007, "book": 427578, "user": 9007, "rating": 4.0, "likes": 6, "reviewed_at": "2026-08-23",
+      "text": "Good fun. The middle sags a little, but the last hundred pages make up for it."
+    },
+    {
+      "id": 70008, "book": 427578, "user": 9008, "rating": 3.0, "likes": 4, "reviewed_at": "2026-09-01",
+      "text": "I wanted more of the characters and less of the experiments. Still glad I read it."
+    },
+    {
+      "id": 70009, "book": 427578, "user": 9009, "rating": 4.5, "likes": 2, "reviewed_at": "2026-09-30",
+      "text": "Read it in two sittings. Recommended it to my whole book club."
+    },
+    {
+      "id": 70010, "book": 427578, "user": 9010, "rating": 5.0, "likes": 1, "reviewed_at": "2026-10-12",
+      "text": "My favourite read of the year so far. The ending is perfect."
+    },
+    {
+      "id": 70011, "book": 427578, "user": 9011, "rating": 2.5, "likes": 0, "reviewed_at": "2026-10-28",
+      "text": "Too many jokes for my taste, and the science lectures broke the tension for me. I can see why people love it."
+    },
+    {
+      "id": 70012, "book": 427578, "user": 9012, "rating": 4.0, "likes": 0, "reviewed_at": "2026-11-09",
+      "text": "A clever, kind book. I'll be thinking about it for a while."
+    },
+    {
+      "id": 70013, "book": 312460, "user": 9003, "rating": 4.5, "likes": 26, "reviewed_at": "2025-12-03",
+      "text": "Slow to start, then impossible to put down. The world-building is the real main character."
+    },
+    {
+      "id": 70014, "book": 312460, "user": 9008, "rating": 4.0, "likes": 11, "reviewed_at": "2026-01-15",
+      "text": "Keep the glossary open for the first hundred pages. After that it all clicks."
+    },
+    {
+      "id": 70015, "book": 312460, "user": 9004, "rating": 5.0, "likes": 3, "reviewed_at": "2026-02-27",
+      "text": "یکی از بهترین رمان‌های علمی‌تخیلی که خوانده‌ام. دنیای داستان آن‌قدر کامل است که انگار واقعاً وجود دارد."
+    },
+    {
+      "id": 70016, "book": 428023, "user": 9007, "rating": 3.5, "likes": 8, "reviewed_at": "2026-05-20",
+      "text": "Useful ideas, a lot of repetition. The chapter summaries are worth keeping."
+    },
+    {
+      "id": 70017, "book": 428023, "user": 9011, "rating": null, "likes": 0, "reviewed_at": "2026-06-04",
+      "text": "Gave up halfway, but the first part already changed how I plan my mornings."
+    },
+    {
+      "id": 70018, "book": 2459845, "user": 9012, "rating": 5.0, "likes": 14, "reviewed_at": "2026-03-30",
+      "text": "A cosy adventure that still has teeth. Perfect for reading aloud."
+    },
+    {
+      "id": 70019, "book": 379760, "user": 9005, "rating": 4.5, "likes": 19, "reviewed_at": "2026-02-02", "spoilers": true,
+      "text": "The final chapters are bleaker than I remembered from school. The last line hit me harder as an adult."
+    }
+  ]
+}

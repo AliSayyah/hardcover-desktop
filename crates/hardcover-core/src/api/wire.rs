@@ -1169,6 +1169,108 @@ impl ProgressContext {
     }
 }
 
+// ---------- other readers' reviews ----------
+
+/// A row of `BookReviews`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawCommunityReview {
+    pub id: i64,
+    pub rating: Option<f64>,
+    pub likes_count: Option<i64>,
+    /// A `timestamp`, though it is written as a `date`.
+    pub reviewed_at: Option<String>,
+    pub review_has_spoilers: Option<bool>,
+    pub review_raw: Option<String>,
+    pub user: Option<RawReviewer>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawReviewer {
+    pub id: i64,
+    pub username: Option<String>,
+    pub name: Option<String>,
+    #[serde(default)]
+    pub cached_image: Value,
+}
+
+impl RawCommunityReview {
+    /// `None` for a row with no text or no user.
+    pub fn into_review(self) -> Option<CommunityReview> {
+        let text = non_empty(self.review_raw)?;
+        let user = self.user?;
+        let mut reviewer = Reviewer::new(UserId::new(user.id));
+        reviewer.username = non_empty(user.username);
+        reviewer.name = non_empty(user.name);
+        reviewer.avatar = cover_from_value(&user.cached_image);
+        reviewer.color = user
+            .cached_image
+            .get("color")
+            .and_then(Value::as_str)
+            .and_then(hex_color);
+        let mut review = CommunityReview::new(UserBookId::new(self.id), reviewer, text);
+        review.rating = self.rating.and_then(Rating::from_api);
+        review.likes = opt_u32(self.likes_count).unwrap_or(0);
+        review.reviewed_at = self.reviewed_at.as_deref().and_then(parse_date);
+        review.has_spoilers = self.review_has_spoilers.unwrap_or(false);
+        Some(review)
+    }
+}
+
+/// `#rrggbb` or `#rgb`, with or without the `#`.
+fn hex_color(s: &str) -> Option<[u8; 3]> {
+    let hex = s.trim().trim_start_matches('#');
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let digit = |i: usize| u8::from_str_radix(&hex[i..=i], 16).ok();
+    match hex.len() {
+        6 => Some([
+            u8::from_str_radix(&hex[0..2], 16).ok()?,
+            u8::from_str_radix(&hex[2..4], 16).ok()?,
+            u8::from_str_radix(&hex[4..6], 16).ok()?,
+        ]),
+        3 => Some([digit(0)? * 17, digit(1)? * 17, digit(2)? * 17]),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod community_review_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn hex_colors() {
+        assert_eq!(hex_color("#1A2b3C"), Some([0x1a, 0x2b, 0x3c]));
+        assert_eq!(hex_color("fff"), Some([255, 255, 255]));
+        assert_eq!(hex_color("#12345"), None);
+        assert_eq!(hex_color("rgb(1,2,3)"), None);
+        assert_eq!(hex_color("#ééé"), None);
+    }
+
+    #[test]
+    fn rows_without_text_or_user_are_dropped() {
+        let row = |raw: Value, user: Value| -> Option<CommunityReview> {
+            serde_json::from_value::<RawCommunityReview>(json!({
+                "id": 1, "rating": 3.5, "likes_count": 2, "reviewed_at": null,
+                "review_has_spoilers": null, "review_raw": raw, "user": user,
+            }))
+            .unwrap()
+            .into_review()
+        };
+        let user = json!({"id": 9, "username": "u9", "name": "", "cached_image": {}});
+        assert!(row(json!("  \n "), user.clone()).is_none());
+        assert!(row(json!(null), user.clone()).is_none());
+        assert!(row(json!("Text"), json!(null)).is_none());
+        let review = row(json!("Text"), user).unwrap();
+        assert_eq!(review.reviewer.name, None);
+        assert_eq!(review.reviewer.avatar, None);
+        assert_eq!(review.rating, Rating::new(3.5));
+        assert!(!review.has_spoilers);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
