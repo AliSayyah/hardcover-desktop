@@ -363,6 +363,9 @@ fn scope_feature(scope: &str) -> &'static str {
         scopes::READ_GOALS | scopes::WRITE_GOALS => "reading goals",
         scopes::WRITE_REVIEWS => "reviews",
         scopes::READ_LISTS | scopes::WRITE_LISTS => "lists",
+        scopes::READ_JOURNAL => "your reading journal",
+        scopes::READ_SOCIAL | scopes::READ_USERS => "other readers' reviews",
+        scopes::READ_NOTIFICATIONS | scopes::WRITE_NOTIFICATIONS => "notifications",
         _ => "your library",
     }
 }
@@ -401,7 +404,15 @@ fn join_and(items: &[&str]) -> String {
 
 /// The features that `missing` scopes cover, in a fixed order.
 pub fn missing_features(missing: &[&str]) -> Vec<&'static str> {
-    const ORDER: [&str; 4] = ["your library", "reading goals", "reviews", "lists"];
+    const ORDER: [&str; 7] = [
+        "your library",
+        "reading goals",
+        "reviews",
+        "lists",
+        "your reading journal",
+        "other readers' reviews",
+        "notifications",
+    ];
     ORDER
         .into_iter()
         .filter(|f| missing.iter().any(|s| scope_feature(s) == *f))
@@ -671,12 +682,12 @@ mod tests {
             Some(scopes::READ_GOALS)
         );
         assert_eq!(
-            requested_scope(Some("read:journal write:library")),
+            requested_scope(Some("read:prompts write:library")),
             Some(scopes::WRITE_LIBRARY)
         );
         // Not a part of read:goals, and not a scope the app requests.
         assert_eq!(requested_scope(Some("read:goalsx")), None);
-        assert_eq!(requested_scope(Some("read:journal")), None);
+        assert_eq!(requested_scope(Some("read:prompts")), None);
         assert_eq!(requested_scope(None), None);
         assert_eq!(
             scope_refused_message(scopes::WRITE_LIBRARY),

@@ -27,6 +27,17 @@ pub const WRITE_GOALS: &str = "write:goals";
 pub const READ_LISTS: &str = "read:lists";
 /// Creating and changing lists.
 pub const WRITE_LISTS: &str = "write:lists";
+/// The user's reading journal (notes, quotes, progress events). Writing it
+/// needs only [`WRITE_LIBRARY`].
+pub const READ_JOURNAL: &str = "read:journal";
+/// Other users' content: their library entries, reviews and activity.
+pub const READ_SOCIAL: &str = "read:social";
+/// Other users' public profiles.
+pub const READ_USERS: &str = "read:users";
+/// The user's notifications.
+pub const READ_NOTIFICATIONS: &str = "read:notifications";
+/// Marking notifications read.
+pub const WRITE_NOTIFICATIONS: &str = "write:notifications";
 
 /// What versions up to 0.1.x requested. A session saved without a granted
 /// scope is assumed to hold exactly these.
@@ -216,7 +227,12 @@ mod tests {
                 READ_GOALS,
                 WRITE_GOALS,
                 READ_LISTS,
-                WRITE_LISTS
+                WRITE_LISTS,
+                READ_JOURNAL,
+                READ_SOCIAL,
+                READ_USERS,
+                READ_NOTIFICATIONS,
+                WRITE_NOTIFICATIONS
             ]
         );
         assert!(granted(&DEFAULT_SCOPES.join(" ")).covers(&DEFAULT_SCOPES));
