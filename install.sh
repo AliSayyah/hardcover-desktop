@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# Install the latest stable release, or a local release tarball and its .minisig.
+# Installs Hardcover Desktop under ~/.local, where it can update itself.
+#
+#   bash install.sh                 the latest stable release, from GitHub
+#   bash install.sh <tarball>       a release tarball, with its .minisig beside it
+#
+# The tarball must be signed by the release key (packaging/minisign.pub; a
+# test keeps the copy below in step), and the signature must name the file,
+# as the in-app updater requires.
 set -euo pipefail
 
 die() { echo "install: $*" >&2; exit 1; }
@@ -19,6 +26,8 @@ fetch() { curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 "$@"; }
 
 if [[ $# == 1 ]]; then
     name=$(basename -- "$1")
+    [[ -f $1 ]] || die "no such file: $1"
+    [[ -f $1.minisig ]] || die "put the signature, $name.minisig, next to the tarball"
     cp -- "$1" "$1.minisig" "$work/"
 else
     url=$(fetch -o /dev/null -w '%{url_effective}' "$releases/latest")
@@ -37,7 +46,7 @@ fi
 verifier=$(command -v minisign || true)
 if [[ -z $verifier ]]; then
     fetch https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz -o "$work/verifier.tar.gz"
-    (cd "$work" && echo '9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73  verifier.tar.gz' | sha256sum -c -)
+    (cd "$work" && echo '9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73  verifier.tar.gz' | sha256sum --quiet -c -)
     tar --warning=no-unknown-keyword -xzf "$work/verifier.tar.gz" -C "$work" minisign-linux/x86_64/minisign
     verifier="$work/minisign-linux/x86_64/minisign"
 fi
@@ -63,4 +72,10 @@ while IFS= read -r -d '' rel; do
 done < "$stage/share-files"
 mkdir -p -- "$prefix/bin"
 mv -fT -- bin/hardcover-desktop "$prefix/bin/hardcover-desktop"
-echo "Installed Hardcover Desktop. Run $prefix/bin/hardcover-desktop or open it from your app launcher."
+echo "Installed Hardcover Desktop. Open it from your app launcher, or run $prefix/bin/hardcover-desktop."
+# The desktop entry runs the binary by name, so the session needs it on PATH.
+# Some distributions add ~/.local/bin only if it existed when you logged in.
+case ":$PATH:" in
+*":$prefix/bin:"*) ;;
+*) echo "$prefix/bin is not on your PATH yet: if the launcher can't start the app, log out and back in." ;;
+esac

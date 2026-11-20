@@ -26,8 +26,8 @@ cargo run -p hardcover-core --example api_check -- --check        # same, withou
 
 The `justfile` wraps these; `just` lists the recipes.
 - `just check` runs fmt-check, clippy (`-D warnings`) and the tests.
-- `just ci` adds `cargo deny`, the packaging validation and actionlint.
-- `just package` builds the release tarball into `target/package/`. `just appimage` and `just flatpak` package the same payload for their respective runtimes.
+- `just ci` adds `cargo deny`, the packaging validation, ShellCheck (`just shellcheck`) and actionlint.
+- `just package` builds the release tarball into `target/package/`; `just appimage` and `just flatpak` repack that tarball, next to it. An AppImage bundles the build system's libraries, so a release one is built on Ubuntu 22.04.
 - `just api-check` is `api_check --check`; `just schema-update` is the run that rewrites `schema/`.
 - `just release patch` makes a whole release, from the PR to the published GitHub release (below, under CI and releases).
 - Only the live-API recipes load `.env`; `just run` never does, so a token there can't bypass OAuth.
@@ -197,6 +197,7 @@ Two skills live in `.claude/skills`:
   - clippy with `-D warnings`, and the tests, as two parallel jobs
   - `cargo deny` (`deny.toml`)
   - desktop-entry and metainfo validation
+  - ShellCheck over `install.sh`, `packaging/linux/`, `ci/` and `scripts/`, then `install.sh` against the latest published release: it must install it, and refuse that tarball modified or renamed to another version
   - actionlint
 - Clippy and the tests run in an `ubuntu:22.04` container, the same one the release builds in. `ci/install-build-deps.sh` holds the system packages; it is the single list for both.
 - `.github/actions/setup-rust` sets up every build job. Its caches are saved only from `master`; other branches restore them.
@@ -225,12 +226,14 @@ Two skills live in `.claude/skills`:
 
   It merges only a PR from this repository (never a fork's), into master, whose diff is exactly the bump (`Cargo.lock` and `crates/app/Cargo.toml` +1 −1, the metainfo +1) and whose head holds the expected version; anything else stops it before CI is even awaited. Keep that check in step if the bump ever changes more files.
 
-  `release.yml` checks that the three versions agree, builds with `--profile dist` (thin LTO, stripped), then packages the tarball, AppImage, Flatpak, and tarball installer. A tag publishes the signed downloads. Running it by hand produces unsigned workflow artifacts.
+  `release.yml` checks that the three versions agree and builds with `--profile dist` (thin LTO, stripped). The build job, in the `ubuntu:22.04` container, packs the tarball (`packaging/linux/package.sh`) and repacks it as an AppImage (`package-appimage.sh`, with linuxdeploy and the AppImage runtime pinned by release and checksum). A second job repacks it as a Flatpak bundle (`package-flatpak.sh` with `flatpak.metadata`: the Freedesktop runtime and the sandbox's permissions) and runs `--version` inside the sandbox. On a tag, the publish job signs the tarball, AppImage, Flatpak and `install.sh`, verifies them, runs the installer on the signed tarball, and creates the GitHub release. Running it by hand builds the same files, unsigned, as workflow artifacts.
+
+  `install.sh` (repository root, also a release download) installs the latest release, or a tarball given with its `.minisig`, into `~/.local`, checking the signature and its `file:` name as the updater does. It carries its own copy of the public key, as do `README.md` and `release-notes.md`; a test (`every_copy_of_the_public_key_is_the_release_key`) keeps them in step with `packaging/minisign.pub`.
 
 ## Self-update
 
 The core side is `hardcover_core::update`; the app side is `crates/app/src/update.rs` plus the sidebar row in `shell.rs`.
-- **When it installs:** the app checks `releases/latest` on GitHub. It installs a release only when it runs from an unpacked release tarball (`<prefix>/bin/hardcover-desktop` with the desktop entry under `<prefix>/share`) in a writable prefix. Other installs only announce new releases.
+- **When it installs:** the app checks `releases/latest` on GitHub. It installs a release only when it runs from an unpacked release tarball (`<prefix>/bin/hardcover-desktop` with the desktop entry under `<prefix>/share`) in a writable prefix, as `install.sh` sets up. Other installs only announce new releases: Flatpak (`FLATPAK_ID`), AppImages (a `usr/` prefix next to `AppRun`, which stays writable when the AppImage is extracted to run without FUSE), packages and development builds.
 - **Trust chain:**
   - The minisign signature must verify against `packaging/minisign.pub`.
   - The signature's `file:` comment must be the tarball name for the advertised version and architecture, which stops replays of older signed releases.

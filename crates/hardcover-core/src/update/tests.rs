@@ -360,6 +360,28 @@ fn install_refuses_a_release_that_is_not_newer() {
 // ----- install kind -----
 
 #[test]
+fn every_copy_of_the_public_key_is_the_release_key() {
+    // The installer and the install instructions carry the key themselves.
+    let copies = [
+        ("install.sh", include_str!("../../../../install.sh")),
+        ("README.md", include_str!("../../../../README.md")),
+        (
+            "packaging/linux/release-notes.md",
+            include_str!("../../../../packaging/linux/release-notes.md"),
+        ),
+    ];
+    let key = release_public_key();
+    for (file, text) in copies {
+        assert!(text.contains(key), "{file} lacks the release key");
+        let others = text
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '+' || c == '/'))
+            .filter(|w| w.len() == key.len() && w.starts_with("RW") && *w != key)
+            .collect::<Vec<_>>();
+        assert!(others.is_empty(), "{file} names another key: {others:?}");
+    }
+}
+
+#[test]
 fn extracted_appimage_does_not_offer_tarball_updates() {
     let appdir = tempfile::tempdir().unwrap();
     let prefix = appdir.path().join("usr");

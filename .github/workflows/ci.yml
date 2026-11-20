@@ -100,6 +100,44 @@ jobs:
       - name: Cargo and metainfo versions agree
         run: ci/check-version.sh
 
+  installer:
+    name: Installer and shell scripts
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: shellcheck install.sh packaging/linux/*.sh ci/*.sh scripts/*.sh
+      # The release workflow tests the installer on the tarball it just
+      # signed; this tests the download path, against the latest release.
+      - name: Install the latest release
+        run: |
+          home="$RUNNER_TEMP/home"
+          HOME="$home" bash install.sh
+          test -f "$home/.local/share/applications/io.github.alisayyah.HardcoverDesktop.desktop"
+          "$home/.local/bin/hardcover-desktop" --version
+      - name: Refuse a modified tarball, and one renamed to another version
+        run: |
+          cd "$RUNNER_TEMP"
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern '*.tar.gz' --pattern '*.tar.gz.minisig'
+          tarball=$(echo hardcover-desktop-*-x86_64-linux.tar.gz)
+          refuses() {
+            if HOME="$RUNNER_TEMP/home" bash "$GITHUB_WORKSPACE/install.sh" "$1" 2>err; then
+              echo "The installer accepted $1" >&2
+              exit 1
+            fi
+            grep -F "$2" err || { cat err >&2; exit 1; }
+          }
+          mkdir modified renamed
+          cp "$tarball" "$tarball.minisig" modified/
+          printf x >>"modified/$tarball"
+          refuses "modified/$tarball" "Signature verification failed"
+          cp "$tarball" renamed/hardcover-desktop-999.0.0-x86_64-linux.tar.gz
+          cp "$tarball.minisig" renamed/hardcover-desktop-999.0.0-x86_64-linux.tar.gz.minisig
+          refuses renamed/hardcover-desktop-999.0.0-x86_64-linux.tar.gz "the signature names a different release"
+
   actionlint:
     name: Workflows
     runs-on: ubuntu-24.04

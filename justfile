@@ -45,12 +45,12 @@ dist:
 package: dist
     packaging/linux/package.sh "$({{ just_executable() }} version)" target/dist/{{ app }} target/package
 
-# AppImage with bundled desktop libraries. Use Ubuntu 22.04 for release builds.
+# The AppImage, from the release tarball, in target/package/. Bundles this system's libraries: release builds use Ubuntu 22.04
 [group('build')]
 appimage: package
     packaging/linux/package-appimage.sh "target/package/{{ app }}-$({{ just_executable() }} version)-x86_64-linux.tar.gz"
 
-# Single-file Freedesktop Flatpak bundle. Requires the flatpak CLI.
+# The Flatpak bundle (Freedesktop runtime), from the release tarball, in target/package/. Needs the flatpak CLI
 [group('build')]
 flatpak: package
     packaging/linux/package-flatpak.sh "target/package/{{ app }}-$({{ just_executable() }} version)-x86_64-linux.tar.gz"
@@ -99,6 +99,11 @@ packaging:
     appstreamcli validate --no-net packaging/linux/*.metainfo.xml
     ci/check-version.sh
 
+# ShellCheck the installer and the packaging, CI and release scripts
+[group('check')]
+shellcheck:
+    shellcheck install.sh packaging/linux/*.sh ci/*.sh scripts/*.sh
+
 # Lint the GitHub workflows
 [group('check')]
 actionlint:
@@ -109,9 +114,9 @@ actionlint:
 [group('check')]
 check: fmt-check clippy test
 
-# Everything CI runs: check, plus cargo deny, packaging and actionlint
+# Everything CI runs offline: check, plus cargo deny, packaging, shellcheck and actionlint
 [group('check')]
-ci: check deny packaging actionlint
+ci: check deny packaging shellcheck actionlint
 
 # Live read tests (needs HARDCOVER_TOKEN, from the environment or .env)
 [group('live')]

@@ -4,10 +4,13 @@ runtime=org.freedesktop.Platform/x86_64/25.08
 sdk=org.freedesktop.Sdk/x86_64/25.08
 command=hardcover-desktop
 
+# network: the API, covers, GitHub and the sign-in's 127.0.0.1 callback.
+# ipc: X11 shared memory. The browser opens through the OpenURI portal.
 [Context]
 shared=network;ipc;
 sockets=wayland;fallback-x11;
 devices=dri;
 
+# The sign-in is stored in the desktop's Secret Service keyring.
 [Session Bus Policy]
 org.freedesktop.secrets=talk

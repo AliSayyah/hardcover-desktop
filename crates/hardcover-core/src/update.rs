@@ -2,8 +2,10 @@
 //!
 //! The app updates itself only when it runs from an unpacked release tarball
 //! (`<prefix>/bin/hardcover-desktop` next to `<prefix>/share/applications/…`)
-//! in a prefix it can write to, such as `~/.local`. Other installs only learn
-//! that a newer version exists.
+//! in a prefix it can write to, such as `~/.local` (where `install.sh` puts
+//! it). Other installs only learn that a newer version exists: a Flatpak, an
+//! AppImage (even one extracted into a writable directory), a distribution
+//! package or a development build.
 //!
 //! Trust chain for an install:
 //! 1. The release tarball must be signed by the key in `packaging/minisign.pub`.
@@ -133,8 +135,8 @@ impl fmt::Display for Version {
 pub enum InstallKind {
     /// Unpacked from a release tarball into a writable prefix.
     Tarball { prefix: PathBuf },
-    /// Anything else: a package, Flatpak, a development build, or a prefix
-    /// this user can't write to. Updates are announced, not installed.
+    /// Anything else: a Flatpak, an AppImage, a package, a development build,
+    /// or a prefix this user can't write to. Updates are announced, not installed.
     Other,
 }
 
@@ -150,8 +152,11 @@ impl InstallKind {
         let Some(prefix) = bin.parent() else {
             return Self::Other;
         };
-        // AppImages have this layout even when extracted into a writable
-        // directory. APPIMAGE can also be inherited from an unrelated launcher.
+        // An AppImage holds the tarball's layout under `usr/`, next to its
+        // `AppRun`. Mounted, it is read-only; extracted (FUSE missing, or
+        // `--appimage-extract-and-run`) it is writable, and an update would
+        // land in a temporary directory. The `APPIMAGE` variable is no test:
+        // a program started from an AppImage inherits it.
         if prefix.file_name().is_some_and(|n| n == "usr")
             && prefix
                 .parent()

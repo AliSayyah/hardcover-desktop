@@ -41,7 +41,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 - **Stats:** books and pages you finished each year, re-reads included, how long a book takes you, how you rate and what is on each shelf, worked out from your library without going online.
 - **Offline access:** your library and covers are cached on your computer, so they open instantly and stay readable without a connection.
 - **Secure sign-in:** you sign in through Hardcover in your browser (OAuth with PKCE). The app never sees your password, and the session is stored in your system keyring.
-- **Updates:** the app announces new releases. Tarball installations can apply signed updates in one click.
+- **Updates:** the app tells you about each new release. Installed under `~/.local` (by the installer, or the tarball unpacked by hand), it installs the release in one click, after verifying its signature.
 - **Settings:** choose a light or dark theme or follow the system, and turn automatic update checks on or off.
 
 <picture>
@@ -71,56 +71,68 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 
 ## Install
 
-Choose an x86_64 package from [GitHub Releases](https://github.com/AliSayyah/hardcover-desktop/releases). All formats need a Wayland or X11 session, working Vulkan or OpenGL graphics, and a Secret Service keyring such as GNOME Keyring or KWallet to store your sign-in.
+Every release on [GitHub](https://github.com/AliSayyah/hardcover-desktop/releases/latest) comes in three forms for x86_64 Linux, all the same app:
 
-### Tarball installer
+| | Updates | Needs |
+| --- | --- | --- |
+| [Installer](#installer) (`~/.local`) | in the app, in one click | glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later) |
+| [AppImage](#appimage) | download the new file | glibc 2.35 or newer |
+| [Flatpak](#flatpak) | install the new bundle | Flatpak; the runtime comes from Flathub |
 
-From a checkout, run `bash install.sh`. To get the installer directly, run this in your download directory:
+Each also needs Wayland or X11, Vulkan or OpenGL graphics drivers, and a Secret Service keyring, such as GNOME Keyring or KWallet, to store your sign-in.
 
-```sh
-curl -fsSLo install.sh https://raw.githubusercontent.com/AliSayyah/hardcover-desktop/master/install.sh && bash install.sh
-```
-
-The installer downloads the latest stable tarball, verifies its signature, and installs the app and launcher under `~/.local`. It runs without sudo and supports the app's built-in updater. If you already have a release tarball, place its matching `.minisig` beside it and run `bash install.sh ./hardcover-desktop-<version>-x86_64-linux.tar.gz`. The installer uses your installed minisign or downloads a checksum-verified copy.
-
-To install manually, run `mkdir -p ~/.local` and unpack the verified tarball with `tar -xzf hardcover-desktop-*-x86_64-linux.tar.gz -C ~/.local --strip-components=1`. The installer and manual install use the same layout.
-
-### AppImage
-
-Download the `.AppImage`. From a directory containing that one AppImage, make it executable and run it.
+### Installer
 
 ```sh
-chmod +x ./hardcover-desktop-*-x86_64-linux.AppImage
-./hardcover-desktop-*-x86_64-linux.AppImage
+curl -fsSLO https://raw.githubusercontent.com/AliSayyah/hardcover-desktop/master/install.sh
+bash install.sh
 ```
 
-If FUSE is unavailable, add `--appimage-extract-and-run` to the launch command. Replace the file to update. Both the AppImage and tarball need glibc 2.35 or newer on the host.
+It downloads the latest release, checks its signature, and installs `~/.local/bin/hardcover-desktop` with its desktop entry and icon, so **Hardcover Desktop** appears in your app launcher. It needs no sudo. Installed this way, the app keeps itself up to date. To check the signature it uses your `minisign`, or downloads minisign's own release and checks its checksum.
 
-### Flatpak
-
-Download the `.flatpak` bundle. From the download directory, run:
+To install a tarball you already have, put its `.minisig` next to it and run `bash install.sh hardcover-desktop-<version>-x86_64-linux.tar.gz`. Or unpack it yourself, to the same place:
 
 ```sh
-flatpak install --user ./hardcover-desktop-*-x86_64-linux.flatpak
-flatpak run io.github.alisayyah.HardcoverDesktop
+mkdir -p ~/.local
+tar -xzf hardcover-desktop-*-x86_64-linux.tar.gz -C ~/.local --strip-components=1
 ```
 
-Allow Flatpak to install the Freedesktop runtime from Flathub if prompted. The runtime supplies glibc. Install each new bundle with the same command. To remove the app, run `flatpak uninstall --user io.github.alisayyah.HardcoverDesktop`.
-
-### Verify a download
-
-Download its matching `.minisig` to the same directory, then run the following with the actual filename. This works for the installer, tarball, AppImage, and Flatpak. [Minisign](https://jedisct1.github.io/minisign/)
-
-```sh
-minisign -Vm FILENAME -P RWQmH1HvOAVP+8piXBk3ZC+nqzBVFZFcynEg8NUsgQDCSYYAkrSkPRXW
-```
-
-To uninstall the AppImage, delete the downloaded file. To uninstall the tarball, delete these:
+To uninstall, delete these:
 - `~/.local/bin/hardcover-desktop`
 - `~/.local/share/applications/io.github.alisayyah.HardcoverDesktop.desktop`
 - `~/.local/share/icons/hicolor/scalable/apps/io.github.alisayyah.HardcoverDesktop.svg`
 - `~/.local/share/metainfo/io.github.alisayyah.HardcoverDesktop.metainfo.xml`
 - `~/.local/share/licenses/hardcover-desktop/`
+
+### AppImage
+
+Download the `.AppImage`, make it executable and run it:
+
+```sh
+chmod +x hardcover-desktop-*-x86_64-linux.AppImage
+./hardcover-desktop-*-x86_64-linux.AppImage
+```
+
+Without FUSE, add `--appimage-extract-and-run`. To update, replace the file with the new release's; to uninstall, delete it.
+
+### Flatpak
+
+Download the `.flatpak` bundle, then install and run it:
+
+```sh
+flatpak install --user hardcover-desktop-*-x86_64-linux.flatpak
+flatpak run io.github.alisayyah.HardcoverDesktop
+```
+
+Flatpak offers to install the Freedesktop runtime from Flathub the first time. To update, install the new release's bundle the same way. To uninstall, run `flatpak uninstall --user io.github.alisayyah.HardcoverDesktop`.
+
+### Checking a download
+
+Every download, the installer included, has a `.minisig` signature next to it on the release. To check a file yourself with [minisign](https://jedisct1.github.io/minisign/), download its `.minisig` into the same directory and run:
+
+```sh
+minisign -Vm <file> -P RWQmH1HvOAVP+8piXBk3ZC+nqzBVFZFcynEg8NUsgQDCSYYAkrSkPRXW
+```
 
 ## Your data
 
@@ -133,7 +145,7 @@ The app talks to Hardcover's API, and to GitHub to check for updates. It stores 
 | Cover images | `~/.cache/hardcover-desktop/covers/` |
 | Settings | `~/.config/hardcover-desktop/settings.json` |
 
-Flatpak stores these data, cache, and settings directories under `~/.var/app/io.github.alisayyah.HardcoverDesktop/`. It uses the desktop keyring for sign-in.
+The Flatpak keeps the library cache, covers and settings under `~/.var/app/io.github.alisayyah.HardcoverDesktop/` instead; the session is in the same keyring.
 
 Signing out (account menu → **Sign out…**, or in **Settings**) revokes the session and deletes the library cache; your settings stay. To turn off automatic update checks, switch them off in **Settings**, or set `HARDCOVER_NO_UPDATE_CHECK=1`. **Check for updates** in the account menu still works.
 

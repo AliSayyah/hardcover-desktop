@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
-# Build on the same distribution as the release binary. linuxdeploy resolves
-# the libraries to bundle from the build system.
+# Builds the AppImage from the release tarball, next to it.
+#
+#   packaging/linux/package-appimage.sh <out-dir>/hardcover-desktop-<version>-x86_64-linux.tar.gz
+#
+# Run it on the distribution the binary was built on (Ubuntu 22.04 for a
+# release): linuxdeploy bundles the libraries the binary links from this
+# system, so they must match the glibc it was built against.
 set -euo pipefail
 
+[[ $# == 1 ]] || { echo "usage: $0 <release tarball>" >&2; exit 2; }
 archive=$(realpath "$1")
 name=$(basename "$archive" .tar.gz)
 out=$(realpath "$(dirname "$archive")")
-[[ $name == *-x86_64-linux && $(uname -m) == x86_64 ]]
+if [[ $name != *-x86_64-linux || $(uname -m) != x86_64 ]]; then
+    echo "error: needs an x86_64 release tarball, on x86_64: $1" >&2
+    exit 1
+fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work"
