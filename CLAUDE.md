@@ -26,8 +26,8 @@ cargo run -p hardcover-core --example api_check -- --check        # same, withou
 
 The `justfile` wraps these; `just` lists the recipes.
 - `just check` runs fmt-check, clippy (`-D warnings`) and the tests.
-- `just ci` adds `cargo deny`, the packaging validation and actionlint.
-- `just package` builds the release tarball into `target/package/`.
+- `just ci` adds `cargo deny`, the packaging validation, ShellCheck (`just shellcheck`) and actionlint.
+- `just package` builds the release tarball into `target/package/`; `just appimage` repacks it as an AppImage and its `.zsync`, next to it. An AppImage bundles the build system's libraries, so a release one is built on Ubuntu 22.04.
 - `just api-check` is `api_check --check`; `just schema-update` is the run that rewrites `schema/`.
 - `just release patch` makes a whole release, from the PR to the published GitHub release (below, under CI and releases).
 - Only the live-API recipes load `.env`; `just run` never does, so a token there can't bypass OAuth.
@@ -198,6 +198,7 @@ Two skills live in `.claude/skills`:
   - clippy with `-D warnings`, and the tests, as two parallel jobs
   - `cargo deny` (`deny.toml`)
   - desktop-entry and metainfo validation
+  - ShellCheck over `install.sh`, `packaging/linux/`, `ci/` and `scripts/`, then `install.sh` against the latest published release: it must install it, and refuse that tarball modified or renamed to another version
   - actionlint
 - Clippy and the tests run in an `ubuntu:22.04` container, the same one the release builds in. `ci/install-build-deps.sh` holds the system packages; it is the single list for both.
 - `.github/actions/setup-rust` sets up every build job. Its caches are saved only from `master`; other branches restore them.
@@ -226,19 +227,23 @@ Two skills live in `.claude/skills`:
 
   It merges only a PR from this repository (never a fork's), into master, whose diff is exactly the bump (`Cargo.lock` and `crates/app/Cargo.toml` +1 −1, the metainfo +1) and whose head holds the expected version; anything else stops it before CI is even awaited. Keep that check in step if the bump ever changes more files.
 
-  `release.yml` checks that the three versions agree, builds with `--profile dist` (thin LTO, stripped), packs a tarball (`packaging/linux/package.sh`) and creates the GitHub release. Running it by hand builds the tarball as an artifact without publishing anything.
+  `release.yml` checks that the three versions agree and builds with `--profile dist` (thin LTO, stripped). The build job, in the `ubuntu:22.04` container, packs the tarball (`packaging/linux/package.sh`) and repacks it as an AppImage (`package-appimage.sh`, with linuxdeploy and the AppImage runtime pinned by release and checksum). The AppImage embeds the standard update information (`gh-releases-zsync|AliSayyah|hardcover-desktop|latest|hardcover-desktop-*-x86_64-linux.AppImage.zsync`) and comes with its `.zsync`, for AppImageUpdate and the like; the script fails if either is missing. On a tag, the publish job signs the tarball, AppImage and `install.sh` (not the `.zsync`), verifies them, runs the installer on the signed tarball, and creates the GitHub release. Running it by hand builds the same files, unsigned, as workflow artifacts.
+
+  `install.sh` (repository root, also a release download) installs the latest release, or a tarball given with its `.minisig`, into `~/.local`, checking the signature and its `file:` name as the updater does. It carries its own copy of the public key, as do `README.md` and `release-notes.md`; a test (`every_copy_of_the_public_key_is_the_release_key`) keeps them in step with `packaging/minisign.pub`.
 
 ## Self-update
 
 The core side is `hardcover_core::update`; the app side is `crates/app/src/update.rs` plus the sidebar row in `shell.rs`.
-- **When it installs:** the app checks `releases/latest` on GitHub. It installs a release only when it runs from an unpacked release tarball (`<prefix>/bin/hardcover-desktop` with the desktop entry under `<prefix>/share`) in a writable prefix. Other installs only announce new releases.
+- **When it installs:** the app checks `releases/latest` on GitHub. It installs a release only when it runs from an unpacked release tarball (`<prefix>/bin/hardcover-desktop` with the desktop entry under `<prefix>/share`) in a writable prefix, as `install.sh` sets up, or from an AppImage in a writable directory. Other installs only announce new releases: packages, development builds, and files this user can't replace.
+- **AppImage:** the runtime sets `APPIMAGE` (the file) and `APPDIR` (where it is mounted, or extracted with `--appimage-extract-and-run`). Everything an AppImage starts inherits both, so they count only when the app's own executable is inside `APPDIR`; otherwise an update could overwrite another app's AppImage (a terminal in an AppImage editor passes its variables on). `APPIMAGE` must also carry the type 2 magic bytes. Anything under an `APPDIR` that fails a check is announce-only, never a tarball. The update downloads `hardcover-desktop-<version>-<arch>-linux.AppImage` and its `.minisig`, writes it next to the running file and renames it over it, keeping its path and name. `main` sets the restart path to the AppImage file, because the executable inside it is gone once the app exits.
 - **Trust chain:**
   - The minisign signature must verify against `packaging/minisign.pub`.
-  - The signature's `file:` comment must be the tarball name for the advertised version and architecture, which stops replays of older signed releases.
+  - The signature's `file:` comment must be the file name (tarball or AppImage) for the advertised version and architecture, which stops replays of older signed releases. Keep the version in the release file names for this reason.
   - The version must be newer than the running one.
   - The archive's top-level directory must match the tarball name.
   - Only regular files under `bin/hardcover-desktop` and `share/` are unpacked. They are staged in the prefix and renamed into place, the binary last.
-- **Restarting:** `main` resolves the executable path before anything else and passes it to `set_restart_path`. After an update, `/proc/self/exe` points to the deleted old binary.
+  - A downloaded AppImage must carry the AppImage magic bytes.
+- **Restarting:** `main` resolves the executable path before anything else and passes it to `set_restart_path` (for an AppImage, the AppImage file instead). After an update, `/proc/self/exe` points to the deleted old binary.
 - **Signing:**
   - `release.yml` signs in the publish job, with the `MINISIGN_SECRET_KEY` repository secret exposed to that one step only, then verifies with `packaging/minisign.pub`.
   - Never replace the key: installed copies trust only this one.

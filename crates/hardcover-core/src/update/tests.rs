@@ -94,11 +94,18 @@ fn release(version: &str) -> Release {
         version: v(version),
         notes: String::new(),
         page_url: "https://example.test/release".into(),
-        asset: Some(Asset {
+        tarball: Some(Asset {
             url: format!("https://dl.test/{name}"),
             signature_url: format!("https://dl.test/{name}.minisig"),
             name,
         }),
+        appimage: None,
+    }
+}
+
+fn tarball_target(prefix: &Path) -> InstallKind {
+    InstallKind::Tarball {
+        prefix: prefix.to_owned(),
     }
 }
 
@@ -170,14 +177,36 @@ fn check_finds_a_newer_release_with_its_assets() {
     let (u, fake) = updater(&key);
     let name = tarball_name(&v("0.2.0"));
     let sig = format!("{name}.minisig");
-    fake.push(200, &github_release("v0.2.0", &[&name, &sig, "other.zip"]));
+    let image = appimage_name(&v("0.2.0"));
+    let image_sig = format!("{image}.minisig");
+    let zsync = format!("{image}.zsync");
+    fake.push(
+        200,
+        &github_release(
+            "v0.2.0",
+            &[&name, &sig, &image, &image_sig, &zsync, "other.zip"],
+        ),
+    );
 
     let r = u.check(&v("0.1.0")).unwrap().unwrap();
     assert_eq!(r.version, v("0.2.0"));
     assert_eq!(r.notes, "Notes");
-    let asset = r.asset.unwrap();
-    assert_eq!(asset.url, format!("https://dl.test/{name}"));
-    assert_eq!(asset.signature_url, format!("https://dl.test/{sig}"));
+    let tarball = r.tarball.as_ref().unwrap();
+    assert_eq!(tarball.url, format!("https://dl.test/{name}"));
+    assert_eq!(tarball.signature_url, format!("https://dl.test/{sig}"));
+    let appimage = r.appimage.as_ref().unwrap();
+    assert_eq!(appimage.url, format!("https://dl.test/{image}"));
+    assert_eq!(
+        appimage.signature_url,
+        format!("https://dl.test/{image_sig}")
+    );
+
+    // Each install updates from its own file.
+    let prefix = tarball_target(Path::new("/opt/x"));
+    assert_eq!(prefix.asset(&r), Some(tarball));
+    let path = PathBuf::from("/opt/x.AppImage");
+    assert_eq!(InstallKind::AppImage { path }.asset(&r), Some(appimage));
+    assert_eq!(InstallKind::Other.asset(&r), None);
 
     let req = &fake.requests()[0];
     assert_eq!(req.url, API);
@@ -214,7 +243,7 @@ fn check_without_releases_or_build_for_this_arch() {
         &github_release("v0.2.0", &[&tarball_name(&v("0.2.0"))]),
     );
     let r = u.check(&v("0.1.0")).unwrap().unwrap();
-    assert_eq!(r.asset, None);
+    assert_eq!(r.tarball, None);
 
     fake.push(403, "{}");
     assert!(u.check(&v("0.1.0")).is_err());
@@ -228,12 +257,13 @@ fn install_replaces_the_files_and_cleans_up() {
     let (u, fake) = updater(&key);
     let r = release("0.2.0");
     let data = release_tarball("0.2.0");
-    let name = &r.asset.as_ref().unwrap().name;
+    let name = &r.tarball.as_ref().unwrap().name;
     fake.push_bytes(200, &key.sign(&data, name));
     fake.push_bytes(200, &data);
     let prefix = old_install();
 
-    u.install(&r, &v("0.1.0"), prefix.path()).unwrap();
+    u.install(&r, &v("0.1.0"), &tarball_target(prefix.path()))
+        .unwrap();
 
     assert_eq!(binary(prefix.path()), "binary 0.2.0");
     let desktop = prefix
@@ -257,7 +287,9 @@ fn install_fails(sig: Vec<u8>, data: Vec<u8>, r: &Release, key: &Key) -> (String
     fake.push_bytes(200, &sig);
     fake.push_bytes(200, &data);
     let prefix = old_install();
-    let err = u.install(r, &v("0.1.0"), prefix.path()).unwrap_err();
+    let err = u
+        .install(r, &v("0.1.0"), &tarball_target(prefix.path()))
+        .unwrap_err();
     assert!(!prefix.path().join(STAGING_DIR).exists());
     (err.to_string(), binary(prefix.path()))
 }
@@ -267,7 +299,7 @@ fn install_rejects_a_signature_from_another_key() {
     let key = Key::new();
     let r = release("0.2.0");
     let data = release_tarball("0.2.0");
-    let sig = Key::new().sign(&data, &r.asset.as_ref().unwrap().name);
+    let sig = Key::new().sign(&data, &r.tarball.as_ref().unwrap().name);
     let (err, bin) = install_fails(sig, data, &r, &key);
     assert!(err.contains("signature is not valid"), "{err}");
     assert_eq!(bin, "binary 0.1.0");
@@ -278,7 +310,7 @@ fn install_rejects_tampered_bytes() {
     let key = Key::new();
     let r = release("0.2.0");
     let data = release_tarball("0.2.0");
-    let sig = key.sign(&data, &r.asset.as_ref().unwrap().name);
+    let sig = key.sign(&data, &r.tarball.as_ref().unwrap().name);
     let mut tampered = data.clone();
     let last = tampered.len() - 1;
     tampered[last] ^= 1;
@@ -304,7 +336,7 @@ fn install_rejects_a_mismatched_top_directory() {
     let key = Key::new();
     let r = release("0.2.0");
     let data = release_tarball("0.1.5");
-    let sig = key.sign(&data, &r.asset.as_ref().unwrap().name);
+    let sig = key.sign(&data, &r.tarball.as_ref().unwrap().name);
     let (err, bin) = install_fails(sig, data, &r, &key);
     assert!(err.contains("top-level"), "{err}");
     assert_eq!(bin, "binary 0.1.0");
@@ -338,7 +370,7 @@ fn install_rejects_unsafe_entries() {
     for (data, expected) in cases {
         let key = Key::new();
         let r = release("0.2.0");
-        let sig = key.sign(&data, &r.asset.as_ref().unwrap().name);
+        let sig = key.sign(&data, &r.tarball.as_ref().unwrap().name);
         let (err, bin) = install_fails(sig, data, &r, &key);
         assert!(err.contains(expected), "{expected}: {err}");
         assert_eq!(bin, "binary 0.1.0");
@@ -351,13 +383,258 @@ fn install_refuses_a_release_that_is_not_newer() {
     let (u, fake) = updater(&key);
     let prefix = old_install();
     let err = u
-        .install(&release("0.1.0"), &v("0.1.0"), prefix.path())
+        .install(
+            &release("0.1.0"),
+            &v("0.1.0"),
+            &tarball_target(prefix.path()),
+        )
         .unwrap_err();
     assert!(err.to_string().contains("not newer"));
     assert_eq!(fake.requests().len(), 0);
 }
 
 // ----- install kind -----
+
+#[test]
+fn every_copy_of_the_public_key_is_the_release_key() {
+    // The installer and the install instructions carry the key themselves.
+    let copies = [
+        ("install.sh", include_str!("../../../../install.sh")),
+        ("README.md", include_str!("../../../../README.md")),
+        (
+            "packaging/linux/release-notes.md",
+            include_str!("../../../../packaging/linux/release-notes.md"),
+        ),
+    ];
+    let key = release_public_key();
+    for (file, text) in copies {
+        assert!(text.contains(key), "{file} lacks the release key");
+        let others = text
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '+' || c == '/'))
+            .filter(|w| w.len() == key.len() && w.starts_with("RW") && *w != key)
+            .collect::<Vec<_>>();
+        assert!(others.is_empty(), "{file} names another key: {others:?}");
+    }
+}
+
+/// An AppImage file's first bytes: ELF, then the type 2 magic at offset 8.
+const APPIMAGE_HEAD: &[u8] = b"\x7fELF\x02\x01\x01\x00AI\x02";
+
+fn appimage_bytes(body: &str) -> Vec<u8> {
+    [APPIMAGE_HEAD, body.as_bytes()].concat()
+}
+
+/// A running AppImage: the file in `apps/`, and its contents mounted at
+/// `mount/` (a tarball's layout under `usr/`, next to `AppRun`).
+struct RunningAppImage {
+    dir: tempfile::TempDir,
+}
+
+impl RunningAppImage {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let usr = dir.path().join("mount/usr");
+        fs::create_dir_all(usr.join("bin")).unwrap();
+        fs::create_dir_all(usr.join("share/applications")).unwrap();
+        fs::write(usr.join(format!("share/applications/{APP_ID}.desktop")), "").unwrap();
+        fs::write(usr.join("bin").join(BINARY), "").unwrap();
+        fs::write(dir.path().join("mount/AppRun"), "").unwrap();
+        fs::create_dir_all(dir.path().join("apps")).unwrap();
+        fs::write(self_path(&dir), appimage_bytes("0.1.0")).unwrap();
+        Self { dir }
+    }
+    fn exe(&self) -> PathBuf {
+        self.dir.path().join("mount/usr/bin").join(BINARY)
+    }
+    fn file(&self) -> PathBuf {
+        self_path(&self.dir)
+    }
+    fn env(&self) -> LaunchEnv {
+        LaunchEnv {
+            appimage: Some(self.file()),
+            appdir: Some(self.dir.path().join("mount")),
+        }
+    }
+}
+
+fn self_path(dir: &tempfile::TempDir) -> PathBuf {
+    dir.path().join("apps/Hardcover.AppImage")
+}
+
+#[test]
+fn detects_a_running_appimage_from_its_runtime_variables() {
+    let app = RunningAppImage::new();
+    let kind = InstallKind::detect_in(&app.exe(), &app.env());
+    let path = app.file().canonicalize().unwrap();
+    assert_eq!(kind, InstallKind::AppImage { path: path.clone() });
+    assert_eq!(kind.restart_path(), Some(path.as_path()));
+    assert!(kind.can_self_update());
+}
+
+#[test]
+fn appimage_variables_inherited_from_another_app_are_ignored() {
+    // Started from a terminal inside another AppImage: the variables name that
+    // one, and this executable is not inside its APPDIR.
+    let other = RunningAppImage::new();
+    let prefix = old_install();
+    let exe = prefix.path().join("bin").join(BINARY);
+    assert_eq!(
+        InstallKind::detect_in(&exe, &other.env()),
+        tarball_target(&prefix.path().canonicalize().unwrap())
+    );
+    let dev = tempfile::tempdir().unwrap();
+    fs::write(dev.path().join(BINARY), "").unwrap();
+    assert_eq!(
+        InstallKind::detect_in(&dev.path().join(BINARY), &other.env()),
+        InstallKind::Other
+    );
+    assert_eq!(fs::read(other.file()).unwrap(), appimage_bytes("0.1.0"));
+}
+
+#[test]
+fn an_appimage_that_cannot_be_replaced_only_announces() {
+    let app = RunningAppImage::new();
+    // Inside APPDIR it is never a tarball, even though the extracted tree
+    // looks like one and is writable.
+    let missing = LaunchEnv {
+        appimage: None,
+        ..app.env()
+    };
+    assert_eq!(
+        InstallKind::detect_in(&app.exe(), &missing),
+        InstallKind::Other
+    );
+
+    let not_an_appimage = app.dir.path().join("apps/script.sh");
+    fs::write(&not_an_appimage, "#!/bin/sh\n").unwrap();
+    let wrong = LaunchEnv {
+        appimage: Some(not_an_appimage),
+        ..app.env()
+    };
+    assert_eq!(
+        InstallKind::detect_in(&app.exe(), &wrong),
+        InstallKind::Other
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let apps = app.dir.path().join("apps");
+        fs::set_permissions(&apps, fs::Permissions::from_mode(0o555)).unwrap();
+        // Root writes anyway, so only check where the directory is read-only.
+        if !is_writable_dir(&apps) {
+            assert_eq!(
+                InstallKind::detect_in(&app.exe(), &app.env()),
+                InstallKind::Other
+            );
+        }
+        fs::set_permissions(&apps, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[test]
+fn an_appdir_extracted_by_hand_is_not_a_tarball() {
+    // `--appimage-extract`, then run without the runtime: no variables.
+    let app = RunningAppImage::new();
+    assert_eq!(
+        InstallKind::detect_in(&app.exe(), &LaunchEnv::default()),
+        InstallKind::Other
+    );
+}
+
+fn appimage_release(version: &str) -> Release {
+    let name = appimage_name(&v(version));
+    Release {
+        tarball: None,
+        appimage: Some(Asset {
+            url: format!("https://dl.test/{name}"),
+            signature_url: format!("https://dl.test/{name}.minisig"),
+            name,
+        }),
+        ..release(version)
+    }
+}
+
+fn leftovers(dir: &Path) -> Vec<String> {
+    fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(STAGING_DIR))
+        .collect()
+}
+
+#[test]
+fn install_replaces_the_appimage_in_place() {
+    let key = Key::new();
+    let (u, fake) = updater(&key);
+    let r = appimage_release("0.2.0");
+    let data = appimage_bytes("0.2.0");
+    fake.push_bytes(200, &key.sign(&data, &appimage_name(&v("0.2.0"))));
+    fake.push_bytes(200, &data);
+    let app = RunningAppImage::new();
+    let target = InstallKind::detect_in(&app.exe(), &app.env());
+
+    u.install(&r, &v("0.1.0"), &target).unwrap();
+
+    assert_eq!(fs::read(app.file()).unwrap(), data);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = fs::metadata(app.file()).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o755);
+    }
+    assert!(leftovers(&app.dir.path().join("apps")).is_empty());
+}
+
+#[test]
+fn install_rejects_a_bad_appimage_and_keeps_the_old_one() {
+    let key = Key::new();
+    let r = appimage_release("0.2.0");
+    let name = appimage_name(&v("0.2.0"));
+    let good = appimage_bytes("0.2.0");
+    let cases: Vec<(Vec<u8>, Vec<u8>, &str)> = vec![
+        (
+            Key::new().sign(&good, &name),
+            good.clone(),
+            "signature is not valid",
+        ),
+        (
+            key.sign(&good, &name),
+            appimage_bytes("0.2.1"),
+            "signature is not valid",
+        ),
+        (
+            key.sign(&appimage_bytes("0.1.5"), &appimage_name(&v("0.1.5"))),
+            appimage_bytes("0.1.5"),
+            "different file",
+        ),
+        (
+            key.sign(b"#!/bin/sh\n", &name),
+            b"#!/bin/sh\n".to_vec(),
+            "not an AppImage",
+        ),
+    ];
+    for (sig, data, expected) in cases {
+        let (u, fake) = updater(&key);
+        fake.push_bytes(200, &sig);
+        fake.push_bytes(200, &data);
+        let app = RunningAppImage::new();
+        let target = InstallKind::detect_in(&app.exe(), &app.env());
+        let err = u.install(&r, &v("0.1.0"), &target).unwrap_err().to_string();
+        assert!(err.contains(expected), "{err}");
+        assert_eq!(fs::read(app.file()).unwrap(), appimage_bytes("0.1.0"));
+        assert!(leftovers(&app.dir.path().join("apps")).is_empty());
+    }
+
+    // A release without an AppImage has nothing for this install.
+    let app = RunningAppImage::new();
+    let target = InstallKind::detect_in(&app.exe(), &app.env());
+    let (u, _) = updater(&key);
+    let err = u
+        .install(&release("0.2.0"), &v("0.1.0"), &target)
+        .unwrap_err();
+    assert!(err.to_string().contains("no build"), "{err}");
+}
 
 #[test]
 fn detects_an_unpacked_tarball_in_a_writable_prefix() {

@@ -33,6 +33,8 @@ use gpui_kit::{
     App, AppContext as _, KeyBinding, Size, TitlebarOptions, WindowBounds, WindowOptions, actions,
 };
 
+use hardcover_core::update::InstallKind;
+
 use crate::book::star_rating;
 use crate::search::search_view;
 
@@ -153,11 +155,17 @@ fn main() {
             design::theme::init(bundled_fonts, cx);
             bind_keys(cx);
             ui::kit::bind_keys(cx);
-            if let Some(exe) = &exe {
-                cx.set_restart_path(exe.clone());
+            let install = exe
+                .as_deref()
+                .map(InstallKind::detect)
+                .unwrap_or(InstallKind::Other);
+            // An AppImage restarts from its file: the executable inside it is
+            // gone once this process exits.
+            if let Some(path) = install.restart_path().or(exe.as_deref()) {
+                cx.set_restart_path(path.to_owned());
             }
             preferences::init(prefs.clone(), prefs_path.clone(), cx);
-            update::init(exe.clone(), cx);
+            update::init(install, cx);
 
             // Window geometry is a platform boundary: logical pixels, not rems.
             let size = Size::new(gpui_kit::px(1200.), gpui_kit::px(800.));

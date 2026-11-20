@@ -1,11 +1,11 @@
 //! App updates: periodic checks against GitHub releases, and a one-click
-//! install when the app runs from an unpacked release tarball.
+//! install when the app runs from an unpacked release tarball or an AppImage
+//! it can replace ([`InstallKind`]).
 //!
 //! [`UpdateModel`] lives for the whole run (an app-level global, like the cover
 //! service), so the state survives signing out and back in. The sidebar shows
 //! it and starts installs; the workspace turns its events into notifications.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui_kit::{
@@ -73,14 +73,10 @@ impl Updates {
     }
 }
 
-/// Creates the model and starts automatic checks if they are on. `exe` is the
-/// executable path resolved at startup, before an update could replace it.
+/// Creates the model and starts automatic checks if they are on. `install`
+/// is detected once at startup, before an update could replace anything.
 /// Needs the preferences global.
-pub fn init(exe: Option<PathBuf>, cx: &mut App) {
-    let install = exe
-        .as_deref()
-        .map(InstallKind::detect)
-        .unwrap_or(InstallKind::Other);
+pub fn init(install: InstallKind, cx: &mut App) {
     let preferences = AppPreferences::global(cx).clone();
     let model = cx.new(|cx| {
         let mut model = UpdateModel {
@@ -132,9 +128,15 @@ impl UpdateModel {
     }
 
     /// Whether this copy can install updates itself (an unpacked release
-    /// tarball in a writable prefix), rather than only announce them.
+    /// tarball in a writable prefix, or an AppImage in a writable
+    /// directory), rather than only announce them.
     pub fn can_install(&self) -> bool {
         self.install.can_self_update()
+    }
+
+    /// Whether `release` has the file this copy updates from.
+    pub fn has_download(&self, release: &Release) -> bool {
+        self.install.asset(release).is_some()
     }
 
     /// Starts or stops automatic checks. They also need
@@ -215,11 +217,11 @@ impl UpdateModel {
         let UpdateState::Available(release) = &self.state else {
             return;
         };
-        let InstallKind::Tarball { prefix } = &self.install else {
+        if !self.install.can_self_update() {
             return;
-        };
+        }
         let release = release.clone();
-        let prefix = prefix.clone();
+        let install = self.install.clone();
         self.state = UpdateState::Installing(release.clone());
         cx.notify();
         let updater = self.updater.clone();
@@ -227,7 +229,7 @@ impl UpdateModel {
         self._install = Some(cx.spawn(async move |this, cx| {
             let target = release.clone();
             let result = cx
-                .background_spawn(async move { updater.install(&target, &current, &prefix) })
+                .background_spawn(async move { updater.install(&target, &current, &install) })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 match result {

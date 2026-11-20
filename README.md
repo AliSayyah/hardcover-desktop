@@ -44,7 +44,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 - **Stats:** books and pages you finished each year, re-reads included, how long a book takes you, how you rate and what is on each shelf, worked out from your library without going online.
 - **Offline access:** your library and covers are cached on your computer, so they open instantly and stay readable without a connection.
 - **Secure sign-in:** you sign in through Hardcover in your browser (OAuth with PKCE). The app never sees your password, and the session is stored in your system keyring.
-- **Self-updating:** the app offers each new release and installs it in one click, after verifying its signature.
+- **Self-updating:** the app tells you about each new release and installs it in one click, after verifying its signature, whether you installed it with the installer or run the AppImage.
 - **Settings:** choose a light or dark theme or follow the system, and turn automatic update checks on or off.
 
 <picture>
@@ -74,25 +74,24 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 
 ## Install
 
-Download `hardcover-desktop-<version>-x86_64-linux.tar.gz` from the [latest release](https://github.com/AliSayyah/hardcover-desktop/releases/latest) and unpack it into `~/.local`:
+Every release on [GitHub](https://github.com/AliSayyah/hardcover-desktop/releases/latest) comes in two forms for x86_64 Linux, the same app in each: the [installer](#installer), which puts it in `~/.local`, and an [AppImage](#appimage), a single file to run from anywhere. Either way the app updates itself, in one click, after verifying the new release's signature.
+
+Both need x86_64 Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later), Wayland or X11, Vulkan or OpenGL graphics drivers, and a Secret Service keyring, such as GNOME Keyring or KWallet, to store your sign-in.
+
+### Installer
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/AliSayyah/hardcover-desktop/master/install.sh | bash
+```
+
+It downloads the latest release, checks its signature, and installs `~/.local/bin/hardcover-desktop` with its desktop entry and icon, so **Hardcover Desktop** appears in your app launcher. It needs no sudo. Installed this way, the app keeps itself up to date. To check the signature it uses your `minisign`, or downloads minisign's own release and checks its checksum.
+
+To install a tarball you already have, download `install.sh`, put the tarball's `.minisig` next to it and run `bash install.sh hardcover-desktop-<version>-x86_64-linux.tar.gz`. Or unpack it yourself, to the same place:
+
+```sh
+mkdir -p ~/.local
 tar -xzf hardcover-desktop-*-x86_64-linux.tar.gz -C ~/.local --strip-components=1
 ```
-
-This installs `~/.local/bin/hardcover-desktop` with its desktop entry and icon, so **Hardcover Desktop** appears in your app launcher. Installed this way, the app keeps itself up to date.
-
-To check the download first, verify its signature with [minisign](https://jedisct1.github.io/minisign/):
-
-```sh
-minisign -Vm hardcover-desktop-*-x86_64-linux.tar.gz -P RWQmH1HvOAVP+8piXBk3ZC+nqzBVFZFcynEg8NUsgQDCSYYAkrSkPRXW
-```
-
-**Requirements:**
-- x86_64 Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later)
-- Wayland or X11
-- Vulkan or OpenGL graphics drivers
-- a Secret Service keyring, such as GNOME Keyring or KWallet
 
 To uninstall, delete these:
 - `~/.local/bin/hardcover-desktop`
@@ -100,6 +99,27 @@ To uninstall, delete these:
 - `~/.local/share/icons/hicolor/scalable/apps/io.github.alisayyah.HardcoverDesktop.svg`
 - `~/.local/share/metainfo/io.github.alisayyah.HardcoverDesktop.metainfo.xml`
 - `~/.local/share/licenses/hardcover-desktop/`
+
+### AppImage
+
+Download the `.AppImage`, make it executable and run it:
+
+```sh
+chmod +x hardcover-desktop-*-x86_64-linux.AppImage
+./hardcover-desktop-*-x86_64-linux.AppImage
+```
+
+Without FUSE, add `--appimage-extract-and-run`. To uninstall, delete the file.
+
+The app updates the AppImage in place: the new release replaces the file and keeps its name, so shortcuts to it keep working (the version in the name stays the one you downloaded; **About** shows the one you run). It needs to be able to write to the AppImage's folder; otherwise it only tells you about new releases. The AppImage also carries the standard update information, so tools such as [AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate), AppImageLauncher and Gear Lever can update it too.
+
+### Checking a download
+
+Every download, the installer included, has a `.minisig` signature next to it on the release (the AppImage's `.zsync` is for update tools, not a download). To check a file yourself with [minisign](https://jedisct1.github.io/minisign/), download its `.minisig` into the same directory and run:
+
+```sh
+minisign -Vm <file> -P RWQmH1HvOAVP+8piXBk3ZC+nqzBVFZFcynEg8NUsgQDCSYYAkrSkPRXW
+```
 
 ## Your data
 

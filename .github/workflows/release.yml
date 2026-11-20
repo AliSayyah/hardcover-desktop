@@ -2,7 +2,7 @@ name: Release
 
 # Push a tag such as v0.2.0 to publish a GitHub release. Before tagging, bump
 # the version in crates/app/Cargo.toml and add a <release> to the metainfo.
-# Run it by hand to build the tarball as a workflow artifact without releasing.
+# Run it by hand to build the packages as workflow artifacts without releasing.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
@@ -21,7 +21,7 @@ env:
 
 jobs:
   build:
-    name: Build x86_64 tarball
+    name: Build x86_64 tarball and AppImage
     runs-on: ubuntu-24.04
     # Building on the oldest supported Ubuntu keeps the glibc floor at 2.35.
     container: ubuntu:22.04
@@ -45,6 +45,9 @@ jobs:
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/app/Cargo.toml | head -n1)
           packaging/linux/package.sh "$version" target/dist/hardcover-desktop dist
+          apt-get install -y --no-install-recommends file desktop-file-utils
+          packaging/linux/package-appimage.sh dist/*.tar.gz
+          cp install.sh dist/
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -84,22 +87,41 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP" minisign-linux/x86_64/minisign 2>/dev/null
           echo "$RUNNER_TEMP/minisign-linux/x86_64" >>"$GITHUB_PATH"
 
-      - name: Sign the tarball
+      - name: Sign the release downloads
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
         run: |
           key="$RUNNER_TEMP/minisign.key"
           trap 'rm -f "$key"' EXIT
           (umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" >"$key")
-          for tarball in dist/*.tar.gz; do
-            minisign -S -s "$key" -m "$tarball"
+          # Not the .zsync: AppImage update tools fetch it over HTTPS and check
+          # the file they build against it.
+          for asset in dist/*.tar.gz dist/*.AppImage dist/install.sh; do
+            minisign -S -s "$key" -m "$asset"
           done
 
       - name: Verify the signatures with the app's public key
         run: |
-          for tarball in dist/*.tar.gz; do
-            minisign -V -p packaging/minisign.pub -m "$tarball"
+          for asset in dist/*.tar.gz dist/*.AppImage dist/install.sh; do
+            minisign -V -p packaging/minisign.pub -m "$asset"
           done
+
+      # Files only: the bare runner lacks libraries the app links. The build
+      # job has already run it, from the tarball and the AppImage.
+      - name: Test the signed tarball installer
+        run: |
+          archive=(dist/*.tar.gz)
+          test_home="$RUNNER_TEMP/install-test"
+          env HOME="$test_home" bash dist/install.sh "${archive[0]}"
+          test -x "$test_home/.local/bin/hardcover-desktop"
+          test -f "$test_home/.local/share/applications/io.github.alisayyah.HardcoverDesktop.desktop"
+          mkdir "$RUNNER_TEMP/tampered"
+          cp "${archive[0]}" "${archive[0]}.minisig" "$RUNNER_TEMP/tampered/"
+          printf x >> "$RUNNER_TEMP/tampered/${archive[0]##*/}"
+          if env HOME="$test_home" bash dist/install.sh "$RUNNER_TEMP/tampered/${archive[0]##*/}"; then
+            echo "Installer accepted a modified archive" >&2
+            exit 1
+          fi
 
       - name: Create the release
         env:

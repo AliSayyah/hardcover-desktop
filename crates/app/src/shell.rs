@@ -896,7 +896,7 @@ impl Workspace {
         let title: SharedString = format!("Hardcover Desktop {}", release.version).into();
         let notes: SharedString = crate::update::release_notes(&release.notes).into();
         let page_url: SharedString = release.page_url.clone().into();
-        let installable = model.can_install() && release.asset.is_some();
+        let installable = model.can_install() && model.has_download(release);
         let description: SharedString = if installable {
             format!(
                 "You have {}. The update downloads and installs in the background; restart the app to finish.",
