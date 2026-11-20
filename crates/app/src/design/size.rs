@@ -1,0 +1,61 @@
+//! The named sizes (`hardcover-design`, Tokens → Frames and sizes), in rems
+//! at the system's 16 px rem. Use a GPUI helper where one exists for the
+//! step (`h_8`, `w_96`) and these where the size has a name of its own.
+//! Cover sizes are [`crate::cover::CoverSize`].
+
+use gpui_kit::{Pixels, Rems, px, rems};
+
+/// A control: button, input, select, nav row, menu item (32; `h_8`).
+pub const CONTROL: Rems = rems(2.);
+/// A small control, inside a row, panel or rail (24; `h_6`).
+pub const CONTROL_SMALL: Rems = rems(1.5);
+/// A chip (20; `h_5`).
+pub const CHIP: Rems = rems(1.25);
+/// A tall row: the brand, the sidebar goal (40; `h_10`).
+pub const ROW_TALL: Rems = rems(2.5);
+/// The object bar over a book or page: its tools, Back (56).
+pub const OBJECT_BAR: Rems = rems(3.5);
+
+/// The sidebar (240).
+pub const SIDEBAR: Rems = rems(15.);
+/// The shelf list, by default; it is resizable (384; `w_96`).
+pub const LIST: Rems = rems(24.);
+/// The rail on Home and the full book page (272).
+pub const RAIL: Rems = rems(17.);
+/// The key column of a property list (96; `w_24`).
+pub const KEY: Rems = rems(6.);
+/// The key column of a property list in a rail (72).
+pub const KEY_IN_RAIL: Rems = rems(4.5);
+/// A select (168).
+pub const SELECT: Rems = rems(10.5);
+/// A small select (128; `w_32`).
+pub const SELECT_SMALL: Rems = rems(8.);
+/// A list row's trailing lane, kept even when empty (48; `w_12`).
+pub const TRAILING_LANE: Rems = rems(3.);
+/// An upcoming row's action lane, kept either way (136).
+pub const ACTION_LANE: Rems = rems(8.5);
+
+/// A meter with words beside it (6).
+pub const METER: Rems = rems(0.375);
+/// A meter inside a row (2).
+pub const METER_THIN: Rems = rems(0.125);
+/// The widest a meter gets (400).
+pub const METER_MAX: Rems = rems(25.);
+/// A meter in a row (160).
+pub const METER_IN_ROW: Rems = rems(10.);
+/// The goal meter's pace tick: 2 wide, 3 proud of the meter on each side.
+pub const PACE_TICK_WIDTH: Pixels = px(2.);
+pub const PACE_TICK_OVERHANG: Pixels = px(3.);
+
+/// The widest prose and readers' words get (640).
+pub const PROSE: Rems = rems(40.);
+/// The widest an empty state's sentence gets (288; `w_72`).
+pub const EMPTY_TEXT: Rems = rems(18.);
+
+/// A dialog that confirms (24 rem).
+pub const DIALOG_CONFIRM: Rems = rems(24.);
+/// A dialog with a form (30 rem).
+pub const DIALOG_FORM: Rems = rems(30.);
+
+/// The 1 px hairline.
+pub const HAIRLINE: Pixels = px(1.);

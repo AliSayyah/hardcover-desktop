@@ -1,63 +1,117 @@
-//! The interface font: Inter, bundled in the binary.
+//! The app's fonts, bundled in the binary: Inter for the interface, Literata
+//! for the book, and Vazirmatn under both for Persian and Arabic text.
 //!
-//! The theme's default family is GPUI's `.SystemUIFont`. On Linux that often
-//! lands on a variable font (Adwaita Sans on GNOME, recent Cantarell), and
-//! GPUI's Linux text system draws only a variable font's default instance:
-//! every medium, semibold and bold run came out regular, so titles and
-//! section headings looked like body text. Static faces give the real
-//! weights on every desktop. Inter is also what Adwaita Sans is drawn from,
-//! so GNOME users see a familiar face.
+//! Every face is a static font. The theme's default family is GPUI's
+//! `.SystemUIFont`, which on Linux often lands on a variable font (Adwaita
+//! Sans on GNOME, recent Cantarell), and GPUI's Linux text system draws only
+//! a variable font's default instance: every medium, semibold and bold run
+//! came out regular. Static faces give the real weights on every desktop.
 //!
-//! Only the faces the app and its components use are bundled: regular,
-//! italic (review text), medium, semibold and bold. A weight in between, or
-//! bold italic, is drawn with the nearest of these. Scripts Inter lacks fall
-//! back to the system's fonts glyph by glyph. Inter is under the SIL Open
-//! Font License, shipped next to it as `assets/fonts/inter/LICENSE.txt`.
+//! The families, as the design system names them (`hardcover-design`, Type):
+//! - **Inter** ([`INTER`]): regular, italic (review text), medium, semibold
+//!   and bold. Everything in the interface. A weight in between, or bold
+//!   italic, is drawn with the nearest of these.
+//! - **Literata Text** ([`LITERATA_TEXT`], the 12 pt optical cut): regular,
+//!   italic and semibold, for book titles up to 18 px and descriptions.
+//! - **Literata Display** ([`LITERATA_DISPLAY`], the 36 pt cut): semibold,
+//!   for book titles and figures from 24 px. The two cuts are two families,
+//!   because GPUI can't pick an optical size.
+//! - **Vazirmatn** ([`VAZIRMATN`]): regular, medium and semibold. Persian and
+//!   Arabic, under Inter and under Literata alike.
+//!
+//! Inter and Literata have no Arabic script, and GPUI's own fallback picks a
+//! system font for it (cosmic-text asks for Noto Sans Arabic). So the
+//! fallback is named with the family (`design::type_roles::Family`): by each
+//! type role, on the shell's root, and by `WrappingText` for the family it
+//! inherits, which also covers dialogs and popovers, as they don't inherit
+//! from the shell.
+//!
+//! GPUI loads a family, as the primary font or a fallback, only if it maps
+//! the letter "m". Vazirmatn does (it has a Latin set); a family without
+//! Latin, such as Noto Naskh Arabic, would be dropped silently.
+//!
+//! The faces come from the projects' releases: Inter 4, Literata 3.103
+//! (`fonts/ttf`) and Vazirmatn 33.003 (`fonts/ttf`). All are under the SIL
+//! Open Font License, shipped
+//! next to them as `assets/fonts/<family>/LICENSE.txt` and installed by
+//! `packaging/linux/package.sh`.
 
 use std::borrow::Cow;
 
 use gpui_kit::App;
 use gpui_kit::component::Theme;
 
-/// The family the faces below register under.
-pub const FAMILY: &str = "Inter";
+/// The interface family.
+pub const INTER: &str = "Inter";
+/// Literata's 12 pt optical cut: book type up to 18 px.
+pub const LITERATA_TEXT: &str = "Literata";
+/// Literata's 36 pt optical cut: book type from 24 px.
+pub const LITERATA_DISPLAY: &str = "Literata 36pt";
+/// Persian and Arabic, under Inter and Literata.
+pub const VAZIRMATN: &str = "Vazirmatn";
 
-const FACES: [&[u8]; 5] = [
-    include_bytes!("../../../assets/fonts/inter/Inter-Regular.ttf"),
-    include_bytes!("../../../assets/fonts/inter/Inter-Italic.ttf"),
-    include_bytes!("../../../assets/fonts/inter/Inter-Medium.ttf"),
-    include_bytes!("../../../assets/fonts/inter/Inter-SemiBold.ttf"),
-    include_bytes!("../../../assets/fonts/inter/Inter-Bold.ttf"),
+macro_rules! face {
+    ($path:literal) => {
+        include_bytes!(concat!("../../../assets/fonts/", $path))
+    };
+}
+
+/// Every bundled face. [`init`] registers these, and the test below checks
+/// each of them.
+const FACES: [&[u8]; 12] = [
+    face!("inter/Inter-Regular.ttf"),
+    face!("inter/Inter-Italic.ttf"),
+    face!("inter/Inter-Medium.ttf"),
+    face!("inter/Inter-SemiBold.ttf"),
+    face!("inter/Inter-Bold.ttf"),
+    face!("literata/Literata-Regular.ttf"),
+    face!("literata/Literata-Italic.ttf"),
+    face!("literata/Literata-SemiBold.ttf"),
+    face!("literata/Literata36pt-SemiBold.ttf"),
+    face!("vazirmatn/Vazirmatn-Regular.ttf"),
+    face!("vazirmatn/Vazirmatn-Medium.ttf"),
+    face!("vazirmatn/Vazirmatn-SemiBold.ttf"),
 ];
 
-/// Registers Inter and makes it the theme's interface font. Runs after
-/// `gpui_kit::init`, which creates the theme. If the faces can't be loaded,
-/// the system font stays.
-pub fn init(cx: &mut App) {
+/// Registers the faces and makes Inter the theme's interface font. Runs
+/// after `gpui_kit::init`, which creates the theme. If the faces can't be
+/// loaded, the system font stays and this returns false.
+pub fn init(cx: &mut App) -> bool {
     let faces = FACES.iter().map(|face| Cow::Borrowed(*face)).collect();
     if let Err(error) = cx.text_system().add_fonts(faces) {
-        eprintln!("hardcover: couldn't load the bundled font, using the system font: {error:#}");
-        return;
+        eprintln!("hardcover: couldn't load the bundled fonts, using the system font: {error:#}");
+        return false;
     }
-    // A theme change keeps the family: the built-in themes don't name one.
-    Theme::update(cx, |theme| theme.font_family = FAMILY.into());
+    // The app's theme configs name Inter too (`design::theme`), so a theme
+    // change keeps it.
+    Theme::update(cx, |theme| theme.font_family = INTER.into());
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The table tags of a TrueType or OpenType font.
+    fn tables(face: &[u8]) -> Vec<&[u8]> {
+        let count = u16::from_be_bytes([face[4], face[5]]) as usize;
+        (0..count)
+            .map(|i| &face[12 + 16 * i..12 + 16 * i + 4])
+            .collect()
+    }
+
     /// The faces must be static: a variable font is what this module avoids.
     /// `fvar` is the table that makes a font variable.
     #[test]
     fn every_bundled_face_is_a_static_font() {
-        for face in FACES {
-            let tables = u16::from_be_bytes([face[4], face[5]]) as usize;
-            let tags: Vec<&[u8]> = (0..tables)
-                .map(|i| &face[12 + 16 * i..12 + 16 * i + 4])
-                .collect();
-            assert!(tags.contains(&&b"glyf"[..]), "not a TrueType font");
-            assert!(!tags.contains(&&b"fvar"[..]), "a variable font");
+        for (i, face) in FACES.iter().enumerate() {
+            let tags = tables(face);
+            assert!(
+                tags.contains(&&b"glyf"[..]),
+                "face {i} is not a TrueType font"
+            );
+            assert!(!tags.contains(&&b"fvar"[..]), "face {i} is a variable font");
+            assert!(!tags.contains(&&b"gvar"[..]), "face {i} has variations");
         }
     }
 }

@@ -29,9 +29,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Axis, Context, ElementId, Entity, FontWeight,
-    InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, Pixels, Render,
-    RenderImage, SharedString, Styled as _, StyledImage as _, Subscription, Task, Window, div, img,
-    prelude::FluentBuilder as _, rems,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, RenderImage,
+    SharedString, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY};
 use hardcover_core::{
@@ -46,8 +45,9 @@ use self::review_section::ReviewEditor;
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
 use super::star_rating::StarRating;
-use crate::app_state::{Services, cover_image, release_cover_image};
+use crate::app_state::{Services, release_cover_image};
 use crate::bidi::WrappingText;
+use crate::cover::{Cover, CoverArt, CoverSize, detail_art};
 use crate::format::{
     average_rating_text, duration_text, edition_text, error_message, parse_progress, position_text,
     progress_summary, read_dates_text, series_position_text, status_label,
@@ -1043,16 +1043,18 @@ impl BookDetailView {
         url: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<Arc<RenderImage>> {
+    ) -> CoverArt {
         if self.cover.as_ref().map(|(u, _)| u) != url.as_ref()
             && let Some((old, image)) = self.cover.take()
         {
             release_cover_image(&old, image, window, cx);
         }
-        let url = url?;
-        let image = cover_image(&url, window, cx);
-        self.cover = Some((url, image.clone()));
-        image
+        let Some(url) = url else {
+            return CoverArt::None;
+        };
+        let art = detail_art(&url, window, cx);
+        self.cover = Some((url, art.image()));
+        art
     }
 
     fn render_header(
@@ -1111,23 +1113,10 @@ impl BookDetailView {
                     .items_start()
                     .gap_6()
                     .child(
-                        div()
-                            .flex_shrink_0()
-                            .w_32()
-                            .h_48()
-                            .rounded(cx.theme().radius_lg)
-                            .overflow_hidden()
-                            .bg(cx.theme().muted)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .map(|this| match cover {
-                                Some(image) => {
-                                    this.child(img(image).size_full().object_fit(ObjectFit::Cover))
-                                }
-                                None => this
-                                    .child(Icon::new(IconName::BookOpen).large().text_color(muted)),
-                            }),
+                        Cover::new(CoverSize::Xl, book.title.clone())
+                            .author(book.authors.first().cloned())
+                            .art(cover)
+                            .shadow(true),
                     )
                     .child(
                         v_flex()

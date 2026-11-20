@@ -653,13 +653,6 @@ pub fn cover_thumbnail(url: &str, window: &mut Window, cx: &mut App) -> Option<A
         .flatten()
 }
 
-/// The detail cover for `url`, loaded like [`cover_file`].
-pub fn cover_image(url: &str, window: &mut Window, cx: &mut App) -> Option<Arc<RenderImage>> {
-    window
-        .use_asset::<CoverImage>(&url.to_owned(), cx)
-        .flatten()
-}
-
 /// Forgets a detail cover the pane no longer shows. GPUI keeps loaded assets
 /// and their textures for the whole run unless told otherwise, which adds up
 /// when browsing hundreds of books.

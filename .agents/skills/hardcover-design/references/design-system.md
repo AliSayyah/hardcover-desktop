@@ -629,10 +629,11 @@ interface.
   wrong place. A single truncated line (rows) can use GPUI's own layout.
 - **Fonts:** Persian and Arabic are set in Vazirmatn (static faces)
   everywhere, under the serif roles as well as the sans ones, so the script
-  reads the same across the app. Display sizes use a 1.5 line height. If
-  GPUI's fallback doesn't pick Vazirmatn glyph by glyph, set the family
-  explicitly for right-to-left runs: `WrappingText` already knows the
-  direction.
+  reads the same across the app. Display sizes use a 1.5 line height. The
+  fallback is named, not left to GPUI: each type role names it, and
+  `WrappingText` names it for the family it inherits. (A family without
+  Latin, such as Noto Naskh Arabic, can't be used: GPUI drops a family that
+  has no "m".)
 - **Covers:** a cloth cover with a right-to-left title sets it right to left.
 
 ## Copy
@@ -684,15 +685,24 @@ it when you wire it.
 | `sidebar_border` | `border` |
 | `sidebar_primary` | `accent` |
 | `sidebar_accent` | `selected` |
-| `secondary`, `group_box` | `surface` |
-| `popover`, `button`, `input` background | `raised` |
+| `secondary`, `group_box`, `muted` | `surface` |
+| `popover`, `button` | `raised` |
 | `border` | `border` |
 | `input` (outline) | `border-strong` |
 | `muted_foreground` | `fg-muted` |
-| `primary`, `progress_bar`, `ring` (at 50%), `link`, `caret`, `switch` (on) | `accent` |
+| `primary`, `progress_bar`, `ring`, `link`, `caret`, `slider_bar` | `accent` |
 | `primary_foreground` | `accent-fg` |
-| `list_hover`, `button_hover`, `secondary_hover` | `hover` |
-| `list_active`, `button_active`, `secondary_active` | `selected` |
+| `list_hover` | `hover` |
+| `list_active` | `selected` |
+| `accent` (the kit's hover for menu items and ghost buttons) | `hover`; ink 10% in dark mode, where the kit halves it for ghost buttons |
+| `button_hover`, `button_active` | `hover`, `selected` blended into `raised` |
+| `secondary_hover`, `secondary_active` | `hover`, `selected` blended into `surface` |
+| `primary_hover`, `primary_active` | `hover`, `selected` blended into `accent` |
+| `button_danger` | clear: `danger` text, with `hover` and `selected` on hover and press |
+| `switch` (off), `switch_thumb` | `track`, `raised` |
+| `scrollbar_thumb`, `scrollbar_thumb_hover` | `border-strong`, `fg-faint` |
+| `tab_bar_segmented` | `chip` blended into `bg` |
+| `chart_1` to `chart_5`, `chart_grid` | `accent`, `track` |
 | `skeleton` | `skeleton` |
 | `danger` | `danger` |
 | `warning` | `warning` |
@@ -700,6 +710,11 @@ it when you wire it.
 | `radius_lg` | 8 |
 | `font_family` | Inter |
 | `font_size` | 16 |
+
+The app builds this as two theme configs (`design::theme`), so every mode
+change applies it. `ring` is the solid accent: the kit draws the 3 px ring
+at 50% of it, plus a 1 px accent edge. What the kit doesn't let the theme
+reach is listed under "Migration status".
 
 **Notes:**
 - **App-owned roles** live in one app module and nowhere else: gold,
@@ -728,35 +743,46 @@ it when you wire it.
 
 What the code still lacks. Remove an item in the commit that finishes it.
 
-1. **Palette.** The app still runs gpui-component's default black-and-white
-   theme. Apply the paper and ink tokens to both themes.
-2. **Fonts.** Only Inter is bundled. Literata (Text and Display) and
-   Vazirmatn are still to come.
-3. **App token module.**
-   - Only `star::color` and `star::empty_color` exist.
-   - The sidebar's muted text is `sidebar_foreground.opacity(0.7)`, repeated
-     in four places across three files.
-4. **Cover component.** Covers are drawn by hand in six places (the
-   upcoming row is the sixth), with differing fills (`muted`, `secondary`),
-   radii (`radius`, `radius_lg`, a raw `px(2.)`), ad hoc sizes (the upcoming
-   row's 24 × 36) and a book-open icon placeholder. There is no edge, hinge,
-   shadow or cloth cover yet, and the sizes are ad hoc.
-5. **Book pane and page.**
+The foundation is in place: the palette on the kit's theme
+(`design::theme`), the token module (`design::colors`, `design::size`,
+`design::TypeRoles`), the bundled fonts (`fonts.rs`), one cover component
+(`cover.rs`) with the cloth cover, and chips at 20 on the chip overlay.
+
+1. **Book pane and page.**
    - The tools sit at the header's top right.
    - "Your book" is a form grid, and "Open on Hardcover" sits in the header.
    - The full page has no rail. The order and the progress and Not started
      panels are not in place.
-6. **Home.** There is no greeting, lead book or rail. Coming soon is a
+   - The title is Inter `text_2xl`, not `display-24` (pane) or `display-30`
+     (page). The full page's header uses the xl cover, not xxl.
+   - Similar books use md covers (64), not lg (80), and their titles are a
+     text button's.
+2. **Home.** There is no greeting, lead book or rail. Coming soon is a
    full-width card under the others, with a semibold title and an xsmall
-   "See all", instead of a section closing the main column.
-7. **Sidebar.** The selected treatment (accent icon), the goal row and the
-   brand row are still to do.
-8. **States.** The ink-overlay hover and selected fills, the focus treatment
-   and skeleton loading are still to do.
-9. **Chips.** These are 22 high (status) and 24 (tags) instead of 20.
-10. **Type.** Line heights and tabular figures aren't set explicitly. The
-    sizes `text_lg`/`text_2xl` are used outside the roles above.
-11. **Reviews.** The reviewer's name uses the kit's `Link` (accent,
-    underlined) instead of the byline link; reviews sit 20 apart without
-    hairlines; the review text is `text_sm` at the default line height
-    rather than `reader`. Upcoming rows use `py_1p5` instead of 12.
+   "See all", instead of a section closing the main column. The covers are
+   on system sizes (reading rows and Up next md, the paused and rating rows
+   sm, the Want to read rows xs), but the layout around them is the old one.
+3. **Sidebar.** The selected treatment (accent icon), the goal row and the
+   brand row are still to do. The kit's sidebar menu hovers at
+   `sidebar_accent` × 0.8 (8%, not 5%), so the nav rows need the app's own
+   row to get the system's hover.
+4. **States and the kit.** The theme gives the kit's controls the ink
+   overlays, solid where a control paints its own fill, and the focus ring
+   (3 px accent at 50% plus a 1 px accent edge). What the theme can't reach:
+   - inputs are paper in light mode and a tint of the input border in dark,
+     not `raised` (`Theme::input_background()` ignores the config);
+   - popovers and menus round at 6, not 8, and use the kit's own shadow,
+     not `shadow-popover`;
+   - dialogs paint `background` (paper), not `raised`;
+   - menu items hover at 10% in dark mode: the kit's `accent` serves both
+     menu items and ghost buttons, and ghost buttons take half of it there;
+   - skeletons don't pulse.
+5. **Type.** The roles exist as helpers (`design::TypeRoles`: `.page_title()`,
+   `.body_strong()`, `.caption(cx)`, `.display_24()`, `.tabular()`, ...), but
+   the screens still set sizes with `text_sm`/`text_lg`/`text_2xl` at GPUI's
+   default line height and without tabular figures. Move each screen to the
+   roles as it is redesigned.
+6. **Reviews.** The reviewer's name uses the kit's `Link` (accent,
+   underlined) instead of the byline link; reviews sit 20 apart without
+   hairlines; the review text is `text_sm` at the default line height
+   rather than `reader`. Upcoming rows use `py_1p5` instead of 12.

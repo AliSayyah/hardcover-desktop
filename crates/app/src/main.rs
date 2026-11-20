@@ -6,8 +6,10 @@ mod bidi;
 mod book;
 mod catalog;
 mod chip;
+mod cover;
 #[cfg(test)]
 mod cover_quality_tests;
+mod design;
 mod fonts;
 mod format;
 mod goals;
@@ -141,7 +143,8 @@ fn main() {
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
-            fonts::init(cx);
+            let bundled_fonts = fonts::init(cx);
+            design::theme::init(bundled_fonts, cx);
             bind_keys(cx);
             if let Some(exe) = &exe {
                 cx.set_restart_path(exe.clone());

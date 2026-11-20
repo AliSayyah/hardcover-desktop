@@ -266,7 +266,7 @@ fn adopt(session: &Session, tokens: &Tokens, user: UserId) -> Result<(), Failure
 impl Render for Reauthorize {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let muted = theme.sidebar_foreground.opacity(0.7);
+        let muted = theme.muted_foreground;
         let danger = theme.danger;
         let message: SharedString =
             permissions_message(&Services::global(cx).missing_scopes()).into();

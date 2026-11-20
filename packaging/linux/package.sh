@@ -24,8 +24,17 @@ install -Dm644 "$here/$app_id.desktop" "$dir/share/applications/$app_id.desktop"
 install -Dm644 "$here/$app_id.metainfo.xml" "$dir/share/metainfo/$app_id.metainfo.xml"
 install -Dm644 "$root/assets/icon.svg" "$dir/share/icons/hicolor/scalable/apps/$app_id.svg"
 install -Dm644 "$root/LICENSE" "$dir/share/licenses/hardcover-desktop/LICENSE"
-# The bundled Inter font (SIL Open Font License); the licence must travel with it.
-install -Dm644 "$root/assets/fonts/inter/LICENSE.txt" "$dir/share/licenses/hardcover-desktop/Inter-LICENSE.txt"
+# The bundled fonts (SIL Open Font License); each licence must travel with
+# its font. Every directory under assets/fonts holds one family and its
+# LICENSE.txt, installed as <directory>-LICENSE.txt (inter-LICENSE.txt, ...).
+for font_dir in "$root"/assets/fonts/*/; do
+    font=$(basename "$font_dir")
+    if [[ ! -f "$font_dir/LICENSE.txt" ]]; then
+        echo "error: $font_dir has no LICENSE.txt" >&2
+        exit 1
+    fi
+    install -Dm644 "$font_dir/LICENSE.txt" "$dir/share/licenses/hardcover-desktop/$font-LICENSE.txt"
+done
 
 mkdir -p "$out"
 tar -C "$stage" --owner=0 --group=0 --numeric-owner -czf "$out/$name.tar.gz" "$name"

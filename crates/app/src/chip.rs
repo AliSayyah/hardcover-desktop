@@ -1,25 +1,40 @@
-//! Chips: small rounded pills on the muted surface.
+//! Chips (`hardcover-design`, Chips): neutral pills, 20 high, on the `chip`
+//! ink overlay, with `fg-muted` text at 12/500 and an optional 12 px icon.
+//! The overlay is translucent on purpose: a chip stays visible on a hovered
+//! or selected row.
 //!
 //! - `StatusChip`: a book's library status at the end of a row, with the
 //!   shelf's sidebar icon, so statuses differ by shape as well as by name.
 //! - `TagChip`: one catalogue tag (a genre, a mood, a content warning) on the
-//!   book page. Content warnings carry a warning icon, the only colour here.
-//!
-//! Both stay neutral: colour is spent only where it means something.
+//!   book page. Content warnings carry the warning icon in `warning`, the
+//!   only colour a chip ever has.
 
-use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _};
+use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::{
-    App, FontWeight, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _,
-    Window, div, prelude::FluentBuilder as _, rems,
+    App, Div, FontWeight, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _,
+    Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::ReadingStatus;
 
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::status_label;
 
-/// The height of a tag chip. The book page's tag group labels use it as their
-/// line height, so a label sits on the line of the first row of chips.
-pub const TAG_HEIGHT: f32 = 1.5;
+/// The pill every chip is drawn on.
+fn pill(cx: &App) -> Div {
+    let colors = colors(cx);
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .h(size::CHIP)
+        .px_2()
+        .gap_1()
+        .rounded_full()
+        .bg(colors.chip)
+        .caption(cx)
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(colors.fg_muted)
+}
 
 /// The icon of a status, as on the sidebar's shelves.
 pub fn status_icon(status: ReadingStatus) -> IconName {
@@ -39,15 +54,7 @@ pub struct StatusChip(pub ReadingStatus);
 
 impl RenderOnce for StatusChip {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = cx.theme();
-        Tag::custom(theme.muted, theme.muted_foreground, theme.muted)
-            .rounded_full()
-            .h(rems(1.375))
-            .py_0()
-            .pl_1p5()
-            .pr_2()
-            .gap_1()
-            .font_weight(FontWeight::MEDIUM)
+        pill(cx)
             .child(Icon::new(status_icon(self.0)).xsmall())
             .child(status_label(self.0))
     }
@@ -77,21 +84,16 @@ impl TagChip {
 
 impl RenderOnce for TagChip {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = cx.theme();
-        Tag::custom(theme.muted, theme.foreground, theme.muted)
-            .rounded_full()
-            .h(rems(TAG_HEIGHT))
+        pill(cx)
+            .flex_shrink(1.)
             .max_w_full()
             .min_w_0()
-            .py_0()
-            .px_2p5()
-            .gap_1()
             .when(self.warning, |this| {
-                this.pl_2().child(
+                this.child(
                     Icon::new(IconName::TriangleAlert)
                         .xsmall()
                         .flex_shrink_0()
-                        .text_color(theme.warning),
+                        .text_color(colors(cx).warning),
                 )
             })
             .child(div().min_w_0().truncate().child(self.text))

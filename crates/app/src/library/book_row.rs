@@ -10,6 +10,8 @@ use hardcover_core::{BookSummary, LibraryEntry, ReadingStatus};
 
 use crate::app_state::cover_thumbnail;
 use crate::chip::StatusChip;
+use crate::cover::{Cover, CoverSize};
+use crate::design::colors;
 use crate::format::{authors_text, progress_summary, rating_text};
 
 /// What the trailing lane shows.
@@ -29,8 +31,9 @@ pub struct BookRow {
     title: SharedString,
     secondary: SharedString,
     cover_url: Option<String>,
-    /// Shown in the cover slot while there is no image.
-    placeholder: IconName,
+    /// For an author or a series, the icon its image slot shows while there
+    /// is no image. A book has its cover instead.
+    placeholder: Option<IconName>,
     trailing: Trailing,
 }
 
@@ -50,7 +53,7 @@ impl BookRow {
             title: entry.book.title.clone().into(),
             secondary: authors_text(&entry.book.authors).into(),
             cover_url: entry.cover().map(|c| c.url.clone()),
-            placeholder: IconName::BookOpen,
+            placeholder: None,
             trailing,
         }
     }
@@ -65,7 +68,7 @@ impl BookRow {
             title: book.title.clone().into(),
             secondary: secondary.into(),
             cover_url: book.cover.as_ref().map(|c| c.url.clone()),
-            placeholder: IconName::BookOpen,
+            placeholder: None,
             trailing: status.map_or(Trailing::None, Trailing::Status),
         }
     }
@@ -84,7 +87,7 @@ impl BookRow {
             title: title.into(),
             secondary: details.into(),
             cover_url: image_url,
-            placeholder,
+            placeholder: Some(placeholder),
             trailing: Trailing::None,
         }
     }
@@ -100,7 +103,7 @@ impl BookRow {
             title: book.title.clone().into(),
             secondary: details.into(),
             cover_url: book.cover.as_ref().map(|c| c.url.clone()),
-            placeholder: IconName::BookOpen,
+            placeholder: None,
             trailing: status.map_or(Trailing::None, Trailing::Status),
         }
     }
@@ -108,34 +111,48 @@ impl BookRow {
 
 impl RenderOnce for BookRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let thumbnail = self
-            .cover_url
-            .as_deref()
-            .and_then(|url| cover_thumbnail(url, window, cx));
         let muted = cx.theme().muted_foreground;
-        h_flex()
-            .w_full()
-            .gap_3()
-            .py_0p5()
-            .child(
-                // Fixed 2:3 slot so rows align whether or not the cover has loaded.
+        let lead = match self.placeholder {
+            None => Cover::new(CoverSize::Sm, self.title.clone())
+                .thumbnail(self.cover_url)
+                .into_any_element(),
+            // Not a book: a 2:3 slot for the person's or series' image.
+            Some(placeholder) => {
+                let thumbnail = self
+                    .cover_url
+                    .as_deref()
+                    .and_then(|url| cover_thumbnail(url, window, cx));
                 div()
                     .flex_shrink_0()
-                    .w_8()
-                    .h_12()
+                    .w(CoverSize::Sm.width())
+                    .h(CoverSize::Sm.height())
                     .rounded(cx.theme().radius)
                     .overflow_hidden()
-                    .bg(cx.theme().muted)
+                    .bg(colors(cx).surface)
                     .flex()
                     .items_center()
                     .justify_center()
                     .map(|this| match thumbnail {
-                        Some(image) => {
-                            this.child(img(image).size_full().object_fit(ObjectFit::Cover))
-                        }
-                        None => this.child(Icon::new(self.placeholder).small().text_color(muted)),
-                    }),
-            )
+                        Some(image) => this.child(
+                            img(image)
+                                .size_full()
+                                .rounded(cx.theme().radius)
+                                .object_fit(ObjectFit::Cover),
+                        ),
+                        None => this.child(
+                            Icon::new(placeholder)
+                                .small()
+                                .text_color(colors(cx).fg_faint),
+                        ),
+                    })
+                    .into_any_element()
+            }
+        };
+        h_flex()
+            .w_full()
+            .gap_3()
+            .py_0p5()
+            .child(lead)
             .child(
                 v_flex()
                     .flex_1()
@@ -176,11 +193,7 @@ impl RenderOnce for BookRow {
                         .text_xs()
                         .text_color(muted)
                         // Gold: the user's own rating, as on the book page.
-                        .child(
-                            crate::star::icon()
-                                .xsmall()
-                                .text_color(crate::star::color(cx)),
-                        )
+                        .child(crate::star::icon().xsmall().text_color(colors(cx).gold))
                         .child(text),
                 ),
                 Trailing::Status(status) => {

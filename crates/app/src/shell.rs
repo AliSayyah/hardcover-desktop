@@ -37,6 +37,8 @@ use crate::catalog::author_view::AuthorView;
 use crate::catalog::discover_view::DiscoverView;
 use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
 use crate::catalog::series_view::SeriesView;
+use crate::design::TypeRoles as _;
+use crate::design::type_roles::Family;
 use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
 use crate::goals::model::GoalsModel;
 use crate::goals::sidebar::GoalsSection;
@@ -154,6 +156,9 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            // Inter over Vazirmatn for everything inside; dialogs and
+            // popovers are outside, see `bidi::WrappingText`.
+            .type_family(Family::Sans)
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
@@ -618,7 +623,7 @@ impl Workspace {
             item.suffix(move |_, cx| {
                 div()
                     .text_xs()
-                    .text_color(cx.theme().sidebar_foreground.opacity(0.7))
+                    .text_color(cx.theme().muted_foreground)
                     .child(count.to_string())
             })
         });
@@ -834,7 +839,7 @@ impl Workspace {
     fn render_account(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let model = self.model.read(cx);
         let user = model.user().cloned();
-        let muted = cx.theme().sidebar_foreground.opacity(0.7);
+        let muted = cx.theme().muted_foreground;
         let (status_icon, status_text): (Option<AnyElement>, SharedString) =
             match model.sync_status() {
                 SyncStatus::Syncing => (
