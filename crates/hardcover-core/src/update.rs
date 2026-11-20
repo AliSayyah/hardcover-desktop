@@ -6,9 +6,8 @@
 //!   `~/.local`, where `install.sh` puts it;
 //! - an AppImage in a directory it can write to.
 //!
-//! Other installs only learn that a newer version exists: a Flatpak, a
-//! distribution package, a development build, or a file this user can't
-//! replace.
+//! Other installs only learn that a newer version exists: a distribution
+//! package, a development build, or files this user can't replace.
 //!
 //! Trust chain for an install:
 //! 1. The release file (tarball or AppImage) must be signed by the key in
@@ -145,16 +144,14 @@ pub enum InstallKind {
     Tarball { prefix: PathBuf },
     /// Run from an AppImage, the file at `path`, in a writable directory.
     AppImage { path: PathBuf },
-    /// Anything else: a Flatpak, a package, a development build, or a prefix
-    /// or AppImage this user can't write to. Updates are announced, not installed.
+    /// Anything else: a package, a development build, or a prefix or
+    /// AppImage this user can't write to. Updates are announced, not installed.
     Other,
 }
 
 /// What the AppImage runtime tells the program it starts, from the environment.
 #[derive(Debug, Default)]
 pub(crate) struct LaunchEnv {
-    /// `FLATPAK_ID` is set.
-    pub flatpak: bool,
     /// `APPIMAGE`: the AppImage file.
     pub appimage: Option<PathBuf>,
     /// `APPDIR`: where the AppImage is mounted or extracted.
@@ -164,7 +161,6 @@ pub(crate) struct LaunchEnv {
 impl LaunchEnv {
     fn current() -> Self {
         Self {
-            flatpak: std::env::var_os("FLATPAK_ID").is_some(),
             appimage: std::env::var_os("APPIMAGE").map(PathBuf::from),
             appdir: std::env::var_os("APPDIR").map(PathBuf::from),
         }
@@ -178,9 +174,6 @@ impl InstallKind {
     }
 
     pub(crate) fn detect_in(exe: &Path, env: &LaunchEnv) -> Self {
-        if env.flatpak {
-            return Self::Other;
-        }
         let exe = exe.canonicalize().unwrap_or_else(|_| exe.to_owned());
         // `APPIMAGE` and `APPDIR` are inherited by everything an AppImage
         // starts (a terminal, an editor), so they describe this program only

@@ -451,7 +451,6 @@ impl RunningAppImage {
     }
     fn env(&self) -> LaunchEnv {
         LaunchEnv {
-            flatpak: false,
             appimage: Some(self.file()),
             appdir: Some(self.dir.path().join("mount")),
         }
@@ -531,15 +530,6 @@ fn an_appimage_that_cannot_be_replaced_only_announces() {
         }
         fs::set_permissions(&apps, fs::Permissions::from_mode(0o755)).unwrap();
     }
-
-    let flatpak = LaunchEnv {
-        flatpak: true,
-        ..app.env()
-    };
-    assert_eq!(
-        InstallKind::detect_in(&app.exe(), &flatpak),
-        InstallKind::Other
-    );
 }
 
 #[test]
