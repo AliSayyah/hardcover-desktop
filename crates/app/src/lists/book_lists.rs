@@ -6,7 +6,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex};
 use gpui_kit::{
     AnyElement, App, Entity, IntoElement, ParentElement as _, SharedString, Styled as _, Task,
     Window, div,
@@ -240,6 +240,7 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
             .child(
                 h_flex().h(size::CONTROL_SMALL).child(
                     Switch::new("book-owned")
+                        .small()
                         .checked(owned)
                         .accessibility_label("Owned")
                         .disabled(!allowed || busy)

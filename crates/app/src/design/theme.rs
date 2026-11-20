@@ -202,7 +202,7 @@ pub fn config(mode: ThemeMode, bundled_fonts: bool) -> ThemeConfig {
     // Loading, switches, scrollbars.
     c.skeleton = css(p.skeleton);
     c.switch = css(p.track);
-    c.switch_thumb = css(p.raised);
+    c.switch_thumb = css(p.switch_thumb);
     c.scrollbar = css(clear);
     c.scrollbar_thumb = css(p.border_strong);
     c.scrollbar_thumb_hover = css(p.fg_faint);
@@ -283,6 +283,7 @@ mod tests {
                 ),
                 ("skeleton", theme.skeleton, p.skeleton),
                 ("switch", theme.switch, p.track),
+                ("switch_thumb", theme.switch_thumb, p.switch_thumb),
                 ("danger", theme.danger, p.danger),
                 ("warning", theme.warning, p.warning),
             ] {

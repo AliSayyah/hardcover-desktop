@@ -17,6 +17,7 @@ use crate::design::TypeRoles as _;
 use crate::library::model::LibraryModel;
 use crate::preferences::{AppPreferences, PreferencesModel, theme_override};
 use crate::ui::Avatar;
+use crate::ui::kit::SmallControl as _;
 use crate::update::{UpdateModel, UpdateState, Updates, automatic_checks_unavailable};
 
 const THEMES: [(ThemePreference, &str); 3] = [
@@ -57,23 +58,35 @@ impl SettingsView {
     fn render_appearance(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let forced = theme_override();
         let current = forced.unwrap_or_else(|| self.preferences.read(cx).theme());
-        let selected = THEMES.iter().position(|(theme, _)| *theme == current);
-        let preferences = self.preferences.clone();
-        let choices = RadioGroup::horizontal("theme")
-            .children(THEMES.map(|(_, label)| Radio::new(SharedString::from(label)).label(label)))
-            .selected_index(selected)
-            .disabled(forced.is_some())
-            .on_change(move |ix, _, cx| {
-                if let Some((theme, _)) = THEMES.get(*ix) {
-                    preferences.update(cx, |p, cx| p.set_theme(*theme, cx));
-                }
-            });
+        // A theme fixed by `HARDCOVER_THEME` can't be changed here: it shows
+        // as a value, not as radios the user can't press.
+        let control = if forced.is_some() {
+            let label = THEMES
+                .iter()
+                .find(|(theme, _)| *theme == current)
+                .map_or("System", |(_, label)| *label);
+            div().body().child(label).into_any_element()
+        } else {
+            let selected = THEMES.iter().position(|(theme, _)| *theme == current);
+            let preferences = self.preferences.clone();
+            RadioGroup::horizontal("theme")
+                .children(
+                    THEMES.map(|(_, label)| Radio::new(SharedString::from(label)).label(label)),
+                )
+                .selected_index(selected)
+                .on_change(move |ix, _, cx| {
+                    if let Some((theme, _)) = THEMES.get(*ix) {
+                        preferences.update(cx, |p, cx| p.set_theme(*theme, cx));
+                    }
+                })
+                .into_any_element()
+        };
         section(
             "Appearance",
             setting_row(
                 "Theme",
                 forced.map(|_| "Set by HARDCOVER_THEME.".into()),
-                choices,
+                control,
                 cx,
             ),
         )
@@ -84,6 +97,7 @@ impl SettingsView {
         let wanted = self.preferences.read(cx).automatic_update_checks();
         let preferences = self.preferences.clone();
         let switch = Switch::new("automatic-update-checks")
+            .small()
             .checked(wanted && unavailable.is_none())
             .disabled(unavailable.is_some())
             .accessibility_label("Check for updates automatically")
@@ -120,7 +134,7 @@ impl SettingsView {
         );
         let updates = self.updates.clone();
         let check = Button::new("check-for-updates")
-            .small()
+            .small_control()
             .label("Check now")
             .loading(matches!(model.state(), UpdateState::Checking))
             .disabled(busy)
@@ -154,13 +168,12 @@ impl SettingsView {
                 .map(|a| a.url.clone()),
         );
         let view = cx.entity().downgrade();
-        let sign_out =
-            Button::new("sign-out")
-                .small()
-                .label("Sign out…")
-                .on_click(move |_, _, cx| {
-                    let _ = view.update(cx, |_, cx| cx.emit(SignOutRequested));
-                });
+        let sign_out = Button::new("sign-out")
+            .small_control()
+            .label("Sign out…")
+            .on_click(move |_, _, cx| {
+                let _ = view.update(cx, |_, cx| cx.emit(SignOutRequested));
+            });
         section(
             "Account",
             h_flex()

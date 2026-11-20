@@ -168,7 +168,7 @@ impl RenderOnce for StarRating {
 
         // A hover previews the value it would set, lighter than a set one.
         let filled_color = if hovered.is_some() {
-            colors(cx).gold.opacity(0.55)
+            colors(cx).gold_preview
         } else {
             colors(cx).gold
         };

@@ -23,6 +23,7 @@ use hardcover_core::{BookId, EDITIONS_PER_PAGE, EditionId, EditionSummary};
 use crate::app_state::Services;
 use crate::design::{TypeRoles as _, size};
 use crate::format::edition_text;
+use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_dialog;
 
 /// The user picked `0`.
@@ -214,7 +215,7 @@ impl Render for EditionPicker {
                         .child(div().text_color(muted).child(error))
                         .child(
                             Button::new("retry-editions")
-                                .small()
+                                .small_control()
                                 .label("Try again")
                                 .on_click(cx.listener(|this, _, _, cx| this.fetch_more(cx))),
                         ),
@@ -226,7 +227,7 @@ impl Render for EditionPicker {
                     this.child(
                         div().child(
                             Button::new("more-editions")
-                                .small()
+                                .small_control()
                                 .label("Show more")
                                 .loading(self.loading)
                                 .disabled(self.loading)

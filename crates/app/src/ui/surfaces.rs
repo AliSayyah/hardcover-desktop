@@ -153,7 +153,7 @@ impl RenderOnce for RailSection {
 ///
 /// ```ignore
 /// Block::new("Notes")
-///     .action(Button::new("edit-notes").ghost().small().label("Edit"))
+///     .action(Button::new("edit-notes").ghost().small_control().label("Edit"))
 ///     .child(notes)
 /// ```
 #[derive(IntoElement)]

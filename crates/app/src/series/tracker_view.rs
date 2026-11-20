@@ -22,7 +22,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{
-    Icon, IconName, IndexPath, Sizable as _, VirtualListScrollHandle, h_flex, v_virtual_list,
+    Icon, IconName, IndexPath, VirtualListScrollHandle, h_flex, v_virtual_list,
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
@@ -38,6 +38,7 @@ use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
 use crate::ui::focus::{keyed_focus, reveal_when};
 use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::SmallControl as _;
 use crate::ui::{EmptyState, PageHeader, SeriesStrip};
 use crate::upcoming::model::UpcomingModel;
 
@@ -390,7 +391,7 @@ impl SeriesTrackerView {
             .child(div().body().text_color(colors(cx).fg_muted).child(message))
             .child(
                 Button::new("series-retry")
-                    .small()
+                    .small_control()
                     .label("Try again")
                     .on_click(cx.listener(|this, _, _, cx| this.retry(cx))),
             )
@@ -414,7 +415,7 @@ impl SeriesTrackerView {
                     .child(
                         Button::new("series-show-finished")
                             .ghost()
-                            .small()
+                            .small_control()
                             .label("Show finished")
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.show_finished(window, cx)),

@@ -29,6 +29,7 @@
   --border: #E4DED3;
   --border-strong: #D0C8BA; /* control outlines */
   --track: #E0D9CC;         /* empty part of a progress bar */
+  --switch-thumb: #FFFFFF;  /* raised */
   --chip: rgba(31, 28, 23, .07);
   --skeleton: #E9E4DA;      /* something still loading */
   --fg: #1F1C17;            /* ink */
@@ -59,8 +60,9 @@
   --border: #292623;
   --border-strong: #3D3934;
   --track: #35312C;
+  --switch-thumb: #EEEAE3;  /* fg: a raised thumb on track is 1.2:1 here */
   --chip: rgba(238, 234, 227, .08);
-  --skeleton: #23211E;
+  --skeleton: #2B2825;
   --fg: #EEEAE3;
   --fg-muted: #ABA498;
   --fg-faint: #807A6F;
@@ -225,7 +227,7 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .select svg { margin-left: auto; color: var(--fg-muted); }
 .select.sm { height: var(--h-control-s); padding: 0 var(--s-4) 0 var(--s-8); font-size: var(--t-12); width: var(--w-select-s); }
 .switch { width: 28px; height: 16px; border-radius: var(--r-pill); background: var(--track); position: relative; flex: none; }
-.switch i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: var(--r-pill); background: var(--raised); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.switch i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: var(--r-pill); background: var(--switch-thumb); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
 .switch.on { background: var(--accent); }
 .switch.on i { left: 14px; }
 .link { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }

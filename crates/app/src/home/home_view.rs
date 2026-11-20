@@ -21,7 +21,7 @@ use std::sync::Arc;
 use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
     HighlightStyle, InteractiveElement as _, IntoElement, ParentElement as _, Render, RenderImage,
@@ -53,6 +53,7 @@ use crate::format::{
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, CoverShelf, Greeting, Lane, Meter, MonthBars, RailSection, RowSpacing, SectionHeader,
@@ -346,7 +347,13 @@ impl HomeView {
         let disabled_reason = (!can_write).then(|| needs_permission(WRITE_LIBRARY));
         let model = self.model.clone();
         let entry_for_dialog = entry.clone();
-        let size = |button: Button| if small { button.small() } else { button };
+        let size = |button: Button| {
+            if small {
+                button.small_control()
+            } else {
+                button
+            }
+        };
         [
             size(Button::new(SharedString::from(format!("home-update-{id}"))))
                 .label("Update progress…")
@@ -591,7 +598,7 @@ impl HomeView {
                         this.child(
                             Button::new("home-all-paused")
                                 .ghost()
-                                .small()
+                                .small_control()
                                 .label(format!("All {} paused", count_text(count as u32)))
                                 .on_click(|_, window, cx| {
                                     window.dispatch_action(Box::new(ShowPaused), cx)
@@ -747,7 +754,7 @@ impl HomeView {
             .action(
                 Button::new("home-goal-details")
                     .ghost()
-                    .small()
+                    .small_control()
                     .label("Details…")
                     .on_click(move |_, window, cx| {
                         open_goal(goals.clone(), model.clone(), goal_id, window, cx)
@@ -852,7 +859,7 @@ impl HomeView {
                             .child(
                                 h_flex().mt_2().child(
                                     Button::new("home-start-next")
-                                        .small()
+                                        .small_control()
                                         .label("Start reading")
                                         .loading(pending == Some(WriteKind::Status))
                                         .disabled(pending.is_some() || !can_write)

@@ -11,9 +11,7 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::text::TextView;
-use gpui_kit::component::{
-    Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{Disableable as _, Icon, IconName, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     Action, Anchor, AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, Modifiers, ModifiersChangedEvent,
@@ -50,6 +48,7 @@ use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::stats::stats_view::StatsView;
 use crate::ui::focus::{remember_focus, return_focus};
+use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::{open_alert_dialog, open_alert_dialog_on_result, open_dialog};
 use crate::ui::reveal::RevealScroll as _;
 use crate::ui::{
@@ -840,7 +839,7 @@ impl Workspace {
                 .tooltip(format!("Version {version} is installed"))
                 .on_click(|_, _, cx| cx.restart()),
         };
-        Some(button.small().w_full().into_any_element())
+        Some(button.small_control().w_full().into_any_element())
     }
 
     fn check_for_updates(&mut self, cx: &mut Context<Self>) {

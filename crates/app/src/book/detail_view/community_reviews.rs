@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, SharedString,
     Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
@@ -24,6 +24,7 @@ use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, date_text, rating_text};
+use crate::ui::kit::SmallControl as _;
 use crate::ui::{Avatar, Block, BylineLink, RowSpacing, Sequence, Skeleton, Stars};
 
 /// Reviews wait this long after the details, a little longer than similar
@@ -194,7 +195,7 @@ impl BookDetailView {
         let loading = self.community_reviews.loading == Some(book);
         let retry = |id: &'static str, cx: &mut Context<Self>| {
             Button::new(id)
-                .small()
+                .small_control()
                 .label("Try again")
                 .on_click(cx.listener(|this, _, _, cx| this.more_reviews(cx)))
         };
@@ -243,7 +244,7 @@ impl BookDetailView {
                             .when(state.error.is_none() || loading, |this| {
                                 this.child(
                                     Button::new("more-reviews")
-                                        .small()
+                                        .small_control()
                                         .label("Show more reviews")
                                         .loading(loading)
                                         .on_click(
@@ -304,7 +305,7 @@ impl BookDetailView {
                 .child("Contains spoilers")
                 .child(
                     Button::new(("review-spoilers", key))
-                        .small()
+                        .small_control()
                         .label("Show")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.community_reviews.spoilers_shown.insert(id);
@@ -337,7 +338,7 @@ impl BookDetailView {
                         // ghost button's padding.
                         Button::new(("review-more", key))
                             .ghost()
-                            .small()
+                            .small_control()
                             .ml_neg_2()
                             .label(if expanded { "Show less" } else { "Read more" })
                             .on_click(cx.listener(move |this, _, _, cx| {

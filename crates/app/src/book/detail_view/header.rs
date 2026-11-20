@@ -14,7 +14,7 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Side, Sizable as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Side, h_flex, v_flex,
 };
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, IntoElement, ParentElement as _, SharedString,
@@ -41,6 +41,7 @@ use crate::library::model::WriteKind;
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::ui::TextButton;
+use crate::ui::kit::SmallIconButton as _;
 
 /// Genres shown in the header. With more, every genre is in the Tags block.
 pub(super) const HEADER_GENRES: usize = 6;
@@ -335,7 +336,7 @@ impl BookDetailView {
                 Some(_) => this.child(
                     Button::new("clear-rating")
                         .ghost()
-                        .small()
+                        .small_icon_button()
                         .icon(IconName::Close)
                         .tooltip(if can_write {
                             "Clear rating".to_owned()

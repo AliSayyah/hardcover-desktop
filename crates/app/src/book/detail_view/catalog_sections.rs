@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, SharedString,
     Styled as _, div, prelude::FluentBuilder as _,
@@ -25,6 +25,7 @@ use crate::chip::TagChip;
 use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{average_rating_text, count_text};
+use crate::ui::kit::SmallControl as _;
 use crate::ui::{
     Block, CoverShelf, ExternalLink, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars,
     TextButton,
@@ -128,7 +129,7 @@ impl BookDetailView {
                 .child(div().body().text_color(muted).child(message.clone()))
                 .child(
                     Button::new("retry-details")
-                        .small()
+                        .small_control()
                         .label("Try again")
                         .on_click(cx.listener(|this, _, _, cx| this.retry_details(cx))),
                 )
@@ -182,7 +183,7 @@ impl BookDetailView {
                     this.action(
                         Button::new("toggle-tags")
                             .ghost()
-                            .small()
+                            .small_control()
                             .label(if expanded {
                                 "Show fewer".to_owned()
                             } else {
@@ -376,7 +377,7 @@ impl BookDetailView {
                 .child(div().body().text_color(muted).child(message.clone()))
                 .child(
                     Button::new("retry-similar")
-                        .small()
+                        .small_control()
                         .label("Try again")
                         .on_click(cx.listener(|this, _, _, cx| this.retry_similar(cx))),
                 )
