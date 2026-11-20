@@ -16,7 +16,9 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, Styled as _, Window, div,
 };
-use gpui_kit::{FocusHandle, KeyDownEvent, ScrollHandle, point, px};
+use gpui_kit::{
+    FocusHandle, KeyDownEvent, ScrollHandle, StatefulInteractiveElement as _, point, px,
+};
 
 use super::kit::{RaisedField as _, open_alert_dialog, open_dialog};
 use super::*;
