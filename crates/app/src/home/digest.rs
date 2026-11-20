@@ -317,15 +317,14 @@ pub fn finishing_by(goal: &Goal, digest: &Digest, today: Date) -> Vec<UserBookId
 /// goal over other dates.
 pub fn finished_per_month(goal: &Goal, entries: &[LibraryEntry]) -> Option<[u32; 12]> {
     use chrono::Datelike as _;
-    let year = goal.start.year();
-    let calendar_year = goal.start == Date::from_ymd_opt(year, 1, 1)?
-        && goal.end == Date::from_ymd_opt(year, 12, 31)?;
-    if !calendar_year {
-        return None;
-    }
+    let year = crate::format::goal_year(goal.start, goal.end)?;
     let mut months = [0; 12];
+    // A goal that ends on the next New Year's Day counts that day too; it
+    // has no bar of its own.
     for (_, finished) in crate::goals::model::GoalsModel::finished_in(goal, entries) {
-        months[finished.month0() as usize] += 1;
+        if finished.year() == year {
+            months[finished.month0() as usize] += 1;
+        }
     }
     Some(months)
 }
@@ -765,5 +764,19 @@ mod tests {
             finished_per_month(&goal(GoalMetric::Books, "2026-01-01", "2026-06-30"), &books),
             None
         );
+    }
+
+    #[test]
+    fn a_year_goal_may_end_on_the_next_new_years_day() {
+        // How Hardcover dates its own year goals. The last day has no bar.
+        let books = [
+            finished(entry(1, ReadingStatus::Read, None), "2026-01-01"),
+            finished(entry(2, ReadingStatus::Read, None), "2026-12-31"),
+            finished(entry(3, ReadingStatus::Read, None), "2027-01-01"),
+        ];
+        let months =
+            finished_per_month(&goal(GoalMetric::Books, "2026-01-01", "2027-01-01"), &books)
+                .unwrap();
+        assert_eq!(months, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
     }
 }
