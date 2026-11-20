@@ -685,15 +685,24 @@ it when you wire it.
 | `sidebar_border` | `border` |
 | `sidebar_primary` | `accent` |
 | `sidebar_accent` | `selected` |
-| `secondary`, `group_box` | `surface` |
-| `popover`, `button`, `input` background | `raised` |
+| `secondary`, `group_box`, `muted` | `surface` |
+| `popover`, `button` | `raised` |
 | `border` | `border` |
 | `input` (outline) | `border-strong` |
 | `muted_foreground` | `fg-muted` |
-| `primary`, `progress_bar`, `ring` (at 50%), `link`, `caret`, `switch` (on) | `accent` |
+| `primary`, `progress_bar`, `ring`, `link`, `caret`, `slider_bar` | `accent` |
 | `primary_foreground` | `accent-fg` |
-| `list_hover`, `button_hover`, `secondary_hover` | `hover` |
-| `list_active`, `button_active`, `secondary_active` | `selected` |
+| `list_hover` | `hover` |
+| `list_active` | `selected` |
+| `accent` (the kit's hover for menu items and ghost buttons) | `hover`; ink 10% in dark mode, where the kit halves it for ghost buttons |
+| `button_hover`, `button_active` | `hover`, `selected` blended into `raised` |
+| `secondary_hover`, `secondary_active` | `hover`, `selected` blended into `surface` |
+| `primary_hover`, `primary_active` | `hover`, `selected` blended into `accent` |
+| `button_danger` | clear: `danger` text, with `hover` and `selected` on hover and press |
+| `switch` (off), `switch_thumb` | `track`, `raised` |
+| `scrollbar_thumb`, `scrollbar_thumb_hover` | `border-strong`, `fg-faint` |
+| `tab_bar_segmented` | `chip` blended into `bg` |
+| `chart_1` to `chart_5`, `chart_grid` | `accent`, `track` |
 | `skeleton` | `skeleton` |
 | `danger` | `danger` |
 | `warning` | `warning` |
@@ -701,6 +710,11 @@ it when you wire it.
 | `radius_lg` | 8 |
 | `font_family` | Inter |
 | `font_size` | 16 |
+
+The app builds this as two theme configs (`design::theme`), so every mode
+change applies it. `ring` is the solid accent: the kit draws the 3 px ring
+at 50% of it, plus a 1 px accent edge. What the kit doesn't let the theme
+reach is listed under "Migration status".
 
 **Notes:**
 - **App-owned roles** live in one app module and nowhere else: gold,
@@ -759,6 +773,7 @@ The foundation is in place: the palette on the kit's theme
      not `raised` (`Theme::input_background()` ignores the config);
    - popovers and menus round at 6, not 8, and use the kit's own shadow,
      not `shadow-popover`;
+   - dialogs paint `background` (paper), not `raised`;
    - menu items hover at 10% in dark mode: the kit's `accent` serves both
      menu items and ghost buttons, and ghost buttons take half of it there;
    - skeletons don't pulse.

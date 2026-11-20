@@ -41,6 +41,7 @@
 //! - Popovers and menus round at `radius` (6), not `radius_lg` (8), and use
 //!   the kit's own shadow, not `shadow-popover`.
 //! - The segmented tab bar's sliding indicator is always `background`.
+//! - Dialogs paint `background` (paper), not `raised`.
 
 use std::rc::Rc;
 
