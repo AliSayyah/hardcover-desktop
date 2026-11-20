@@ -39,10 +39,11 @@ use crate::book::detail_view::{BookDetailView, Subject};
 use crate::catalog::navigation::{self, Page};
 use crate::format::{author_hit_details, series_hit_details};
 use crate::library::book_row::BookRow;
-use crate::library::library_view::empty_state;
 use crate::library::model::LibraryModel;
 use crate::search::library_matches::{counts_as_shelved, library_matches};
 use crate::search::results::{Hit, Phase, SearchResults};
+use crate::ui::empty_state;
+use crate::ui::kit::RaisedField as _;
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
 
@@ -690,6 +691,7 @@ impl SearchView {
                             }))
                             .child(
                                 Input::new(&self.input)
+                                    .raised_field(false, cx)
                                     .cleanable(true)
                                     .prefix(
                                         Icon::new(IconName::Search)

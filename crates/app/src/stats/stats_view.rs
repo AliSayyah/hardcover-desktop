@@ -16,8 +16,8 @@ use hardcover_core::Date;
 
 use super::reading_stats::{ReadingStats, YearTotals, compute};
 use crate::format::{books_count_text, count_text, status_label};
-use crate::library::library_view::empty_state;
 use crate::library::model::LibraryModel;
+use crate::ui::empty_state;
 
 pub struct StatsView {
     model: Entity<LibraryModel>,

@@ -23,6 +23,7 @@ mod shell;
 mod sign_in;
 mod star;
 mod stats;
+mod ui;
 mod upcoming;
 mod update;
 
@@ -164,6 +165,17 @@ fn main() {
                 app_id: Some(APP_ID.to_owned()),
                 ..Default::default()
             };
+            // The demo build can show the shared components instead of the
+            // app (`ui::gallery`).
+            #[cfg(feature = "demo")]
+            if std::env::var_os("HARDCOVER_GALLERY").is_some() {
+                gpui_kit::open_window(options, cx, |window, cx| {
+                    preferences::follow_theme(window, cx);
+                    cx.new(|cx| ui::gallery::Gallery::new(window, cx))
+                })
+                .expect("failed to open window");
+                return;
+            }
             gpui_kit::open_window(options, cx, |window, cx| {
                 preferences::follow_theme(window, cx);
                 cx.new(|cx| shell::Shell::new(window, cx))

@@ -7,7 +7,6 @@ use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
 use gpui_kit::component::form::{Field, Form};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::progress::Progress;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
@@ -28,6 +27,9 @@ use crate::format::{
     retargeted_description,
 };
 use crate::library::model::LibraryModel;
+use crate::ui::Meter;
+use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::{open_alert_dialog, open_dialog};
 
 fn today() -> Date {
     chrono::Local::now().date_naive()
@@ -67,7 +69,7 @@ pub fn open_goal(
         .unwrap_or_else(|| format!("{} reading goal", goal_period(goal.start, goal.end)))
         .into();
     let view = cx.new(|cx| GoalView::new(goals, library, id, window, cx));
-    window.open_dialog(cx, move |dialog, window, _| {
+    open_dialog(window, cx, move |dialog, window, _| {
         dialog
             .title(title.clone())
             .w(dialog_width(window))
@@ -78,7 +80,7 @@ pub fn open_goal(
 /// Opens the form that creates a goal.
 pub fn open_new_goal(goals: Entity<GoalsModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| NewGoalView::new(goals, window, cx));
-    window.open_dialog(cx, move |dialog, window, _| {
+    open_dialog(window, cx, move |dialog, window, _| {
         dialog
             .title("New reading goal")
             .w(dialog_width(window))
@@ -181,7 +183,7 @@ impl GoalView {
         let id = self.id;
         // One overlay at a time: the confirmation replaces this dialog.
         window.close_all_dialogs(cx);
-        window.open_alert_dialog(cx, move |alert, _, _| {
+        open_alert_dialog(window, cx, move |alert, _, _| {
             let goals = goals.clone();
             alert
                 .title(title.clone())
@@ -237,8 +239,7 @@ impl GoalView {
                     ),
             )
             .child(
-                Progress::new("goal-progress")
-                    .value(percent.min(100.0) as f32)
+                Meter::new("goal-progress", percent.min(100.0) as f32)
                     .accessibility_label("Progress toward the goal"),
             )
             .child(
@@ -285,7 +286,9 @@ impl GoalView {
                         .gap_2()
                         .child(
                             div().w(rems(7.)).child(
-                                Input::new(&self.target).disabled(reason.is_some() || writing),
+                                Input::new(&self.target)
+                                    .disabled(reason.is_some() || writing)
+                                    .raised_field(reason.is_some() || writing, cx),
                             ),
                         )
                         .child(div().text_sm().child(unit))
@@ -544,9 +547,11 @@ impl Render for NewGoalView {
                             h_flex()
                                 .gap_2()
                                 .child(
-                                    div()
-                                        .w(rems(7.))
-                                        .child(Input::new(&self.target).disabled(writing)),
+                                    div().w(rems(7.)).child(
+                                        Input::new(&self.target)
+                                            .disabled(writing)
+                                            .raised_field(writing, cx),
+                                    ),
                                 )
                                 .child(div().text_sm().child(unit)),
                         ),

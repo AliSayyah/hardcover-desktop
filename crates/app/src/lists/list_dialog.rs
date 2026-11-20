@@ -18,6 +18,8 @@ use hardcover_core::{BookSummary, ListDraft, ListId, Privacy};
 use super::model::ListsModel;
 use crate::app_state::Services;
 use crate::format::needs_permission;
+use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::open_dialog;
 
 fn dialog_width(window: &Window) -> Pixels {
     rems(30.).to_pixels(window.rem_size())
@@ -31,7 +33,7 @@ pub fn open_new_list(
     cx: &mut App,
 ) {
     let view = cx.new(|cx| ListDialog::new(lists, Mode::Create(book), window, cx));
-    window.open_dialog(cx, move |dialog, window, _| {
+    open_dialog(window, cx, move |dialog, window, _| {
         dialog
             .title("New list")
             .w(dialog_width(window))
@@ -46,7 +48,7 @@ pub fn open_edit_list(lists: Entity<ListsModel>, id: ListId, window: &mut Window
     };
     let title: SharedString = format!("Edit “{name}”").into();
     let view = cx.new(|cx| ListDialog::new(lists, Mode::Edit(id), window, cx));
-    window.open_dialog(cx, move |dialog, window, _| {
+    open_dialog(window, cx, move |dialog, window, _| {
         dialog
             .title(title.clone())
             .w(dialog_width(window))
@@ -227,14 +229,18 @@ impl Render for ListDialog {
                     .label_layout(Axis::Horizontal)
                     .label_width(rems(6.).to_pixels(window.rem_size()))
                     .child(
-                        Field::new()
-                            .label("Name")
-                            .child(Input::new(&self.name).disabled(writing)),
+                        Field::new().label("Name").child(
+                            Input::new(&self.name)
+                                .disabled(writing)
+                                .raised_field(writing, cx),
+                        ),
                     )
                     .child(
-                        Field::new()
-                            .label("Description")
-                            .child(Textarea::new(&self.description).disabled(writing)),
+                        Field::new().label("Description").child(
+                            Textarea::new(&self.description)
+                                .disabled(writing)
+                                .raised_field(writing, cx),
+                        ),
                     )
                     .child(Field::new().label("Visible to").child(privacy))
                     .child(

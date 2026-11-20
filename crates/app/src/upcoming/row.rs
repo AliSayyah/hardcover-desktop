@@ -17,11 +17,12 @@ use hardcover_core::{BookSummary, Date, ReadingStatus, UpcomingBook};
 
 use super::schedule::{release_text, series_text, soon_text};
 use crate::app_state::Services;
-use crate::catalog::navigation::{self, Page};
+use crate::catalog::navigation::Page;
 use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverSize};
 use crate::format::needs_permission;
 use crate::library::model::LibraryModel;
+use crate::ui::TextButton;
 
 /// The width of the trailing lane, so dates line up whether a row has the
 /// chip or the button.
@@ -116,7 +117,10 @@ impl RenderOnce for UpcomingRow {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .child(title_button(prefix, &self.book.book, page))
+                    .child(TextButton::book(
+                        SharedString::from(format!("{prefix}-title-{}", self.book.book.id)),
+                        &self.book.book,
+                    ))
                     .when(!series.is_empty(), |this| {
                         this.child(div().text_sm().text_color(muted).truncate().child(series))
                     }),
@@ -143,26 +147,6 @@ impl RenderOnce for UpcomingRow {
                     .child(action),
             )
     }
-}
-
-/// The title as a quiet button that opens the book's page: reachable by
-/// keyboard, unlike the cover.
-fn title_button(prefix: &str, book: &BookSummary, page: Page) -> impl IntoElement {
-    // A row, so the button keeps its content's width instead of stretching
-    // (and centring the title); it may still shrink, and the title truncates.
-    h_flex().min_w_0().child(
-        Button::new(SharedString::from(format!("{prefix}-title-{}", book.id)))
-            .text()
-            .min_w_0()
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(book.title.clone()),
-            )
-            .on_click(move |_, _, cx| navigation::open(page.clone(), cx)),
-    )
 }
 
 /// Adds `book` to Want to Read in the background, as the book page does; the

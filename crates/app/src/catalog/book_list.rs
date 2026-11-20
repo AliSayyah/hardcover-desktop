@@ -13,8 +13,8 @@ use hardcover_core::{BookSummary, ReadingStatus};
 use super::navigation::{self, Page};
 use crate::format::average_rating_text;
 use crate::library::book_row::BookRow;
-use crate::library::library_view::empty_state;
 use crate::library::model::LibraryModel;
+use crate::ui::empty_state;
 
 /// One book and its secondary line.
 #[derive(Clone)]

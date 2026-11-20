@@ -19,10 +19,8 @@ use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, Textar
 use gpui_kit::component::link::Link;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
-use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, IndexPath, Sizable as _, StyledExt as _,
     WindowExt as _, h_flex, v_flex,
@@ -55,6 +53,9 @@ use crate::format::{
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
+use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::open_alert_dialog;
+use crate::ui::{EmptyState, Meter, ObjectTools, SkeletonText};
 
 mod catalog_sections;
 mod community_reviews;
@@ -209,6 +210,9 @@ pub struct BookDetailView {
     _similar_task: Option<Task<()>>,
     /// "Show all tags" was pressed for the book shown.
     tags_expanded: bool,
+    /// The tools sit in the object bar the shell draws over this view (the
+    /// full page), not in the header (the pane).
+    tools_in_bar: bool,
     review: ReviewEditor,
     community_reviews: CommunityReviews,
     _subscriptions: Vec<Subscription>,
@@ -331,6 +335,7 @@ impl BookDetailView {
             similar_loading: None,
             _similar_task: None,
             tags_expanded: false,
+            tools_in_bar: false,
             review,
             community_reviews: CommunityReviews::default(),
             _subscriptions: subscriptions,
@@ -361,6 +366,12 @@ impl BookDetailView {
         self.load_similar(cx);
         self.community_reviews_subject_changed(cx);
         cx.notify();
+    }
+
+    /// Hands the book's tools to the object bar over this view (the full
+    /// page) instead of drawing them in the header. See [`ObjectTools`].
+    pub fn set_tools_in_bar(&mut self, in_bar: bool) {
+        self.tools_in_bar = in_bar;
     }
 
     /// The library entry for the subject, if the book is in the library.
@@ -933,7 +944,7 @@ impl BookDetailView {
         )
         .into();
         let view = cx.entity().downgrade();
-        window.open_alert_dialog(cx, move |alert, _, _| {
+        open_alert_dialog(window, cx, move |alert, _, _| {
             let view = view.clone();
             alert
                 .title("Delete this read?")
@@ -964,7 +975,7 @@ impl BookDetailView {
         let id = entry.user_book_id;
         let title: SharedString = format!("Remove “{}”?", entry.book.title).into();
         let view = cx.entity().downgrade();
-        window.open_alert_dialog(cx, move |alert, _, _| {
+        open_alert_dialog(window, cx, move |alert, _, _| {
             let view = view.clone();
             alert
                 .title(title.clone())
@@ -1187,58 +1198,74 @@ impl BookDetailView {
                             }),
                     ),
             )
-            .children(book_lists::lists_button(book, cx))
-            .when_some(entry, |this, entry| {
-                let busy = self
-                    .model
-                    .read(cx)
-                    .pending_write(entry.user_book_id)
-                    .is_some();
-                let has_edition = entry.edition.is_some();
-                // With `read:lists` the Owned switch under "Your book" replaces this.
-                let one_way_owned = book_lists::offers_one_way_owned(cx);
-                let owning =
-                    ListsModel::global(cx).is_some_and(|l| l.read(cx).is_busy(entry.book.id));
-                let owned_entry = entry.clone();
-                let view = cx.entity().downgrade();
-                this.child(
-                    Button::new("book-more")
-                        .ghost()
-                        .icon(IconName::Ellipsis)
-                        .tooltip("More actions")
-                        .disabled(busy)
-                        .dropdown_menu(move |menu, _, _| {
-                            let remove_view = view.clone();
-                            // Ownership is per edition on Hardcover.
-                            let own_label = if has_edition {
-                                "Add to Owned list…"
-                            } else {
-                                "Add to Owned list (choose an edition first)"
-                            };
-                            let owned_entry = owned_entry.clone();
-                            let menu = if one_way_owned {
-                                menu.item(
-                                    PopupMenuItem::new(own_label)
-                                        .disabled(!has_edition || owning)
-                                        .on_click(move |_, window, cx| {
-                                            book_lists::confirm_owned(&owned_entry, window, cx)
-                                        }),
-                                )
-                                .separator()
-                            } else {
-                                menu
-                            };
+            // On a page the tools sit in the object bar instead
+            // (`ObjectTools`); the pane keeps them here until its redesign.
+            .when(!self.tools_in_bar, |this| {
+                this.children(self.render_tools(book, entry, cx))
+            })
+    }
+
+    /// The book's tools: the "Lists" menu button and, for a book in the
+    /// library, "more".
+    fn render_tools(
+        &self,
+        book: &BookSummary,
+        entry: Option<&LibraryEntry>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut tools: Vec<AnyElement> = book_lists::lists_button(book, cx).into_iter().collect();
+        if let Some(entry) = entry {
+            let busy = self
+                .model
+                .read(cx)
+                .pending_write(entry.user_book_id)
+                .is_some();
+            let has_edition = entry.edition.is_some();
+            // With `read:lists` the Owned switch under "Your book" replaces this.
+            let one_way_owned = book_lists::offers_one_way_owned(cx);
+            let owning = ListsModel::global(cx).is_some_and(|l| l.read(cx).is_busy(entry.book.id));
+            let owned_entry = entry.clone();
+            let view = cx.entity().downgrade();
+            tools.push(
+                Button::new("book-more")
+                    .ghost()
+                    .icon(IconName::Ellipsis)
+                    .tooltip("More actions")
+                    .disabled(busy)
+                    .dropdown_menu(move |menu, _, _| {
+                        let remove_view = view.clone();
+                        // Ownership is per edition on Hardcover.
+                        let own_label = if has_edition {
+                            "Add to Owned list…"
+                        } else {
+                            "Add to Owned list (choose an edition first)"
+                        };
+                        let owned_entry = owned_entry.clone();
+                        let menu = if one_way_owned {
                             menu.item(
-                                PopupMenuItem::new("Remove from library…")
-                                    .icon(IconName::Delete)
+                                PopupMenuItem::new(own_label)
+                                    .disabled(!has_edition || owning)
                                     .on_click(move |_, window, cx| {
-                                        let _ = remove_view
-                                            .update(cx, |this, cx| this.confirm_remove(window, cx));
+                                        book_lists::confirm_owned(&owned_entry, window, cx)
                                     }),
                             )
-                        }),
-                )
-            })
+                            .separator()
+                        } else {
+                            menu
+                        };
+                        menu.item(
+                            PopupMenuItem::new("Remove from library…")
+                                .icon(IconName::Delete)
+                                .on_click(move |_, window, cx| {
+                                    let _ = remove_view
+                                        .update(cx, |this, cx| this.confirm_remove(window, cx));
+                                }),
+                        )
+                    })
+                    .into_any_element(),
+            );
+        }
+        tools
     }
 
     fn render_your_book(
@@ -1256,10 +1283,11 @@ impl BookDetailView {
                 .label_width(label_width)
                 .child(
                     Field::new().label("Status").child(
-                        div()
-                            .w_full()
-                            .max_w_56()
-                            .child(Select::new(&self.status).disabled(busy)),
+                        div().w_full().max_w_56().child(
+                            Select::new(&self.status)
+                                .disabled(busy)
+                                .raised_field(busy, cx),
+                        ),
                     ),
                 )
                 .child(
@@ -1319,7 +1347,8 @@ impl BookDetailView {
                                 div().w_full().max_w_56().child(
                                     Select::new(&self.privacy)
                                         .placeholder("Unknown")
-                                        .disabled(busy),
+                                        .disabled(busy)
+                                        .raised_field(busy, cx),
                                 ),
                             )
                             .when(pending == Some(WriteKind::Privacy), |this| {
@@ -1380,7 +1409,11 @@ impl BookDetailView {
         v_flex()
             .w_full()
             .gap_2()
-            .child(Textarea::new(&self.notes).disabled(saving_notes))
+            .child(
+                Textarea::new(&self.notes)
+                    .disabled(saving_notes)
+                    .raised_field(saving_notes, cx),
+            )
             .when(dirty || saved || saving_notes, |this| {
                 this.child(
                     h_flex()
@@ -1583,8 +1616,7 @@ impl BookDetailView {
                     .gap_2()
                     .child(div().text_sm().child(summary))
                     .child(
-                        Progress::new("reading-progress")
-                            .value(progress.percent.unwrap_or(0.0))
+                        Meter::new("reading-progress", progress.percent.unwrap_or(0.0))
                             .accessibility_label("Reading progress"),
                     ),
             )
@@ -1592,7 +1624,12 @@ impl BookDetailView {
                 h_flex()
                     .flex_wrap()
                     .gap_2()
-                    .child(Input::new(&self.page).w_24().disabled(pending.is_some()))
+                    .child(
+                        Input::new(&self.page)
+                            .w_24()
+                            .disabled(pending.is_some())
+                            .raised_field(pending.is_some(), cx),
+                    )
                     .when_some(progress.total_pages, |this, total| {
                         this.child(
                             div()
@@ -1660,11 +1697,11 @@ impl BookDetailView {
             h_flex()
                 .gap_2()
                 .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .max_w_56()
-                        .child(Select::new(&self.add_status).disabled(adding)),
+                    div().flex_1().min_w_0().max_w_56().child(
+                        Select::new(&self.add_status)
+                            .disabled(adding)
+                            .raised_field(adding, cx),
+                    ),
                 )
                 .child(
                     Button::new("add-to-library")
@@ -1709,22 +1746,11 @@ impl BookDetailView {
                         .on_click(cx.listener(|this, _, _, cx| this.retry_details(cx))),
                 )
                 .into_any_element(),
-            None if self.details_fetching == Some(book.id) => v_flex()
-                .gap_2()
-                .child(Skeleton::new().h_4().w_full())
-                .child(Skeleton::new().h_4().w_full())
-                .child(Skeleton::new().h_4().w_2_3())
-                .into_any_element(),
-            // Waiting out the delay: the same placeholder, still.
-            None => {
-                let bar = || div().h_4().bg(cx.theme().skeleton);
-                v_flex()
-                    .gap_2()
-                    .child(bar().w_full())
-                    .child(bar().w_full())
-                    .child(bar().w_2_3())
-                    .into_any_element()
+            None if self.details_fetching == Some(book.id) => {
+                SkeletonText::new(3).into_any_element()
             }
+            // Waiting out the delay: the same placeholder, still.
+            None => SkeletonText::new(3).still().into_any_element(),
         };
         section("Description").child(body).into_any_element()
     }
@@ -1793,6 +1819,21 @@ fn section(title: &'static str) -> gpui_kit::Div {
         .child(div().text_sm().font_semibold().child(title))
 }
 
+impl ObjectTools for BookDetailView {
+    fn object_tools(&mut self, _: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        if !self.tools_in_bar {
+            return Vec::new();
+        }
+        let entry = self.entry(self.model.read(cx)).cloned();
+        let book = match (&self.subject, &entry) {
+            (_, Some(entry)) => entry.book.clone(),
+            (Some(Subject::Book(book)), None) => book.clone(),
+            _ => return Vec::new(),
+        };
+        self.render_tools(&book, entry.as_ref(), cx)
+    }
+}
+
 impl Render for BookDetailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let model = self.model.read(cx);
@@ -1804,15 +1845,7 @@ impl Render for BookDetailView {
         };
         let Some(book) = book else {
             self.load_cover(None, window, cx);
-            return v_flex()
-                .id("book-detail-empty")
-                .size_full()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .text_color(cx.theme().muted_foreground)
-                .child(Icon::new(IconName::BookOpen).large())
-                .child(div().text_sm().child("Select a book to see its details"))
+            return EmptyState::new(IconName::BookOpen, "Select a book to see its details")
                 .into_any_element();
         };
         let details = match self.details.get(&book.id) {

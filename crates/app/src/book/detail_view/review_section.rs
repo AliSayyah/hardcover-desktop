@@ -9,17 +9,16 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::ui::Skeleton;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::calendar::Date as CalendarDate;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::link::Link;
-use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex,
-    v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex,
 };
 use gpui_kit::{
     AnyElement, AppContext as _, Context, ElementId, Entity, IntoElement, ParentElement as _,
@@ -32,6 +31,8 @@ use super::{BookDetailView, Written, section};
 use crate::app_state::Services;
 use crate::format::{date_text, needs_permission};
 use crate::library::model::WriteKind;
+use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::open_alert_dialog;
 
 /// Wait before fetching a review, so arrowing through a list does not spend
 /// the rate limit on every book passed over.
@@ -296,7 +297,7 @@ impl BookDetailView {
             return;
         }
         let view = cx.entity().downgrade();
-        window.open_alert_dialog(cx, move |alert, _, _| {
+        open_alert_dialog(window, cx, move |alert, _, _| {
             let view = view.clone();
             alert
                 .title("Discard your changes to this review?")
@@ -366,7 +367,7 @@ impl BookDetailView {
         let keep = entry.status;
         let title: SharedString = format!("Delete your review of “{}”?", entry.book.title).into();
         let view = cx.entity().downgrade();
-        window.open_alert_dialog(cx, move |alert, _, _| {
+        open_alert_dialog(window, cx, move |alert, _, _| {
             let view = view.clone();
             alert
                 .title(title.clone())
@@ -473,8 +474,8 @@ impl BookDetailView {
             match fetching {
                 true => v_flex()
                     .gap_2()
-                    .child(Skeleton::new().h_4().w_full())
-                    .child(Skeleton::new().h_4().w_2_3())
+                    .child(Skeleton::line().h_4().w_full())
+                    .child(Skeleton::line().h_4().w_2_3())
                     .into_any_element(),
                 false => {
                     let bar = || div().h_4().bg(cx.theme().skeleton);
@@ -663,7 +664,11 @@ impl BookDetailView {
         v_flex()
             .w_full()
             .gap_3()
-            .child(Textarea::new(&self.review.text).disabled(saving))
+            .child(
+                Textarea::new(&self.review.text)
+                    .disabled(saving)
+                    .raised_field(saving, cx),
+            )
             .child(
                 h_flex()
                     .flex_wrap()

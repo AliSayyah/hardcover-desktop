@@ -14,6 +14,8 @@ use hardcover_core::{Length, LibraryEntry, UserBookId};
 use crate::app_state::Services;
 use crate::format::{duration_text, parse_progress, position_text, progress_summary};
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::open_dialog;
 
 /// Opens the dialog for `entry`, which must be in `model`.
 pub fn open_progress(
@@ -24,7 +26,7 @@ pub fn open_progress(
 ) {
     let view = cx.new(|cx| ProgressDialog::new(model, entry, window, cx));
     let input = view.read(cx).input.clone();
-    window.open_dialog(cx, move |dialog, window, _| {
+    open_dialog(window, cx, move |dialog, window, _| {
         let ok_view = view.clone();
         // Enter anywhere in the dialog confirms. The dialog stays open until
         // the write succeeds, and closes itself then.
@@ -159,7 +161,12 @@ impl Render for ProgressDialog {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(Input::new(&self.input).w_24().disabled(busy || !can_write))
+                    .child(
+                        Input::new(&self.input)
+                            .w_24()
+                            .disabled(busy || !can_write)
+                            .raised_field(busy || !can_write, cx),
+                    )
                     .when_some(total, |this, total| {
                         this.child(div().text_sm().text_color(muted).child(total))
                     })

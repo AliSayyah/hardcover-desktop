@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::ui::Skeleton;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::link::Link;
 use gpui_kit::component::list::{List, ListState};
-use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, FontWeight, IntoElement,
@@ -240,6 +240,16 @@ impl SeriesView {
     }
 }
 
+impl SeriesView {
+    /// The name of a page already loaded this session, for Back's label.
+    pub fn name(&self, id: SeriesId) -> Option<&str> {
+        match self.pages.get(&id)? {
+            Loaded::Ready(details) => Some(&details.name),
+            Loaded::Failed(_) => None,
+        }
+    }
+}
+
 impl Render for SeriesView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.current.and_then(|id| self.pages.get(&id));
@@ -262,9 +272,9 @@ impl Render for SeriesView {
                 .into_any_element(),
             None => v_flex()
                 .gap_2()
-                .child(Skeleton::new().h_8().w_64())
-                .child(Skeleton::new().h_4().w_48())
-                .child(Skeleton::new().h_4().w_32())
+                .child(Skeleton::line().h_8().w_64())
+                .child(Skeleton::line().h_4().w_48())
+                .child(Skeleton::line().h_4().w_32())
                 .into_any_element(),
         };
         let ready = matches!(current, Some(Loaded::Ready(_)));

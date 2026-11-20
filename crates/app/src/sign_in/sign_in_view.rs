@@ -23,6 +23,7 @@ use hardcover_core::auth::{
 use hardcover_core::{Client, Error};
 
 use crate::format::error_message;
+use crate::ui::kit::RaisedField as _;
 
 /// How long to wait for the browser before giving up.
 pub(crate) const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -188,6 +189,7 @@ impl Render for SignInView {
                         .gap_2()
                         .child(
                             Input::new(&self.url)
+                                .raised_field(false, cx)
                                 .readonly(true)
                                 .small()
                                 .flex_1()

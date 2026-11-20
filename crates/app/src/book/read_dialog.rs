@@ -3,6 +3,7 @@
 //! It only collects and checks the dates; the detail view makes the write when
 //! the dialog reports [`ReadDatesChosen`], then closes it.
 
+use crate::ui::kit::open_dialog;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::calendar::Date as CalendarDate;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
@@ -89,7 +90,7 @@ impl ReadDialog {
             ReadDialogKind::Add => ("Add a read", "Add"),
             ReadDialogKind::Edit { .. } => ("Change read dates", "Save"),
         };
-        window.open_dialog(cx, move |dialog: Dialog, window, _| {
+        open_dialog(window, cx, move |dialog: Dialog, window, _| {
             let confirm_view = view.clone();
             let ok_view = view.clone();
             dialog

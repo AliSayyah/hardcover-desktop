@@ -9,9 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use gpui_kit::component::avatar::Avatar;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::link::Link;
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, FontWeight, IntoElement, ParentElement as _,
@@ -19,13 +17,14 @@ use gpui_kit::{
     relative,
 };
 use hardcover_core::auth::scopes::READ_SOCIAL;
-use hardcover_core::{BookId, CommunityReview, Rating, Reviewer, UserBookId};
+use hardcover_core::{BookId, CommunityReview, Rating, UserBookId};
 
 use super::{BookDetailView, Details, section};
-use crate::app_state::{Services, cover_thumbnail};
-use crate::bidi::{WrappingText, is_rtl};
-use crate::design::color::{colors, data_color, text_on_data};
+use crate::app_state::Services;
+use crate::bidi::WrappingText;
+use crate::design::color::colors;
 use crate::format::{count_text, date_text};
+use crate::ui::{Avatar, BylineLink, Skeleton};
 
 /// Reviews wait this long after the details, a little longer than similar
 /// books, so arrowing through a list fetches neither for books passed over.
@@ -184,7 +183,7 @@ impl BookDetailView {
     pub(super) fn render_community_reviews(
         &self,
         book: BookId,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if !Services::global(cx).has_scope(READ_SOCIAL) {
@@ -201,7 +200,7 @@ impl BookDetailView {
         let state = self.community_reviews.books.get(&book);
         let body: AnyElement = match state {
             // Waiting out the delay or loading: the shape of a review, still.
-            None => placeholder(cx).into_any_element(),
+            None => placeholder(loading).into_any_element(),
             Some(state) if !state.loaded => match &state.error {
                 Some(message) if !loading => h_flex()
                     .gap_2()
@@ -209,7 +208,7 @@ impl BookDetailView {
                     .child(div().text_color(muted).child(message.clone()))
                     .child(retry("retry-reviews", cx))
                     .into_any_element(),
-                _ => placeholder(cx).into_any_element(),
+                _ => placeholder(loading).into_any_element(),
             },
             Some(state) if state.reviews.is_empty() && !state.has_more => div()
                 .text_sm()
@@ -222,7 +221,7 @@ impl BookDetailView {
                     state
                         .reviews
                         .iter()
-                        .map(|review| self.render_community_review(review, window, cx)),
+                        .map(|review| self.render_community_review(review, cx)),
                 )
                 .when(state.has_more || state.error.is_some(), |this| {
                     this.child(
@@ -270,7 +269,6 @@ impl BookDetailView {
     fn render_community_review(
         &self,
         review: &CommunityReview,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
@@ -339,19 +337,17 @@ impl BookDetailView {
                 .into_any_element()
         };
         let name_element: AnyElement = match review.reviewer.profile_url() {
-            // GPUI's Linux layout puts the underline beside a right-to-left
-            // name rather than under it, so such a name goes without.
-            Some(url) => Link::new(("reviewer", key))
-                .href(url)
-                .when(is_rtl(&name), |this| this.text_decoration_none())
-                .child(name.clone())
-                .into_any_element(),
+            Some(url) => BylineLink::new(("reviewer", key), name.clone(), url).into_any_element(),
             None => div().child(name.clone()).into_any_element(),
         };
         h_flex()
             .items_start()
             .gap_3()
-            .child(reviewer_avatar(&review.reviewer, &name, window, cx))
+            .child(
+                Avatar::new(name.clone())
+                    .image(review.reviewer.raster_avatar().map(|a| a.url.clone()))
+                    .data_color(review.reviewer.color),
+            )
             .child(
                 v_flex()
                     .flex_1()
@@ -384,83 +380,25 @@ impl BookDetailView {
     }
 }
 
-/// The shape of two reviews while the first page loads.
-fn placeholder(cx: &Context<BookDetailView>) -> impl IntoElement {
-    let bar = || div().h_4().bg(cx.theme().skeleton);
+/// The shape of two reviews while the first page loads. It pulses only
+/// while the request is in flight; waiting out the delay, it holds still.
+fn placeholder(loading: bool) -> impl IntoElement {
+    let still = !loading;
+    let shape = move |skeleton: Skeleton| if still { skeleton.still() } else { skeleton };
     v_flex().gap_5().children((0..2).map(move |_| {
         h_flex()
             .items_start()
             .gap_3()
-            .child(div().size_6().rounded_full().bg(cx.theme().skeleton))
+            .child(shape(Skeleton::circle()))
             .child(
                 v_flex()
                     .flex_1()
                     .gap_2()
-                    .child(bar().w_1_3())
-                    .child(bar().w_full())
-                    .child(bar().w_2_3()),
+                    .child(shape(Skeleton::line().w_1_3()))
+                    .child(shape(Skeleton::line()))
+                    .child(shape(Skeleton::line().w_2_3())),
             )
     }))
-}
-
-/// The reviewer's avatar: their picture through the cover pipeline once it
-/// has loaded, else their initials on their avatar's colour, else the kit's
-/// initials.
-fn reviewer_avatar(
-    reviewer: &Reviewer,
-    name: &str,
-    window: &mut Window,
-    cx: &mut Context<BookDetailView>,
-) -> AnyElement {
-    let image = reviewer
-        .raster_avatar()
-        .and_then(|a| cover_thumbnail(&a.url, window, cx));
-    match (image, reviewer.color) {
-        (Some(image), _) => Avatar::new()
-            .small()
-            .name(name.to_owned())
-            .src(image)
-            .into_any_element(),
-        (None, Some([r, g, b])) => {
-            let background = data_color([r, g, b]);
-            let foreground = text_on_data([r, g, b]);
-            div()
-                .flex_shrink_0()
-                .size_6()
-                .rounded_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(background)
-                .text_color(foreground)
-                .text_xs()
-                .font_weight(FontWeight::MEDIUM)
-                .child(initials(name))
-                .into_any_element()
-        }
-        (None, None) => Avatar::new()
-            .small()
-            .name(name.to_owned())
-            .into_any_element(),
-    }
-}
-
-/// True if dark text reads better than white on this colour.
-/// One or two letters for an avatar: the first letter of the first and last
-/// words. "@user" counts from the letter after the "@".
-fn initials(name: &str) -> String {
-    let first_letter = |word: &str| word.chars().find(|c| c.is_alphanumeric());
-    let words: Vec<&str> = name.split_whitespace().collect();
-    let mut out = String::new();
-    if let Some(c) = words.first().and_then(|w| first_letter(w)) {
-        out.extend(c.to_uppercase());
-    }
-    if words.len() > 1
-        && let Some(c) = words.last().and_then(|w| first_letter(w))
-    {
-        out.extend(c.to_uppercase());
-    }
-    out
 }
 
 /// Five small stars in the text's muted colour: another reader's rating,
@@ -562,14 +500,5 @@ mod tests {
         let shown = collapse(&[text.trim()], 1, 12).unwrap();
         assert!(shown[0].ends_with('…'));
         assert!(shown[0].chars().count() <= 13, "{}", shown[0]);
-    }
-
-    #[test]
-    fn initials_take_the_first_and_last_words() {
-        assert_eq!(initials("Jane Quill"), "JQ");
-        assert_eq!(initials("Jane van der Quill"), "JQ");
-        assert_eq!(initials("@quill_reads"), "Q");
-        assert_eq!(initials("شیرین"), "ش");
-        assert_eq!(initials(""), "");
     }
 }

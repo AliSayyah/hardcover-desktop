@@ -53,6 +53,8 @@ use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::stats::stats_view::StatsView;
+use crate::ui::kit::{open_alert_dialog, open_dialog};
+use crate::ui::{BackTo, ObjectBar, back_label, tools_of};
 use crate::upcoming::model::UpcomingModel;
 use crate::upcoming::upcoming_view::UpcomingView;
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
@@ -243,7 +245,11 @@ impl Workspace {
         let stats = cx.new(|cx| StatsView::new(model.clone(), cx));
         let series_page = cx.new(|cx| SeriesView::new(model.clone(), window, cx));
         let author_page = cx.new(|cx| AuthorView::new(model.clone(), window, cx));
-        let book_page = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
+        let book_page = cx.new(|cx| {
+            let mut page = BookDetailView::new(model.clone(), window, cx);
+            page.set_tools_in_bar(true);
+            page
+        });
         let navigator = Navigator::init(cx);
         let reauthorize = cx.new(|_| Reauthorize::new(model.clone()));
         let goals = cx.new(|cx| GoalsModel::new(model.clone(), cx));
@@ -440,12 +446,23 @@ impl Workspace {
         }
     }
 
-    fn render_page(&self, page: &Page, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The page over the destination, under its object bar: Back, and the
+    /// page's own tools (a book's).
+    fn render_page(
+        &mut self,
+        page: &Page,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let content: AnyElement = match page {
             Page::Series(_) => self.series_page.clone().into_any_element(),
             Page::Author(_) => self.author_page.clone().into_any_element(),
             Page::Book(_) => self.book_page.clone().into_any_element(),
             Page::Upcoming => self.upcoming_page.clone().into_any_element(),
+        };
+        let tools = match page {
+            Page::Book(_) => tools_of(&self.book_page, window, cx),
+            _ => Vec::new(),
         };
         v_flex()
             .id("catalog-page")
@@ -453,23 +470,47 @@ impl Workspace {
             .track_focus(&self.page_focus)
             .size_full()
             .child(
-                h_flex()
-                    .flex_shrink_0()
-                    .px_3()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        Button::new("go-back")
-                            .ghost()
-                            .small()
-                            .icon(IconName::ArrowLeft)
-                            .label("Back")
-                            .tooltip_with_action("Back", &GoBack, Some("Workspace"))
-                            .on_click(cx.listener(|this, _, window, cx| this.go_back(window, cx))),
-                    ),
+                ObjectBar::new()
+                    .hairline(true)
+                    .back(
+                        self.back_label(cx),
+                        cx.listener(|this, _, window, cx| this.go_back(window, cx)),
+                    )
+                    .tools(tools),
             )
             .child(div().flex_1().min_h_0().child(content))
+    }
+
+    /// Where Back goes: the page under this one, or the destination.
+    fn back_label(&self, cx: &App) -> SharedString {
+        let destination = match self.destination {
+            Destination::Home => SharedString::new_static("Home"),
+            Destination::Search => SharedString::new_static("Search"),
+            Destination::Discover => SharedString::new_static("Discover"),
+            Destination::Stats => SharedString::new_static("Stats"),
+            Destination::Shelf(status) => SharedString::new_static(status_label(status)),
+            Destination::List(id) => self
+                .lists
+                .read(cx)
+                .list(id)
+                .map(|list| SharedString::from(list.name.clone()))
+                .unwrap_or_else(|| SharedString::new_static("Back")),
+        };
+        let previous = self.pages.previous().map(|page| match page {
+            Page::Book(book) => BackTo::Named(&book.title),
+            Page::Upcoming => BackTo::Named("Coming soon"),
+            Page::Series(id) => self
+                .series_page
+                .read(cx)
+                .name(*id)
+                .map_or(BackTo::Unnamed, BackTo::Named),
+            Page::Author(id) => self
+                .author_page
+                .read(cx)
+                .name(*id)
+                .map_or(BackTo::Unnamed, BackTo::Named),
+        });
+        back_label(previous, &destination)
     }
 
     fn show_shelf(&mut self, status: ReadingStatus, window: &mut Window, cx: &mut Context<Self>) {
@@ -504,7 +545,7 @@ impl Workspace {
                 this.confirm_sign_out(window, cx);
             },
         ));
-        window.open_dialog(cx, move |dialog, window, _| {
+        open_dialog(window, cx, move |dialog, window, _| {
             dialog
                 .title("Settings")
                 .w(rems(30.).to_pixels(window.rem_size()))
@@ -514,7 +555,7 @@ impl Workspace {
 
     fn confirm_sign_out(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = cx.entity().downgrade();
-        window.open_alert_dialog(cx, move |alert, _, _| {
+        open_alert_dialog(window, cx, move |alert, _, _| {
             let view = view.clone();
             alert
                 .title("Sign out of Hardcover?")
@@ -802,7 +843,7 @@ impl Workspace {
             )
         }
         .into();
-        window.open_alert_dialog(cx, move |alert, _, _| {
+        open_alert_dialog(window, cx, move |alert, _, _| {
             let updates = updates.clone();
             let page_url = page_url.clone();
             let notes = notes.clone();
@@ -1064,8 +1105,8 @@ impl Render for Workspace {
             }))
             .child(self.render_sidebar(window, cx))
             .child(div().flex_1().min_w_0().h_full().map(|this| {
-                match (self.pages.current(), self.destination) {
-                    (Some(page), _) => this.child(self.render_page(page, cx)),
+                match (self.pages.current().cloned(), self.destination) {
+                    (Some(page), _) => this.child(self.render_page(&page, window, cx)),
                     (None, Destination::Home) => this.child(self.home.clone()),
                     (None, Destination::Search) => this.child(self.search.clone()),
                     (None, Destination::Discover) => this.child(self.discover.clone()),
