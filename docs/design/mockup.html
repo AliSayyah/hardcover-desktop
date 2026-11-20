@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="en">
+<!--
+  The reference mockup for the hardcover-design skill (.claude/skills/hardcover-design).
+  Open it in a browser. Every screen and both token sheets are built from the CSS variables
+  below, which carry the system's token values. When this file and the skill disagree, the
+  skill wins; fix this file in the same change. The books come from the demo catalogue
+  (plus one Persian title); the reader and their lists are invented. Covers are loaded from
+  Hardcover at view time and are never committed. The console prints a contrast and layout audit.
+-->
+<head>
+<meta charset="utf-8">
+<title>Hardcover Desktop: design system mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400&family=Noto+Naskh+Arabic:wght@400;500;600&family=Vazirmatn:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   Tokens. Every rule below uses these; the token sheet reads them back
+   with getComputedStyle, so the sheet cannot drift from the screens.
+   ===================================================================== */
+.theme-light {
+  --bg: #FAF8F4;            /* paper: the work area */
+  --sidebar: #F1EEE7;       /* the sidebar */
+  --surface: #F3F0E9;       /* the one inset panel: your progress */
+  --raised: #FFFFFF;        /* controls, popovers */
+  --hover: rgba(31, 28, 23, .05);     /* ink overlays: they step the same way on every host surface */
+  --selected: rgba(31, 28, 23, .10);  /* the current row; a pressed control */
+  --border: #E4DED3;
+  --border-strong: #D0C8BA; /* control outlines */
+  --track: #E0D9CC;         /* empty part of a progress bar */
+  --chip: rgba(31, 28, 23, .07);
+  --skeleton: #E9E4DA;      /* something still loading */
+  --fg: #1F1C17;            /* ink */
+  --fg-muted: #5F574B;      /* secondary text that carries information: AA on every surface */
+  --fg-faint: #857D70;      /* placeholders and disabled hints only */
+  --accent: #3B4A9C;        /* ink blue: progress, primary commit, focus, the selected icon, external links */
+  --accent-fg: #FFFFFF;
+  --accent-soft: rgba(59, 74, 156, .10);
+  --ring: rgba(59, 74, 156, .5);
+  --gold: #F59E0B;          /* the user's own rating, nothing else */
+  --star-empty: rgba(31, 28, 23, .14);
+  --danger: #B42318;
+  --warning: #B54708;
+  --cover-edge: rgba(30, 20, 10, .16);
+  --cover-hinge: rgba(30, 20, 10, .16);
+  --shadow-cover: 0 1px 2px rgba(40, 28, 16, .18), 0 8px 20px rgba(40, 28, 16, .14);
+  --shadow-popover: 0 0 0 1px rgba(30, 20, 10, .10), 0 4px 12px rgba(40, 28, 16, .12);
+  --frame-edge: rgba(0, 0, 0, .10);
+  color-scheme: light;
+}
+.theme-dark {
+  --bg: #171614;
+  --sidebar: #100F0E;
+  --surface: #1E1C1A;
+  --raised: #262320;
+  --hover: rgba(238, 234, 227, .05);
+  --selected: rgba(238, 234, 227, .10);
+  --border: #292623;
+  --border-strong: #3D3934;
+  --track: #35312C;
+  --chip: rgba(238, 234, 227, .08);
+  --skeleton: #23211E;
+  --fg: #EEEAE3;
+  --fg-muted: #ABA498;
+  --fg-faint: #807A6F;
+  --accent: #98A5F4;
+  --accent-fg: #12142A;
+  --accent-soft: rgba(152, 165, 244, .14);
+  --ring: rgba(152, 165, 244, .5);
+  --gold: #FBBF24;
+  --star-empty: rgba(238, 234, 227, .14);
+  --danger: #F97066;
+  --warning: #FDB022;
+  --cover-edge: rgba(255, 255, 255, .12);
+  --cover-hinge: rgba(0, 0, 0, .28);
+  --shadow-cover: 0 1px 2px rgba(0, 0, 0, .55), 0 10px 24px rgba(0, 0, 0, .45);
+  --shadow-popover: 0 0 0 1px rgba(255, 255, 255, .08), 0 4px 12px rgba(0, 0, 0, .5);
+  --frame-edge: rgba(255, 255, 255, .08);
+  color-scheme: dark;
+}
+:root {
+  /* Families. GPUI draws no variable axes, so each is a set of static faces.
+     Literata is used at two fixed optical sizes, as two families: Text (12pt)
+     up to 18 px and Display (36pt) from 24 px. Nothing depends on letter-spacing. */
+  --sans: "Inter", "Vazirmatn", system-ui, sans-serif;
+  --serif: "Literata", "Noto Naskh Arabic", Georgia, serif;
+
+  /* Type sizes (rem steps: xs, sm, base, lg, xl, 2xl, 3xl) and their line heights */
+  --t-12: 12px; --l-12: 16px;
+  --t-14: 14px; --l-14: 20px;
+  --t-16: 16px; --l-16: 24px;
+  --t-18: 18px; --l-18: 24px;
+  --t-20: 20px; --l-20: 28px;
+  --t-24: 24px; --l-24: 30px;
+  --t-30: 30px; --l-30: 36px;
+  --l-prose: 26px;          /* serif 16 prose */
+
+  /* Spacing: one scale, named by relationship */
+  --s-2: 2px;   /* optical */
+  --s-4: 4px;   /* parts of one control */
+  --s-8: 8px;   /* closely related */
+  --s-12: 12px; /* one group */
+  --s-16: 16px; /* groups in a section; panel inset */
+  --s-24: 24px; /* sections; pane inset */
+  --s-32: 32px; /* regions; page inset */
+
+  /* Radius */
+  --r-cover-s: 2px;  /* covers xs, sm */
+  --r-cover: 3px;    /* covers md and up */
+  --r-control: 6px;  /* buttons, inputs, nav rows */
+  --r-box: 8px;      /* list rows, panels, popovers */
+  --r-pill: 999px;   /* chips, progress bars, the avatar */
+
+  /* Frames */
+  --h-control: 32px; --h-control-s: 24px; --h-chip: 20px; --h-row-l: 40px; --h-bar: 56px;
+  --w-sidebar: 240px; --w-list: 384px; --w-rail: 272px; --w-key: 96px; --w-key-s: 72px;
+  --w-select: 168px; --w-select-s: 128px; --w-meter: 400px; --w-meter-s: 160px; --w-empty: 288px; --w-prose: 640px;
+  --icon: 16px; --icon-s: 12px; --icon-l: 24px;
+  --meter: 6px; --meter-thin: 2px;   /* progress bars: 6 with words beside them, 2 inside a row */
+
+  /* Covers: always 2:3 */
+  --cv-xs: 20px; --cv-sm: 32px; --cv-md: 64px; --cv-lg: 80px; --cv-xl: 128px; --cv-xxl: 160px;
+  --cloth-ink: #F4ECDD;
+}
+
+/* ---------- Page (outside the mock windows) ---------- */
+body { margin: 0; }
+.sheet { display: flex; flex-direction: column; gap: 28px; padding: 4px 0 24px; }
+.cap { font: 600 13px/1.4 var(--sans); margin: 0 0 8px; }
+.cap span { font-weight: 400; opacity: .7; }
+.frame { position: relative; overflow: visible; }
+.win {
+  position: absolute; top: 0; left: 0;
+  width: 1200px; display: flex; overflow: hidden;
+  background: var(--bg); color: var(--fg);
+  font: var(--t-14)/var(--l-14) var(--sans);
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--frame-edge), 0 18px 40px rgba(0,0,0,.18);
+  transform-origin: top left;
+  -webkit-font-smoothing: antialiased;
+}
+.win * { box-sizing: border-box; }
+
+/* ---------- Type roles ---------- */
+.serif { font-family: var(--serif); font-optical-sizing: none; font-variation-settings: "opsz" 12; }
+.display { font-family: var(--serif); font-optical-sizing: none; font-variation-settings: "opsz" 36; font-weight: 600; font-variant-numeric: lining-nums; }
+.d-30 { font-size: var(--t-30); line-height: var(--l-30); }
+.d-24 { font-size: var(--t-24); line-height: var(--l-24); }
+.title-18 { font: 600 var(--t-18)/var(--l-18) var(--serif); font-optical-sizing: none; font-variation-settings: "opsz" 12; }
+.prose { font: 400 var(--t-16)/var(--l-prose) var(--serif); font-optical-sizing: none; font-variation-settings: "opsz" 12; max-width: var(--w-prose); }
+.page-title { font-size: var(--t-20); line-height: var(--l-20); font-weight: 600; }
+.section { font-size: var(--t-16); line-height: var(--l-16); font-weight: 600; }
+.heading { font-size: var(--t-14); line-height: var(--l-14); font-weight: 600; }
+.label { font-size: var(--t-12); line-height: var(--l-12); font-weight: 500; color: var(--fg-muted); }
+.small { font-size: var(--t-12); line-height: var(--l-12); }
+.strong { font-weight: 500; }
+.muted { color: var(--fg-muted); }
+.ink { color: var(--fg); }
+.faint { color: var(--fg-faint); }
+.num { font-variant-numeric: tabular-nums; }
+/* Right-to-left text: the block sits on the interface's leading edge, the line runs in its own
+   direction. A title that wraps fills its column, so its lines pack to the right (WrappingText). */
+.rtl { direction: rtl; text-align: start; align-self: flex-start; max-width: 100%; }
+.display.rtl { line-height: 1.5; }
+.one-line.rtl { align-self: auto; text-align: left; }
+.one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+svg.i { width: var(--icon); height: var(--icon); flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
+
+/* ---------- Layout helpers ---------- */
+.row-c { display: flex; align-items: center; }
+.row-b { display: flex; align-items: baseline; }
+.col { display: flex; flex-direction: column; }
+.fill { flex: 1; min-width: 0; }
+.push { margin-left: auto; }
+.g-4 { gap: var(--s-4); } .g-8 { gap: var(--s-8); } .g-12 { gap: var(--s-12); } .g-16 { gap: var(--s-16); } .g-24 { gap: var(--s-24); }
+.mt-4 { margin-top: var(--s-4); } .mt-8 { margin-top: var(--s-8); } .mt-12 { margin-top: var(--s-12); } .mt-16 { margin-top: var(--s-16); } .mt-24 { margin-top: var(--s-24); }
+.start { align-self: flex-start; }
+.hair { height: 1px; background: var(--border); flex: none; }
+
+/* ---------- Sidebar: icons on x=16, labels on x=40, counts on the trailing lane ---------- */
+.sb { width: var(--w-sidebar); flex: none; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: var(--s-8); }
+.brand { display: flex; align-items: center; gap: var(--s-8); height: var(--h-row-l); padding: 0 var(--s-8); margin-bottom: var(--s-8); font-size: var(--t-16); font-weight: 600; }
+.brand svg { color: var(--accent); }
+.nav { display: flex; align-items: center; gap: var(--s-8); height: var(--h-control); padding: 0 var(--s-8); border-radius: var(--r-control); white-space: nowrap; flex: none; }
+.nav svg { color: var(--fg-muted); }
+.nav .lab { overflow: hidden; text-overflow: ellipsis; }
+.nav .n { margin-left: auto; padding-left: var(--s-8); font-size: var(--t-12); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.nav.hover, .row.hover, .btn.hover, .menu-item.hover { background-image: linear-gradient(var(--hover), var(--hover)); }
+.nav.sel, .row.sel, .btn.pressed { background-image: linear-gradient(var(--selected), var(--selected)); }
+.nav.sel { font-weight: 500; }
+.nav.sel svg { color: var(--accent); }
+.nav.sel .n { color: var(--fg); }
+.nav.focus { box-shadow: 0 0 0 3px var(--ring), inset 0 0 0 1px var(--accent); }
+.sb .label { padding: var(--s-16) var(--s-8) var(--s-4); }
+/* The goal is a row like the others; its bar runs under the label, from the label spine to the count lane. */
+.goal-row { display: flex; flex-direction: column; justify-content: center; gap: var(--s-4); height: var(--h-row-l); padding: 0 var(--s-8); border-radius: var(--r-control); }
+.goal-row .top { display: flex; align-items: center; gap: var(--s-8); }
+.goal-row svg { color: var(--fg-muted); }
+.goal-row .n { margin-left: auto; font-size: var(--t-12); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.goal-row .bar { margin-left: calc(var(--icon) + var(--s-8)); }
+.acct { margin-top: auto; display: flex; align-items: center; gap: var(--s-8); padding: var(--s-8); border-radius: var(--r-control); }
+.avatar { width: var(--h-control); height: var(--h-control); border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: var(--t-12); font-weight: 600; flex: none; }
+.acct svg { margin-left: auto; color: var(--fg-muted); }
+
+/* ---------- Controls ---------- */
+.btn { height: var(--h-control); padding: 0 var(--s-12); border-radius: var(--r-control); border: 1px solid var(--border-strong); background: var(--raised); color: var(--fg); font: 500 var(--t-14)/1 var(--sans); display: inline-flex; align-items: center; gap: var(--s-8); white-space: nowrap; flex: none; }
+.btn svg { color: var(--fg-muted); }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-fg); }
+.btn.primary svg { color: inherit; }
+.btn.danger { background: transparent; color: var(--danger); }
+.btn.danger svg { color: inherit; }
+.btn.sm { height: var(--h-control-s); padding: 0 var(--s-8); font-size: var(--t-12); gap: var(--s-4); }
+.btn.icon { width: var(--h-control); padding: 0; justify-content: center; }
+.btn.focus, .input.focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+.dis { opacity: .5; }
+.input { height: var(--h-control); border: 1px solid var(--border-strong); background: var(--raised); border-radius: var(--r-control); display: flex; align-items: center; gap: var(--s-8); padding: 0 var(--s-8); color: var(--fg-faint); }
+.input svg { color: var(--fg-muted); }
+.input .val { color: var(--fg); }
+.select { height: var(--h-control); border: 1px solid var(--border-strong); background: var(--raised); border-radius: var(--r-control); display: inline-flex; align-items: center; gap: var(--s-8); padding: 0 var(--s-8) 0 var(--s-12); flex: none; }
+.select svg { margin-left: auto; color: var(--fg-muted); }
+.select.sm { height: var(--h-control-s); padding: 0 var(--s-4) 0 var(--s-8); font-size: var(--t-12); width: var(--w-select-s); }
+.switch { width: 28px; height: 16px; border-radius: var(--r-pill); background: var(--track); position: relative; flex: none; }
+.switch i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: var(--r-pill); background: var(--raised); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.switch.on { background: var(--accent); }
+.switch.on i { left: 14px; }
+.link { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.textbtn { border-bottom: 1px solid transparent; }
+.textbtn.hover { border-bottom-color: currentColor; }
+
+.bar { height: var(--meter); border-radius: var(--r-pill); background: var(--track); position: relative; }
+.bar > i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: inherit; background: var(--accent); }
+.bar > b { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--fg); } /* where the pace says you should be */
+.bar.thin { height: var(--meter-thin); }
+
+.chip { display: inline-flex; align-items: center; gap: var(--s-4); height: var(--h-chip); padding: 0 var(--s-8); border-radius: var(--r-pill); background: var(--chip); color: var(--fg-muted); font-size: var(--t-12); font-weight: 500; white-space: nowrap; flex: none; }
+.chip svg.warn { color: var(--warning); }
+
+.stars { display: inline-flex; gap: var(--s-2); align-items: center; flex: none; }
+.star { position: relative; width: 16px; height: 16px; }
+.star svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.star .sfill { position: absolute; inset: 0; overflow: hidden; }
+.stars.lg .star { width: 20px; height: 20px; }
+.stars.xs .star { width: 12px; height: 12px; }
+
+.panel { background: var(--surface); border-radius: var(--r-box); padding: var(--s-16); }
+.popover { background: var(--raised); border-radius: var(--r-box); box-shadow: var(--shadow-popover); padding: var(--s-4); }
+.menu-item { display: flex; align-items: center; gap: var(--s-8); height: var(--h-control); padding: 0 var(--s-8); border-radius: var(--r-control); }
+.menu-item svg { color: var(--fg-muted); }
+
+/* ---------- Covers ----------
+   2:3 always. A hairline edge at every size. From md up: a hinge (one 2-stop gradient strip on the
+   spine side) and, where the cover is the subject of its row, the cover shadow. */
+.cover { position: relative; flex: none; width: var(--w); height: calc(var(--w) * 1.5); border-radius: var(--r-cover); overflow: hidden; background: var(--cloth, var(--skeleton)); color: var(--cloth-ink); }
+.cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cover .edge { position: absolute; inset: 0; border: 1px solid var(--cover-edge); border-radius: inherit; }
+.cover .hinge { position: absolute; top: 0; bottom: 0; left: 0; width: 6%; background: linear-gradient(90deg, var(--cover-hinge), transparent); }
+.cover.lift { box-shadow: var(--shadow-cover); }
+.cv-xs { --w: var(--cv-xs); --ph: 10px; border-radius: var(--r-cover-s); }
+.cv-sm { --w: var(--cv-sm); --ph: 16px; border-radius: var(--r-cover-s); }
+.cv-md { --w: var(--cv-md); --ph: 9px; }
+.cv-lg { --w: var(--cv-lg); --ph: 11px; }
+.cv-xl { --w: var(--cv-xl); --ph: 18px; }
+.cv-xxl { --w: var(--cv-xxl); --ph: 22px; }
+/* The cloth cover: a blind-stamped frame, the title, a short rule, the author. Its type scales with
+   the cover (it stands in for an image), so it is the one place off the type scale. */
+.ph { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 16% 13% 13%; font-family: var(--serif); font-optical-sizing: none; font-variation-settings: "opsz" 12; font-size: var(--ph); }
+.ph .stamp { position: absolute; inset: 5%; border: 1px solid currentColor; border-radius: 1px; opacity: .28; }
+.ph .pt { font-weight: 600; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.ph .rule { width: 24%; height: 1px; background: currentColor; opacity: .6; margin-top: 10%; flex: none; }
+.ph .pa { margin-top: auto; opacity: .85; line-height: 1.2; font-size: .8em; }
+.ph[dir="rtl"] .pt { font-size: 1.25em; line-height: 1.5; }
+.ph.initial { justify-content: center; padding: 0; font-weight: 600; line-height: 1; gap: 3px; }
+.ph.initial .rule { margin: 0; width: 8px; }
+.cv-xs .ph.initial .rule { width: 6px; }
+.cover.loading { background: var(--skeleton); }
+.sk { background: var(--skeleton); border-radius: var(--r-control); height: 12px; }
+
+/* ---------- Shared regions ---------- */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.scroll { flex: 1; min-height: 0; overflow: hidden; }
+.objbar { height: var(--h-bar); flex: none; display: flex; align-items: center; gap: var(--s-4); padding: 0 var(--s-16); }
+.objbar.line { border-bottom: 1px solid var(--border); padding: 0 var(--s-24) 0 var(--s-32); }
+.objbar .back { margin-left: calc(-1 * var(--s-12)); }
+.rail { width: var(--w-rail); flex: none; display: flex; flex-direction: column; padding-left: var(--s-24); border-left: 1px solid var(--border); }
+.rail .hair { margin: var(--s-24) 0; }
+.figure { display: flex; align-items: baseline; gap: var(--s-8); margin-top: var(--s-4); }
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: var(--s-4); padding: var(--s-32); }
+.empty svg { width: var(--icon-l); height: var(--icon-l); color: var(--fg-faint); margin-bottom: var(--s-8); stroke-width: 1.5; }
+.empty .d { color: var(--fg-muted); max-width: var(--w-empty); }
+.empty .btn { margin-top: var(--s-12); }
+
+/* ---------- Home ---------- */
+.home { padding: var(--s-32); }
+.cols { display: flex; gap: var(--s-32); align-items: stretch; }
+.hero { display: flex; gap: var(--s-24); padding: var(--s-4) 0 var(--s-24); }
+.hero-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hero .prog { margin-top: auto; display: flex; flex-direction: column; gap: var(--s-8); max-width: var(--w-meter); }
+.cr { display: flex; align-items: center; gap: var(--s-16); padding: var(--s-16) 0; border-top: 1px solid var(--border); }
+.cr .progline { display: flex; align-items: center; gap: var(--s-8); margin-top: var(--s-8); }
+.cr .progline .bar { width: var(--w-meter-s); }
+.cr .acts { display: flex; flex-direction: column; align-items: flex-end; gap: var(--s-4); }
+.shelf { display: flex; gap: var(--s-16); }
+.shelf .it { width: var(--cv-md); }
+.shelf.lg .it { width: var(--cv-lg); }
+.shelf .tt { font-size: var(--t-12); line-height: var(--l-12); margin-top: var(--s-8); }
+
+/* ---------- Library: list content on x=16, pane content on x=24 ---------- */
+.list { width: var(--w-list); flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.list-head { padding: var(--s-12) var(--s-16); display: flex; flex-direction: column; gap: var(--s-12); border-bottom: 1px solid var(--border); }
+.list-head .h { height: var(--h-control); display: flex; align-items: baseline; gap: var(--s-8); line-height: var(--h-control); }
+.list-tools { display: flex; gap: var(--s-8); }
+.list-tools .select { width: var(--w-select); }
+.rows { padding: var(--s-8); display: flex; flex-direction: column; gap: var(--s-2); }
+.row { display: flex; align-items: center; gap: var(--s-12); padding: var(--s-8); border-radius: var(--r-box); }
+.row.focus { box-shadow: 0 0 0 3px var(--ring), inset 0 0 0 1px var(--accent); }
+.row .t { font-weight: 500; }
+.row .trail { width: 48px; flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: var(--s-4); font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.row .trail .bar { width: 100%; }
+.row.sel .trail { color: var(--fg); }
+
+.detail { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pane { padding: 0 var(--s-24) var(--s-24); }
+.bh { display: flex; gap: var(--s-24); align-items: stretch; }
+.bh-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s-4); }
+.bh-by { font-size: var(--t-16); line-height: var(--l-16); margin-bottom: var(--s-4); }
+.bh-fact { color: var(--fg-muted); display: flex; gap: var(--s-4); align-items: center; }
+.bh-tags { display: flex; gap: var(--s-4); flex-wrap: wrap; margin-top: var(--s-8); }
+.actbar { display: flex; align-items: center; gap: var(--s-16); margin-top: auto; padding-top: var(--s-16); }
+.bh + .panel { margin-top: var(--s-24); }
+.start-panel { display: flex; align-items: center; gap: var(--s-12); }
+.rate { display: flex; align-items: center; gap: var(--s-8); color: var(--fg-muted); }
+.prog-panel { display: flex; flex-direction: column; gap: var(--s-12); }
+.block { margin-top: var(--s-24); }
+.block-h { display: flex; align-items: center; min-height: var(--h-control-s); margin-bottom: var(--s-8); }
+.reads .r { display: flex; align-items: flex-start; gap: var(--s-8); }
+.reads .r svg { color: var(--fg-muted); margin-top: var(--s-2); }
+.props { display: flex; flex-direction: column; gap: var(--s-8); }
+.props .p { display: flex; align-items: center; min-height: var(--h-control-s); }
+.props .k { width: var(--w-key); flex: none; color: var(--fg-muted); }
+.props .v { display: flex; align-items: center; gap: var(--s-8); min-width: 0; }
+.rail .props .k { width: var(--w-key-s); }
+
+/* ---------- Full book page ---------- */
+.page { padding: var(--s-32); }
+.page .cols { gap: var(--s-24); }
+
+/* ---------- Token sheets ---------- */
+.tok { flex: 1; min-width: 0; padding: var(--s-32); display: flex; flex-direction: column; gap: var(--s-24); background: var(--bg); color: var(--fg); }
+.tok + .tok { border-left: 1px solid var(--border); }
+.tok h4 { margin: 0 0 var(--s-12); font-size: var(--t-12); line-height: var(--l-12); font-weight: 600; color: var(--fg-muted); }
+.tok .note { font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); margin-top: var(--s-8); }
+.sw { display: flex; flex-wrap: wrap; gap: var(--s-12) var(--s-8); }
+.sw > div { width: 126px; font-size: var(--t-12); line-height: var(--l-12); }
+.sw i { display: flex; align-items: center; justify-content: center; height: 32px; border-radius: var(--r-control); box-shadow: inset 0 0 0 1px var(--border); margin-bottom: var(--s-4); font-style: normal; font-weight: 600; }
+.sw code, .tok code { font: 11px/16px ui-monospace, "JetBrains Mono", monospace; color: var(--fg-muted); display: block; }
+.wrap { display: flex; gap: var(--s-12); flex-wrap: wrap; align-items: flex-end; }
+.wrap.c { align-items: center; }
+.ts { display: flex; flex-direction: column; gap: var(--s-8); }
+.ts .l { display: flex; align-items: baseline; gap: var(--s-16); }
+.ts .l code { width: 216px; flex: none; }
+.scale { display: flex; align-items: flex-end; gap: var(--s-16); }
+.scale > div { display: flex; flex-direction: column; align-items: center; gap: var(--s-4); }
+.scale .sq { background: var(--accent-soft); border: 1px solid var(--accent); }
+.state { display: flex; flex-direction: column; gap: var(--s-4); align-items: flex-start; }
+.demo-list { width: 232px; background: var(--sidebar); border-radius: var(--r-box); padding: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2); }
+.demo-list .nav.focus { margin: 3px 0; }
+.boxed { border: 1px solid var(--border); border-radius: var(--r-box); }
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet"></div>
+
+<script>
+// ---------- Data: the demo catalogue, plus one Persian book added for the mockup ----------
+const C = id => `https://assets.hardcover.app/${id}`;
+const B = {
+  phm:  { t: "Project Hail Mary", a: "Andy Weir", p: 476, y: 2021, r: 4.51, rc: 9223, g: ["Science Fiction", "Space", "Adventure"], c: C("editions/3274049/8741341047797682-91mYu67RfUL._SL1500_.jpg") },
+  wok:  { t: "The Way of Kings", a: "Brandon Sanderson", p: 1007, y: 2010, r: 4.63, rc: 4280, g: ["Fantasy", "High Fantasy"], s: "The Stormlight Archive #1", c: C("edition/3134360/a18d937805a28e3214a556442c8d33f41c02f2cb.jpeg") },
+  ah:   { t: "Atomic Habits", a: "James Clear", p: 305, y: 2018, c: C("edition/12605395/629717fe-df46-40b8-8529-dca0323bf699.jpg") },
+  dm:   { t: "Dune Messiah", a: "Frank Herbert", p: 304, y: 1969, c: C("edition/24211570/08ad8362f4da9c08a76f6d08aeab822336b97c35.jpeg") },
+  fw:   { t: "Fourth Wing", a: "Rebecca Yarros", p: 517, y: 2023, c: C("editions/30707731/3559167047761380.jpeg") },
+  tat:  { t: "Tomorrow, and Tomorrow, and Tomorrow", a: "Gabrielle Zevin", p: 496, y: 2022, c: C("edition/30535150/2efdfd508a803c89913fd6e987f69048a17c89c6.jpeg") },
+  ml:   { t: "The Midnight Library", a: "Matt Haig", p: 304, y: 2020, c: C("external_data/30206313/f95c74793bcdd7925758f16a6f6f5f423a2ec81d.jpeg") },
+  kts:  { t: "Klara and the Sun", a: "Kazuo Ishiguro", p: 320, y: 2021, c: C("edition/30399733/66fac4de-272a-40e1-a4e6-32693d78f936.jpg") },
+  circe:{ t: "Circe", a: "Madeline Miller", p: 400, y: 2018, c: C("editions/187333/9694237244087422-circe.jpg") },
+  lic:  { t: "Lessons in Chemistry", a: "Bonnie Garmus", p: 400, y: 2021, c: C("edition/30618050/eeb1fc88-ea92-4854-a37c-e7fdcebc6254.jpg") },
+  dune: { t: "Dune", a: "Frank Herbert", c: C("edition/6216483/16b2e7f2-d173-46d4-932c-8c5158ea5eff.jpg") },
+  hob:  { t: "The Hobbit", a: "J.R.R. Tolkien", c: C("edition/17456445/d34448a9-bf3f-441d-93f2-1cd32dd3867c.jpg") },
+  mist: { t: "Mistborn: The Final Empire", a: "Brandon Sanderson", c: C("edition/5195452/8c6af4492dd7ef9eed7c1e40abefc79f23df2d2f.jpeg") },
+  ij:   { t: "Infinite Jest", a: "David Foster Wallace", p: 1104, c: C("edition/32718880/2682231d-f875-4902-90f5-02f443b32150.jpg") },
+  owl:  { t: "بوف کور", a: "صادق هدایت", p: 128, y: 1937, rtl: true, g: ["Literary Fiction", "Classics"] },
+  moby: { t: "Moby Dick", a: "Herman Melville" },
+};
+
+// ---------- Icons (Lucide paths; the star is the app's own) ----------
+const P = {
+  book: '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+  home: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  pie: '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>',
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  check: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
+  ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  eyeoff: '<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  updown: '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>',
+  target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  sort: '<path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/>',
+  pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
+  left: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  ext: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
+  layers: '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>',
+  warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+};
+const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</svg>`;
+const STAR = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><polygon points="12 2.6 14.85 8.55 21.4 9.35 16.6 13.85 17.85 20.35 12 17.15 6.15 20.35 7.4 13.85 2.6 9.35 9.15 8.55"/></svg>';
+// own: gold; cat: the muted text colour (catalogue figures)
+function stars(v, kind = "own", size = "") {
+  const col = kind === "own" ? "var(--gold)" : "var(--fg-muted)";
+  const px = size === "lg" ? 20 : size === "xs" ? 12 : 16;
+  let h = `<span class="stars ${size}">`;
+  for (let i = 0; i < 5; i++) {
+    const f = Math.max(0, Math.min(1, v - i));
+    h += `<span class="star"><span style="color:var(--star-empty)">${STAR}</span>` +
+      (f > 0 ? `<span class="sfill" style="width:${f * 100}%;color:${col}"><span style="display:block;width:${px}px;height:100%;position:relative">${STAR}</span></span>` : "") + `</span>`;
+  }
+  return h + "</span>";
+}
+const star1 = (kind = "cat") => `<span class="stars xs"><span class="star" style="color:${kind === "own" ? "var(--gold)" : "var(--fg-muted)"}">${STAR}</span></span>`;
+
+// ---------- Covers: the image when it loads, a cloth cover when the book has none ----------
+// Eight book-cloth colours, the same in both themes; the title picks one.
+const CLOTH = ["#6A4A39", "#3A574B", "#414C6B", "#743838", "#7A5D30", "#39596A", "#594567", "#4E5356"];
+const hash = s => [...s].reduce((h, ch) => (h * 31 + ch.codePointAt(0)) >>> 0, 7);
+function cover(b, size, lift = false, state = "") {
+  const small = size === "xs" || size === "sm";
+  const over = `${small ? "" : '<div class="hinge"></div>'}<div class="edge"></div>`;
+  if (state === "loading") return `<div class="cover cv-${size} loading"><div class="edge"></div></div>`;
+  const cloth = CLOTH[hash(b.t) % CLOTH.length];
+  const dir = b.rtl ? ' dir="rtl"' : "";
+  const ph = small
+    ? `<div class="ph initial"${dir}><span>${[...b.t.replace(/^The /, "")][0]}</span>${size === "sm" ? '<div class="rule"></div>' : ""}</div>`
+    : `<div class="ph"${dir}><div class="stamp"></div><div class="pt">${b.t}</div><div class="rule"></div>${size === "md" ? "" : `<div class="pa">${b.a}</div>`}</div>`;
+  return `<div class="cover cv-${size}${lift ? " lift" : ""}" style="--cloth:${cloth}">${ph}${b.c ? `<img src="${b.c}" alt="" onerror="this.remove()">` : ""}${over}</div>`;
+}
+
+// ---------- Sidebar ----------
+function sidebar(active) {
+  const item = (icon, label, n, key) => `<div class="nav${active === key ? " sel" : ""}">${ic(icon)}<span class="lab">${label}</span>${n != null ? `<span class="n">${n}</span>` : ""}</div>`;
+  return `<aside class="sb">
+    <div class="brand">${ic("book")}Hardcover</div>
+    ${item("home", "Home", null, "home")}${item("search", "Search", null, "search")}${item("globe", "Discover", null, "discover")}${item("pie", "Stats", null, "stats")}
+    <div class="label">Library</div>
+    ${item("book", "Currently reading", 3, "cr")}${item("inbox", "Want to read", 8, "wtr")}${item("check", "Read", 9, "read")}${item("pause", "Paused", 1, "paused")}${item("ban", "Did not finish", 2, "dnf")}${item("eyeoff", "Ignored", 1, "ign")}
+    <div class="label">Reading goal</div>
+    <div class="goal-row"><div class="top">${ic("target")}<span>2026</span><span class="n">9 of 12 books</span></div><div class="bar thin"><i style="width:75%"></i></div></div>
+    <div class="label">Lists</div>
+    ${item("folder", "Owned", 5, "owned")}${item("list", "Best science fiction so far", 6, "l1")}${item("list", "Book club picks", 4, "l2")}${item("list", "Classics to finish", 4, "l3")}
+    <div class="nav muted">${ic("plus")}<span>New list…</span></div>
+    <div class="acct"><div class="avatar">DR</div><div class="fill"><div class="strong one-line">demo_reader</div><div class="small muted">Updated just now</div></div>${ic("updown")}</div>
+  </aside>`;
+}
+
+// ---------- Screen: Home ----------
+function home() {
+  const row = (b, pct, meta) => `<div class="cr">${cover(b, "md", true)}<div class="fill">
+      <div class="title-18 one-line">${b.t}</div><div class="muted one-line">${b.a}</div>
+      <div class="progline"><div class="bar"><i style="width:${pct}%"></i></div><span class="small muted num">${pct}%</span></div>
+      <div class="small muted num mt-4">${meta}</div>
+    </div><div class="acts"><span class="btn sm">Update progress…</span><span class="btn sm ghost">Mark as read…</span></div></div>`;
+  return sidebar("home") + `<div class="main"><div class="scroll home">
+    <div class="muted">Friday, November 20</div>
+    <div class="display d-30">Good evening</div>
+    <div class="cols mt-24">
+      <div class="fill">
+        <div class="section">Continue reading</div>
+        <div class="hero mt-12">${cover(B.phm, "xl", true)}<div class="hero-body">
+          <div class="display d-24">${B.phm.t}</div>
+          <div class="muted mt-4">${B.phm.a}</div>
+          <div class="prog">
+            <div class="row-b"><span class="strong num">Page 312 of 476</span><span class="muted num push">66%</span></div>
+            <div class="bar"><i style="width:66%"></i></div>
+            <div class="muted num">16 pages a day · done around Dec 1</div>
+          </div>
+          <div class="row-c g-8 mt-16"><span class="btn">Update progress…</span><span class="btn ghost">Mark as read…</span></div>
+        </div></div>
+        ${row(B.wok, 42, "Page 418 of 1,007 · 13 pages a day · done around Jan 4")}
+        ${row(B.ah, 40, "Page 121 of 305 · Last updated 8 days ago")}
+        <div class="cr">${cover(B.ij, "sm")}
+          <div class="fill"><div class="strong one-line">${B.ij.t}</div><div class="small muted num">Paused at page 230 of 1,104 · since Oct 1</div></div>
+          <span class="chip">${ic("pause", "xs")}Paused</span>
+        </div>
+      </div>
+      <div class="rail">
+        <div class="label">2026 reading goal</div>
+        <div class="figure"><span class="display d-30">9</span><span class="muted">of 12 books</span></div>
+        <div class="bar mt-12"><i style="width:75%"></i><b style="left:88.8%"></b></div>
+        <div class="muted mt-12">2 behind pace, 3 to go in 41 days. <span class="strong ink">Project Hail Mary</span> should finish in time.</div>
+        <div class="hair"></div>
+        <div class="label">Up next</div>
+        <div class="row-c g-16 mt-12">${cover(B.dm, "md", true)}
+          <div class="col fill">
+            <div class="small muted">Next in Dune · #2</div>
+            <div class="title-18">${B.dm.t}</div>
+            <div class="muted">${B.dm.a}</div>
+            <span class="btn sm start mt-8">Start reading</span>
+          </div>
+        </div>
+        <div class="hair"></div>
+        <div class="label">Newest on Want to read</div>
+        <div class="shelf mt-12">${[B.fw, B.tat, B.ml].map(b => `<div class="it">${cover(b, "md")}<div class="tt clamp-2">${b.t}</div></div>`).join("")}</div>
+      </div>
+    </div>
+  </div></div>`;
+}
+
+// ---------- The book: header, tools bar, action row ----------
+function bookHeader(b, size, opts = {}) {
+  const facts = [b.y, b.p && `${b.p.toLocaleString("en")} pages`].filter(Boolean).join(" · ");
+  const rtl = b.rtl ? " rtl" : "", dir = b.rtl ? ' dir="rtl"' : "";
+  return `<div class="bh">${cover(b, size, true)}<div class="bh-info">
+      <div class="display ${opts.title || "d-24"}${rtl}"${dir}>${b.t}</div>
+      <div class="bh-by${rtl}"${dir}><span class="textbtn${opts.hover ? " hover" : ""}">${b.a}</span></div>
+      ${b.s ? `<div><span class="textbtn">${b.s}</span></div>` : ""}
+      <div class="bh-fact num">${facts}</div>
+      ${b.r && !opts.noAverage ? `<div class="bh-fact num">${star1()}${b.r} average · ${b.rc.toLocaleString("en")} ratings</div>` : ""}
+      ${b.g ? `<div class="bh-tags">${b.g.map(g => `<span class="chip">${g}</span>`).join("")}</div>` : ""}
+      <div class="actbar">${opts.actions || ""}</div>
+    </div></div>`;
+}
+// The book's own tools live in a bar above it, the same bar that holds Back on a page.
+const bookTools = `<span class="btn ghost">${ic("layers")}Lists${ic("down", "xs")}</span><span class="btn ghost icon">${ic("more")}</span>`;
+const statusBtn = (icon, label) => `<span class="btn">${ic(icon)}${label}${ic("down", "xs")}</span>`;
+const rate = `<div class="rate">${stars(0, "own", "lg")}<span>Rate</span></div>`;
+const blockH = (title, action = "") => `<div class="block-h"><span class="heading">${title}</span>${action ? `<span class="push"></span>${action}` : ""}</div>`;
+const progress = (page, pct, meta) => `<div class="panel prog-panel">
+    <div class="row-b"><span class="strong num">${page}</span><span class="muted num push">${pct}%</span></div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="row-c g-12"><span class="muted num fill">${meta}</span><span class="btn sm">Update progress…</span></div>
+  </div>`;
+const details = (added) => `<div class="props">
+    <div class="p"><div class="k">Edition</div><div class="v"><span class="muted">Not chosen</span><span class="btn sm">Choose…</span></div></div>
+    <div class="p"><div class="k">Owned</div><div class="v"><span class="switch dis"><i></i></span><span class="small muted">Choose an edition first</span></div></div>
+    <div class="p"><div class="k">Privacy</div><div class="v"><span class="select sm">Private${ic("down", "xs")}</span></div></div>
+    ${added ? `<div class="p"><div class="k">Added</div><div class="v num">${added}</div></div>` : ""}
+  </div>`;
+const emptyState = (icon, title, desc = "", action = "") => `<div class="empty">${ic(icon)}<div class="strong">${title}</div>${desc ? `<div class="d">${desc}</div>` : ""}${action}</div>`;
+
+// ---------- Screen: Library (shelf + detail pane) ----------
+function shelf(head, n, rows, filter = "") {
+  return `<div class="list"><div class="list-head"><div class="h"><span class="page-title">${head}</span><span class="muted num">${n}</span></div>
+      <div class="list-tools"><div class="input fill">${ic("search")}${filter ? `<span class="val">${filter}</span>` : "Filter books"}</div><span class="select">Recently updated${ic("down", "xs")}</span></div></div>
+      ${rows}</div>`;
+}
+function library(kind) {
+  if (kind === "cr") {
+    const r = (b, pct, sel) => `<div class="row${sel ? " sel" : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line">${b.a}</div></div><div class="trail">${pct}%<div class="bar thin"><i style="width:${pct}%"></i></div></div></div>`;
+    return sidebar(kind) + shelf("Currently reading", 3, `<div class="rows">${r(B.phm, 66, true) + r(B.wok, 42) + r(B.ah, 40)}</div>`) + `<div class="detail">
+      <div class="objbar"><span class="push"></span>${bookTools}</div>
+      <div class="pane">
+        ${bookHeader(B.phm, "xl", { actions: statusBtn("book", "Currently reading") + rate })}
+        ${progress("Page 312 of 476", 66, "Started Nov 1 · 16 pages a day · done around Dec 1")}
+        <div class="block">${blockH("Notes", `<span class="btn sm ghost">${ic("pencil", "xs")}Edit</span>`)}<div>Borrowed from the library, due back on the 30th.</div></div>
+        <div class="block">${blockH("About this book")}<div class="prose">A schoolteacher wakes up alone on a spaceship light-years from home, with no memory of how he got there, and slowly realises he may be Earth's last chance against a microbe that is dimming the sun.</div></div>
+        <div class="block">${blockH("Details")}${details()}</div>
+      </div>
+    </div>`;
+  }
+  if (kind === "wtr") {
+    const r = (b, state) => `<div class="row${state ? " " + state : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line${b.rtl ? " rtl" : ""}"${b.rtl ? ' dir="rtl"' : ""}>${b.t}</div><div class="muted one-line${b.rtl ? " rtl" : ""}"${b.rtl ? ' dir="rtl"' : ""}>${b.a}</div></div><div class="trail">${b.y || ""}</div></div>`;
+    return sidebar(kind) + shelf("Want to read", 8, `<div class="rows">${r(B.owl, "sel") + r(B.dm, "hover") + r(B.fw) + r(B.tat) + r(B.ml) + r(B.kts) + r(B.circe) + r(B.lic)}</div>`) + `<div class="detail">
+      <div class="objbar"><span class="push"></span>${bookTools}</div>
+      <div class="pane">
+        ${bookHeader(B.owl, "xl", { actions: statusBtn("inbox", "Want to read") + rate })}
+        <div class="panel start-panel"><div class="fill"><div class="strong">Not started</div><div class="muted">Starting moves it to Currently reading.</div></div><span class="btn">Start reading</span></div>
+        <div class="block">${blockH("About this book")}<div class="prose">A painter of pen-case covers, shut in his room, writes down the visions that have haunted him since he glimpsed a girl through a gap in the wall. Hedayat's short novel is the best-known work of modern Persian fiction.</div></div>
+        <div class="block">${blockH("Details")}${details("Nov 19, 2026")}</div>
+      </div>
+    </div>`;
+  }
+  // A filter with no matches, and nothing selected: the app's own copy.
+  return sidebar("dnf") + shelf("Did not finish", 2, emptyState("search", "No matches", "No books in Did not finish match “dune”."), "dune") +
+    `<div class="detail">${emptyState("book", "Select a book to see its details")}</div>`;
+}
+
+// ---------- Screen: full book page, over Discover ----------
+function bookPage() {
+  return sidebar("discover") + `<div class="main">
+    <div class="objbar line"><span class="btn ghost back">${ic("left")}Discover</span><span class="push"></span>${bookTools}</div>
+    <div class="scroll page"><div class="cols">
+      <div class="fill">
+        ${bookHeader(B.wok, "xxl", { title: "d-30", noAverage: true, actions: statusBtn("book", "Currently reading") + rate })}
+        ${progress("Page 418 of 1,007", 42, "Started Oct 20 · 13 pages a day · done around Jan 4")}
+        <div class="block">${blockH("About this book")}<div class="prose">On a storm-scoured world, a slave soldier, a scholar with a secret and a highprince haunted by visions are drawn toward a war older than any of them know. The first book of the Stormlight Archive.</div></div>
+        <div class="block">${blockH("Your review", `<span class="btn sm">${ic("pencil", "xs")}Write a review…</span>`)}<div class="muted">No review yet.</div></div>
+        <div class="block">${blockH("Similar books")}<div class="shelf lg">${[B.mist, B.dune, B.hob, B.circe, B.moby, B.fw].map(b => `<div class="it">${cover(b, "lg", true)}<div class="tt strong clamp-2">${b.t}</div></div>`).join("")}</div></div>
+      </div>
+      <div class="rail">
+        <div class="label">On Hardcover</div>
+        <div class="figure"><span class="display d-30 num">4.63</span>${stars(4.63, "cat")}</div>
+        <div class="muted num mt-4">4,280 ratings · 10,144 readers</div>
+        <span class="link row-c g-4 start mt-12">Open on Hardcover ${ic("ext", "xs")}</span>
+        <div class="hair"></div>
+        <div class="label">Details</div>
+        <div class="mt-12">${details("Oct 10, 2026")}</div>
+        <div class="hair"></div>
+        <div class="row-c"><span class="label">Reads</span><span class="btn sm ghost push">${ic("plus", "xs")}Add a past read…</span></div>
+        <div class="reads mt-8"><div class="r">${ic("book")}<div class="col"><span>Current read</span><span class="small muted num">Oct 20, 2026 – now · page 418</span></div></div></div>
+        <div class="hair"></div>
+        <div class="label">Notes</div>
+        <div class="muted mt-8">No notes.</div>
+        <span class="btn sm start mt-12">${ic("pencil", "xs")}Add a note…</span>
+      </div>
+    </div></div></div>`;
+}
+
+// ---------- Token sheets: built from the same variables the screens use ----------
+const probes = {};
+for (const t of ["light", "dark"]) { const p = document.createElement("div"); p.className = "theme-" + t; p.style.display = "none"; document.body.append(p); probes[t] = p; }
+const tv = (theme, name) => getComputedStyle(probes[theme]).getPropertyValue(name).trim();
+const rv = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const lum = hex => { const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
+const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + .05) / (y + .05); };
+const HOSTS = ["--bg", "--sidebar", "--surface", "--raised"];
+const hex2 = n => Math.round(n).toString(16).padStart(2, "0");
+// An overlay token (rgba) laid on a host surface, as a hex colour.
+function over(theme, top, host) {
+  const m = tv(theme, top).match(/[\d.]+/g).map(Number), b = tv(theme, host);
+  return "#" + [0, 1, 2].map(i => hex2(m[i] * m[3] + parseInt(b.slice(1 + 2 * i, 3 + 2 * i), 16) * (1 - m[3]))).join("");
+}
+// Every fill text can sit on: each host, alone and under hover and selected.
+const fills = theme => HOSTS.flatMap(h => [tv(theme, h), over(theme, "--hover", h), over(theme, "--selected", h)]);
+const worst = (theme, fg, on) => Math.min(...(on || fills(theme)).map(s => contrast(tv(theme, fg), s)));
+const plain = (theme, ...names) => names.map(n => tv(theme, n));
+
+function tokensTheme(theme, themeName) {
+  const sw = (name, v, use, text) => `<div><i style="background:var(${v});${text ? `color:var(${text})` : ""}">${text ? "Aa" : ""}</i><b class="strong">${name}</b><code>${tv(theme, v)}</code><span class="muted">${use}</span></div>`;
+  const ink = (name, v, use, on) => `<div><i style="color:var(${v})">Aa 123</i><b class="strong">${name}</b><code>${tv(theme, v)}</code><code>${worst(theme, v, on).toFixed(1)}:1 lowest</code><span class="muted">${use}</span></div>`;
+  const statuses = [["book", "Currently reading"], ["inbox", "Want to read"], ["check", "Read"], ["pause", "Paused"], ["ban", "Did not finish"], ["eyeoff", "Ignored"]];
+  const st = (label, html) => `<div class="state">${html}<span class="small muted">${label}</span></div>`;
+  return `<div class="tok theme-${theme}">
+    <div class="section">${themeName}</div>
+    <div><h4>Surfaces</h4><div class="sw">
+      ${sw("bg", "--bg", "paper: the work area")}${sw("sidebar", "--sidebar", "the sidebar")}${sw("surface", "--surface", "the progress panel")}${sw("raised", "--raised", "controls, popovers")}
+      ${sw("hover", "--hover", "ink overlay: pointer over")}${sw("selected", "--selected", "ink overlay: current, pressed")}${sw("chip", "--chip", "ink overlay: chips")}${sw("skeleton", "--skeleton", "still loading")}
+      ${sw("border", "--border", "hairlines")}${sw("border-strong", "--border-strong", "control outlines")}${sw("track", "--track", "empty progress")}${sw("star-empty", "--star-empty", "an unfilled star")}
+    </div></div>
+    <div><h4>Ink: contrast is the lowest over bg, sidebar, surface and raised, each alone, hovered and selected</h4><div class="sw">
+      ${ink("fg", "--fg", "text")}${ink("fg-muted", "--fg-muted", "secondary text, counts")}${ink("fg-faint", "--fg-faint", "placeholder, disabled only", plain(theme, "--bg", "--raised"))}${ink("accent", "--accent", "links, selected icon")}
+      ${sw("accent", "--accent", "progress, primary commit", "--accent-fg")}${sw("accent-soft", "--accent-soft", "the avatar")}${sw("ring", "--ring", "focus ring, 3 px")}${sw("gold", "--gold", "your rating only")}
+      ${ink("danger", "--danger", "destructive", plain(theme, "--bg", "--raised"))}${ink("warning", "--warning", "content-warning icon", [over(theme, "--chip", "--bg")])}
+    </div></div>
+    <div><h4>Elevation: three levels</h4><div class="wrap" style="gap:var(--s-24)">
+      ${st("0 · flat: a hairline or a fill", `<div class="panel" style="width:128px;height:96px"></div>`)}
+      ${st("1 · cover: the book as an object", cover(B.dune, "md", true))}
+      ${st("2 · popover: menus, dialogs", `<div class="popover" style="width:168px"><div class="menu-item">${ic("book")}Currently reading</div><div class="menu-item hover">${ic("inbox")}Want to read</div><div class="menu-item">${ic("check")}Read</div></div>`)}
+    </div><div class="note">Flat regions take no shadow. Hover, selected and chip are ink overlays, so a control on raised and a row on paper step the same way, and a chip stays visible on a hovered or selected row.</div>
+    <code>shadow-cover: ${tv(theme, "--shadow-cover")}</code><code>shadow-popover: ${tv(theme, "--shadow-popover")}</code><code>cover-edge: ${tv(theme, "--cover-edge")} · cover-hinge: ${tv(theme, "--cover-hinge")} to clear, 6% of the width</code></div>
+    <div><h4>Covers: the image, the cloth cover when there is none, the skeleton while loading</h4><div class="wrap">
+      ${cover(B.dune, "md", true)}${cover(B.dune, "sm")}${cover(B.moby, "md", true)}${cover(B.moby, "sm")}${cover(B.moby, "xs")}${cover(B.owl, "md", true)}${cover(B.owl, "sm")}${cover(B.dune, "md", false, "loading")}${cover(B.dune, "sm", false, "loading")}
+    </div></div>
+    <div><h4>Rating: gold is yours; the catalogue's is muted ink</h4><div class="wrap c" style="gap:var(--s-16)">
+      <span class="row-c g-8">${stars(4.5, "own", "lg")}<span class="small muted">yours</span></span>
+      <span class="row-c g-8">${stars(4.51, "cat")}<span class="small muted">Hardcover average</span></span>
+      <span class="row-c g-8">${stars(0, "own")}<span class="small muted">unrated</span></span>
+    </div></div>
+    <div><h4>Chips: neutral; the icon's shape tells statuses apart</h4><div class="wrap c" style="gap:var(--s-4)">
+      ${statuses.map(([i, l]) => `<span class="chip">${ic(i, "xs")}${l}</span>`).join("")}
+      <span class="chip">Fantasy</span><span class="chip">${ic("warn", "xs warn")}Violence</span>
+    </div></div>
+    <div><h4>Control states: one treatment each, on every control</h4>
+      <div class="wrap" style="gap:var(--s-16)">
+        ${st("rest", `<span class="btn">Choose…</span>`)}${st("hover", `<span class="btn hover">Choose…</span>`)}${st("pressed", `<span class="btn pressed">Choose…</span>`)}${st("focus", `<span class="btn focus">Choose…</span>`)}${st("disabled", `<span class="btn dis">Choose…</span>`)}
+      </div>
+      <div class="note">hover: the hover fill · pressed: the selected fill · focus: an accent edge and a 3 px ring · disabled: 50% opacity. Nothing else changes.</div>
+      <div class="wrap mt-16" style="gap:var(--s-16)">
+        ${st("primary: one per decision", `<span class="btn primary">Save</span>`)}${st("ghost: tools", `<span class="btn ghost">${ic("layers")}Lists${ic("down", "xs")}</span>`)}${st("danger", `<span class="btn danger">${ic("trash")}Remove from library…</span>`)}${st("link: opens the browser", `<span class="link row-c g-4" style="height:var(--h-control)">Open on Hardcover ${ic("ext", "xs")}</span>`)}
+      </div>
+      <div class="wrap mt-16" style="gap:var(--s-16)">
+        ${st("input", `<div class="input" style="width:152px">${ic("search")}Filter books</div>`)}${st("input, focus", `<div class="input focus" style="width:152px">${ic("search")}<span class="val">dune</span></div>`)}${st("switch off, on, disabled", `<span class="row-c g-8" style="height:var(--h-control)"><span class="switch"><i></i></span><span class="switch on"><i></i></span><span class="switch dis"><i></i></span></span>`)}
+      </div>
+    </div>
+    <div><h4>Row states, progress, loading and empty</h4><div class="wrap" style="gap:var(--s-24);align-items:flex-start">
+      <div class="demo-list">
+        <div class="nav">${ic("inbox")}<span>Rest</span><span class="n">8</span></div>
+        <div class="nav hover">${ic("check")}<span>Hover</span><span class="n">9</span></div>
+        <div class="nav sel">${ic("book")}<span>Selected</span><span class="n">3</span></div>
+        <div class="nav focus">${ic("pause")}<span>Keyboard focus</span><span class="n">1</span></div>
+        <div class="nav dis">${ic("target")}<span>Disabled</span></div>
+      </div>
+      <div class="col g-16" style="width:248px">
+        <div class="col g-8"><div class="bar"><i style="width:66%"></i></div><span class="small muted">meter: accent on track, 6 px; 2 px inside a row</span></div>
+        <div class="col g-8"><div class="bar"><i style="width:75%"></i><b style="left:88.8%"></b></div><span class="small muted">goal: the tick is where the pace should be</span></div>
+        <div class="row-c g-12">${cover(B.dune, "sm", false, "loading")}<div class="col g-8 fill"><div class="sk" style="width:70%"></div><div class="sk" style="width:45%"></div></div></div>
+        <span class="small muted">loading: skeleton fill, pulsing 100% to 50%; no spinner in a list</span>
+      </div>
+    </div>
+    <div class="boxed mt-16" style="height:168px;display:flex">${emptyState("search", "No matches", "No books in Read match “tolkien”.")}</div>
+    <div class="note">empty: a 24 px muted icon, a 14/500 title, one muted sentence, centred in the region it explains.</div></div>
+  </div>`;
+}
+
+function tokensScales() {
+  const t = (code, cls, sample, style = "") => `<div class="l"><code>${code}</code><span class="${cls}" style="${style}">${sample}</span></div>`;
+  const sp = [["--s-2", "optical"], ["--s-4", "one control"], ["--s-8", "related"], ["--s-12", "a group"], ["--s-16", "groups"], ["--s-24", "sections"], ["--s-32", "regions"]];
+  const rad = [["--r-cover-s", "covers xs, sm"], ["--r-cover", "covers md+"], ["--r-control", "controls, nav rows"], ["--r-box", "rows, panels, popovers"], ["--r-pill", "chips, bars"]];
+  const cvs = ["xs", "sm", "md", "lg", "xl", "xxl"];
+  return `<div class="tok theme-light">
+    <div class="section">Type</div>
+    <div><h4>Sans speaks for the app: Inter 400, 500, 600</h4><div class="ts">
+      ${t("page-title · 20/28 · 600", "page-title", "Currently reading")}
+      ${t("section · 16/24 · 600", "section", "Continue reading")}
+      ${t("heading · 14/20 · 600", "heading", "About this book")}
+      ${t("body · 14/20 · 400", "", "Borrowed from the library, due back on the 30th.")}
+      ${t("body-strong · 14/20 · 500", "strong", "Project Hail Mary")}
+      ${t("body, muted", "muted", "Andy Weir")}
+      ${t("label · 12/16 · 500, muted", "label", "2026 reading goal")}
+      ${t("caption · 12/16 · 400, muted", "small muted num", "Page 418 of 1,007 · 13 pages a day")}
+    </div></div>
+    <div><h4>Serif speaks for the book: Literata Display (36pt cut) 600, Literata Text (12pt cut) 400, 600</h4><div class="ts">
+      ${t("display-30 · 30/36 · Display 600", "display d-30", "The Way of Kings")}
+      ${t("display-24 · 24/30 · Display 600", "display d-24", "Project Hail Mary")}
+      ${t("title-18 · 18/24 · Text 600", "title-18", "Dune Messiah")}
+      ${t("prose · 16/26 · Text 400", "prose", "A schoolteacher wakes up alone on a spaceship light-years from home.", "max-width:320px")}
+      ${t("figure · display-30, lining", "display d-30 num", "9 &nbsp; 4.63")}
+    </div><div class="note">Seven sizes in all: 12, 14, 16, 18, 20, 24, 30. No letter-spacing anywhere; the Display cut does the tightening.</div></div>
+    <div><h4>Persian and Arabic: Noto Naskh Arabic under the serif, Vazirmatn under the sans</h4><div class="ts">
+      ${t("display-24, leading 1.5", "display d-24 rtl", "بوف کور", "").replace("<span", '<span dir="rtl"')}
+      ${t("body-strong", "strong rtl", "بوف کور", "").replace("<span", '<span dir="rtl"')}
+      ${t("body, muted", "muted rtl", "صادق هدایت", "").replace("<span", '<span dir="rtl"')}
+    </div><div class="note">The block sits on the leading edge like any other title; only the line runs right to left. A title that wraps fills its column and packs to the right.</div></div>
+    <div><h4>Numerals: tabular wherever figures stack or change in place</h4><div class="row-c g-24">
+      <div class="col num" style="align-items:flex-end"><span>66%</span><span>42%</span><span>100%</span></div>
+      <div class="col num muted"><span>Page 312 of 476</span><span>Page 418 of 1,007</span><span>Page 121 of 305</span></div>
+    </div></div>
+    <div><h4>Cloth: eight colours, the same in both themes; the title picks one</h4><div class="sw">
+      ${CLOTH.map(c => `<div><i style="background:${c};color:var(--cloth-ink)" class="serif">Aa</i><code>${c}</code><code>${contrast(rv("--cloth-ink"), c).toFixed(1)}:1</code></div>`).join("")}
+    </div><div class="note">cloth-ink ${rv("--cloth-ink")} for the stamp, title and author.</div></div>
+  </div><div class="tok theme-light">
+    <div class="section">Space, shape and size</div>
+    <div><h4>Spacing: named by relationship</h4><div class="scale">
+      ${sp.map(([v, n]) => `<div><div class="sq" style="width:var(${v});height:var(${v})"></div><code>${rv(v)}</code><span class="small muted">${n}</span></div>`).join("")}
+    </div><div class="note">Insets: sidebar 8, list 16, pane 24, page 32. Row gap 2. Section gap 24.</div></div>
+    <div><h4>Radius</h4><div class="scale">
+      ${rad.map(([v, n]) => `<div><div class="sq" style="width:56px;height:40px;border-radius:var(${v})"></div><code>${rv(v).replace("999px", "full")}</code><span class="small muted">${n}</span></div>`).join("")}
+    </div></div>
+    <div><h4>Frames</h4><div class="wrap" style="gap:var(--s-16)">
+      <div class="state"><span class="btn">Control 32</span><span class="small muted">buttons, inputs, nav rows</span></div>
+      <div class="state"><span class="btn sm">Small 24</span><span class="small muted">inside a row or panel</span></div>
+      <div class="state"><span class="chip">Chip 20</span><span class="small muted">chips</span></div>
+      <div class="state"><span class="row-c g-8" style="height:var(--h-control)">${ic("book")}${ic("book", "xs")}</span><span class="small muted">icons 16, 12</span></div>
+    </div><div class="note">Regions: sidebar 240, list 384, rail 272, bar 56, tall row 40, key column 96 (72 in a rail). Widths: select 168 and 128, meter 400 and 160, prose 640, empty-state text 288.</div></div>
+    <div><h4>Cover sizes (width): xs 20, sm 32, md 64, lg 80, xl 128, xxl 160</h4>
+      <div class="wrap" style="gap:var(--s-8)">${cvs.map(s => cover(B.dune, s, s !== "xs" && s !== "sm")).join("")}</div>
+      <div class="wrap mt-16" style="gap:var(--s-8)">${cvs.map(s => cover(B.moby, s, s !== "xs" && s !== "sm")).join("")}</div>
+      <div class="wrap mt-16">${["xs", "sm", "md", "lg", "xl"].map(s => cover(B.owl, s, s !== "xs" && s !== "sm")).join("")}</div>
+      <div class="note">xs, sm: rows and menus (edge only). md, lg: shelves and cards. xl: the pane and the Home lead. xxl: the book page. The hinge appears from md; the shadow where the cover leads its row. Cloth: xs an initial, sm an initial and a rule, md the title, lg and up the title and author.</div>
+    </div>
+  </div>`;
+}
+
+// ---------- Assemble ----------
+const shots = [
+  ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail", "light", 800, home()],
+  ["Home", "dark", "dark", 800, home()],
+  ["Library: Currently reading", "light · the book's tools sit in a bar above it; status and rating first, then progress", "light", 800, library("cr")],
+  ["Library: Want to read", "dark · a Persian title, a book with no cover, a hovered row · proposed: Start reading sits in the panel that holds progress once the book is started", "dark", 800, library("wtr")],
+  ["Book page over Discover", "light · the rail starts at the top; scrolled content shown in full", "light", 920, bookPage()],
+  ["Library: empty states", "light · a filter with no matches and no book selected, in the app's own copy", "light", 760, library("none")],
+  ["Tokens: colour, elevation and states", "both themes", null, 2300, tokensTheme("light", "Light") + tokensTheme("dark", "Dark")],
+  ["Tokens: type, space, shape and size", "the same in both themes", null, 1328, tokensScales()],
+];
+const ONLY = null; // e.g. [4, 5] to render only some shots while checking
+const sheet = document.getElementById("sheet");
+shots.forEach(([title, sub, theme, h, html], i) => {
+  if (ONLY && !ONLY.includes(i)) return;
+  sheet.insertAdjacentHTML("beforeend", `<section><div class="cap">${title} <span>· ${sub}</span></div><div class="frame" data-h="${h}"><div class="win theme-${theme || "light"}" data-name="${i} ${title}" style="height:${h}px">${html}</div></div></section>`);
+});
+
+function fit() {
+  document.querySelectorAll(".frame").forEach(f => {
+    const s = Math.min(1, f.parentElement.clientWidth / 1200);
+    f.style.height = (f.dataset.h * s) + "px";
+    f.firstElementChild.style.transform = `scale(${s})`;
+  });
+}
+fit();
+addEventListener("resize", fit);
+
+// ---------- Audit (console): fonts, contrast, clipped content ----------
+document.fonts.ready.then(() => {
+  const ok = ["600 16px Literata", "16px Inter", "16px 'Noto Naskh Arabic'", "16px Vazirmatn"].map(f => `${f}: ${document.fonts.check(f)}`);
+  console.log("fonts", ok.join(", "));
+  for (const t of ["light", "dark"]) {
+    const line = [["--fg"], ["--fg-muted", [...fills(t), over(t, "--chip", "--bg"), over(t, "--chip", "--sidebar")]], ["--fg-faint", plain(t, "--bg", "--raised")], ["--accent"], ["--danger", plain(t, "--bg", "--raised")], ["--warning", [over(t, "--chip", "--bg")]]]
+      .map(([fg, on]) => `${fg.slice(2)} ${worst(t, fg, on).toFixed(2)}`).join(", ");
+    console.log(`contrast ${t} (lowest over the fills each is used on): ${line}; accent-fg on accent ${contrast(tv(t, "--accent-fg"), tv(t, "--accent")).toFixed(2)}`);
+    // State fills must step the same way on every host: rest < hover < selected in distance from the host.
+    const steps = HOSTS.map(h => { const [r, hv, s] = [tv(t, h), over(t, "--hover", h), over(t, "--selected", h)].map(lum); return `${h.slice(2)} ${Math.sign(hv - r) === Math.sign(s - hv) ? "ok" : "FLIPS"} (${contrast(tv(t, h), over(t, "--hover", h)).toFixed(2)}, ${contrast(tv(t, h), over(t, "--selected", h)).toFixed(2)})`; });
+    console.log(`state steps ${t}: ${steps.join(", ")}`);
+  }
+  console.log("cloth ink on cloth:", CLOTH.map(c => contrast(rv("--cloth-ink"), c).toFixed(1)).join(" "));
+  const clipped = [];
+  document.querySelectorAll(".win").forEach(w => {
+    w.querySelectorAll(".sb, .main, .scroll, .list, .detail, .pane, .tok, .rail, .fill, .bh-info, .actbar, .objbar, .cr, .row, .hero").forEach(el => {
+      if (el.classList.contains("one-line")) return;
+      if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) clipped.push(`${w.dataset.name}: .${el.className.split(" ").join(".")} ${el.scrollWidth}x${el.scrollHeight} in ${el.clientWidth}x${el.clientHeight}`);
+    });
+    const bottom = Math.max(...[...w.querySelectorAll("*")].filter(e => !e.children.length && !e.closest(".sb") && !e.classList.contains("hair")).map(e => e.getBoundingClientRect().bottom)) - w.getBoundingClientRect().top;
+    const scale = w.getBoundingClientRect().width / 1200;
+    console.log(`window ${w.dataset.name}: content ends at ${Math.round(bottom / scale)} of ${w.clientHeight}`);
+  });
+  console.log(clipped.length ? "CLIPPED\n" + clipped.join("\n") : "no clipped regions");
+});
+</script>
+</body>
+</html>

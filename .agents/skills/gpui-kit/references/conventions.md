@@ -59,7 +59,7 @@ The footer supplies layout only: attach the save action to the Button. Form does
 
 Components live in their component modules. Common capabilities may be extension traits, not inherent methods: import `ButtonVariants` for button variants, `Sizable` for size tiers, `Disableable` for supported disabled builders, `ActiveTheme` for theme access, and `WindowExt` for window overlays. Do not infer that every component supports every trait.
 
-Use the [complete application recipe](recipes.md) for imports, retained ownership, initialization, Root, and overlay layers. For a narrow task, load its component page and the relevant section of the coding/design guides; a component catalog is not a required reading sequence.
+Use the [complete application recipe](recipes.md) for imports, retained ownership, initialization, Root, and overlay layers. For a narrow task, load its component page and the relevant section of the coding guide and the `hardcover-design` skill; a component catalog is not a required reading sequence.
 
 ## Verify the convention transfer
 

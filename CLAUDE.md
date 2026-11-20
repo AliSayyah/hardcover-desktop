@@ -159,9 +159,11 @@ The workspace has two crates, in `crates/*`.
 - Resizing the window after launch squeezes the library's list toward its minimum width. Drag the divider back to its default of 24rem before capturing.
 - Strip metadata from the PNGs (`magick … -strip`).
 
-## gpui-kit
+## Design system and gpui-kit
 
-Use the bundled `gpui-kit` and `gpui-kit-design-guides` skills, in `.claude/skills`, before any UI or architecture work. When the skills and the crate disagree, the crate source wins: `~/.cargo/registry/src/index.crates.io-*/gpui-component-0.10.0`. For example, `ActiveTheme` is imported from `gpui_kit::component::ActiveTheme`.
+Two skills live in `.claude/skills`:
+- **`hardcover-design`** is the app's own design system. It is the only design authority. Use it before any visible change: tokens, type, covers, components, states, screen layouts, right-to-left text and copy. `docs/design/mockup.html` is its reference mockup; open it in a browser. The app is still migrating to the system. The skill's "Migration status" lists what the code lacks; update that list in the commit that changes it. GPUI Kit's generic Design Guides are deliberately not used here.
+- **`gpui-kit`** covers GPUI and the component APIs. Use it before any UI or architecture work. When it and the crate disagree, the crate source wins: `~/.cargo/registry/src/index.crates.io-*/gpui-component-0.10.0`. For example, `ActiveTheme` is imported from `gpui_kit::component::ActiveTheme`.
 
 ## CI and releases
 
