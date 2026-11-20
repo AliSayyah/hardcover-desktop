@@ -6,6 +6,9 @@
 //!   is never the only carrier.
 //! - A goal meter adds the pace tick ([`Meter::pace`]): where steady progress
 //!   would be today, 2 px wide in `fg`, 3 px proud of the meter on each side.
+//! - Hardcover's figures (the book's ratings breakdown) take the muted fill
+//!   ([`Meter::muted`]): `fg-muted` on `track`, since the accent is for
+//!   progress. Their counts sit beside them.
 //! - It fills its width; set one where the system names it
 //!   (`size::METER_IN_ROW`, at most `size::METER_MAX`).
 //! - Exposed as a progress indicator with its value and an accessible name.
@@ -32,6 +35,7 @@ pub struct Meter {
     id: ElementId,
     percent: f32,
     thin: bool,
+    muted: bool,
     pace: Option<f32>,
     label: Option<SharedString>,
     style: StyleRefinement,
@@ -45,6 +49,7 @@ impl Meter {
             id: id.into(),
             percent,
             thin: false,
+            muted: false,
             pace: None,
             label: None,
             style: StyleRefinement::default(),
@@ -54,6 +59,13 @@ impl Meter {
     /// The 2 px meter that sits inside a row.
     pub fn thin(mut self) -> Self {
         self.thin = true;
+        self
+    }
+
+    /// The `fg-muted` fill of a figure that isn't the reader's progress:
+    /// Hardcover's ratings breakdown.
+    pub fn muted(mut self) -> Self {
+        self.muted = true;
         self
     }
 
@@ -96,6 +108,11 @@ impl RenderOnce for Meter {
         } else {
             size::METER
         };
+        let fill = if self.muted {
+            colors.fg_muted
+        } else {
+            colors.accent
+        };
         let tick = self.pace.map(fraction);
         let overhang = size::PACE_TICK_OVERHANG;
         Progress::new(self.id)
@@ -117,7 +134,7 @@ impl RenderOnce for Meter {
                         .left_0()
                         .w(relative(filled))
                         .rounded_full()
-                        .bg(colors.accent),
+                        .bg(fill),
                 )
             })
             .when_some(tick, |this, tick| {

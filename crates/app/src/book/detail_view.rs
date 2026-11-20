@@ -570,6 +570,11 @@ impl BookDetailView {
             return;
         };
         let id = entry.user_book_id;
+        // A change while another write runs is dropped: the stars stay
+        // enabled during a write only so that they keep the keyboard focus.
+        if self.model.read(cx).pending_write(id).is_some() {
+            return;
+        }
         // Sending the shown status keeps Hardcover from marking the book Read.
         let keep = entry.status;
         self.run_write(
@@ -631,14 +636,19 @@ impl BookDetailView {
         cx.notify();
     }
 
-    /// Opens the notes editor on the entry shown, with the cursor in it.
+    /// Opens the notes editor on the entry shown, with the cursor at the end
+    /// of the notes, ready to add a line.
     fn edit_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(entry) = self.current_entry(cx) else {
             return;
         };
         self.notes_editing = Some(entry.user_book_id);
         self.notes_saved = None;
-        self.notes.update(cx, |s, cx| s.focus(window, cx));
+        self.notes.update(cx, |s, cx| {
+            let end = s.value().len();
+            s.set_selected_range(end..end, cx);
+            s.focus(window, cx);
+        });
         cx.notify();
     }
 
@@ -769,6 +779,7 @@ impl BookDetailView {
             return;
         };
         let id = entry.user_book_id;
+        let title: SharedString = format!("Delete this read of “{}”?", entry.book.title).into();
         let description: SharedString = format!(
             "{}. Its dates and progress are deleted from Hardcover.",
             read_dates_text(session.started_at, session.finished_at)
@@ -778,7 +789,7 @@ impl BookDetailView {
         open_alert_dialog(window, cx, move |alert, _, _| {
             let view = view.clone();
             alert
-                .title("Delete this read?")
+                .title(title.clone())
                 .description(description.clone())
                 .confirm()
                 .ok_text("Delete")
@@ -804,7 +815,8 @@ impl BookDetailView {
             return;
         };
         let id = entry.user_book_id;
-        let title: SharedString = format!("Remove “{}”?", entry.book.title).into();
+        let title: SharedString =
+            format!("Remove “{}” from your library?", entry.book.title).into();
         let view = cx.entity().downgrade();
         open_alert_dialog(window, cx, move |alert, _, _| {
             let view = view.clone();
@@ -1024,18 +1036,22 @@ impl BookDetailView {
         let width = window.viewport_size().width
             - size::SIDEBAR.to_pixels(rem)
             - PAGE_INSET.to_pixels(rem) * 2.;
+        // Keyboard order follows the task, not the tree: the header and
+        // panel, then the rail beside them (your book), then the main
+        // column's blocks. The blocks are a later tab group inside the
+        // page's own group, so the rail's stops come before them.
         let main = v_flex()
             .w_full()
             .gap_6()
             .child(header)
             .children(entry.and_then(|entry| self.render_panel(entry, cx)))
-            .child(blocks().children(main));
+            .child(blocks().tab_group().tab_index(1).children(main));
         div()
             .id(("book-detail", book.id.get() as u64))
             .size_full()
             .overflow_y_scrollbar()
             .child(
-                div().w_full().p_8().child(
+                div().w_full().p_8().tab_group().child(
                     Columns::new(main)
                         .rail(rail)
                         .folded(folds(width, rem, false)),

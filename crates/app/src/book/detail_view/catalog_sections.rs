@@ -10,7 +10,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, SharedString,
-    Styled as _, div, prelude::FluentBuilder as _, relative,
+    Styled as _, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookDetails, BookId, BookSummary, RatingBucket};
@@ -26,7 +26,8 @@ use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{average_rating_text, count_text};
 use crate::ui::{
-    Block, CoverShelf, ExternalLink, RailSection, Skeleton, SkeletonText, Stars, TextButton,
+    Block, CoverShelf, ExternalLink, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars,
+    TextButton,
 };
 
 /// Similar books fetched for one book.
@@ -118,7 +119,7 @@ impl BookDetailView {
                 _ => div()
                     .body()
                     .text_color(muted)
-                    .child("No description on Hardcover.")
+                    .child("No description on Hardcover")
                     .into_any_element(),
             },
             Some(Details::Failed(message)) => h_flex()
@@ -411,41 +412,27 @@ fn render_breakdown(details: &BookDetails, cx: &mut Context<BookDetailView>) -> 
         .gap_1()
         .children(rating_rows(buckets).into_iter().map(|bucket| {
             let (rating, count) = (bucket.rating, bucket.count);
-            let fraction = count as f32 / max as f32;
+            let percent = count as f32 / max as f32 * 100.;
             h_flex()
                 .gap_2()
                 .caption(cx)
                 .tabular()
                 .child(
-                    h_flex()
-                        .flex_shrink_0()
-                        .w_10()
-                        .justify_end()
-                        .gap_0p5()
-                        .child(rating_label(rating))
-                        .child(crate::star::icon().size_3().text_color(colors.fg_muted)),
+                    Lane::trailing().child(
+                        h_flex()
+                            .gap_0p5()
+                            .child(rating_label(rating))
+                            .child(crate::star::icon().size_3().text_color(colors.fg_muted)),
+                    ),
                 )
                 .child(
-                    div()
+                    Meter::new(SharedString::from(format!("rating-{rating}")), percent)
+                        .muted()
                         .flex_1()
-                        .h(size::METER)
-                        .rounded_full()
-                        .bg(colors.track)
-                        .child(
-                            div()
-                                .h_full()
-                                .w(relative(fraction))
-                                .rounded_full()
-                                .bg(colors.fg_muted),
-                        ),
+                        .w_auto()
+                        .accessibility_label(format!("{} stars", rating_label(rating))),
                 )
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .w(size::TRAILING_LANE)
-                        .text_right()
-                        .child(count_text(count)),
-                )
+                .child(Lane::trailing().child(count_text(count)))
         }))
         .into_any_element()
 }

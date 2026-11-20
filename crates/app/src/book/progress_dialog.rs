@@ -3,8 +3,7 @@
 //!
 //! The dialog makes the write itself, with `begin_write`/`end_write` on the
 //! entry, and stays open with what was typed and the reason when it fails.
-//! It is the same command as Home's "Update progress…" (`home/`), which can
-//! use this one.
+//! Home's "Update progress…" opens it too.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -18,7 +17,9 @@ use hardcover_core::{Length, LibraryEntry, UserBookId};
 
 use crate::app_state::Services;
 use crate::design::{TypeRoles as _, size};
-use crate::format::{duration_text, parse_progress, position_text, progress_summary};
+use crate::format::{
+    count_text, duration_text, needs_permission, parse_progress, position_text, progress_summary,
+};
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::open_dialog;
@@ -38,6 +39,7 @@ pub fn open_progress(
         // the write succeeds, and closes itself then.
         dialog
             .title("Update progress")
+            // One field and its commit: the confirmation width, not a form's.
             .w(size::DIALOG_CONFIRM.to_pixels(window.rem_size()))
             .on_ok(move |_, window, cx| {
                 ok_view.update(cx, |this, cx| this.save(window, cx));
@@ -116,7 +118,9 @@ impl ProgressDialog {
         let id = self.id;
         let model = self.model.clone();
         if !model.update(cx, |m, cx| m.begin_write(id, WriteKind::Progress, cx)) {
-            self.error = Some("Another change to this book is still being saved.".into());
+            self.error = Some(
+                "Another change to this book is still being saved. Try again in a moment.".into(),
+            );
             cx.notify();
             return;
         }
@@ -156,14 +160,14 @@ impl Render for ProgressDialog {
         let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
         let muted = cx.theme().muted_foreground;
         let total = match length {
-            Some(Length::Pages(total)) => Some(format!("of {total}")),
+            Some(Length::Pages(total)) => Some(format!("of {}", count_text(total))),
             Some(Length::Seconds(total)) => Some(format!("of {}", duration_text(total))),
             None => None,
         };
         let title = model.entry(self.id).map(|e| e.book.title.clone());
         v_flex()
             .gap_3()
-            .children(title.map(|t| div().body().truncate().child(t)))
+            .children(title.map(|t| div().body_strong().truncate().child(t)))
             .child(
                 h_flex()
                     .gap_2()
@@ -183,6 +187,9 @@ impl Render for ProgressDialog {
                             .label("Update")
                             .loading(saving)
                             .disabled(busy || !can_write)
+                            .when(!can_write, |this| {
+                                this.tooltip(needs_permission(WRITE_LIBRARY))
+                            })
                             .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                     ),
             )

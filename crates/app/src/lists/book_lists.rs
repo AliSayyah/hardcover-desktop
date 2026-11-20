@@ -6,7 +6,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
 use gpui_kit::{
     AnyElement, App, Entity, IntoElement, ParentElement as _, SharedString, Styled as _, Task,
     Window, div,
@@ -17,7 +17,7 @@ use hardcover_core::{BookId, BookSummary, EditionSummary, LibraryEntry};
 use super::list_dialog::open_new_list;
 use super::model::ListsModel;
 use crate::app_state::Services;
-use crate::design::TypeRoles as _;
+use crate::design::{TypeRoles as _, size};
 use crate::format::needs_permission;
 use crate::ui::kit::open_alert_dialog;
 
@@ -207,7 +207,6 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
     let owned = rows.as_ref().is_some_and(|r| !r.is_empty());
     let busy = model.is_busy(book);
     let edition = entry.edition.as_ref();
-    let muted = cx.theme().muted_foreground;
     // Adding goes through `edition_owned` (write:library); taking it off is
     // a list change (write:lists).
     let (allowed, reason): (bool, Option<SharedString>) = match (&rows, owned) {
@@ -218,7 +217,7 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
         (Some(_), false) if !services.has_scope(WRITE_LIBRARY) => {
             (false, Some(needs_permission(WRITE_LIBRARY).into()))
         }
-        (Some(_), false) if edition.is_none() => (false, Some("Choose an edition first.".into())),
+        (Some(_), false) if edition.is_none() => (false, Some("Choose an edition first".into())),
         _ => (true, None),
     };
     let note: Option<SharedString> = match (&rows, reason) {
@@ -226,36 +225,50 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
         // Only worth saying when the entry names an edition that isn't the one owned.
         (Some(rows), None) if owned => edition
             .filter(|e| !rows.iter().any(|r| r.edition_id == Some(e.id)))
-            .map(|_| "Another edition is on your Owned list.".into()),
+            .map(|_| "Another edition is on your Owned list".into()),
         _ => None,
     };
     let entry = entry.clone();
+    // The hint is a caption beside the switch, wrapping under it where the
+    // column is narrow (a rail): each line is a property row's 24, so the
+    // key stays on the switch's line.
     Some(
         h_flex()
             .w_full()
             .flex_wrap()
-            .gap_2()
+            .gap_x_2()
             .child(
-                Switch::new("book-owned")
-                    .checked(owned)
-                    .accessibility_label("Owned")
-                    .disabled(!allowed || busy)
-                    .on_click(move |checked, window, cx| {
-                        if *checked {
-                            confirm_owned(&entry, window, cx);
-                        } else if let Some(lists) = ListsModel::global(cx) {
-                            let task = lists
-                                .update(cx, |m, cx| m.set_owned(entry.book.id, None, false, cx));
-                            notify_failure(
-                                task,
-                                "Couldn't take it off your Owned list",
-                                window,
-                                cx,
-                            );
-                        }
-                    }),
+                h_flex().h(size::CONTROL_SMALL).child(
+                    Switch::new("book-owned")
+                        .checked(owned)
+                        .accessibility_label("Owned")
+                        .disabled(!allowed || busy)
+                        .on_click(move |checked, window, cx| {
+                            if *checked {
+                                confirm_owned(&entry, window, cx);
+                            } else if let Some(lists) = ListsModel::global(cx) {
+                                let task = lists.update(cx, |m, cx| {
+                                    m.set_owned(entry.book.id, None, false, cx)
+                                });
+                                notify_failure(
+                                    task,
+                                    "Couldn't take it off your Owned list",
+                                    window,
+                                    cx,
+                                );
+                            }
+                        }),
+                ),
             )
-            .children(note.map(|note| div().min_w_0().body().text_color(muted).child(note)))
+            .children(note.map(|note| {
+                div()
+                    .min_w_0()
+                    .min_h(size::CONTROL_SMALL)
+                    .flex()
+                    .items_center()
+                    .caption(cx)
+                    .child(note)
+            }))
             .into_any_element(),
     )
 }
