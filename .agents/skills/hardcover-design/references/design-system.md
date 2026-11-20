@@ -589,6 +589,9 @@ Every screen starts from its task:
     with titles at 12 px in two lines.
 - Sections that don't apply (no goal, missing scope) disappear without
   leaving a gap.
+- **Narrow window:** when the main column would get less than 400 beside
+  the rail, the rail's sections follow the main column, full width, under
+  a hairline (`ui::Columns`).
 
 ### Coming soon (the full list, over Home)
 
@@ -770,13 +773,6 @@ still need their layouts moved onto the rest.
      (page). The full page's header uses the xl cover, not xxl.
    - Similar books use md covers (64), not lg (80), and their titles are a
      text button's.
-2. **Home.** There is no greeting, lead book or rail (`ui::Greeting` and
-   `ui::Rail` exist, unused). Coming soon is a full-width card under the
-   others, with a semibold title and an xsmall "See all", instead of a
-   section closing the main column (`ui::SectionHeader`, `ui::see_all`).
-   The covers are on system sizes (reading rows and Up next md, the paused
-   and rating rows sm, the Want to read rows xs), but the layout around them
-   is the old one.
 3. **Sidebar.** It still uses the kit's sidebar menu, which hovers at
    `sidebar_accent` × 0.8 (8%, not 5%) and has no accent icon when
    selected. `ui::NavRow` is the system's row; the sidebar moves onto it,
@@ -802,5 +798,4 @@ still need their layouts moved onto the rest.
    roles as it is redesigned.
 6. **Reviews.** Reviews sit 20 apart without hairlines (`ui::Sequence`
    with `RowSpacing::Reviews` is the system's); the review text is
-   `text_sm` at the default line height rather than `reader`. Upcoming rows
-   use `py_1p5` instead of 12.
+   `text_sm` at the default line height rather than `reader`.

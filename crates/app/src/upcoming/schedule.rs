@@ -151,14 +151,6 @@ impl Group {
             Group::Year(year) => year.to_string(),
         }
     }
-
-    /// A stable key for element ids.
-    pub fn key(self) -> String {
-        match self {
-            Group::Month { year, month } => format!("{year}-{month:02}"),
-            Group::Year(year) => year.to_string(),
-        }
-    }
 }
 
 /// The books under their headings, in date order. `shown` is sorted by date.
@@ -348,10 +340,6 @@ mod tests {
         let expected: Vec<(String, usize)> =
             expected.iter().map(|(l, n)| (l.to_string(), *n)).collect();
         assert_eq!(groups, expected);
-        assert_ne!(
-            Group::of(day("2027-11-20"), today).key(),
-            Group::of(day("2027-12-01"), today).key()
-        );
     }
 
     #[test]

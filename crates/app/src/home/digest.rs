@@ -289,20 +289,21 @@ pub fn to_rate(
     (rows, unrated)
 }
 
-/// What the goal can expect from the books being read: how many of them
-/// should finish by its end at their pace. A book left idle doesn't count,
-/// as Home shows no finish date for it. Only for a goal counted in books.
-pub fn finishing_by(goal: &Goal, digest: &Digest, today: Date) -> usize {
+/// What the goal can expect from the books being read: the ones that should
+/// finish by its end at their pace, the most recently updated first, so Home
+/// can name them. A book left idle doesn't count, as Home shows no finish
+/// date for it. Only for a goal counted in books.
+pub fn finishing_by(goal: &Goal, digest: &Digest, today: Date) -> Vec<UserBookId> {
     if goal.metric != GoalMetric::Books || today > goal.end {
-        return 0;
+        return Vec::new();
     }
     digest
         .reading
         .iter()
         .filter(|r| r.idle_days.is_none())
-        .filter_map(|r| r.pace?.finish)
-        .filter(|f| *f <= goal.end)
-        .count()
+        .filter(|r| r.pace.and_then(|p| p.finish).is_some_and(|f| f <= goal.end))
+        .map(|r| r.id)
+        .collect()
 }
 
 /// Books finished in each month of a calendar-year goal, January first, as
@@ -705,19 +706,25 @@ mod tests {
         let late = reading(2, 1007, Some("2026-10-20"), Some(418)); // January
         let d = compute(&[soon, late], today, &HashSet::new());
         let year = goal(GoalMetric::Books, "2026-01-01", "2026-12-31");
-        assert_eq!(finishing_by(&year, &d, today), 1);
+        assert_eq!(finishing_by(&year, &d, today), [UserBookId::new(1)]);
         let november = goal(GoalMetric::Books, "2026-01-01", "2026-11-30");
-        assert_eq!(finishing_by(&november, &d, today), 0);
+        assert!(finishing_by(&november, &d, today).is_empty());
         let pages = goal(GoalMetric::Pages, "2026-01-01", "2026-12-31");
-        assert_eq!(finishing_by(&pages, &d, today), 0);
-        assert_eq!(finishing_by(&year, &d, day("2027-01-02")), 0);
+        assert!(finishing_by(&pages, &d, today).is_empty());
+        assert!(finishing_by(&year, &d, day("2027-01-02")).is_empty());
+        let next_year = goal(GoalMetric::Books, "2026-01-01", "2027-12-31");
+        assert_eq!(
+            finishing_by(&next_year, &d, today),
+            [UserBookId::new(2), UserBookId::new(1)],
+            "both, in the order Home lists them"
+        );
 
         // An idle book's finish date isn't trusted.
         let mut idle = reading(3, 476, Some("2026-11-01"), Some(312));
         idle.updated_at = Some(at("2026-11-10"));
         let d = compute(&[idle], today, &HashSet::new());
         assert!(d.reading[0].pace.and_then(|p| p.finish).is_some());
-        assert_eq!(finishing_by(&year, &d, today), 0);
+        assert!(finishing_by(&year, &d, today).is_empty());
     }
 
     #[test]
