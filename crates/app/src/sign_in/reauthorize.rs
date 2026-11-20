@@ -10,15 +10,12 @@ use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex,
-    v_flex,
+    Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
-    AppContext as _, ClipboardItem, Context, Entity, EventEmitter, FontWeight, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Task, Window, div,
-    prelude::FluentBuilder as _,
+    AppContext as _, ClipboardItem, Context, Entity, EventEmitter, IntoElement, ParentElement as _,
+    Render, SharedString, Styled as _, Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::{
     CancelHandle, GrantedScopes, OAuthConfig, Session, StaticToken, Tokens, begin_sign_in,
@@ -27,6 +24,7 @@ use hardcover_core::{Client, Error, UserId};
 
 use super::sign_in_view::SIGN_IN_TIMEOUT;
 use crate::app_state::Services;
+use crate::design::{TypeRoles as _, colors};
 use crate::format::{error_message, permissions_message};
 use crate::library::model::LibraryModel;
 
@@ -265,100 +263,89 @@ fn adopt(session: &Session, tokens: &Tokens, user: UserId) -> Result<(), Failure
 
 impl Render for Reauthorize {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let muted = theme.muted_foreground;
-        let danger = theme.danger;
+        let colors = colors(cx);
         let message: SharedString =
             permissions_message(&Services::global(cx).missing_scopes()).into();
-        let body = match &self.state {
-            State::Idle { error } => v_flex()
-                .gap_2()
-                .child(div().child(message))
-                .when_some(error.clone(), |this, error| {
-                    this.child(div().text_color(danger).child(error))
-                })
-                .child(
-                    h_flex()
-                        .gap_1()
-                        .child(
-                            Button::new("reauthorize")
-                                .outline()
-                                .small()
-                                .label("Sign in again…")
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.start(window, cx)),
-                                ),
-                        )
-                        .child(
-                            Button::new("reauthorize-later")
-                                .ghost()
-                                .small()
-                                .label("Later")
-                                .tooltip("Hide this until the next start; the account menu brings it back")
-                                .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
-                        ),
-                ),
-            State::Starting => v_flex().gap_2().child(div().child(message)).child(
-                Button::new("reauthorize")
-                    .outline()
-                    .small()
-                    .loading(true)
-                    .disabled(true)
-                    .label("Sign in again…"),
-            ),
-            State::Waiting { .. } => v_flex()
-                .gap_2()
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(div().flex_shrink_0().child(Spinner::new().xsmall()))
-                        // Wraps inside the narrow sidebar card.
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child("Waiting for approval in your browser…"),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .gap_1()
-                        .child(
-                            Button::new("reauthorize-copy-link")
-                                .small()
-                                .label("Copy link")
-                                .tooltip("If the browser didn't open, paste this link into it")
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.copy_link(window, cx)),
-                                ),
-                        )
-                        .child(
-                            Button::new("reauthorize-cancel")
-                                .ghost()
-                                .small()
-                                .label("Cancel")
-                                .on_click(cx.listener(|this, _, _, cx| this.cancel(cx))),
-                        ),
-                ),
+        let sign_in = |loading: bool| {
+            Button::new("reauthorize")
+                .small()
+                .label("Sign in again…")
+                .loading(loading)
+                .disabled(loading)
         };
-        let theme = cx.theme();
-        div().w_full().px_2().child(
-            v_flex()
-                .gap_2()
-                .p_2()
-                .rounded(theme.radius)
-                .border_1()
-                .border_color(theme.sidebar_border)
-                .text_xs()
-                .child(
-                    h_flex()
-                        .gap_1()
-                        .text_color(theme.sidebar_foreground)
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(Icon::new(IconName::Info).xsmall())
-                        .child("New permissions needed"),
-                )
-                .child(div().text_color(muted).child(body)),
-        )
+        let (text, buttons) = match &self.state {
+            State::Idle { error } => (
+                v_flex()
+                    .gap_1()
+                    .child(message)
+                    .when_some(error.clone(), |this, error| {
+                        this.child(div().text_color(colors.danger).child(error))
+                    }),
+                h_flex()
+                    .gap_2()
+                    .child(
+                        sign_in(false)
+                            .on_click(cx.listener(|this, _, window, cx| this.start(window, cx))),
+                    )
+                    .child(
+                        Button::new("reauthorize-later")
+                            .ghost()
+                            .small()
+                            .label("Later")
+                            .tooltip(
+                                "Hide this until the next start; the account menu brings it back",
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
+                    ),
+            ),
+            State::Starting => (v_flex().child(message), h_flex().child(sign_in(true))),
+            State::Waiting { .. } => (
+                v_flex().child("Waiting for approval in your browser…"),
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("reauthorize-copy-link")
+                            .small()
+                            .label("Copy link")
+                            .tooltip("If the browser didn't open, paste this link into it")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.copy_link(window, cx)),
+                            ),
+                    )
+                    .child(
+                        Button::new("reauthorize-cancel")
+                            .ghost()
+                            .small()
+                            .label("Cancel")
+                            .on_click(cx.listener(|this, _, _, cx| this.cancel(cx))),
+                    ),
+            ),
+        };
+        // Part of the sidebar, not a card on it: the heading on the icon and
+        // label spines, the words and buttons under the label.
+        v_flex()
+            .w_full()
+            .gap_1()
+            .px_2()
+            .pb_2()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .body_strong()
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size_4()
+                            .flex_none()
+                            .text_color(colors.fg_muted),
+                    )
+                    .child("New permissions needed"),
+            )
+            .child(
+                v_flex()
+                    .pl_6()
+                    .gap_2()
+                    .child(text.caption(cx))
+                    .child(buttons),
+            )
     }
 }

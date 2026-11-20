@@ -10,6 +10,11 @@
 //! The kit's own controls draw this themselves from the theme. Use these for
 //! the app's components that track their own focus.
 //!
+//! A focused element must also be seen: GPUI doesn't scroll a plain
+//! scrolling `div` to the element that takes focus. A component inside one
+//! adds [`reveal_on_focus`], which scrolls just enough to show it, with its
+//! ring, each time it gains focus.
+//!
 //! ```ignore
 //! let focus = keyed_focus(id.clone(), window, cx);
 //! div()
@@ -20,7 +25,8 @@
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
-    App, BoxShadow, ElementId, FocusHandle, Hsla, ParentElement, Pixels, Styled, Window, div, px,
+    AnyElement, App, BoxShadow, ElementId, FocusHandle, Hsla, IntoElement as _, ParentElement,
+    Pixels, ScrollHandle, Styled, Window, canvas, div, point, px,
 };
 
 use crate::design::{colors, size};
@@ -115,4 +121,51 @@ pub fn control_radius(cx: &App) -> Pixels {
 /// The corner radius of rows, panels, popovers and dialogs (`r-box`).
 pub fn box_radius(cx: &App) -> Pixels {
     cx.theme().radius_lg
+}
+
+/// An invisible child that keeps its parent in view inside the scroller
+/// `scroll`: when `focus` is gained, the scroller moves just enough to show
+/// the parent and its focus ring, and then leaves the scroll to the reader
+/// until focus leaves and comes back. The parent must be positioned
+/// (`relative`); `id` is the parent's id.
+pub fn reveal_on_focus(
+    id: impl Into<ElementId>,
+    focus: &FocusHandle,
+    scroll: &ScrollHandle,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let id = ElementId::NamedChild(std::sync::Arc::new(id.into()), "reveal".into());
+    let revealed = window.use_keyed_state(id, cx, |_, _| false);
+    let focused = focus.is_focused(window);
+    if !focused {
+        revealed.update(cx, |r, _| *r = false);
+    }
+    let scroll = scroll.clone();
+    let margin = size::FOCUS_RING + px(1.);
+    canvas(
+        move |bounds, window, cx| {
+            if !focused || *revealed.read(cx) {
+                return;
+            }
+            revealed.update(cx, |r, _| *r = true);
+            let viewport = scroll.bounds();
+            let offset = scroll.offset();
+            let shift = if bounds.top() - margin < viewport.top() {
+                viewport.top() - (bounds.top() - margin)
+            } else if bounds.bottom() + margin > viewport.bottom() {
+                viewport.bottom() - (bounds.bottom() + margin)
+            } else {
+                return;
+            };
+            scroll.set_offset(point(offset.x, offset.y + shift));
+            window.refresh();
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+    .into_any_element()
 }

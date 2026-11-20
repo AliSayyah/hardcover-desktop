@@ -34,6 +34,7 @@
 //! | [`BylineLink`] | A person's name that opens their Hardcover profile in the browser |
 //! | [`NavRow`] | A sidebar destination: icon, label, count or shortcut, selected state |
 //! | [`Stars`] | A rating shown, not set: Hardcover's average, another reader's rating (muted, never gold) |
+//! | [`brand_row`], [`sidebar_label`], [`GoalRow`], [`AccountRow`] | The sidebar's other parts: the brand, a section label, the reading goal, the account menu's trigger |
 //! | [`Avatar`] | A person: their picture, else initials on their colour or `accent-soft` |
 //! | [`focus`] | The focus ring and edge, for a component that tracks its own focus |
 //! | [`kit`] | Fixes for the kit's own components: raised fields and dialogs, the popover surface |
@@ -60,6 +61,7 @@ mod nav_row;
 mod object_bar;
 mod row_focus;
 mod rows;
+mod sidebar;
 mod skeleton;
 mod stars;
 mod surfaces;
@@ -82,6 +84,7 @@ pub use self::{
     object_bar::{BackTo, ObjectBar, ObjectTools, back_label, tools_of},
     row_focus::RowFocus,
     rows::{Lane, ListRow, PropertyList, RowSpacing, Sequence},
+    sidebar::{AccountRow, GoalRow, brand_row, sidebar_label},
     skeleton::{Skeleton, SkeletonRow, SkeletonText},
     stars::Stars,
     surfaces::{Block, Rail, RailSection, blocks, panel},

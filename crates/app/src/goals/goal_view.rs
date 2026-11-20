@@ -9,11 +9,9 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{Disableable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
-    App, AppContext as _, Axis, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    App, AppContext as _, Axis, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, Render, SharedString, Styled as _, Subscription, Window, div,
     prelude::FluentBuilder as _, rems,
 };
@@ -21,9 +19,11 @@ use hardcover_core::auth::scopes::WRITE_GOALS;
 use hardcover_core::{Date, Goal, GoalId, GoalMetric, NewGoal};
 
 use super::model::GoalsModel;
+use super::sidebar::pace_percent;
 use crate::app_state::Services;
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{
-    goal_description, goal_pace, goal_period, goal_progress, goal_unit, needs_permission,
+    goal_amount, goal_description, goal_pace, goal_period, goal_unit, needs_permission,
     retargeted_description,
 };
 use crate::library::model::LibraryModel;
@@ -45,11 +45,12 @@ fn parse_target(text: &str) -> Option<u32> {
 }
 
 fn dialog_width(window: &Window) -> Pixels {
-    rems(30.).to_pixels(window.rem_size())
+    size::DIALOG_FORM.to_pixels(window.rem_size())
 }
 
+/// The forms' key column, as in a property list.
 fn label_width(window: &Window) -> Pixels {
-    rems(5.).to_pixels(window.rem_size())
+    size::KEY.to_pixels(window.rem_size())
 }
 
 /// Opens the dialog for one of the model's goals.
@@ -80,12 +81,19 @@ pub fn open_goal(
 /// Opens the form that creates a goal.
 pub fn open_new_goal(goals: Entity<GoalsModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| NewGoalView::new(goals, window, cx));
-    open_dialog(window, cx, move |dialog, window, _| {
-        dialog
-            .title("New reading goal")
-            .w(dialog_width(window))
-            .child(view.clone())
+    open_dialog(window, cx, {
+        let view = view.clone();
+        move |dialog, window, _| {
+            dialog
+                .title("New reading goal")
+                .w(dialog_width(window))
+                .child(view.clone())
+        }
     });
+    // After opening: the dialog gives focus back to whatever had it when it
+    // opened, which must be the row that opened it.
+    let target = view.read(cx).target.clone();
+    target.update(cx, |input, cx| input.focus(window, cx));
 }
 
 // ----- one goal -----
@@ -212,47 +220,53 @@ impl GoalView {
     }
 
     fn render_summary(&self, goal: &Goal, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
+        let colors = colors(cx);
         let percent = (goal.fraction() * 100.0).clamp(0.0, 999.0);
         let dates = format!(
             "{} – {}",
             goal.start.format("%b %-d, %Y"),
             goal.end.format("%b %-d, %Y")
         );
+        let target = format!(
+            "of {} {}",
+            goal.target,
+            goal_unit(&goal.metric, f64::from(goal.target))
+        );
+        // The figure as on Home's rail: "9" in display, "of 12 books" muted.
         v_flex()
             .gap_2()
             .child(
                 h_flex()
-                    .justify_between()
-                    .items_end()
+                    .gap_2()
+                    .items_baseline()
                     .child(
                         div()
-                            .text_2xl()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(goal_progress(goal)),
+                            .display_30()
+                            .child(goal_amount(&goal.metric, goal.progress)),
                     )
+                    .child(div().flex_1().text_color(colors.fg_muted).child(target))
                     .child(
                         div()
-                            .text_sm()
-                            .text_color(muted)
+                            .text_color(colors.fg_muted)
+                            .tabular()
                             .child(format!("{percent:.0}%")),
                     ),
             )
             .child(
                 Meter::new("goal-progress", percent.min(100.0) as f32)
+                    .pace(pace_percent(goal, today()))
                     .accessibility_label("Progress toward the goal"),
             )
             .child(
                 h_flex()
                     .justify_between()
                     .gap_2()
-                    .text_sm()
-                    .text_color(muted)
+                    .text_color(colors.fg_muted)
                     .children(goal_pace(goal, today()))
-                    .child(dates),
+                    .child(div().tabular().child(dates)),
             )
             .when(!goal.conditions.is_empty(), |this| {
-                this.child(div().text_xs().text_color(muted).child(
+                this.child(div().caption(cx).child(
                     "Only some books count toward this goal; its filters are set on hardcover.app.",
                 ))
             })
@@ -291,7 +305,7 @@ impl GoalView {
                                     .raised_field(reason.is_some() || writing, cx),
                             ),
                         )
-                        .child(div().text_sm().child(unit))
+                        .child(div().child(unit))
                         .child(
                             Button::new("save-goal-target")
                                 .label("Save")
@@ -304,19 +318,12 @@ impl GoalView {
                 ),
             )
             .when_some(reason, |this, reason| {
-                this.child(
-                    Field::new().child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(reason),
-                    ),
-                )
+                this.child(Field::new().child(div().caption(cx).child(reason)))
             })
     }
 
     fn render_finished(&self, goal: &Goal, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
+        let muted = colors(cx).fg_muted;
         let library = self.library.read(cx);
         let finished = GoalsModel::finished_in(goal, library.entries());
         let rows = finished.iter().map(|(entry, finished)| {
@@ -328,26 +335,28 @@ impl GoalView {
                 )))
                 .gap_2()
                 .justify_between()
-                .text_sm()
                 .child(div().min_w_0().truncate().child(entry.book.title.clone()))
-                .child(div().flex_shrink_0().text_color(muted).child(date))
+                .child(div().flex_shrink_0().caption(cx).tabular().child(date))
         });
         let count = finished.len();
         v_flex()
             .gap_2()
             .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .child(format!("Finished in this period ({count})")),
+                h_flex()
+                    .justify_between()
+                    .child(div().heading().child("Finished in this period"))
+                    .child(div().caption(cx).tabular().child(match count {
+                        1 => "1 book".to_owned(),
+                        n => format!("{n} books"),
+                    })),
             )
-            .child(div().text_xs().text_color(muted).child(
+            .child(div().caption(cx).child(
                 "From your library: books with a read finished between these dates. \
                  Hardcover counts the goal itself, so its number can differ.",
             ))
             .map(|this| {
                 if count == 0 {
-                    this.child(div().text_sm().text_color(muted).child("None yet."))
+                    this.child(div().text_color(muted).child("None yet."))
                 } else {
                     this.child(
                         v_flex()
@@ -366,27 +375,27 @@ impl Render for GoalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(goal) = self.goals.read(cx).goal(self.id).cloned() else {
             // Deleted meanwhile (e.g. from another window); nothing to show.
-            return v_flex().child(
+            return v_flex().body().child(
                 div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(colors(cx).fg_muted)
                     .child("This goal no longer exists."),
             );
         };
         let can_write = Services::global(cx).has_scope(WRITE_GOALS);
         let writing = self.goals.read(cx).is_writing();
+        // Dialogs don't inherit the shell's family, so the roles set it.
         v_flex()
-            .gap_5()
+            .gap_6()
+            .body()
             .child(self.render_summary(&goal, cx))
             .child(self.render_target(&goal, label_width(window), cx))
             .child(self.render_finished(&goal, cx))
             .when_some(self.error.clone(), |this, error| {
-                this.child(div().text_sm().text_color(cx.theme().danger).child(error))
+                this.child(div().text_color(colors(cx).danger).child(error))
             })
             .child(
                 h_flex().child(
                     Button::new("delete-goal")
-                        .ghost()
                         .danger()
                         .label("Delete goal…")
                         .disabled(!can_write || writing)
@@ -453,7 +462,6 @@ impl NewGoalView {
                 },
             ),
         ];
-        target.update(cx, |input, cx| input.focus(window, cx));
         Self {
             goals,
             metric: 0,
@@ -537,6 +545,7 @@ impl Render for NewGoalView {
             });
         v_flex()
             .gap_4()
+            .body()
             .child(
                 Form::new()
                     .label_layout(Axis::Horizontal)
@@ -553,7 +562,7 @@ impl Render for NewGoalView {
                                             .raised_field(writing, cx),
                                     ),
                                 )
-                                .child(div().text_sm().child(unit)),
+                                .child(div().child(unit)),
                         ),
                     )
                     .child(
@@ -578,13 +587,12 @@ impl Render for NewGoalView {
             .when(matches!(metric, GoalMetric::Hours), |this| {
                 this.child(
                     div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
+                        .caption(cx)
                         .child("Hours count time read and listened, as Hardcover tracks it."),
                 )
             })
             .when_some(self.error.clone(), |this, error| {
-                this.child(div().text_sm().text_color(cx.theme().danger).child(error))
+                this.child(div().text_color(colors(cx).danger).child(error))
             })
             .child(
                 h_flex()

@@ -10,6 +10,7 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::list::ListItem;
+use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
@@ -559,7 +560,45 @@ fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
                 .child(div().body().child("Current read")),
         )
         .section(
-            RailSection::new("Sidebar rows").child(div().bg(c.sidebar).p_2().children(nav_rows)),
+            RailSection::new("Sidebar rows").child(
+                div()
+                    .bg(c.sidebar)
+                    .p_2()
+                    .child(brand_row(cx))
+                    .children(nav_rows)
+                    .child(sidebar_label("Reading goal", cx))
+                    .child(
+                        GoalRow::new("g-goal", "2026", "9 of 12 books", 75.)
+                            .pace(Some(88.))
+                            .on_click(|_, _, _| {}),
+                    )
+                    .child(
+                        GoalRow::new("g-goal-dates", "By Jun 30", "1,200 of 5,000 pages", 24.)
+                            .pace(Some(61.))
+                            .on_click(|_, _, _| {}),
+                    )
+                    .child(sidebar_label("Lists", cx))
+                    .child(
+                        NavRow::new("g-new-list", IconName::Plus, "New list…")
+                            .muted(true)
+                            .on_click(|_, _, _| {}),
+                    )
+                    .child(
+                        NavRow::new("g-new-goal", IconName::Plus, "Set a reading goal…")
+                            .muted(true)
+                            .disabled(true)
+                            .tooltip(Some("Disabled: no permission")),
+                    )
+                    .child(
+                        AccountRow::new(
+                            "g-account",
+                            Avatar::new("demo_reader"),
+                            "demo_reader",
+                            "Updated just now",
+                        )
+                        .dropdown_menu(|menu, _, _| menu.label("The account menu")),
+                    ),
+            ),
         )
 }
 
