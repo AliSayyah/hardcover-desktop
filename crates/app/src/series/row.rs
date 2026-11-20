@@ -32,13 +32,13 @@ use super::progress::{
 };
 use crate::app_state::Services;
 use crate::bidi::is_rtl;
+use crate::book::progress_dialog::open_progress;
 use crate::catalog::navigation::Page;
 use crate::chip::{StatusChip, status_icon};
 use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, needs_permission, progress_summary};
 use crate::home::home_view::paused_text;
-use crate::book::progress_dialog::open_progress;
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::ui::focus::{keyed_focus, reveal_when};
 use crate::ui::{SeriesStrip, StripItem, TextButton};
