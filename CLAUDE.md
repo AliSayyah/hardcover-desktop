@@ -23,6 +23,17 @@ cargo run -p hardcover-core --example api_check                   # check the li
 cargo run -p hardcover-core --example api_check -- --check        # same, without writing; exit 1 on any change
 ```
 
+The `justfile` wraps these; `just` lists the recipes.
+- `just check` runs fmt-check, clippy (`-D warnings`) and the tests.
+- `just ci` adds `cargo deny`, the packaging validation and actionlint.
+- `just package` builds the release tarball into `target/package/`.
+- `just api-check` is `api_check --check`; `just schema-update` is the run that rewrites `schema/`.
+- `just release patch` makes a whole release, from the PR to the published GitHub release (below, under CI and releases).
+- Only the live-API recipes load `.env`; `just run` never does, so a token there can't bypass OAuth.
+- The recipes that write to the real account, and `oauth-login`, ask for confirmation.
+
+Keep the justfile in step when a command here changes.
+
 `api_check` is local only and is not run in CI. It uses `HARDCOVER_TOKEN` if set, otherwise the app's keyring session; both see the same schema. It does three things:
 1. Introspects the live schema and lists added, removed and changed types and fields.
 2. Validates every document in `queries::ALL` against the live schema.
@@ -159,6 +170,22 @@ Use the bundled `gpui-kit` and `gpui-kit-design-guides` skills, in `.claude/skil
   1. Bump `version` in `crates/app/Cargo.toml`.
   2. Add a `<release>` to `packaging/linux/io.github.alisayyah.HardcoverDesktop.metainfo.xml`.
   3. Push a `vX.Y.Z` tag.
+
+  `just release <patch|minor|major|X.Y.Z>` (`scripts/release.sh ship`) does all of it. It asks once, then:
+  - bumps `origin/master` in a temporary worktree (never the current checkout): the version, `Cargo.lock`, and a `<release>` dated today;
+  - pushes `release-X.Y.Z` and opens the "Release X.Y.Z" PR, assigned to the user, listing the commits since the last tag;
+  - waits for its CI run, then squash-merges it as "Release X.Y.Z (#N)" and deletes the branch;
+  - waits for CI on the merge commit, then pushes the annotated tag `vX.Y.Z` ("Hardcover Desktop X.Y.Z");
+  - follows `release.yml` until the GitHub release exists, and prints its URL.
+
+  It refuses a version that isn't newer than the current one and the latest tag, and a release with no commits since the last tag. After a failure (red CI, say), fix it and run `just release` again with no level: it resumes an open `release-*` PR, a bump on master that has no tag yet, or a tag that hasn't been published. `--yes` skips the question; without a terminal it is required.
+
+  The steps also run on their own:
+  - `just bump <level>` edits this checkout and commits nothing.
+  - `just release-pr <level>` only opens the PR.
+  - `just release-tag` only tags `origin/master` (CI there must already have passed; it asks first) and follows the release build.
+
+  It merges only a PR from this repository (never a fork's), into master, whose diff is exactly the bump (`Cargo.lock` and `crates/app/Cargo.toml` +1 −1, the metainfo +1) and whose head holds the expected version; anything else stops it before CI is even awaited. Keep that check in step if the bump ever changes more files.
 
   `release.yml` checks that the three versions agree, builds with `--profile dist` (thin LTO, stripped), packs a tarball (`packaging/linux/package.sh`) and creates the GitHub release. Running it by hand builds the tarball as an artifact without publishing anything.
 

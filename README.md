@@ -154,6 +154,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+With [just](https://github.com/casey/just) installed, `just check` runs all three (formatting is checked, not applied), and `just` lists the other tasks: the demo, the release tarball, `cargo deny`, packaging validation.
+
 ## Licence
 
 [MIT](LICENSE). Hardcover is a trademark of its owners; this project only uses its public API.
