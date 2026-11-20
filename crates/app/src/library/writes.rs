@@ -9,7 +9,7 @@ use super::model::LibraryModel;
 use crate::app_state::Services;
 
 /// Adds a book with `status` in the background and applies the returned entry.
-pub fn add_to_library(
+pub(crate) fn add_to_library(
     library: Entity<LibraryModel>,
     book: BookId,
     status: ReadingStatus,
@@ -45,7 +45,7 @@ pub fn add_to_library(
 }
 
 /// Changes an entry's status in the background and applies the returned entry.
-pub fn set_status(
+pub(crate) fn set_status(
     library: Entity<LibraryModel>,
     id: UserBookId,
     status: ReadingStatus,

@@ -86,7 +86,7 @@ pub fn page_list<D: ListDelegate>(list: &Entity<ListState<D>>) -> List<D> {
 
 /// Gives the list focus after a catalogue page loads, if the page's fallback
 /// control still owns focus.
-pub fn focus_list_if_fallback_is_focused(
+pub(super) fn focus_list_if_fallback_is_focused(
     list: &Entity<ListState<CatalogBooks>>,
     fallback: Option<FocusHandle>,
     window: &mut Window,
