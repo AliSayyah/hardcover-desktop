@@ -1,14 +1,16 @@
 //! The Home destination, shown at launch: the books being read with their
-//! pace, the reading goal, and what to read next. Everything comes from the
-//! library on this computer and the goals already loaded; Home asks Hardcover
-//! for nothing until the reader acts.
+//! pace, books finished lately to rate, the reading goal, and what to read
+//! next. Everything comes from the library on this computer and the goals
+//! already loaded; Home asks Hardcover for nothing until the reader acts.
 
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex,
     v_flex,
@@ -21,12 +23,15 @@ use gpui_kit::{
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_LIBRARY};
 use hardcover_core::{
-    Client, Date, Error, Goal, GoalMetric, LibraryEntry, ReadingStatus, UserBookId,
+    Client, Date, Error, Goal, GoalMetric, LibraryEntry, Rating, ReadingStatus, UserBookId,
 };
 
-use super::digest::{Digest, Reading, SeriesNext, compute, finished_per_month, finishing_by};
+use super::digest::{
+    Digest, Reading, SeriesNext, ToRate, compute, finished_per_month, finishing_by, to_rate,
+};
 use super::progress_dialog::open_progress;
 use crate::app_state::{Services, cover_thumbnail};
+use crate::book::star_rating::StarRating;
 use crate::catalog::navigation::{self, Page};
 use crate::format::{
     authors_text, goal_amount, goal_pace, goal_period, goal_unit, needs_permission,
@@ -44,6 +49,11 @@ pub struct HomeView {
     focus_handle: FocusHandle,
     /// The digest and the library revision and date it was computed for.
     computed: Option<(u64, Date, Rc<Digest>)>,
+    /// Books rated on Home since it was last opened from the sidebar: their
+    /// rows stay, so the rating can still be changed.
+    rated_here: HashSet<UserBookId>,
+    /// A rating being saved, shown until the write lands.
+    saving_ratings: HashMap<UserBookId, Option<Rating>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -68,12 +78,23 @@ impl HomeView {
             goals,
             focus_handle: cx.focus_handle(),
             computed: None,
+            rated_here: HashSet::new(),
+            saving_ratings: HashMap::new(),
             _subscriptions: subscriptions,
         }
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         window.focus(&self.focus_handle, cx);
+    }
+
+    /// Home was opened from the sidebar: books rated on the last visit leave
+    /// "Rate what you finished". Coming back from a book page keeps them.
+    pub fn opened(&mut self, cx: &mut Context<Self>) {
+        if !self.rated_here.is_empty() {
+            self.rated_here.clear();
+            cx.notify();
+        }
     }
 
     fn digest(&mut self, today: Date, cx: &App) -> Rc<Digest> {
@@ -149,6 +170,35 @@ impl HomeView {
             WriteKind::Status,
             "Couldn't change the status",
             move |client| client.set_status(id, status),
+            window,
+            cx,
+        );
+    }
+
+    fn rate(
+        &mut self,
+        id: UserBookId,
+        rating: Option<Rating>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let model = self.model.read(cx);
+        // A change while the last one saves is dropped: the stars stay
+        // enabled during a save only so that they keep the keyboard focus.
+        if model.pending_write(id).is_some() {
+            return;
+        }
+        let Some(keep) = model.entry(id).map(|e| e.status) else {
+            return;
+        };
+        self.rated_here.insert(id);
+        self.saving_ratings.insert(id, rating);
+        // Sending the status keeps Hardcover from starting a new read.
+        self.write(
+            id,
+            WriteKind::Rating,
+            "Couldn't save the rating",
+            move |client| client.set_rating(id, rating, keep),
             window,
             cx,
         );
@@ -419,6 +469,103 @@ impl HomeView {
             .into_any_element()
     }
 
+    /// Books finished lately with no rating, each with its stars. Hidden
+    /// without `write:library`, as there is nothing to do in it then.
+    fn render_rate(
+        &self,
+        rows: &[ToRate],
+        unrated: usize,
+        today: Date,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::Div {
+        let library = self.model.read(cx);
+        let books: Vec<(Date, LibraryEntry)> = rows
+            .iter()
+            .filter_map(|r| Some((r.finished, library.entry(r.id)?.clone())))
+            .collect();
+        let rows = books
+            .iter()
+            .enumerate()
+            .map(|(ix, (finished, entry))| self.rate_row(ix, entry, *finished, today, window, cx))
+            .collect::<Vec<_>>();
+        section(
+            "Rate what you finished",
+            (unrated > 0).then_some(unrated),
+            cx,
+        )
+        .child(v_flex().children(rows))
+    }
+
+    fn rate_row(
+        &self,
+        ix: usize,
+        entry: &LibraryEntry,
+        finished: Date,
+        today: Date,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = entry.user_book_id;
+        let pending = self.model.read(cx).pending_write(id);
+        let rating = match self.saving_ratings.get(&id) {
+            Some(saving) if pending == Some(WriteKind::Rating) => *saving,
+            _ => entry.rating,
+        };
+        let muted = cx.theme().muted_foreground;
+        let mut byline = authors_text(&entry.book.authors);
+        let finished_text = format!("Finished {}", short_date(finished, today));
+        byline = if byline.is_empty() {
+            finished_text
+        } else {
+            format!("{byline} · {finished_text}")
+        };
+        h_flex()
+            .id(SharedString::from(format!("home-rate-{id}")))
+            .gap_3()
+            .py_1p5()
+            .when(ix > 0, |this| {
+                this.border_t_1().border_color(cx.theme().border)
+            })
+            .child(cover(entry, CoverSize::Small, window, cx))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(title_button("home-rate-title", entry, FontWeight::MEDIUM))
+                    .child(div().text_sm().text_color(muted).truncate().child(byline)),
+            )
+            .child(
+                h_flex()
+                    .flex_shrink_0()
+                    .gap_2()
+                    .child(
+                        StarRating::new(SharedString::from(format!("home-stars-{id}")))
+                            .value(rating)
+                            .on_change(cx.listener(
+                                move |this, rating: &Option<Rating>, window, cx| {
+                                    this.rate(id, *rating, window, cx)
+                                },
+                            )),
+                    )
+                    // Fixed width, so the stars line up from row to row.
+                    .child(
+                        div()
+                            .w(rems(1.75))
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .map(|this| {
+                                if pending == Some(WriteKind::Rating) {
+                                    this.child(Spinner::new().small())
+                                } else {
+                                    this.children(rating.map(rating_text))
+                                }
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_goal(
         &self,
         goal: &Goal,
@@ -641,7 +788,16 @@ impl Render for HomeView {
             return root.into_any_element();
         }
         let goal = self.goal(today, cx);
-        if digest.is_empty() && goal.is_none() {
+        let model = self.model.read(cx);
+        let (rate_rows, unrated) = if Services::global(cx).has_scope(WRITE_LIBRARY) {
+            to_rate(model.entries(), today, &self.rated_here)
+        } else {
+            (Vec::new(), 0)
+        };
+        // A rating stays on screen only while it is being saved.
+        self.saving_ratings
+            .retain(|id, _| model.pending_write(*id) == Some(WriteKind::Rating));
+        if digest.is_empty() && rate_rows.is_empty() && goal.is_none() {
             return root
                 .child(empty_state(
                     IconName::LayoutDashboard,
@@ -654,6 +810,8 @@ impl Render for HomeView {
         let up_next = (digest.want_to_read > 0).then(|| self.render_up_next(&digest, window, cx));
         let goal_card = goal.map(|g| self.render_goal(&g, &digest, today, cx));
         let reading = self.render_reading(&digest, today, window, cx);
+        let rate = (!rate_rows.is_empty())
+            .then(|| self.render_rate(&rate_rows, unrated, today, window, cx));
         root.overflow_y_scrollbar()
             .child(
                 v_flex()
@@ -680,6 +838,7 @@ impl Render for HomeView {
                             ),
                     )
                     .child(reading)
+                    .children(rate)
                     .when(goal_card.is_some() || up_next.is_some(), |this| {
                         this.child(
                             h_flex()

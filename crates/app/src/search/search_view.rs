@@ -6,12 +6,17 @@
 //! newer results. Each kind keeps its own results and request: only the kind
 //! shown is searched, and switching kinds searches the current query there.
 //!
+//! Book results start with the matching books of the library, found on this
+//! computer as the query changes ("In your library"), followed by Hardcover's
+//! results without them ("On Hardcover").
+//!
 //! Books open in the detail pane beside the list. Authors and series open
 //! their pages, on Enter or a click.
 //!
 //! Down or Enter in the query field moves into the results, selecting the
 //! first row when none is, so the focus is visible where it lands.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -22,9 +27,9 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, h_resizable, resizable_panel, v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window,
-    actions, div, prelude::FluentBuilder as _,
+    AnyElement, App, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task,
+    WeakEntity, Window, actions, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{AuthorHit, BookId, BookSummary, Client, SearchHits, SeriesHit};
@@ -36,6 +41,7 @@ use crate::format::{author_hit_details, series_hit_details};
 use crate::library::book_row::BookRow;
 use crate::library::library_view::empty_state;
 use crate::library::model::LibraryModel;
+use crate::search::library_matches::{counts_as_shelved, library_matches};
 use crate::search::results::{Hit, Phase, SearchResults};
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
@@ -88,6 +94,14 @@ pub trait SearchHit: Hit + Clone + Send + 'static {
     fn hint() -> &'static str;
     fn row_id(&self) -> (&'static str, u64);
     fn name(&self) -> SharedString;
+    /// The library's own matches for `query`, shown before Hardcover's.
+    fn library_matches(_: &LibraryModel, _: &str) -> Vec<Self> {
+        Vec::new()
+    }
+    /// Whether a library match is still in the library.
+    fn in_library(&self, _: &LibraryModel) -> bool {
+        false
+    }
 }
 
 impl SearchHit for BookSummary {
@@ -116,6 +130,16 @@ impl SearchHit for BookSummary {
 
     fn name(&self) -> SharedString {
         self.title.clone().into()
+    }
+
+    fn library_matches(model: &LibraryModel, query: &str) -> Vec<Self> {
+        library_matches(model.entries(), query)
+    }
+
+    fn in_library(&self, model: &LibraryModel) -> bool {
+        model
+            .entry_for_book(self.id)
+            .is_some_and(|e| counts_as_shelved(e.status))
     }
 }
 
@@ -187,15 +211,113 @@ impl SearchHit for SeriesHit {
 
 pub struct ResultsDelegate<T: SearchHit> {
     results: SearchResults<T>,
+    /// The library's matches, the first section when there are any.
+    library: Vec<T>,
+    library_keys: HashSet<T::Key>,
     model: Entity<LibraryModel>,
     view: WeakEntity<SearchView>,
+}
+
+impl<T: SearchHit> ResultsDelegate<T> {
+    fn set_library(&mut self, hits: Vec<T>) {
+        self.library_keys = hits.iter().map(Hit::key).collect();
+        self.library = hits;
+    }
+
+    /// With library matches the list has two sections, else one: section 0
+    /// always has the first row, as the list's own keyboard handling expects.
+    fn has_library(&self) -> bool {
+        !self.library.is_empty()
+    }
+
+    /// Hardcover's results, without the ones shown as library matches.
+    fn remote(&self) -> impl Iterator<Item = &T> {
+        self.results
+            .hits()
+            .iter()
+            .filter(|h| !self.library_keys.contains(&h.key()))
+    }
+
+    fn hit_at(&self, ix: IndexPath) -> Option<&T> {
+        if self.has_library() && ix.section == 0 {
+            self.library.get(ix.row)
+        } else {
+            self.remote().nth(ix.row)
+        }
+    }
+
+    fn index_of(&self, key: T::Key) -> Option<IndexPath> {
+        if let Some(row) = self.library.iter().position(|h| h.key() == key) {
+            return Some(IndexPath::new(row));
+        }
+        let section = usize::from(self.has_library());
+        self.remote()
+            .position(|h| h.key() == key)
+            .map(|row| IndexPath::new(row).section(section))
+    }
+
+    fn first(&self) -> Option<&T> {
+        self.hit_at(IndexPath::default())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.library.is_empty() && self.results.hits().is_empty()
+    }
+
+    /// Hardcover's results so far that are left out as library matches.
+    fn hidden_duplicates(&self) -> u32 {
+        self.results.hits().len() as u32 - self.remote().count() as u32
+    }
+}
+
+/// "2 in your library · 14 more on Hardcover": Hardcover's total less the
+/// library matches among its results. One on a page not loaded yet is still
+/// counted, so until it loads the number is a little high.
+fn library_status(library: usize, total: u32, duplicates: u32) -> SharedString {
+    match total.saturating_sub(duplicates) {
+        0 => format!("{library} in your library").into(),
+        more => format!("{library} in your library · {more} more on Hardcover").into(),
+    }
 }
 
 impl<T: SearchHit> ListDelegate for ResultsDelegate<T> {
     type Item = ListItem;
 
-    fn items_count(&self, _: usize, _: &App) -> usize {
-        self.results.hits().len()
+    fn sections_count(&self, _: &App) -> usize {
+        1 + usize::from(self.has_library())
+    }
+
+    fn items_count(&self, section: usize, _: &App) -> usize {
+        if self.has_library() && section == 0 {
+            self.library.len()
+        } else {
+            self.remote().count()
+        }
+    }
+
+    fn render_section_header(
+        &mut self,
+        section: usize,
+        _: &mut Window,
+        cx: &mut Context<ListState<Self>>,
+    ) -> Option<impl IntoElement> {
+        if !self.has_library() {
+            return None;
+        }
+        Some(
+            div()
+                .px_3()
+                .pt_2()
+                .pb_1()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(cx.theme().muted_foreground)
+                .child(if section == 0 {
+                    "In your library"
+                } else {
+                    "On Hardcover"
+                }),
+        )
     }
 
     fn render_item(
@@ -204,7 +326,7 @@ impl<T: SearchHit> ListDelegate for ResultsDelegate<T> {
         _: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let hit = self.results.hits().get(ix.row)?;
+        let hit = self.hit_at(ix)?;
         Some(
             ListItem::new(hit.row_id())
                 .accessibility_label(hit.name())
@@ -312,7 +434,7 @@ impl SearchView {
                         ListEvent::Select(ix) | ListEvent::Confirm(ix) => *ix,
                         ListEvent::Cancel => return,
                     };
-                    let book = list.read(cx).delegate().results.hits().get(ix.row).cloned();
+                    let book = list.read(cx).delegate().hit_at(ix).cloned();
                     if let Some(book) = book {
                         this.select(book, window, cx);
                     }
@@ -323,7 +445,7 @@ impl SearchView {
                 &authors,
                 |_, list: Entity<ListState<ResultsDelegate<AuthorHit>>>, event: &ListEvent, cx| {
                     if let ListEvent::Confirm(ix) = event {
-                        let author = list.read(cx).delegate().results.hits().get(ix.row).cloned();
+                        let author = list.read(cx).delegate().hit_at(*ix).cloned();
                         if let Some(author) = author {
                             navigation::open(Page::Author(author.id), cx);
                         }
@@ -334,16 +456,32 @@ impl SearchView {
                 &series,
                 |_, list: Entity<ListState<ResultsDelegate<SeriesHit>>>, event: &ListEvent, cx| {
                     if let ListEvent::Confirm(ix) = event {
-                        let series = list.read(cx).delegate().results.hits().get(ix.row).cloned();
+                        let series = list.read(cx).delegate().hit_at(*ix).cloned();
                         if let Some(series) = series {
                             navigation::open(Page::Series(series.id), cx);
                         }
                     }
                 },
             ),
-            // Status badges follow library changes.
-            cx.observe(&model, |this, _, cx| {
-                this.books.update(cx, |_, cx| cx.notify())
+            // Status badges follow library changes, and a book that left the
+            // library leaves its matches. New matches wait for the next query:
+            // adding the selected book mustn't move it under the pointer.
+            cx.observe_in(&model, window, |this, model, window, cx| {
+                this.books.update(cx, |list, cx| {
+                    let library = model.read(cx);
+                    let delegate = list.delegate_mut();
+                    if delegate.library.iter().any(|b| !b.in_library(library)) {
+                        let kept = delegate
+                            .library
+                            .iter()
+                            .filter(|b| b.in_library(library))
+                            .cloned()
+                            .collect();
+                        delegate.set_library(kept);
+                    }
+                    cx.notify();
+                });
+                this.sync_list_selection(window, cx);
             }),
         ];
         Self {
@@ -374,7 +512,7 @@ impl SearchView {
             SearchKind::Books => {
                 let list = &self.books.read(cx);
                 let first = match list.selected_index() {
-                    None => list.delegate().results.hits().first().cloned(),
+                    None => list.delegate().first().cloned(),
                     Some(_) => None,
                 };
                 if let Some(book) = first {
@@ -445,7 +583,11 @@ impl SearchView {
         cx: &mut Context<Self>,
     ) {
         let revision = T::list(self).update(cx, |list, cx| {
-            let revision = list.delegate_mut().results.start(query.trim().into());
+            let delegate = list.delegate_mut();
+            let revision = delegate.results.start(query.trim().into());
+            // The library's matches show at once; Hardcover's follow.
+            let library = T::library_matches(delegate.model.read(cx), query.trim());
+            delegate.set_library(library);
             cx.notify();
             revision
         });
@@ -517,15 +659,7 @@ impl SearchView {
     fn sync_list_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let selected = self.selected;
         self.books.update(cx, |list, cx| {
-            let ix = selected
-                .and_then(|id| {
-                    list.delegate()
-                        .results
-                        .hits()
-                        .iter()
-                        .position(|b| b.id == id)
-                })
-                .map(IndexPath::new);
+            let ix = selected.and_then(|id| list.delegate().index_of(id));
             if list.selected_index() != ix {
                 list.set_selected_index(ix, window, cx);
             }
@@ -616,6 +750,8 @@ fn new_results_list<T: SearchHit>(
         ListState::new(
             ResultsDelegate {
                 results: SearchResults::default(),
+                library: Vec::new(),
+                library_keys: HashSet::new(),
                 model: model.clone(),
                 view: view.clone(),
             },
@@ -631,7 +767,7 @@ fn focus_list<T: SearchHit>(
     window: &mut Window,
     cx: &mut App,
 ) {
-    if list.read(cx).delegate().results.hits().is_empty() {
+    if list.read(cx).delegate().is_empty() {
         return;
     }
     list.update(cx, |list, cx| {
@@ -648,15 +784,22 @@ fn results_status<T: SearchHit>(
     list: &Entity<ListState<ResultsDelegate<T>>>,
     cx: &App,
 ) -> (Option<SharedString>, bool, AnyElement) {
-    let results = &list.read(cx).delegate().results;
+    let delegate = list.read(cx).delegate();
+    let results = &delegate.results;
     let status: Option<SharedString> = match results.phase() {
         Phase::Searching => Some("Searching…".into()),
         Phase::LoadingMore => Some("Loading more…".into()),
-        Phase::Loaded => results.total().map(|t| match t {
-            1 => "1 result".into(),
-            n => format!("{n} results").into(),
+        Phase::Loaded => results.total().map(|total| {
+            if delegate.has_library() {
+                library_status(delegate.library.len(), total, delegate.hidden_duplicates())
+            } else if total == 1 {
+                "1 result".into()
+            } else {
+                format!("{total} results").into()
+            }
         }),
-        Phase::Failed(message) if !results.hits().is_empty() => Some(message.clone().into()),
+        // Shown above any rows; with none, the empty list says it.
+        Phase::Failed(message) if !delegate.is_empty() => Some(message.clone().into()),
         _ => None,
     };
     let busy = matches!(results.phase(), Phase::Searching | Phase::LoadingMore);
