@@ -702,7 +702,7 @@ impl RawSearch {
 
 /// `results` is the Typesense response: `{found, page, hits: [{document: {...}}]}`.
 /// Hits without a usable id are skipped.
-pub(crate) fn search_page(raw: RawSearch, page: u32, per_page: u32) -> SearchPage {
+pub(crate) fn search_page(raw: &RawSearch, page: u32, per_page: u32) -> SearchPage {
     let results = &raw.results;
     let books = results
         .get("hits")
@@ -812,7 +812,7 @@ impl GoalPayload {
 /// document's own `id` is preferred; `ids[i]` stands in only when `ids` lines up
 /// with the hits. Hits without a usable id or name are skipped.
 pub(crate) fn search_hits<T>(
-    raw: RawSearch,
+    raw: &RawSearch,
     page: u32,
     per_page: u32,
     parse: impl Fn(&Value, Option<i64>) -> Option<T>,

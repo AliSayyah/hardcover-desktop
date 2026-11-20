@@ -267,7 +267,7 @@ impl Client {
             return Ok(SearchPage::new(Vec::new(), page, SEARCH_PER_PAGE));
         }
         let raw = self.raw_search("SearchBooks", queries::SEARCH_BOOKS, query, page)?;
-        Ok(search_page(raw, page, SEARCH_PER_PAGE))
+        Ok(search_page(&raw, page, SEARCH_PER_PAGE))
     }
 
     /// Author search, ranked as on the website. Like [`Client::search_books`]
@@ -308,7 +308,7 @@ impl Client {
             return Ok(SearchHits::new(Vec::new(), page, SEARCH_PER_PAGE));
         }
         let raw = self.raw_search(op, doc, query, page)?;
-        Ok(search_hits(raw, page, SEARCH_PER_PAGE, parse))
+        Ok(search_hits(&raw, page, SEARCH_PER_PAGE, parse))
     }
 
     fn raw_search(&self, op: &str, doc: &str, query: &str, page: u32) -> Result<RawSearch> {

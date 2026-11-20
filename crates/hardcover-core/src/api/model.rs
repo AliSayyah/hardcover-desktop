@@ -1126,7 +1126,7 @@ impl<T> SearchHits<T> {
 fn has_more(page: u32, per_page: u32, total: Option<u32>, item_count: usize) -> bool {
     match total {
         Some(total) => u64::from(page) * u64::from(per_page) < u64::from(total),
-        None => item_count as u32 >= per_page,
+        None => item_count >= per_page as usize,
     }
 }
 
