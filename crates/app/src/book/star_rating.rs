@@ -18,6 +18,7 @@ use gpui_kit::{
 };
 use hardcover_core::Rating;
 
+use crate::design::colors;
 use crate::star;
 
 /// Key context of the control; its bindings live in `main`.
@@ -137,11 +138,11 @@ impl RenderOnce for StarRating {
 
         // A hover previews the value it would set, lighter than a set one.
         let filled_color = if hovered.is_some() {
-            star::color(cx).opacity(0.55)
+            colors(cx).gold.opacity(0.55)
         } else {
-            star::color(cx)
+            colors(cx).gold
         };
-        let empty_color = star::empty_color(cx);
+        let empty_color = colors(cx).star_empty;
         let label = match value {
             Some(r) => format!("Rating: {} of 5 stars", r.value()),
             None => "Rating: not rated".to_owned(),

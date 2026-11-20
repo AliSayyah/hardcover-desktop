@@ -327,6 +327,34 @@ pub fn colors(cx: &App) -> &'static Palette {
     }
 }
 
+/// A colour that comes as data, such as a reviewer's Hardcover colour
+/// (`cached_image.color`): not a UI colour, so it has no token.
+pub fn data_color([r, g, b]: [u8; 3]) -> Hsla {
+    Rgba {
+        r: f32::from(r) / 255.,
+        g: f32::from(g) / 255.,
+        b: f32::from(b) / 255.,
+        a: 1.,
+    }
+    .into()
+}
+
+/// Text on a data colour ([`data_color`]): near-black ink on a light one,
+/// white on a dark one, in both themes.
+pub fn text_on_data([r, g, b]: [u8; 3]) -> Hsla {
+    if is_light([r, g, b]) {
+        LIGHT.fg.into()
+    } else {
+        LIGHT.raised.into()
+    }
+}
+
+/// Whether text on `rgb` should be dark (its luma is high).
+fn is_light([r, g, b]: [u8; 3]) -> bool {
+    let luma = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
+    luma > 160.0
+}
+
 /// The cloth colour for a title: a stable hash of its code points, the same
 /// as the mockup's (`h = 7; h = h * 31 + c mod 2^32`), so a book always gets
 /// the same cloth.
@@ -398,6 +426,15 @@ mod tests {
         assert_eq!(cloth_index("Dune"), 7);
         assert_eq!(cloth_index("Untitled Empyrean #4"), 4);
         assert_eq!(cloth_index("ملت عشق"), 3);
+    }
+
+    #[test]
+    fn light_data_colours_get_dark_text() {
+        assert!(is_light([0xf5, 0xe6, 0x80]));
+        assert!(!is_light([0x33, 0x66, 0x99]));
+        assert_eq!(rgb(text_on_data([0xf5, 0xe6, 0x80])), [0x1F, 0x1C, 0x17]);
+        assert_eq!(rgb(text_on_data([0x33, 0x66, 0x99])), [0xFF, 0xFF, 0xFF]);
+        assert_eq!(rgb(data_color([0x33, 0x66, 0x99])), [0x33, 0x66, 0x99]);
     }
 
     #[test]

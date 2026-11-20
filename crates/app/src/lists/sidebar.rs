@@ -33,7 +33,7 @@ pub fn lists_group(
         return None;
     }
     let can_write = services.has_scope(WRITE_LISTS);
-    let muted = cx.theme().sidebar_foreground.opacity(0.7);
+    let muted = cx.theme().muted_foreground;
     let mut items: Vec<SidebarMenuItem> = model
         .lists()
         .iter()

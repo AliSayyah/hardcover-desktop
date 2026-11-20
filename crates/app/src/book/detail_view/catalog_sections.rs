@@ -17,8 +17,9 @@ use super::{BookDetailView, Details, section};
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::catalog::navigation::{self, Page};
-use crate::chip::{TAG_HEIGHT, TagChip};
+use crate::chip::TagChip;
 use crate::cover::{Cover, CoverSize};
+use crate::design::{colors, size};
 use crate::format::{authors_text, series_position_text};
 
 /// Similar books fetched for one book.
@@ -233,7 +234,7 @@ impl BookDetailView {
                                 .flex_1()
                                 .h_2()
                                 .rounded(cx.theme().radius)
-                                .bg(cx.theme().muted)
+                                .bg(colors(cx).track)
                                 .child(
                                     div()
                                         .h_full()
@@ -298,7 +299,7 @@ impl BookDetailView {
                                 .w(rems(6.))
                                 .pr_2()
                                 .text_sm()
-                                .line_height(rems(TAG_HEIGHT))
+                                .line_height(size::CHIP)
                                 .text_color(muted)
                                 .child(label),
                         )

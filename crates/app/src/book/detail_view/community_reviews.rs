@@ -14,9 +14,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::link::Link;
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, FontWeight, Hsla, IntoElement, ParentElement as _,
-    SharedString, Styled as _, Subscription, Task, Window, black, div, prelude::FluentBuilder as _,
-    relative, rgb, white,
+    AnyElement, AppContext as _, Context, FontWeight, IntoElement, ParentElement as _,
+    SharedString, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
+    relative,
 };
 use hardcover_core::auth::scopes::READ_SOCIAL;
 use hardcover_core::{BookId, CommunityReview, Rating, Reviewer, UserBookId};
@@ -24,6 +24,7 @@ use hardcover_core::{BookId, CommunityReview, Rating, Reviewer, UserBookId};
 use super::{BookDetailView, Details, section};
 use crate::app_state::{Services, cover_thumbnail};
 use crate::bidi::{WrappingText, is_rtl};
+use crate::design::color::{colors, data_color, text_on_data};
 use crate::format::{count_text, date_text};
 
 /// Reviews wait this long after the details, a little longer than similar
@@ -421,12 +422,8 @@ fn reviewer_avatar(
             .src(image)
             .into_any_element(),
         (None, Some([r, g, b])) => {
-            let background = rgb(u32::from_be_bytes([0, r, g, b]));
-            let foreground: Hsla = if is_light([r, g, b]) {
-                black()
-            } else {
-                white()
-            };
+            let background = data_color([r, g, b]);
+            let foreground = text_on_data([r, g, b]);
             div()
                 .flex_shrink_0()
                 .size_6()
@@ -449,11 +446,6 @@ fn reviewer_avatar(
 }
 
 /// True if dark text reads better than white on this colour.
-fn is_light([r, g, b]: [u8; 3]) -> bool {
-    let luma = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
-    luma > 160.0
-}
-
 /// One or two letters for an avatar: the first letter of the first and last
 /// words. "@user" counts from the letter after the "@".
 fn initials(name: &str) -> String {
@@ -475,7 +467,7 @@ fn initials(name: &str) -> String {
 /// never gold.
 fn stars(rating: Rating, cx: &Context<BookDetailView>) -> impl IntoElement {
     let filled = cx.theme().muted_foreground;
-    let empty = crate::star::empty_color(cx);
+    let empty = colors(cx).star_empty;
     let value = rating.value();
     h_flex().gap_0p5().children((1..=5).map(move |position| {
         let position = position as f32;
@@ -579,11 +571,5 @@ mod tests {
         assert_eq!(initials("@quill_reads"), "Q");
         assert_eq!(initials("شیرین"), "ش");
         assert_eq!(initials(""), "");
-    }
-
-    #[test]
-    fn light_colours_get_dark_text() {
-        assert!(is_light([0xf5, 0xe6, 0x80]));
-        assert!(!is_light([0x33, 0x66, 0x99]));
     }
 }

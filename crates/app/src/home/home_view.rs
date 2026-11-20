@@ -36,6 +36,7 @@ use crate::app_state::Services;
 use crate::book::star_rating::StarRating;
 use crate::catalog::navigation::{self, Page};
 use crate::cover::{Cover, CoverSize};
+use crate::design::colors;
 use crate::format::{
     authors_text, goal_amount, goal_pace, goal_period, goal_unit, needs_permission,
     progress_summary, rating_text, series_position_text,
@@ -449,7 +450,7 @@ impl HomeView {
             .px_3()
             .py_2()
             .rounded(cx.theme().radius_lg)
-            .bg(cx.theme().muted)
+            .bg(colors(cx).surface)
             .child(cover(entry, CoverSize::Sm, false))
             .child(
                 h_flex()
@@ -743,7 +744,7 @@ impl HomeView {
             .gap_3()
             .p_3()
             .rounded(cx.theme().radius_lg)
-            .bg(cx.theme().muted)
+            .bg(colors(cx).surface)
             .child(cover(entry, CoverSize::Md, true))
             .child(
                 v_flex()
@@ -999,7 +1000,7 @@ fn goal_bar(fraction: f32, expected: Option<f32>, cx: &App) -> impl IntoElement 
         .w_full()
         .h(height)
         .rounded_full()
-        .bg(cx.theme().progress_bar.opacity(0.2))
+        .bg(colors(cx).track)
         .child(
             div()
                 .absolute()

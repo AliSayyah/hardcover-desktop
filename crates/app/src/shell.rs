@@ -623,7 +623,7 @@ impl Workspace {
             item.suffix(move |_, cx| {
                 div()
                     .text_xs()
-                    .text_color(cx.theme().sidebar_foreground.opacity(0.7))
+                    .text_color(cx.theme().muted_foreground)
                     .child(count.to_string())
             })
         });
@@ -839,7 +839,7 @@ impl Workspace {
     fn render_account(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let model = self.model.read(cx);
         let user = model.user().cloned();
-        let muted = cx.theme().sidebar_foreground.opacity(0.7);
+        let muted = cx.theme().muted_foreground;
         let (status_icon, status_text): (Option<AnyElement>, SharedString) =
             match model.sync_status() {
                 SyncStatus::Syncing => (
