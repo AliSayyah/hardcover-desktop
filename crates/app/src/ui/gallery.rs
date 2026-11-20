@@ -1,6 +1,6 @@
 //! Every shared component in its states, on one scrolling page: for checking
-//! them by eye in both themes, and by keyboard (Tab walks every control).
-//! Only in the demo build, opened instead of the app with
+//! them by eye in both themes, and by keyboard (Tab walks every control;
+//! Page Up, Page Down, Home and End scroll). Only in the demo build, opened instead of the app with
 //! `HARDCOVER_GALLERY=1`:
 //!
 //! ```sh
@@ -16,6 +16,7 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, Styled as _, Window, div,
 };
+use gpui_kit::{FocusHandle, KeyDownEvent, ScrollHandle, point, px};
 
 use super::kit::{RaisedField as _, open_alert_dialog, open_dialog};
 use super::*;
@@ -28,14 +29,38 @@ use hardcover_core::ReadingStatus;
 pub struct Gallery {
     input: Entity<InputState>,
     selected_nav: usize,
+    focus: FocusHandle,
+    scroll: ScrollHandle,
 }
 
 impl Gallery {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
         Self {
             input: cx.new(|cx| InputState::new(window, cx).placeholder("Filter books")),
             selected_nav: 1,
+            focus,
+            scroll: ScrollHandle::new(),
         }
+    }
+
+    /// Page Up and Down, Home and End: the page scrolls without a pointer
+    /// (a headless session has none).
+    fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let offset = self.scroll.offset();
+        let page = self.scroll.bounds().size.height * 0.9;
+        let max = self.scroll.max_offset().height;
+        let y = match event.keystroke.key.as_str() {
+            "pagedown" => offset.y - page,
+            "pageup" => offset.y + page,
+            "home" => px(0.),
+            "end" => -max,
+            _ => return,
+        };
+        self.scroll
+            .set_offset(point(offset.x, y.clamp(-max, px(0.))));
+        cx.notify();
     }
 }
 
@@ -80,6 +105,8 @@ impl Render for Gallery {
             .child(empty(cx));
 
         v_flex()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(Self::on_key_down))
             .type_family(Family::Sans)
             .size_full()
             .bg(c.bg)
@@ -96,7 +123,9 @@ impl Render for Gallery {
                     .id("gallery-scroll")
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scrollbar()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .vertical_scrollbar(&self.scroll)
                     .child(
                         h_flex()
                             .items_start()
