@@ -326,6 +326,9 @@ Never colour-code chips, and never use a badge for ordinary metadata.
 - **An empty star:** the same shape in `star-empty`, so a half star splits
   cleanly.
 - An unrated rating control reads "Rate" beside it, in `fg-muted`.
+- In code: the rating control is `book::star_rating::StarRating` (20;
+  `.small()` 16 in a row); a rating only shown is `ui::Stars` (16;
+  `.small()` 12 inline).
 
 ### Meters
 
@@ -755,8 +758,9 @@ The shared components are built, in `crates/app/src/ui/` (its module doc
 lists each with what to use it for): the object bar, panel, rail, blocks,
 headers and the greeting, sequences, list rows, lanes, the property list,
 the meter, empty states, skeletons, text buttons, byline links, external
-links, nav rows, avatars, row focus and the kit fixes. The demo build shows them all on one page with
-`HARDCOVER_GALLERY=1`. Only drop-in swaps are done: the empty states
+links, stars, nav rows, avatars, row focus and the kit fixes. The demo
+build shows them all on one page with `HARDCOVER_GALLERY=1`. Only drop-in
+swaps are done: the empty states
 (`empty_state`), every meter and skeleton, the book titles on Home and in
 Coming soon, the reviewers' avatars and bylines, and the full page's Back
 bar. The account avatar is still the kit's.
@@ -768,17 +772,6 @@ author's large `ui::Avatar`) and Stats (display figures, sections, charts on
 the theme's chart tokens) are on the system's rows, headers, type roles and
 tokens. The screens below still need their layouts moved onto the rest.
 
-1. **Book pane and page.**
-   - The full page has its object bar (`ui::ObjectBar`, Back plus the
-     book's tools), but the pane has none: its tools still sit at the
-     header's top right.
-   - "Your book" is a form grid, and "Open on Hardcover" sits in the header.
-   - The full page has no rail. The order and the progress and Not started
-     panels are not in place.
-   - The title is Inter `text_2xl`, not `display-24` (pane) or `display-30`
-     (page). The full page's header uses the xl cover, not xxl.
-   - Similar books use md covers (64), not lg (80), and their titles are a
-     text button's.
 3. **Sidebar.** It still uses the kit's sidebar menu, which hovers at
    `sidebar_accent` × 0.8 (8%, not 5%) and has no accent icon when
    selected. `ui::NavRow` is the system's row; the sidebar moves onto it,
@@ -799,10 +792,7 @@ tokens. The screens below still need their layouts moved onto the rest.
    - a dialog keeps the kit's shadow.
 5. **Type.** The roles exist as helpers (`design::TypeRoles`: `.page_title()`,
    `.body_strong()`, `.caption(cx)`, `.display_24()`, `.tabular()`, ...), but
-   the book pane and page, the sidebar and shell, the dialogs, Settings,
-   About and sign-in still set sizes with `text_sm`/`text_lg`/`text_2xl` at
-   GPUI's default line height and without tabular figures. Move each screen
-   to the roles as it is redesigned.
-6. **Reviews.** Reviews sit 20 apart without hairlines (`ui::Sequence`
-   with `RowSpacing::Reviews` is the system's); the review text is
-   `text_sm` at the default line height rather than `reader`.
+   the sidebar and shell, the dialogs, Settings, About and sign-in still set
+   sizes with `text_sm`/`text_lg`/`text_2xl` at GPUI's default line height
+   and without tabular figures. Move each screen to the roles as it is
+   redesigned.

@@ -1,5 +1,6 @@
-//! The detail pane's "Reviews" section: other readers' reviews of the book,
-//! the most liked first, a page at a time.
+//! The book's "Reviews" block (`hardcover-design`, Reviews): other readers'
+//! reviews of the book, the most liked first, a page at a time, as sequence
+//! rows 16 apart with hairlines between them.
 //!
 //! Fetched once the details are in, after [`REVIEWS_DELAY`], and kept per book
 //! for the run. Hidden without `read:social`. The user's own review is left
@@ -10,21 +11,20 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, FontWeight, IntoElement, ParentElement as _,
-    SharedString, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
-    relative,
+    AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, SharedString,
+    Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_SOCIAL;
-use hardcover_core::{BookId, CommunityReview, Rating, UserBookId};
+use hardcover_core::{BookId, CommunityReview, UserBookId};
 
-use super::{BookDetailView, Details, section};
+use super::{BookDetailView, Details};
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
-use crate::design::color::colors;
-use crate::format::{count_text, date_text};
-use crate::ui::{Avatar, BylineLink, Skeleton};
+use crate::design::{TypeRoles as _, colors, size};
+use crate::format::{count_text, date_text, rating_text};
+use crate::ui::{Avatar, Block, BylineLink, RowSpacing, Sequence, Skeleton, Stars};
 
 /// Reviews wait this long after the details, a little longer than similar
 /// books, so arrowing through a list fetches neither for books passed over.
@@ -179,7 +179,8 @@ impl BookDetailView {
 
     // ----- rendering -----
 
-    /// The "Reviews" section, or `None` without `read:social`.
+    /// The "Reviews" block, or `None` without `read:social`: the count on the
+    /// heading's trailing edge, then the reviews between hairlines.
     pub(super) fn render_community_reviews(
         &self,
         book: BookId,
@@ -189,7 +190,7 @@ impl BookDetailView {
         if !Services::global(cx).has_scope(READ_SOCIAL) {
             return None;
         }
-        let muted = cx.theme().muted_foreground;
+        let muted = colors(cx).fg_muted;
         let loading = self.community_reviews.loading == Some(book);
         let retry = |id: &'static str, cx: &mut Context<Self>| {
             Button::new(id)
@@ -199,44 +200,49 @@ impl BookDetailView {
         };
         let state = self.community_reviews.books.get(&book);
         let body: AnyElement = match state {
-            // Waiting out the delay or loading: the shape of a review, still.
+            // Waiting out the delay or loading: the shape of two reviews.
             None => placeholder(loading).into_any_element(),
             Some(state) if !state.loaded => match &state.error {
                 Some(message) if !loading => h_flex()
+                    .flex_wrap()
                     .gap_2()
-                    .text_sm()
-                    .child(div().text_color(muted).child(message.clone()))
+                    .child(div().body().text_color(muted).child(message.clone()))
                     .child(retry("retry-reviews", cx))
                     .into_any_element(),
                 _ => placeholder(loading).into_any_element(),
             },
             Some(state) if state.reviews.is_empty() && !state.has_more => div()
-                .text_sm()
+                .body()
                 .text_color(muted)
-                .child("No reviews yet")
+                .child("No reviews yet.")
                 .into_any_element(),
             Some(state) => v_flex()
-                .gap_5()
-                .children(
-                    state
-                        .reviews
-                        .iter()
-                        .map(|review| self.render_community_review(review, cx)),
+                .items_start()
+                .gap_2()
+                .child(
+                    Sequence::new()
+                        .spacing(RowSpacing::Reviews)
+                        .flush_top()
+                        .children(
+                            state
+                                .reviews
+                                .iter()
+                                .map(|review| self.render_community_review(review, cx)),
+                        ),
                 )
                 .when(state.has_more || state.error.is_some(), |this| {
                     this.child(
                         h_flex()
+                            .flex_wrap()
                             .gap_2()
                             .items_center()
-                            .text_sm()
                             .when_some(state.error.clone().filter(|_| !loading), |this, e| {
-                                this.child(div().text_color(muted).child(e))
+                                this.child(div().body().text_color(muted).child(e))
                                     .child(retry("retry-more-reviews", cx))
                             })
                             .when(state.error.is_none() || loading, |this| {
                                 this.child(
                                     Button::new("more-reviews")
-                                        .outline()
                                         .small()
                                         .label("Show more reviews")
                                         .loading(loading)
@@ -257,21 +263,24 @@ impl BookDetailView {
                 n => format!("{} reviews", count_text(n)),
             });
         Some(
-            section("Reviews")
+            Block::new("Reviews")
                 .when_some(caption, |this, caption| {
-                    this.child(div().text_sm().text_color(muted).child(caption))
+                    this.action(div().caption(cx).tabular().child(caption))
                 })
                 .child(body)
                 .into_any_element(),
         )
     }
 
+    /// One review: the avatar beside the byline and rating, the date and
+    /// likes, and the text in `reader`, collapsed when long; a spoiler review
+    /// shows only that it has spoilers, and "Show".
     fn render_community_review(
         &self,
         review: &CommunityReview,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
+        let muted = colors(cx).fg_muted;
         let id = review.id;
         let key = id.get() as u64;
         let name = review.reviewer.display_name();
@@ -289,15 +298,13 @@ impl BookDetailView {
             h_flex()
                 .gap_2()
                 .items_center()
-                .text_sm()
+                .body()
                 .text_color(muted)
-                .child(Icon::new(IconName::EyeOff).xsmall())
+                .child(Icon::new(IconName::EyeOff).size_3())
                 .child("Contains spoilers")
-                .child("·")
                 .child(
                     Button::new(("review-spoilers", key))
-                        .ghost()
-                        .xsmall()
+                        .small()
                         .label("Show")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.community_reviews.spoilers_shown.insert(id);
@@ -314,31 +321,41 @@ impl BookDetailView {
                 _ => paragraphs.iter().map(|p| (*p).to_owned()).collect(),
             };
             v_flex()
+                .items_start()
                 .gap_2()
-                .text_sm()
-                .children(shown.into_iter().map(WrappingText::new))
+                .child(
+                    v_flex()
+                        .w_full()
+                        .max_w(size::PROSE)
+                        .gap_2()
+                        .reader()
+                        .children(shown.into_iter().map(WrappingText::new)),
+                )
                 .when(collapsed.is_some(), |this| {
                     this.child(
-                        h_flex().child(
-                            Button::new(("review-more", key))
-                                .ghost()
-                                .xsmall()
-                                .label(if expanded { "Show less" } else { "Read more" })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    let expanded = &mut this.community_reviews.expanded;
-                                    if !expanded.remove(&id) {
-                                        expanded.insert(id);
-                                    }
-                                    cx.notify();
-                                })),
-                        ),
+                        Button::new(("review-more", key))
+                            .ghost()
+                            .small()
+                            .label(if expanded { "Show less" } else { "Read more" })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let expanded = &mut this.community_reviews.expanded;
+                                if !expanded.remove(&id) {
+                                    expanded.insert(id);
+                                }
+                                cx.notify();
+                            })),
                     )
                 })
                 .into_any_element()
         };
         let name_element: AnyElement = match review.reviewer.profile_url() {
             Some(url) => BylineLink::new(("reviewer", key), name.clone(), url).into_any_element(),
-            None => div().child(name.clone()).into_any_element(),
+            None => div()
+                .body_strong()
+                .min_w_0()
+                .truncate()
+                .child(name.clone())
+                .into_any_element(),
         };
         h_flex()
             .items_start()
@@ -355,23 +372,24 @@ impl BookDetailView {
                     .gap_2()
                     .child(
                         v_flex()
-                            .gap_0p5()
+                            .gap_1()
                             .child(
                                 h_flex()
                                     .flex_wrap()
                                     .items_center()
                                     .gap_x_2()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
                                     .child(name_element)
                                     .when_some(review.rating, |this, rating| {
-                                        this.child(stars(rating, cx))
+                                        this.child(
+                                            Stars::new(rating.value()).small().accessibility_label(
+                                                ("review-rating", key),
+                                                format!("Rated {} of 5", rating_text(rating)),
+                                            ),
+                                        )
                                     }),
                             )
                             .when(!facts.is_empty(), |this| {
-                                this.child(
-                                    div().text_xs().text_color(muted).child(facts.join(" · ")),
-                                )
+                                this.child(div().caption(cx).tabular().child(facts.join(" · ")))
                             }),
                     )
                     .child(body),
@@ -380,56 +398,29 @@ impl BookDetailView {
     }
 }
 
-/// The shape of two reviews while the first page loads. It pulses only
-/// while the request is in flight; waiting out the delay, it holds still.
+/// The shape of two reviews while the first page loads: an avatar circle and
+/// three bars, between the same hairline. It pulses only while the request
+/// is in flight; waiting out the delay, it holds still.
 fn placeholder(loading: bool) -> impl IntoElement {
     let still = !loading;
     let shape = move |skeleton: Skeleton| if still { skeleton.still() } else { skeleton };
-    v_flex().gap_5().children((0..2).map(move |_| {
-        h_flex()
-            .items_start()
-            .gap_3()
-            .child(shape(Skeleton::circle()))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .gap_2()
-                    .child(shape(Skeleton::line().w_1_3()))
-                    .child(shape(Skeleton::line()))
-                    .child(shape(Skeleton::line().w_2_3())),
-            )
-    }))
-}
-
-/// Five small stars in the text's muted colour: another reader's rating,
-/// never gold.
-fn stars(rating: Rating, cx: &Context<BookDetailView>) -> impl IntoElement {
-    let filled = cx.theme().muted_foreground;
-    let empty = colors(cx).star_empty;
-    let value = rating.value();
-    h_flex().gap_0p5().children((1..=5).map(move |position| {
-        let position = position as f32;
-        let star = || crate::star::icon().size_3p5().flex_shrink_0();
-        div().relative().flex_shrink_0().size_3p5().map(|this| {
-            if value >= position {
-                this.child(star().text_color(filled))
-            } else if value + 0.5 >= position {
-                // Half: the empty star with its leading half filled.
-                this.child(star().text_color(empty)).child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .h_full()
-                        .w(relative(0.5))
-                        .overflow_hidden()
-                        .child(star().text_color(filled)),
+    Sequence::new()
+        .spacing(RowSpacing::Reviews)
+        .flush_top()
+        .children((0..2).map(move |_| {
+            h_flex()
+                .items_start()
+                .gap_3()
+                .child(shape(Skeleton::circle()))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .gap_2()
+                        .child(shape(Skeleton::line().w_1_3()))
+                        .child(shape(Skeleton::line()))
+                        .child(shape(Skeleton::line().w_2_3())),
                 )
-            } else {
-                this.child(star().text_color(empty))
-            }
-        })
-    }))
+        }))
 }
 
 /// The paragraphs a collapsed review shows, or `None` if the whole review

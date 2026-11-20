@@ -1,5 +1,5 @@
-//! The detail pane's "Your review" section: the entry's review, and an editor
-//! to write, change or delete it.
+//! The book's "Your review" block: the entry's review in the `reader` role,
+//! and an editor in place to write, change or delete it.
 //!
 //! Reviews are not part of the library sync (review text can be long): the
 //! [`LibraryModel`] fetches one when a book page shows its entry, and keeps it
@@ -9,17 +9,13 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::ui::Skeleton;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::calendar::Date as CalendarDate;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
-use gpui_kit::component::link::Link;
 use gpui_kit::component::text::TextView;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex,
-};
+use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, ElementId, Entity, IntoElement, ParentElement as _,
     SharedString, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
@@ -27,12 +23,16 @@ use gpui_kit::{
 use hardcover_core::auth::scopes::WRITE_REVIEWS;
 use hardcover_core::{Date, LibraryEntry, Review, UserBookId};
 
-use super::{BookDetailView, Written, section};
+use super::your_book::{paragraphs, saved_note};
+use super::{BookDetailView, Written};
 use crate::app_state::Services;
+use crate::bidi::WrappingText;
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{date_text, needs_permission};
 use crate::library::model::WriteKind;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::open_alert_dialog;
+use crate::ui::{Block, ExternalLink, Skeleton};
 
 /// Wait before fetching a review, so arrowing through a list does not spend
 /// the rate limit on every book passed over.
@@ -433,6 +433,8 @@ impl BookDetailView {
 
     // ----- rendering -----
 
+    /// The "Your review" block: the review in `reader` with "Edit…" on the
+    /// heading, "No review yet." with "Write a review…", or the editor.
     pub(super) fn render_review(
         &self,
         entry: &LibraryEntry,
@@ -440,6 +442,7 @@ impl BookDetailView {
     ) -> impl IntoElement {
         let id = entry.user_book_id;
         let can_write = Services::global(cx).has_scope(WRITE_REVIEWS);
+        let muted = colors(cx).fg_muted;
         let model = self.model.read(cx);
         let slot = model.review(id);
         let fetched = slot.is_some_and(|s| s.review.is_some());
@@ -450,18 +453,37 @@ impl BookDetailView {
             .filter(|r| r.exists())
             .cloned();
         let editing = self.review.editing.as_ref().is_some_and(|(e, _)| *e == id);
+        let busy = self.model.read(cx).pending_write(id).is_some();
+        let refreshing = self.review_refreshing(id, cx);
+        let open_editor = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
+            Button::new(id)
+                .small()
+                .label(label)
+                .disabled(!can_write || busy || refreshing)
+                .when(!can_write, |this| {
+                    this.tooltip(needs_permission(WRITE_REVIEWS))
+                })
+                .on_click(cx.listener(|this, _, window, cx| this.open_review_editor(window, cx)))
+        };
+        let mut action: Option<AnyElement> = None;
         let body: AnyElement = if editing {
             let editable = editable_here(review.as_ref());
             self.render_review_editor(entry, review.is_some(), can_write, editable, cx)
                 .into_any_element()
         } else if let Some(review) = review {
-            self.render_saved_review(entry, review, can_write, cx)
-                .into_any_element()
+            if editable_here(Some(&review)) {
+                action = Some(
+                    open_editor("edit-review", "Edit…", cx)
+                        .ghost()
+                        .into_any_element(),
+                );
+            }
+            self.render_saved_review(entry, review, cx)
         } else if let Some(error) = error.clone().filter(|_| !fetched) {
             h_flex()
+                .flex_wrap()
                 .gap_2()
-                .text_sm()
-                .child(div().text_color(cx.theme().muted_foreground).child(error))
+                .child(div().body().text_color(muted).child(error))
                 .child(
                     Button::new("retry-review")
                         .small()
@@ -471,23 +493,18 @@ impl BookDetailView {
                 .into_any_element()
         } else if !fetched {
             // Not fetched yet: a pulse only while the request runs.
-            match fetching {
-                true => v_flex()
-                    .gap_2()
-                    .child(Skeleton::line().h_4().w_full())
-                    .child(Skeleton::line().h_4().w_2_3())
-                    .into_any_element(),
-                false => {
-                    let bar = || div().h_4().bg(cx.theme().skeleton);
-                    v_flex()
-                        .gap_2()
-                        .child(bar().w_full())
-                        .child(bar().w_2_3())
-                        .into_any_element()
-                }
-            }
+            let line = |skeleton: Skeleton| if fetching { skeleton } else { skeleton.still() };
+            v_flex()
+                .gap_2()
+                .child(line(Skeleton::line()))
+                .child(line(Skeleton::line().w_2_3()))
+                .into_any_element()
         } else {
-            self.render_no_review(entry, can_write, cx)
+            action = Some(open_editor("write-review", "Write a review…", cx).into_any_element());
+            div()
+                .body()
+                .text_color(muted)
+                .child("No review yet.")
                 .into_any_element()
         };
         // A review shown from before a failed refetch may be out of date.
@@ -495,33 +512,31 @@ impl BookDetailView {
             h_flex()
                 .gap_2()
                 .items_center()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
+                .body()
+                .text_color(muted)
                 .child("Couldn't refresh")
-                .child("·")
                 .child(
                     Button::new("refresh-review")
                         .ghost()
-                        .xsmall()
+                        .small()
                         .label("Try again")
                         .tooltip(error)
                         .on_click(cx.listener(|this, _, _, cx| this.retry_review(cx))),
                 )
         });
-        section("Your review").child(body).children(refresh_failed)
+        Block::new("Your review")
+            .when_some(action, |this, action| this.action(action))
+            .child(body)
+            .children(refresh_failed)
     }
 
     fn render_saved_review(
         &self,
         entry: &LibraryEntry,
         review: Review,
-        can_write: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = entry.user_book_id;
-        let muted = cx.theme().muted_foreground;
-        let busy = self.model.read(cx).pending_write(id).is_some();
-        let refreshing = self.review_refreshing(id, cx);
         let editable = editable_here(Some(&review));
         let mut facts: Vec<String> = Vec::new();
         if let Some(date) = review.reviewed_at {
@@ -533,19 +548,17 @@ impl BookDetailView {
         // The app writes only Markdown; any other review is changed on
         // Hardcover, so a save here can't flatten it.
         let url = entry.book.web_url();
-        let on_hardcover = move |note: &'static str| {
-            h_flex()
-                .flex_wrap()
-                .gap_x_2()
-                .text_sm()
-                .text_color(muted)
-                .child(note)
+        let on_hardcover = move |note: &'static str, cx: &mut Context<Self>| {
+            v_flex()
+                .items_start()
+                .gap_1()
+                .child(div().body().text_color(colors(cx).fg_muted).child(note))
                 .when_some(url, |this, url| {
-                    this.child(
-                        Link::new("edit-review-on-hardcover")
-                            .href(url)
-                            .child("Edit on Hardcover"),
-                    )
+                    this.child(ExternalLink::new(
+                        "edit-review-on-hardcover",
+                        "Edit on Hardcover",
+                        url,
+                    ))
                 })
         };
         let body: AnyElement = match (review.markdown, review.plain) {
@@ -557,92 +570,41 @@ impl BookDetailView {
             // Plain text from Hardcover: paragraphs as written, not Markdown.
             (None, Some(plain)) => v_flex()
                 .gap_2()
-                .children(
-                    plain
-                        .split('\n')
-                        .map(str::trim)
-                        .filter(|p| !p.is_empty())
-                        .map(|p| div().child(p.to_owned())),
-                )
+                .children(paragraphs(&plain).map(WrappingText::new))
                 .into_any_element(),
             // Nothing to edit from, so no editor: saving would replace it.
             (None, None) => {
                 return on_hardcover(
                     "You have a review of this book that this app can't show. \
                      Open it on Hardcover to read or change it.",
+                    cx,
                 )
                 .into_any_element();
             }
         };
-        let edit: AnyElement = if editable {
-            Button::new("edit-review")
-                .outline()
-                .small()
-                .label("Edit…")
-                .disabled(!can_write || busy || refreshing)
-                .when(!can_write, |this| {
-                    this.tooltip(needs_permission(WRITE_REVIEWS))
-                })
-                .on_click(cx.listener(|this, _, window, cx| this.open_review_editor(window, cx)))
-                .into_any_element()
-        } else {
-            on_hardcover("Written on the Hardcover website, and changed there.").into_any_element()
-        };
         v_flex()
-            .gap_3()
-            .child(div().text_sm().child(body))
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .text_sm()
-                    .text_color(muted)
-                    .when(!facts.is_empty(), |this| this.child(facts.join(" · ")))
-                    .child(edit)
-                    .when(self.review.saved == Some(id), |this| {
-                        this.child(
-                            h_flex()
-                                .gap_1()
-                                .text_xs()
-                                .child(Icon::new(IconName::Check).xsmall())
-                                .child("Saved"),
-                        )
-                    }),
-            )
-            .into_any_element()
-    }
-
-    fn render_no_review(
-        &self,
-        entry: &LibraryEntry,
-        can_write: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let id = entry.user_book_id;
-        let busy = self.model.read(cx).pending_write(id).is_some();
-        let refreshing = self.review_refreshing(id, cx);
-        h_flex()
-            .flex_wrap()
             .gap_2()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("You haven't reviewed this book."),
-            )
-            .child(
-                Button::new("write-review")
-                    .small()
-                    .icon(IconName::Plus)
-                    .label("Write a review…")
-                    .disabled(!can_write || busy || refreshing)
-                    .when(!can_write, |this| {
-                        this.tooltip(needs_permission(WRITE_REVIEWS))
-                    })
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.open_review_editor(window, cx)),
-                    ),
-            )
+            .child(div().w_full().max_w(size::PROSE).reader().child(body))
+            .when(!facts.is_empty() || self.review.saved == Some(id), |this| {
+                this.child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .when(!facts.is_empty(), |this| {
+                            this.child(div().caption(cx).tabular().child(facts.join(" · ")))
+                        })
+                        .when(self.review.saved == Some(id), |this| {
+                            this.child(saved_note(cx))
+                        }),
+                )
+            })
+            .when(!editable, |this| {
+                this.child(on_hardcover(
+                    "Written on the Hardcover website, and changed there.",
+                    cx,
+                ))
+            })
+            .into_any_element()
     }
 
     fn render_review_editor(
@@ -690,10 +652,10 @@ impl BookDetailView {
                         h_flex()
                             .items_center()
                             .gap_2()
-                            .child(div().text_sm().child("Reviewed on"))
+                            .child(div().body().child("Reviewed on"))
                             .child(
                                 div()
-                                    .w_48()
+                                    .w(size::SELECT)
                                     .child(DatePicker::new(&self.review.date).disabled(saving)),
                             ),
                     ),
@@ -733,7 +695,6 @@ impl BookDetailView {
                     .when(has_review, |this| {
                         this.child(div().flex_1()).child(
                             Button::new("delete-review")
-                                .ghost()
                                 .danger()
                                 .small()
                                 .label("Delete review…")

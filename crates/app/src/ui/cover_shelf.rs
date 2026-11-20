@@ -2,6 +2,8 @@
 //! and the full book page's "Similar books"): a few books in a row, each a
 //! cover over its title, 16 apart.
 //!
+//! - Books that don't fit wrap onto another row, 16 below (Similar books in
+//!   a narrow pane).
 //! - Each book is as wide as its cover; the title under it, 8 below, is a
 //!   [`TextButton`] at 12/500 in ink, at most two lines, so the cover is
 //!   never the only keyboard path to the book.
@@ -55,6 +57,7 @@ impl RenderOnce for CoverShelf {
         div()
             .flex()
             .flex_row()
+            .flex_wrap()
             .items_start()
             .gap_4()
             .children(

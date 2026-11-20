@@ -106,6 +106,7 @@ impl Render for Gallery {
             .child(skeletons())
             .child(kit_fixes(&self.input, cx))
             .child(empty(cx))
+            .child(stars_and_links())
             .child(shelf_and_columns(cx));
 
         v_flex()
@@ -333,6 +334,34 @@ fn review(
         .into_any_element()
 }
 
+fn stars_and_links() -> AnyElement {
+    specimen(
+        "Stars, external link",
+        v_flex()
+            .items_start()
+            .gap_3()
+            .child(
+                h_flex()
+                    .items_baseline()
+                    .gap_2()
+                    .child(div().display_30().child("4.63"))
+                    .child(Stars::new(4.63).accessibility_label("g-average", "4.63 average")),
+            )
+            .child(
+                h_flex()
+                    .gap_4()
+                    .child(Stars::new(5.).small())
+                    .child(Stars::new(3.5).small())
+                    .child(Stars::new(0.).small()),
+            )
+            .child(ExternalLink::new(
+                "g-external",
+                "Open on Hardcover",
+                "https://hardcover.app",
+            )),
+    )
+}
+
 fn blocks_and_properties(cx: &App) -> AnyElement {
     let muted = colors(cx).fg_muted;
     let edition = h_flex()
@@ -387,12 +416,7 @@ fn blocks_and_properties(cx: &App) -> AnyElement {
                 Block::new("Reviews")
                     .action(div().caption(cx).child("12 reviews"))
                     .child(reviews),
-            )
-            .child(Block::new("External link").child(ExternalLink::new(
-                "g-external",
-                "Open on Hardcover",
-                "https://hardcover.app",
-            ))),
+            ),
     )
 }
 
