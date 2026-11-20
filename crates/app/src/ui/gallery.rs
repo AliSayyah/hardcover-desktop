@@ -50,7 +50,7 @@ impl Gallery {
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let offset = self.scroll.offset();
         let page = self.scroll.bounds().size.height * 0.9;
-        let max = self.scroll.max_offset().height;
+        let max = self.scroll.max_offset().y;
         let y = match event.keystroke.key.as_str() {
             "pagedown" => offset.y - page,
             "pageup" => offset.y + page,
