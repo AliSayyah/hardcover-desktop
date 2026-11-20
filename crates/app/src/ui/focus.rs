@@ -2,7 +2,10 @@
 //! `ring` outside, plus a 1 px accent edge. Controls take both
 //! ([`FocusTreatment::focus_ring`]); rows take the edge alone
 //! ([`FocusTreatment::focus_edge`]), because they sit in lists that clip
-//! whatever is drawn outside them.
+//! whatever is drawn outside them. Bare text with no box of its own (a text
+//! button, a byline link) takes both outside the text
+//! ([`FocusTreatment::focus_ring_around`]), so the edge never touches a
+//! glyph.
 //!
 //! The kit's own controls draw this themselves from the theme. Use these for
 //! the app's components that track their own focus.
@@ -17,7 +20,7 @@
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
-    App, BoxShadow, ElementId, FocusHandle, ParentElement, Pixels, Styled, Window, div, px,
+    App, BoxShadow, ElementId, FocusHandle, Hsla, ParentElement, Pixels, Styled, Window, div, px,
 };
 
 use crate::design::{colors, size};
@@ -68,6 +71,31 @@ pub trait FocusTreatment: Styled + ParentElement + Sized {
                 .border(ring)
                 .border_color(colors(cx).ring),
         )
+    }
+
+    /// The focus of bare text (a text button, a byline link): the 1 px
+    /// accent edge just outside the text, standing in for the border it
+    /// doesn't have, and the 3 px ring outside that. The same conditions as
+    /// [`FocusTreatment::focus_ring`]; the element's box shadow is kept.
+    fn focus_ring_around(self, radius: Pixels, cx: &App) -> Self {
+        let edge = size::FOCUS_EDGE;
+        let ring = size::FOCUS_RING;
+        let band = |inset: Pixels, width: Pixels, color: Hsla| {
+            div()
+                .absolute()
+                .top(-inset)
+                .left(-inset)
+                .right(-inset)
+                .bottom(-inset)
+                .rounded(radius + inset)
+                .border(width)
+                .border_color(color)
+        };
+        self.child(band(edge, edge, colors(cx).accent)).child(band(
+            edge + ring,
+            ring,
+            colors(cx).ring,
+        ))
     }
 
     /// A row's focus: the 1 px accent edge alone, inside the row. Replaces

@@ -66,7 +66,7 @@ impl RenderOnce for BylineLink {
                 .body_strong()
                 .when(underline, |this| this.hover(|style| style.underline()))
                 .on_click(move |_, _, cx| cx.open_url(&url))
-                .when(focused, |this| this.focus_ring(radius, cx))
+                .when(focused, |this| this.focus_ring_around(radius, cx))
                 .child(div().min_w_0().truncate().child(self.name)),
         )
     }

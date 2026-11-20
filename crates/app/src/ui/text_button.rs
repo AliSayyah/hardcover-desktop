@@ -122,7 +122,7 @@ impl RenderOnce for TextButton {
                     this.on_click(move |event, window, cx| handler(event, window, cx))
                 })
                 .refine_style(&self.style)
-                .when(focused, |this| this.focus_ring(radius, cx))
+                .when(focused, |this| this.focus_ring_around(radius, cx))
                 .child(if wrap {
                     div()
                         .min_w_0()
