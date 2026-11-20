@@ -1,20 +1,69 @@
-//! The book list on series and author pages: keyboard-navigable rows with each
-//! book's library status. Enter or a click opens the book. Escape reaches the
-//! page's Back binding: the list's own Cancel lets it through.
+//! The book list on Discover and the series and author pages: catalogue
+//! rows (`hardcover-design`, Rows → Catalogue row) with each book's library
+//! status, keyboard-navigable. Enter or a click opens the book. Escape
+//! reaches the page's Back binding: the list's own Cancel lets it through.
+//!
+//! The pages share one frame: content at most [`PAGE_WIDTH`] wide, inset 32
+//! ([`page_header`]), with the list's rows on the same spine
+//! ([`page_list`]: a row's own 8 of padding inside a 24 inset).
 
-use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
+use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::{IconName, IndexPath};
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, SharedString,
-    Subscription, Window,
+    App, AppContext as _, Context, Div, Entity, IntoElement, ParentElement as _, Rems,
+    SharedString, Styled as _, Subscription, Window, div, rems,
 };
 use hardcover_core::{BookSummary, ReadingStatus};
 
 use super::navigation::{self, Page};
+use crate::design::{TypeRoles as _, colors};
 use crate::format::average_rating_text;
-use crate::library::book_row::BookRow;
+use crate::library::book_row::{BookRow, loading_rows};
 use crate::library::model::LibraryModel;
-use crate::ui::empty_state;
+use crate::ui::{ListRow as _, RowFocus, empty_state};
+
+/// The widest a catalogue page's content gets (768), so rows and lines
+/// stay readable in a wide window.
+pub const PAGE_WIDTH: Rems = rems(48.);
+
+/// The top of a page: inset 32 on three sides, 16 above the list (whose
+/// rows add their own 8).
+pub fn page_header() -> Div {
+    div()
+        .flex_none()
+        .w_full()
+        .max_w(PAGE_WIDTH)
+        .px_8()
+        .pt_8()
+        .pb_4()
+}
+
+/// The region a page's list fills, under its header.
+pub fn page_body() -> Div {
+    div().flex_1().min_h_0().w_full().max_w(PAGE_WIDTH)
+}
+
+/// A page's list, its rows' text on the header's spine.
+pub fn page_list<D: ListDelegate>(list: &Entity<ListState<D>>) -> List<D> {
+    List::new(list).size_full().px_6().pb_6()
+}
+
+/// A page that failed to load: what happened, in one muted sentence, and
+/// `retry` ("Try again") beside it.
+pub fn load_failed(message: SharedString, retry: impl IntoElement, cx: &App) -> Div {
+    div()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap_3()
+        .child(div().body().text_color(colors(cx).fg_muted).child(message))
+        .child(retry)
+}
+
+/// A page's rows while they load, on the list's spine.
+pub fn page_loading() -> Div {
+    div().px_6().child(loading_rows())
+}
 
 /// One book and its secondary line.
 #[derive(Clone)]
@@ -27,6 +76,7 @@ pub struct CatalogBooks {
     rows: Vec<CatalogRow>,
     model: Entity<LibraryModel>,
     empty: SharedString,
+    focus: RowFocus,
 }
 
 impl CatalogBooks {
@@ -45,9 +95,10 @@ impl ListDelegate for CatalogBooks {
     fn render_item(
         &mut self,
         ix: IndexPath,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
+        let focused = self.focus.shows_focus(ix, window);
         let row = self.rows.get(ix.row)?;
         let status = self
             .model
@@ -56,6 +107,7 @@ impl ListDelegate for CatalogBooks {
             .map(|e| e.status);
         Some(
             ListItem::new(("catalog-book", row.book.id.get() as u64))
+                .list_row(focused, cx)
                 .accessibility_label(row.book.title.clone())
                 .child(BookRow::for_catalog(&row.book, row.details.clone(), status)),
         )
@@ -63,10 +115,11 @@ impl ListDelegate for CatalogBooks {
 
     fn set_selected_index(
         &mut self,
-        _: Option<IndexPath>,
+        ix: Option<IndexPath>,
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) {
+        self.focus.select(ix);
     }
 
     fn render_empty(
@@ -86,17 +139,20 @@ pub fn new_list(
     cx: &mut App,
 ) -> Entity<ListState<CatalogBooks>> {
     let empty = empty.into();
-    cx.new(|cx| {
+    let list = cx.new(|cx| {
         ListState::new(
             CatalogBooks {
                 rows: Vec::new(),
                 model: model.clone(),
                 empty,
+                focus: RowFocus::default(),
             },
             window,
             cx,
         )
-    })
+    });
+    RowFocus::attach(&list, |d| &mut d.focus, cx);
+    list
 }
 
 /// Opens the confirmed book. Arrowing only moves the selection.

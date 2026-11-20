@@ -1,60 +1,103 @@
-//! One book in a collection list: cover thumbnail, title, authors and a fixed
-//! trailing lane. Shared by the library shelves and search results.
+//! The content of one row in a collection (`hardcover-design`, Rows → List
+//! row and Catalogue row), inside the `ListItem` that `ui::ListRow` styles.
+//! Shared by the shelves, search, Discover, list pages and the series and
+//! author pages.
+//!
+//! - an sm cover (an author's avatar, a series' icon, in the same 32 wide
+//!   slot, so the text keeps its spine);
+//! - the title in `body-strong` and the author or facts in `body` muted,
+//!   both one line and truncated;
+//! - the trailing lane: on a shelf, 48 wide and kept when empty, with
+//!   tabular caption figures (progress over a 2 px meter, the reader's own
+//!   rating with its gold star, a release year); in a catalogue, the
+//!   StatusChip. The figures turn from `fg-muted` to `fg` on the selected
+//!   row.
 
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    App, IntoElement, ObjectFit, ParentElement as _, RenderOnce, SharedString, Styled as _,
-    StyledImage as _, Window, div, img, prelude::FluentBuilder as _,
+    AnyElement, App, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _,
+    Window, div,
 };
 use hardcover_core::{BookSummary, LibraryEntry, ReadingStatus};
 
-use crate::app_state::cover_thumbnail;
 use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverSize};
-use crate::design::colors;
+use crate::design::{TypeRoles as _, colors};
 use crate::format::{authors_text, progress_summary, rating_text};
+use crate::ui::{Avatar, Lane, Meter, SkeletonRow};
 
 /// What the trailing lane shows.
 #[derive(Clone)]
 pub enum Trailing {
-    None,
-    /// Reading progress, e.g. "42%".
-    Progress(SharedString),
-    /// The user's rating.
+    /// Nothing in a shelf row's lane, which it keeps.
+    Empty,
+    /// Reading progress: "66%" over a 2 px meter, or "p. 12" alone when the
+    /// book's length is unknown. `id` keys the meter.
+    Progress {
+        id: u64,
+        text: SharedString,
+        percent: Option<f32>,
+    },
+    /// The reader's own rating, with the gold star.
     Rating(SharedString),
-    /// Library status of a search result.
+    /// A year: when a Want to read book came out.
+    Year(i32),
+    /// A catalogue book's library status.
     Status(ReadingStatus),
+    /// No lane: a catalogue book not in the library, an author, a series.
+    None,
+}
+
+/// What leads the row.
+#[derive(Clone, Copy)]
+enum Lead {
+    Book,
+    /// A person: their photo or initials, in a circle.
+    Person,
+    /// A series: its icon in the cover's slot.
+    Series,
 }
 
 #[derive(IntoElement)]
 pub struct BookRow {
     title: SharedString,
     secondary: SharedString,
-    cover_url: Option<String>,
-    /// For an author or a series, the icon its image slot shows while there
-    /// is no image. A book has its cover instead.
-    placeholder: Option<IconName>,
+    image_url: Option<String>,
+    lead: Lead,
     trailing: Trailing,
+    selected: bool,
 }
 
 impl BookRow {
     /// A row on a library shelf.
     pub fn for_entry(entry: &LibraryEntry) -> Self {
         let trailing = match entry.status {
-            ReadingStatus::CurrentlyReading => progress_summary(entry)
-                .short_text()
-                .map_or(Trailing::None, |t| Trailing::Progress(t.into())),
+            ReadingStatus::CurrentlyReading | ReadingStatus::Paused => {
+                let progress = progress_summary(entry);
+                progress
+                    .short_text()
+                    .map_or(Trailing::Empty, |text| Trailing::Progress {
+                        id: entry.user_book_id.get() as u64,
+                        text: text.into(),
+                        percent: progress.percent,
+                    })
+            }
             ReadingStatus::Read => entry
                 .rating
-                .map_or(Trailing::None, |r| Trailing::Rating(rating_text(r).into())),
-            _ => Trailing::None,
+                .map_or(Trailing::Empty, |r| Trailing::Rating(rating_text(r).into())),
+            ReadingStatus::WantToRead => entry
+                .book
+                .release_year
+                .map_or(Trailing::Empty, Trailing::Year),
+            ReadingStatus::DidNotFinish | ReadingStatus::Ignored => Trailing::Empty,
         };
         Self {
             title: entry.book.title.clone().into(),
             secondary: authors_text(&entry.book.authors).into(),
-            cover_url: entry.cover().map(|c| c.url.clone()),
-            placeholder: None,
+            image_url: entry.cover().map(|c| c.url.clone()),
+            lead: Lead::Book,
             trailing,
+            selected: false,
         }
     }
 
@@ -64,36 +107,11 @@ impl BookRow {
         if let Some(year) = book.release_year {
             secondary.push_str(&format!(" · {year}"));
         }
-        Self {
-            title: book.title.clone().into(),
-            secondary: secondary.into(),
-            cover_url: book.cover.as_ref().map(|c| c.url.clone()),
-            placeholder: None,
-            trailing: status.map_or(Trailing::None, Trailing::Status),
-        }
-    }
-}
-
-impl BookRow {
-    /// An author or a series in search results: `placeholder` stands in for a
-    /// missing image.
-    pub fn for_hit(
-        title: impl Into<SharedString>,
-        details: impl Into<SharedString>,
-        image_url: Option<String>,
-        placeholder: IconName,
-    ) -> Self {
-        Self {
-            title: title.into(),
-            secondary: details.into(),
-            cover_url: image_url,
-            placeholder: Some(placeholder),
-            trailing: Trailing::None,
-        }
+        Self::for_catalog(book, secondary, status)
     }
 
-    /// A book on a series or author page: `details` is its secondary line
-    /// (position, year, average), with its library status when shelved.
+    /// A book on a catalogue page (Discover, a series, an author, a list):
+    /// `details` is its secondary line, with its library status when shelved.
     pub fn for_catalog(
         book: &BookSummary,
         details: impl Into<SharedString>,
@@ -102,103 +120,136 @@ impl BookRow {
         Self {
             title: book.title.clone().into(),
             secondary: details.into(),
-            cover_url: book.cover.as_ref().map(|c| c.url.clone()),
-            placeholder: None,
+            image_url: book.cover.as_ref().map(|c| c.url.clone()),
+            lead: Lead::Book,
             trailing: status.map_or(Trailing::None, Trailing::Status),
+            selected: false,
         }
+    }
+
+    /// An author in search results: their photo, else their initials.
+    pub fn for_author(
+        name: impl Into<SharedString>,
+        details: impl Into<SharedString>,
+        photo_url: Option<String>,
+    ) -> Self {
+        Self {
+            title: name.into(),
+            secondary: details.into(),
+            image_url: photo_url,
+            lead: Lead::Person,
+            trailing: Trailing::None,
+            selected: false,
+        }
+    }
+
+    /// A series in search results.
+    pub fn for_series(name: impl Into<SharedString>, details: impl Into<SharedString>) -> Self {
+        Self {
+            title: name.into(),
+            secondary: details.into(),
+            image_url: None,
+            lead: Lead::Series,
+            trailing: Trailing::None,
+            selected: false,
+        }
+    }
+
+    /// Whether the row is the selected one: its figures turn to ink.
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
     }
 }
 
 impl RenderOnce for BookRow {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
-        let lead = match self.placeholder {
-            None => Cover::new(CoverSize::Sm, self.title.clone())
-                .thumbnail(self.cover_url)
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = colors(cx);
+        let figures = if self.selected {
+            colors.fg
+        } else {
+            colors.fg_muted
+        };
+        let lead: AnyElement = match self.lead {
+            Lead::Book => Cover::new(CoverSize::Sm, self.title.clone())
+                .thumbnail(self.image_url)
                 .into_any_element(),
-            // Not a book: a 2:3 slot for the person's or series' image.
-            Some(placeholder) => {
-                let thumbnail = self
-                    .cover_url
-                    .as_deref()
-                    .and_then(|url| cover_thumbnail(url, window, cx));
-                div()
-                    .flex_shrink_0()
-                    .w(CoverSize::Sm.width())
-                    .h(CoverSize::Sm.height())
-                    .rounded(cx.theme().radius)
-                    .overflow_hidden()
-                    .bg(colors(cx).surface)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .map(|this| match thumbnail {
-                        Some(image) => this.child(
-                            img(image)
-                                .size_full()
-                                .rounded(cx.theme().radius)
-                                .object_fit(ObjectFit::Cover),
-                        ),
-                        None => this.child(
-                            Icon::new(placeholder)
-                                .small()
-                                .text_color(colors(cx).fg_faint),
-                        ),
-                    })
-                    .into_any_element()
+            Lead::Person => Avatar::new(self.title.clone())
+                .image(self.image_url)
+                .into_any_element(),
+            Lead::Series => div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .w(CoverSize::Sm.width())
+                .h(CoverSize::Sm.height())
+                .child(Icon::new(IconName::GalleryVerticalEnd).text_color(colors.fg_muted))
+                .into_any_element(),
+        };
+        let figure = || div().caption(cx).tabular().text_color(figures);
+        let lane: Option<AnyElement> = match self.trailing {
+            Trailing::None => None,
+            Trailing::Empty => Some(Lane::trailing().into_any_element()),
+            Trailing::Progress { id, text, percent } => Some(
+                Lane::trailing()
+                    .stacked()
+                    .child(figure().child(text))
+                    .children(percent.map(|percent| {
+                        Meter::new(("row-progress", id), percent)
+                            .thin()
+                            .w_full()
+                            .accessibility_label("Reading progress")
+                    }))
+                    .into_any_element(),
+            ),
+            Trailing::Rating(text) => Some(
+                Lane::trailing()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            // Gold: the reader's own rating, as on the book page.
+                            .child(crate::star::icon().xsmall().text_color(colors.gold))
+                            .child(figure().child(text)),
+                    )
+                    .into_any_element(),
+            ),
+            Trailing::Year(year) => Some(
+                Lane::trailing()
+                    .child(figure().child(year.to_string()))
+                    .into_any_element(),
+            ),
+            Trailing::Status(status) => {
+                Some(Lane::fit().child(StatusChip(status)).into_any_element())
             }
         };
         h_flex()
             .w_full()
             .gap_3()
-            .py_0p5()
             .child(lead)
             .child(
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap_0p5()
+                    .child(div().body_strong().truncate().child(self.title))
                     .child(
                         div()
-                            .text_sm()
-                            .font_weight(gpui_kit::FontWeight::MEDIUM)
-                            .truncate()
-                            .child(self.title),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
+                            .body()
+                            .text_color(colors.fg_muted)
                             .truncate()
                             .child(self.secondary),
                     ),
             )
-            .map(|this| match self.trailing {
-                Trailing::None => this.child(div().flex_shrink_0().w_12()),
-                Trailing::Progress(text) => this.child(
-                    div()
-                        .flex_shrink_0()
-                        .w_12()
-                        .text_xs()
-                        .text_right()
-                        .text_color(muted)
-                        .child(text),
-                ),
-                Trailing::Rating(text) => this.child(
-                    h_flex()
-                        .flex_shrink_0()
-                        .w_12()
-                        .justify_end()
-                        .gap_1()
-                        .text_xs()
-                        .text_color(muted)
-                        // Gold: the user's own rating, as on the book page.
-                        .child(crate::star::icon().xsmall().text_color(colors(cx).gold))
-                        .child(text),
-                ),
-                Trailing::Status(status) => {
-                    this.child(div().flex_shrink_0().child(StatusChip(status)))
-                }
-            })
+            .children(lane)
     }
+}
+
+/// A collection's rows while it loads: skeleton rows at the list's 8 inset,
+/// 2 apart, in place of the kit's spinner.
+pub fn loading_rows() -> impl IntoElement {
+    v_flex()
+        .w_full()
+        .p_2()
+        .gap_0p5()
+        .children((0..6).map(|_| SkeletonRow::new()))
 }

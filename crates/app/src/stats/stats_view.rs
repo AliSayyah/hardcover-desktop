@@ -1,23 +1,32 @@
 //! The Stats destination: what the reader finished, rated and shelved,
 //! computed from the library on this computer. Recomputed only when the
 //! library or the date changes.
+//!
+//! A page (inset 32, at most 768 wide): the page title, the headline figures
+//! in `display-30` over muted words, then sections ("Finished per year",
+//! "Your ratings", "Shelves") 32 apart. Charts draw their bars in `accent`
+//! on a `track` grid with muted labels (the theme's chart colours); counts
+//! are tabular.
 
 use std::rc::Rc;
 
 use gpui_kit::component::chart::BarChart;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{ActiveTheme as _, IconName, h_flex, v_flex};
+use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
-    Subscription, Window, div, rems,
+    AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Window, div,
+    rems,
 };
 use hardcover_core::Date;
 
 use super::reading_stats::{ReadingStats, YearTotals, compute};
+use crate::catalog::book_list::PAGE_WIDTH;
+use crate::chip::status_icon;
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{books_count_text, count_text, status_label};
 use crate::library::model::LibraryModel;
-use crate::ui::empty_state;
+use crate::ui::{Lane, PageHeader, SectionHeader, empty_state};
 
 pub struct StatsView {
     model: Entity<LibraryModel>,
@@ -88,26 +97,10 @@ impl Render for StatsView {
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(rems(48.))
-                    .px_6()
-                    .py_6()
+                    .max_w(PAGE_WIDTH)
+                    .p_8()
                     .gap_8()
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_2xl()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Stats"),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("From your library on this computer."),
-                            ),
-                    )
+                    .child(PageHeader::new("Stats").line("From your library on this computer."))
                     .child(render_figures(&stats, cx))
                     .child(render_years(&stats, cx))
                     .child(render_ratings(&stats, cx))
@@ -117,20 +110,14 @@ impl Render for StatsView {
     }
 }
 
-/// A large number over what it counts.
+/// A headline figure in `display-30` over what it counts, muted.
 fn figure(value: impl Into<SharedString>, label: impl Into<SharedString>, cx: &App) -> AnyElement {
     v_flex()
-        .gap_0p5()
+        .child(div().display_30().child(value.into()))
         .child(
             div()
-                .text_2xl()
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(value.into()),
-        )
-        .child(
-            div()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
+                .body()
+                .text_color(colors(cx).fg_muted)
                 .child(label.into()),
         )
         .into_any_element()
@@ -163,25 +150,23 @@ fn render_figures(stats: &ReadingStats, cx: &App) -> impl IntoElement {
     if let Some(avg) = stats.average_rating {
         figures.push(figure(format!("{avg:.1}"), "average rating", cx));
     }
-    h_flex().flex_wrap().gap_x_12().gap_y_4().children(figures)
+    h_flex().flex_wrap().gap_x_12().gap_y_6().children(figures)
 }
 
-fn section(title: &'static str, cx: &App) -> gpui_kit::Div {
-    v_flex().gap_3().child(
-        div()
-            .pb_1()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .text_base()
-            .font_weight(FontWeight::SEMIBOLD)
-            .child(title),
-    )
+/// A section: its `section` title, then its content 12 below.
+fn section(title: &'static str) -> gpui_kit::Div {
+    v_flex().gap_3().child(SectionHeader::new(title))
+}
+
+/// A chart's name over it: "Books", "Pages".
+fn chart_label(text: &'static str, cx: &App) -> AnyElement {
+    div().label(cx).child(text).into_any_element()
 }
 
 fn note(text: impl Into<SharedString>, cx: &App) -> AnyElement {
     div()
-        .text_sm()
-        .text_color(cx.theme().muted_foreground)
+        .body()
+        .text_color(colors(cx).fg_muted)
         .child(text.into())
         .into_any_element()
 }
@@ -247,24 +232,16 @@ fn render_years(stats: &ReadingStats, cx: &App) -> impl IntoElement {
         )]
     } else {
         vec![
-            div()
-                .text_sm()
-                .font_weight(FontWeight::MEDIUM)
-                .child("Books")
-                .into_any_element(),
+            chart_label("Books", cx),
             year_chart("books-per-year", &stats.years, |y| y.books, year_tooltip),
             div()
-                .pt_2()
-                .text_sm()
-                .font_weight(FontWeight::MEDIUM)
-                .child("Pages")
+                .pt_3()
+                .child(chart_label("Pages", cx))
                 .into_any_element(),
             year_chart("pages-per-year", &stats.years, |y| y.pages, year_tooltip),
         ]
     };
-    section("Finished per year", cx)
-        .children(body)
-        .children(notes)
+    section("Finished per year").children(body).children(notes)
 }
 
 /// "½", "1", "1½" … "5".
@@ -278,7 +255,7 @@ fn half_stars(index: usize) -> SharedString {
 }
 
 fn render_ratings(stats: &ReadingStats, cx: &App) -> impl IntoElement {
-    let section = section("Your ratings", cx);
+    let section = section("Your ratings");
     let Some(avg) = stats.average_rating else {
         return section.child(note("Rate a book and it's counted here.", cx));
     };
@@ -311,19 +288,28 @@ fn render_ratings(stats: &ReadingStats, cx: &App) -> impl IntoElement {
     )
 }
 
+/// Each shelf as the sidebar draws it: its icon, its name and its count on
+/// a trailing lane, tabular, so the counts line up.
 fn render_shelves(stats: &ReadingStats, cx: &App) -> impl IntoElement {
+    let muted = colors(cx).fg_muted;
     let rows = stats.shelves.iter().map(|(status, count)| {
         h_flex()
-            .justify_between()
-            .text_sm()
-            .child(status_label(*status))
+            .h(size::CONTROL)
+            .gap_2()
+            .body()
+            .child(Icon::new(status_icon(*status)).text_color(muted))
             .child(
                 div()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(count_text(*count)),
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(status_label(*status)),
+            )
+            .child(
+                Lane::trailing().child(div().tabular().text_color(muted).child(count_text(*count))),
             )
     });
-    section("Shelves", cx).child(v_flex().gap_2().children(rows))
+    section("Shelves").child(v_flex().max_w(size::LIST).children(rows))
 }
 
 #[cfg(test)]

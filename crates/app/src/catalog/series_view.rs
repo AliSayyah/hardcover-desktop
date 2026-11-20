@@ -1,29 +1,35 @@
 //! A series page: its books in reading order with the reader's progress.
+//!
+//! The header has the series' name as the page title, "by" its author (a text
+//! button to their page), the facts and how many of the books the reader has
+//! read, the description in `prose`, and "Open on Hardcover". The books
+//! follow as catalogue rows.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::ui::Skeleton;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::link::Link;
-use gpui_kit::component::list::{List, ListState};
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::button::Button;
+use gpui_kit::component::list::ListState;
+use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FocusHandle, FontWeight, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
-    prelude::FluentBuilder as _, rems,
+    AnyElement, AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement as _,
+    Render, SharedString, Styled as _, Subscription, Task, Window, div,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{SeriesDetails, SeriesId};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, follow_list, new_list, read_summary, row_details,
+    CatalogBooks, CatalogRow, follow_list, load_failed, new_list, page_body, page_header,
+    page_list, read_summary, row_details,
 };
-use super::navigation::{self, Page};
+use super::navigation::Page;
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::series_position_text;
 use crate::library::model::LibraryModel;
+use crate::ui::{ExternalLink, Skeleton, TextButton};
 
 enum Loaded {
     Ready(Arc<SeriesDetails>),
@@ -161,7 +167,6 @@ impl SeriesView {
     }
 
     fn render_header(&self, series: &SeriesDetails, cx: &mut Context<Self>) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
         let model = self.model.read(cx);
         // The main (whole-numbered) books; a series without numbers counts all.
         let main: Vec<_> = series.books.iter().filter(|b| b.is_main()).collect();
@@ -190,51 +195,56 @@ impl SeriesView {
                 .iter()
                 .map(|b| model.entry_for_book(b.book.id).map(|e| e.status)),
         );
+        let muted = colors(cx).fg_muted;
         v_flex()
-            .gap_1()
+            .gap_4()
             .child(
-                div()
-                    .text_2xl()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(WrappingText::new(series.name.clone())),
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .page_title()
+                            .child(WrappingText::new(series.name.clone())),
+                    )
+                    .when_some(series.author.clone(), |this, author| {
+                        this.child(
+                            h_flex()
+                                .gap_1()
+                                .body()
+                                .child(div().text_color(muted).child("by"))
+                                .child(
+                                    TextButton::new("series-author", author.name.clone())
+                                        .opens(Page::Author(author.id)),
+                                ),
+                        )
+                    })
+                    .when(!facts.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .body()
+                                .tabular()
+                                .text_color(muted)
+                                .child(facts.join(" · ")),
+                        )
+                    })
+                    .when_some(summary, |this, summary| {
+                        this.child(div().body().tabular().child(summary))
+                    }),
             )
-            .when_some(series.author.clone(), |this, author| {
-                this.child(
-                    h_flex().gap_1().text_base().child("by").child(
-                        Button::new("series-author")
-                            .text()
-                            .label(author.name.clone())
-                            .tooltip("Open the author")
-                            .on_click(move |_, _, cx| {
-                                navigation::open(Page::Author(author.id), cx)
-                            }),
-                    ),
-                )
-            })
-            .when(!facts.is_empty(), |this| {
-                this.child(div().text_sm().text_color(muted).child(facts.join(" · ")))
-            })
-            .when_some(summary, |this, summary| {
-                this.child(div().text_sm().child(summary))
-            })
             .when_some(series.description.clone(), |this, text| {
                 this.child(
                     div()
-                        .pt_2()
-                        .text_sm()
-                        .text_color(muted)
+                        .max_w(size::PROSE)
+                        .prose()
                         .child(WrappingText::new(text).line_clamp(3)),
                 )
             })
             .when_some(series.web_url(), |this, url| {
-                this.child(
-                    div().pt_2().child(
-                        Link::new("series-on-hardcover")
-                            .href(url)
-                            .text_sm()
-                            .child("Open on Hardcover"),
-                    ),
-                )
+                this.child(ExternalLink::new(
+                    "series-on-hardcover",
+                    "Open on Hardcover",
+                    url,
+                ))
             })
             .into_any_element()
     }
@@ -255,50 +265,29 @@ impl Render for SeriesView {
         let current = self.current.and_then(|id| self.pages.get(&id));
         let header = match current {
             Some(Loaded::Ready(series)) => self.render_header(&series.clone(), cx),
-            Some(Loaded::Failed(message)) => h_flex()
-                .gap_2()
-                .text_sm()
-                .child(
-                    div()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(message.clone()),
-                )
-                .child(
-                    Button::new("retry-series")
-                        .small()
-                        .label("Try again")
-                        .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
-                )
-                .into_any_element(),
+            Some(Loaded::Failed(message)) => load_failed(
+                message.clone(),
+                Button::new("retry-series")
+                    .small()
+                    .label("Try again")
+                    .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
+                cx,
+            )
+            .into_any_element(),
             None => v_flex()
                 .gap_2()
-                .child(Skeleton::line().h_8().w_64())
-                .child(Skeleton::line().h_4().w_48())
-                .child(Skeleton::line().h_4().w_32())
+                .child(Skeleton::line().h_7().w_64())
+                .child(Skeleton::line().w_48())
+                .child(Skeleton::line().w_32())
                 .into_any_element(),
         };
         let ready = matches!(current, Some(Loaded::Ready(_)));
         v_flex()
             .size_full()
             .min_w_0()
-            .child(
-                div()
-                    .w_full()
-                    .max_w(rems(48.))
-                    .px_6()
-                    .pt_6()
-                    .pb_3()
-                    .child(header),
-            )
+            .child(page_header().child(header))
             .when(ready, |this| {
-                this.child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .max_w(rems(48.))
-                        .px_3()
-                        .child(List::new(&self.list).size_full().p_1()),
-                )
+                this.child(page_body().child(page_list(&self.list)))
             })
     }
 }
