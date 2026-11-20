@@ -20,14 +20,16 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 > This is a community project. It is not made by, affiliated with, or endorsed by Hardcover.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/library-dark.png">
-  <img src="docs/screenshots/library-light.png" alt="Hardcover Desktop showing the Currently reading shelf, with a book's page beside it: its status, rating, edition, privacy, notes and reading progress">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png">
+  <img src="docs/screenshots/home-light.png" alt="Home: the books being read with their progress and pace, the reading goal and whether it is on track, the next book in a series, the newest books on Want to read, and the books coming soon">
 </picture>
 
 ## Features
 
 - **Home:** the books you're reading, with your pace and when each should be done at it, your reading goal and whether you're on track, and what to read next, such as the next book in a series you've started.
 - **Your library by shelf:** Currently Reading, Want to Read, Read, Paused and Did Not Finish, with counts in the sidebar, plus the books you ignored.
+- **Series:** every series you've started, with the books you've read, the one you're on and the next one to read, grouped into in progress, waiting for the next book, not touched in a year and finished.
+- **Coming soon:** the unreleased books in the series on your shelves, by release date, with one click to put them on Want to Read.
 - **Search:** find any book, author or series on Hardcover, and add books to a shelf.
 - **Discover:** the books the most readers finished on Hardcover this week, month, three months, year or of all time, each with its shelf.
 - **Book details:** the authors and other contributors, series, page count, average rating, description, ratings breakdown, genres, moods and content warnings, and similar books.
@@ -35,6 +37,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 - **Your reading:** set the status and rating, update your progress in pages (or time, for an audiobook), set the dates you started and finished, or remove a book.
 - **Your copy:** choose the edition you read, keep private notes, choose who can see the book, and mark it owned or not (your Owned list on Hardcover).
 - **Every read:** see each time you read a book, add a re-read or an earlier read, change its dates, or delete it.
+- **Reviews:** read what other readers wrote about a book, with their ratings; spoilers stay hidden until you ask.
 - **Your review:** write a review of a book in your library, in Markdown, mark it as containing spoilers and date it; change or delete it later. A review written on the website is shown here and edited there.
 - **Reading goals:** see this year's goal and your pace in the sidebar, and set, change or delete a goal of books, pages or hours.
 - **Lists:** open your lists from the sidebar to see their books in order, create, edit or delete a list, and put a book on your lists or take it off from its page.
@@ -45,8 +48,8 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 - **Settings:** choose a light or dark theme or follow the system, and turn automatic update checks on or off.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/search-dark.png">
-  <img src="docs/screenshots/search-light.png" alt="Searching books for Dune, with the Books, Authors and Series switch above the results and the first result's page open beside the list">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/library-dark.png">
+  <img src="docs/screenshots/library-light.png" alt="The Currently reading shelf, with a book's page beside it: its status, rating, progress, notes, edition, owned switch and privacy">
 </picture>
 
 - **Keyboard first:**
@@ -65,8 +68,8 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
   | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/discover-dark.png">
-  <img src="docs/screenshots/discover-light.png" alt="Discover, listing the books the most readers finished on Hardcover in the last month, each with its shelf">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/series-dark.png">
+  <img src="docs/screenshots/series-light.png" alt="Series: the series the reader has started, grouped by where they are, each with its books as a row of covers and the next step in it">
 </picture>
 
 ## Install
