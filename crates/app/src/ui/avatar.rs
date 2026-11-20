@@ -60,7 +60,7 @@ impl Avatar {
 
     /// The account avatar, using the display name and falling back to a
     /// caller-provided label when the account is unavailable or unnamed.
-    pub fn for_user(
+    pub(crate) fn for_user(
         user: Option<&hardcover_core::User>,
         fallback: impl Into<SharedString>,
     ) -> Self {
