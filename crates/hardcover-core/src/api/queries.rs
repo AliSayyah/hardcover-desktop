@@ -248,6 +248,35 @@ pub(crate) const UPCOMING_IN_SERIES: &str = concat!(
     book_summary_fields!()
 );
 
+/// The series a reader has started, a batch at a time, with every book of each:
+/// the Series destination's data. Merged duplicates, compilations and books
+/// without a position are filtered here; several books may share a position
+/// (unmerged duplicates, translations), and the app keeps the one in the library,
+/// else the most-read one, so no row is dropped by position here. Ordered by
+/// position, so the row limit only ever cuts a series' tail.
+pub(crate) const SERIES_OVERVIEW: &str = concat!(
+    "query SeriesOverview($ids: [Int!]!, $limit: Int!, $rows: Int!) {
+  series(where: {id: {_in: $ids}}, limit: $limit) {
+    id name slug primary_books_count is_completed
+    author { id name }
+    book_series(
+      where: {
+        book: {canonical_id: {_is_null: true}}
+        compilation: {_eq: false}
+        position: {_is_null: false}
+      }
+      order_by: [{position: asc}, {book: {users_count: desc}}]
+      limit: $rows
+    ) {
+      position compilation
+      book { ...BookSummaryFields canonical_id release_date is_partial_book }
+    }
+  }
+}
+",
+    book_summary_fields!()
+);
+
 /// Lengths needed to turn a percentage into pages/seconds, plus the read to update.
 /// `$reads` selects either one read by id or the unfinished read.
 pub(crate) const PROGRESS_CONTEXT: &str =
@@ -630,6 +659,7 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("BOOK_REVIEWS", BOOK_REVIEWS),
     ("BOOK_REVIEWS_COUNT", BOOK_REVIEWS_COUNT),
     ("UPCOMING_IN_SERIES", UPCOMING_IN_SERIES),
+    ("SERIES_OVERVIEW", SERIES_OVERVIEW),
 ];
 
 #[cfg(test)]

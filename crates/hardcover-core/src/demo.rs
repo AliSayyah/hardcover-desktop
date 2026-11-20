@@ -684,6 +684,67 @@ fn series_page(catalogue: &Catalogue, id: i64) -> Option<Value> {
     }))
 }
 
+/// `series` for `SeriesOverview`: each series asked for, with the books the
+/// query keeps (a position, not merged, not a compilation), the catalogue's
+/// and those still to come, by position.
+fn series_overview(catalogue: &Catalogue, vars: &Value) -> Value {
+    let ids: Vec<i64> = vars["ids"]
+        .as_array()
+        .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
+        .unwrap_or_default();
+    let series: Vec<Value> = catalogue
+        .series()
+        .into_iter()
+        .filter(|(id, _)| ids.contains(id))
+        .map(|(id, name)| {
+            let mut rows: Vec<(f64, Value)> = catalogue
+                .books
+                .iter()
+                .filter_map(|b| {
+                    let s = b.series.as_ref().filter(|s| s.name == name)?;
+                    let mut book = book_summary(b);
+                    book["canonical_id"] = Value::Null;
+                    book["release_date"] = json!(b.release_date);
+                    book["is_partial_book"] = json!(false);
+                    Some((s.position, book))
+                })
+                .chain(
+                    catalogue
+                        .upcoming
+                        .iter()
+                        .filter(|u| u.series == name)
+                        .filter_map(|u| {
+                            let mut book = upcoming_summary(catalogue, u);
+                            book["canonical_id"] = Value::Null;
+                            book["is_partial_book"] = json!(false);
+                            Some((u.position?, book))
+                        }),
+                )
+                .collect();
+            rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let author = catalogue
+                .series_author(name)
+                .map(|a| json!({ "id": catalogue.author_id(a), "name": a }));
+            let rows: Vec<Value> = rows
+                .into_iter()
+                .map(|(position, book)| {
+                    json!({ "position": position, "compilation": false, "book": book })
+                })
+                .collect();
+            json!({
+                "id": id,
+                "name": name,
+                "slug": slug(name),
+                "primary_books_count": null,
+                "is_completed": null,
+                "author": author,
+                "book_series": rows,
+            })
+        })
+        .collect();
+    json!({ "series": series })
+}
+
 /// `authors_by_pk` for `AuthorPage`, most read first.
 fn author_page(catalogue: &Catalogue, id: i64) -> Option<Value> {
     let (id, name) = catalogue.authors().into_iter().find(|(i, _)| *i == id)?;
@@ -834,6 +895,7 @@ fn answer(op: &str, vars: &Value) -> Value {
         }),
         "SeriesPage" => json!({ "series_by_pk": series_page(catalogue, int("id")) }),
         "UpcomingInSeries" => upcoming_rows(catalogue, vars),
+        "SeriesOverview" => series_overview(catalogue, vars),
         "AuthorPage" => json!({ "authors_by_pk": author_page(catalogue, int("id")) }),
         "BooksByIds" => {
             let ids: Vec<i64> = vars["ids"]
@@ -1581,6 +1643,44 @@ mod tests {
         assert!(details.description.is_none());
         let page = client.series(first).unwrap();
         assert!(page.books.iter().any(|b| b.book.id == books[0].book.id));
+    }
+
+    #[test]
+    fn the_series_overview_lists_catalogue_and_upcoming_books() {
+        let catalogue = &*CATALOGUE;
+        let client = client();
+        let ids: Vec<crate::SeriesId> = catalogue
+            .series()
+            .into_iter()
+            .map(|(id, _)| crate::SeriesId::new(id))
+            .collect();
+        let series = client.tracked_series(&ids).unwrap();
+        assert_eq!(series.len(), ids.len());
+        let named = |name: &str| series.iter().find(|s| s.name == name).unwrap();
+
+        let dune: Vec<f32> = named("Dune").books.iter().map(|b| b.position).collect();
+        assert_eq!(dune, [1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(named("Dune").author.as_ref().unwrap().name, "Frank Herbert");
+        // A novella still to come, with its date.
+        let mistborn = named("The Mistborn Saga: The Original Trilogy");
+        let novella = mistborn.books.iter().find(|b| b.position == 3.5).unwrap();
+        assert!(novella.release_date.unwrap() > today());
+        // An upcoming book without a position is filtered, as the query does.
+        assert!(
+            named("Reidverse")
+                .books
+                .iter()
+                .all(|b| b.book.title != "Untitled Reidverse Novel")
+        );
+        assert!(
+            series
+                .iter()
+                .all(|s| { s.books.windows(2).all(|w| w[0].position <= w[1].position) })
+        );
+        // Only the series asked for.
+        let one = client.tracked_series(&ids[..1]).unwrap();
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].id, ids[0]);
     }
 
     #[test]
