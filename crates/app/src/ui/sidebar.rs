@@ -31,13 +31,15 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Icon, IconName, Selectable};
 use gpui_kit::{
     AnyElement, App, ClickEvent, Div, ElementId, FontWeight, InteractiveElement, Interactivity,
-    IntoElement, ParentElement as _, RenderOnce, SharedString, Stateful,
+    IntoElement, ParentElement as _, RenderOnce, Role, ScrollHandle, SharedString, Stateful,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder as _,
 };
 
 use super::Meter;
-use super::focus::{FocusTreatment as _, control_radius, focus_visible, keyed_focus};
+use super::focus::{
+    FocusTreatment as _, control_radius, focus_visible, keyed_focus, reveal_on_focus,
+};
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors, size};
 
@@ -82,6 +84,7 @@ pub struct GoalRow {
     percent: f32,
     pace: Option<f32>,
     accessibility_label: Option<SharedString>,
+    reveal_in: Option<ScrollHandle>,
     on_click: Option<ClickHandler>,
 }
 
@@ -101,8 +104,15 @@ impl GoalRow {
             percent,
             pace: None,
             accessibility_label: None,
+            reveal_in: None,
             on_click: None,
         }
+    }
+
+    /// The scroller the row sits in, as [`super::NavRow::reveal_in`].
+    pub fn reveal_in(mut self, scroll: &ScrollHandle) -> Self {
+        self.reveal_in = Some(scroll.clone());
+        self
     }
 
     /// The pace tick, at `percent` of the way. `None` draws none.
@@ -137,6 +147,9 @@ impl RenderOnce for GoalRow {
             .accessibility_label
             .unwrap_or_else(|| format!("{}, {}", self.label, self.count).into());
         let meter_id = ElementId::NamedChild(std::sync::Arc::new(self.id.clone()), "meter".into());
+        let reveal = self
+            .reveal_in
+            .map(|scroll| reveal_on_focus(self.id.clone(), &focus, &scroll, window, cx));
         BaseButton::new(self.id)
             .track_focus(&focus)
             .accessibility_label(label)
@@ -157,6 +170,7 @@ impl RenderOnce for GoalRow {
                 this.on_click(move |event, window, cx| handler(event, window, cx))
             })
             .when(focused, |this| this.focus_ring(radius, cx))
+            .children(reveal)
             .child(
                 div()
                     .flex()
@@ -265,6 +279,8 @@ impl RenderOnce for AccountRow {
         let status_id =
             ElementId::NamedChild(std::sync::Arc::new(self.id.clone()), "status".into());
         self.base
+            .role(Role::Button)
+            .aria_label(self.name.clone())
             .track_focus(&focus.clone().tab_stop(true))
             .relative()
             .flex()
@@ -311,5 +327,33 @@ impl RenderOnce for AccountRow {
                     .flex_none()
                     .text_color(colors.fg_muted),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::ui::test_support::{host, press, tab};
+    use gpui_kit::TestAppContext;
+
+    #[gpui_kit::test]
+    fn the_goal_row_opens_from_the_keyboard(cx: &mut TestAppContext) {
+        let opened = Rc::new(Cell::new(0));
+        let cx = host(cx, {
+            let opened = opened.clone();
+            move |_, _| {
+                let opened = opened.clone();
+                GoalRow::new("goal", "2026", "9 of 12 books", 75.)
+                    .pace(Some(88.))
+                    .on_click(move |_, _, _| opened.set(opened.get() + 1))
+                    .into_any_element()
+            }
+        });
+        tab(cx);
+        press(cx, "enter");
+        assert_eq!(opened.get(), 1);
     }
 }

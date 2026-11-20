@@ -15,10 +15,10 @@ use gpui_kit::component::{
     Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
-    Action, AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
+    Action, Anchor, AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, Modifiers, ModifiersChangedEvent,
-    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
-    prelude::FluentBuilder as _, rems,
+    ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::store::LibraryCache;
 use hardcover_core::{ListId, ReadingStatus};
@@ -32,7 +32,7 @@ use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
 use crate::catalog::series_view::SeriesView;
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors, size};
-use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
+use crate::format::{SIDEBAR_SHELVES, count_text, relative_time, status_label};
 use crate::goals::model::GoalsModel;
 use crate::goals::sidebar::GoalsSection;
 use crate::home::home_view::HomeView;
@@ -203,6 +203,9 @@ pub struct Workspace {
     reauthorize: Entity<Reauthorize>,
     goals: Entity<GoalsModel>,
     goals_section: Entity<GoalsSection>,
+    /// The sidebar's destinations, which scroll between the brand and the
+    /// account; a row that gains focus scrolls into view in it.
+    sidebar_scroll: ScrollHandle,
     lists: Entity<ListsModel>,
     list_page: Entity<ListView>,
     upcoming: Entity<UpcomingModel>,
@@ -248,7 +251,9 @@ impl Workspace {
         let navigator = Navigator::init(cx);
         let reauthorize = cx.new(|_| Reauthorize::new(model.clone()));
         let goals = cx.new(|cx| GoalsModel::new(model.clone(), cx));
-        let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
+        let sidebar_scroll = ScrollHandle::new();
+        let goals_section = cx
+            .new(|cx| GoalsSection::new(goals.clone(), model.clone(), sidebar_scroll.clone(), cx));
         let upcoming = cx.new(|cx| UpcomingModel::new(model.clone(), cx));
         let upcoming_page = cx.new(|cx| UpcomingView::new(upcoming.clone(), model.clone(), cx));
         let home = cx.new(|cx| HomeView::new(model.clone(), goals.clone(), upcoming.clone(), cx));
@@ -325,6 +330,7 @@ impl Workspace {
             reauthorize,
             goals,
             goals_section,
+            sidebar_scroll,
             lists,
             list_page,
             upcoming,
@@ -639,6 +645,7 @@ impl Workspace {
                        action: &dyn Action| {
             let view = view.clone();
             NavRow::new(id, icon, label)
+                .reveal_in(&self.sidebar_scroll)
                 .selected(self.destination == destination)
                 .hint(hint(action))
                 .on_click(move |_, window, cx| {
@@ -654,7 +661,7 @@ impl Workspace {
                 Destination::Shelf(status),
                 action.as_ref(),
             )
-            .count(model.count(status).to_string())
+            .count(count_text(model.count(status) as u32))
         });
         let goals = self
             .goals_section
@@ -663,6 +670,7 @@ impl Workspace {
             .then(|| self.goals_section.clone());
         let lists = lists_section(
             &self.lists,
+            &self.sidebar_scroll,
             match self.destination {
                 Destination::List(id) => Some(id),
                 _ => None,
@@ -694,7 +702,9 @@ impl Workspace {
                     .id("sidebar-destinations")
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scrollbar()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.sidebar_scroll)
+                    .vertical_scrollbar(&self.sidebar_scroll)
                     .child(
                         v_flex()
                             .p_2()
@@ -736,6 +746,7 @@ impl Workspace {
                 v_flex()
                     .flex_none()
                     .px_2()
+                    .pt_2()
                     .pb_2()
                     .gap_2()
                     .when(
@@ -879,7 +890,7 @@ impl Workspace {
                 None,
                 match model.sync_fetched() {
                     0 => "Syncing…".into(),
-                    n => format!("Syncing… {n} books").into(),
+                    n => format!("Syncing… {} books", count_text(n as u32)).into(),
                 },
             ),
             SyncStatus::Failed { offline: true, .. } => {
@@ -941,7 +952,8 @@ impl Workspace {
 
         AccountRow::new("account", avatar, username, status)
             .status_tooltip(sync_tooltip)
-            .dropdown_menu(move |menu, _, _| {
+            // Above the row, so the row shows that its menu is open.
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
                 let view = view.clone();
                 let menu = menu.action_context(focus.clone()).menu_with_icon(
                     "Refresh library",

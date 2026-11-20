@@ -81,12 +81,19 @@ pub fn open_goal(
 /// Opens the form that creates a goal.
 pub fn open_new_goal(goals: Entity<GoalsModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| NewGoalView::new(goals, window, cx));
-    open_dialog(window, cx, move |dialog, window, _| {
-        dialog
-            .title("New reading goal")
-            .w(dialog_width(window))
-            .child(view.clone())
+    open_dialog(window, cx, {
+        let view = view.clone();
+        move |dialog, window, _| {
+            dialog
+                .title("New reading goal")
+                .w(dialog_width(window))
+                .child(view.clone())
+        }
     });
+    // After opening: the dialog gives focus back to whatever had it when it
+    // opened, which must be the row that opened it.
+    let target = view.read(cx).target.clone();
+    target.update(cx, |input, cx| input.focus(window, cx));
 }
 
 // ----- one goal -----
@@ -455,7 +462,6 @@ impl NewGoalView {
                 },
             ),
         ];
-        target.update(cx, |input, cx| input.focus(window, cx));
         Self {
             goals,
             metric: 0,

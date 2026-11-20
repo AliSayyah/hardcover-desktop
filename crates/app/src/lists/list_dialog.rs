@@ -34,12 +34,18 @@ pub fn open_new_list(
     cx: &mut App,
 ) {
     let view = cx.new(|cx| ListDialog::new(lists, Mode::Create(book), window, cx));
-    open_dialog(window, cx, move |dialog, window, _| {
-        dialog
-            .title("New list")
-            .w(dialog_width(window))
-            .child(view.clone())
+    open_dialog(window, cx, {
+        let view = view.clone();
+        move |dialog, window, _| {
+            dialog
+                .title("New list")
+                .w(dialog_width(window))
+                .child(view.clone())
+        }
     });
+    // After opening: the dialog gives focus back to whatever had it when it
+    // opened, which must be the row or button that opened it.
+    view.update(cx, |this, cx| this.focus(window, cx));
 }
 
 /// Opens the form for one of the model's lists.
@@ -49,12 +55,18 @@ pub fn open_edit_list(lists: Entity<ListsModel>, id: ListId, window: &mut Window
     };
     let title: SharedString = format!("Edit “{name}”").into();
     let view = cx.new(|cx| ListDialog::new(lists, Mode::Edit(id), window, cx));
-    open_dialog(window, cx, move |dialog, window, _| {
-        dialog
-            .title(title.clone())
-            .w(dialog_width(window))
-            .child(view.clone())
+    open_dialog(window, cx, {
+        let view = view.clone();
+        move |dialog, window, _| {
+            dialog
+                .title(title.clone())
+                .w(dialog_width(window))
+                .child(view.clone())
+        }
     });
+    // After opening: the dialog gives focus back to whatever had it when it
+    // opened, which must be the row or button that opened it.
+    view.update(cx, |this, cx| this.focus(window, cx));
 }
 
 enum Mode {
@@ -117,7 +129,6 @@ impl ListDialog {
                 },
             ),
         ];
-        name.update(cx, |input, cx| input.focus(window, cx));
         Self {
             lists,
             mode,
@@ -132,6 +143,10 @@ impl ListDialog {
             error: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    fn focus(&self, window: &mut Window, cx: &mut App) {
+        self.name.update(cx, |input, cx| input.focus(window, cx));
     }
 
     fn draft(&self, cx: &App) -> Result<ListDraft, &'static str> {

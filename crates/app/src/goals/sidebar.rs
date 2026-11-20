@@ -2,10 +2,11 @@
 //! (`ui::GoalRow`: the period, "9 of 12 books" and a meter with its pace
 //! tick), or a way to set one.
 
+use chrono::Datelike as _;
 use gpui_kit::component::IconName;
 use gpui_kit::{
-    App, Context, Entity, IntoElement, ParentElement as _, Render, SharedString, Subscription,
-    Window, div,
+    App, Context, Entity, IntoElement, ParentElement as _, Render, ScrollHandle, SharedString,
+    Subscription, Window, div,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_GOALS};
 use hardcover_core::{Date, Goal};
@@ -20,6 +21,8 @@ use crate::ui::{GoalRow, NavRow, sidebar_label};
 pub struct GoalsSection {
     goals: Entity<GoalsModel>,
     library: Entity<LibraryModel>,
+    /// The sidebar's scroller, so a focused row scrolls into view.
+    scroll: ScrollHandle,
     _subscription: Subscription,
 }
 
@@ -27,12 +30,14 @@ impl GoalsSection {
     pub fn new(
         goals: Entity<GoalsModel>,
         library: Entity<LibraryModel>,
+        scroll: ScrollHandle,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
             _subscription: cx.observe(&goals, |_, _, cx| cx.notify()),
             goals,
             library,
+            scroll,
         }
     }
 
@@ -57,6 +62,19 @@ pub fn pace_percent(goal: &Goal, today: Date) -> Option<f32> {
     })
 }
 
+/// The goal row's label: the year for a calendar-year goal ("2026"), else
+/// its end ("By Jun 30"), since both dates don't fit beside the count.
+fn row_label(goal: &Goal, today: Date) -> String {
+    let period = goal_period(goal.start, goal.end);
+    if period.len() == 4 {
+        period
+    } else if goal.end.year() == today.year() {
+        format!("By {}", goal.end.format("%b %-d"))
+    } else {
+        format!("By {}", goal.end.format("%b %-d, %Y"))
+    }
+}
+
 impl Render for GoalsSection {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let today = chrono::Local::now().date_naive();
@@ -78,11 +96,12 @@ impl Render for GoalsSection {
                 let (goals, library, id) = (goals.clone(), library.clone(), goal.id);
                 GoalRow::new(
                     SharedString::from(format!("goal-row-{id}")),
-                    period,
+                    row_label(goal, today),
                     count,
                     percent,
                 )
                 .pace(pace_percent(goal, today))
+                .reveal_in(&self.scroll)
                 .accessibility_label(accessible)
                 .on_click(move |_, window, cx| {
                     open_goal(goals.clone(), library.clone(), id, window, cx)
@@ -100,12 +119,14 @@ impl Render for GoalsSection {
                         IconName::CircleAlert,
                         "Couldn't load. Try again",
                     )
+                    .reveal_in(&self.scroll)
                     .on_click(move |_, _, cx| goals.update(cx, |m, cx| m.load(cx)))
                     .into_any_element()
                 }
                 _ => {
                     let goals = goals.clone();
                     NavRow::new("goal-new", IconName::Plus, "Set a reading goal…")
+                        .reveal_in(&self.scroll)
                         .muted(true)
                         .disabled(!can_write)
                         .tooltip((!can_write).then(|| needs_permission(WRITE_GOALS)))
@@ -120,5 +141,33 @@ impl Render for GoalsSection {
             "Reading goal"
         };
         div().child(sidebar_label(label, cx)).children(rows)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hardcover_core::{GoalId, GoalMetric};
+
+    fn goal(start: Date, end: Date) -> Goal {
+        Goal::new(GoalId::new(1), GoalMetric::Books, 12, start, end)
+    }
+
+    #[test]
+    fn a_goal_row_names_its_year_or_its_end() {
+        let d = |y, m, d| Date::from_ymd_opt(y, m, d).unwrap();
+        let today = d(2026, 11, 20);
+        assert_eq!(
+            row_label(&goal(d(2026, 1, 1), d(2026, 12, 31)), today),
+            "2026"
+        );
+        assert_eq!(
+            row_label(&goal(d(2026, 3, 1), d(2026, 6, 30)), today),
+            "By Jun 30"
+        );
+        assert_eq!(
+            row_label(&goal(d(2026, 9, 1), d(2027, 3, 31)), today),
+            "By Mar 31, 2027"
+        );
     }
 }

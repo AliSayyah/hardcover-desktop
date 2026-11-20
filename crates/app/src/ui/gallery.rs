@@ -572,6 +572,11 @@ fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
                             .pace(Some(88.))
                             .on_click(|_, _, _| {}),
                     )
+                    .child(
+                        GoalRow::new("g-goal-dates", "By Jun 30", "1,200 of 5,000 pages", 24.)
+                            .pace(Some(61.))
+                            .on_click(|_, _, _| {}),
+                    )
                     .child(sidebar_label("Lists", cx))
                     .child(
                         NavRow::new("g-new-list", IconName::Plus, "New list…")
