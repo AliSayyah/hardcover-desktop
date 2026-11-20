@@ -31,9 +31,17 @@ use crate::library::model::{LibraryModel, SyncStatus};
 pub fn open_export(library: Entity<LibraryModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| ExportDialog::new(library, cx));
     window.open_dialog(cx, move |dialog, window, _| {
+        let ok_view = view.clone();
+        // Enter anywhere in the dialog exports (without this, the dialog's
+        // own Enter binding would just close it). It closes itself once the
+        // file is saved.
         dialog
             .title("Export library")
             .w(rems(30.).to_pixels(window.rem_size()))
+            .on_ok(move |_, window, cx| {
+                ok_view.update(cx, |this, cx| this.start(window, cx));
+                false
+            })
             .child(view.clone())
     });
 }
