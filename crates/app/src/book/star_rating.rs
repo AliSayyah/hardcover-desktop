@@ -25,8 +25,8 @@ use gpui_kit::{
 use hardcover_core::Rating;
 
 use crate::design::colors;
-use crate::star;
 use crate::ui::focus::{FocusTreatment as _, control_radius, focus_visible};
+use crate::ui::{StarSize, render_star};
 
 /// Key context of the control; its bindings live in `main`.
 pub const KEY_CONTEXT: &str = "StarRating";
@@ -250,55 +250,41 @@ impl RenderOnce for StarRating {
                                     }
                                 })
                         };
-                        render_star(n, shown, small, filled_color, empty_color)
-                            .child(half(false))
-                            .child(half(true))
+                        render_star(
+                            n,
+                            shown,
+                            if small {
+                                StarSize::Medium
+                            } else {
+                                StarSize::Large
+                            },
+                            filled_color,
+                            empty_color,
+                        )
+                        .child(half(false))
+                        .child(half(true))
                     }))
             })
             .when(disabled, |this| {
-                this.opacity(0.5).children(
-                    (1..=STARS).map(|n| render_star(n, shown, small, filled_color, empty_color)),
-                )
+                this.opacity(0.5).children((1..=STARS).map(|n| {
+                    render_star(
+                        n,
+                        shown,
+                        if small {
+                            StarSize::Medium
+                        } else {
+                            StarSize::Large
+                        },
+                        filled_color,
+                        empty_color,
+                    )
+                }))
             })
             .when_some(self.tooltip, |this, tip| {
                 this.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
             })
             .when(focused, |this| this.focus_ring(radius, cx))
     }
-}
-
-fn render_star(
-    position: u8,
-    value: f32,
-    small: bool,
-    filled: gpui_kit::Hsla,
-    empty: gpui_kit::Hsla,
-) -> gpui_kit::Div {
-    let size = |this: gpui_kit::Div| if small { this.size_4() } else { this.size_5() };
-    let star = || {
-        let icon = star::icon().flex_shrink_0();
-        if small { icon.size_4() } else { icon.size_5() }
-    };
-    div()
-        .relative()
-        .flex_shrink_0()
-        .map(size)
-        .map(|this| match star_fill(value, position) {
-            StarFill::Full => this.child(star().text_color(filled)),
-            StarFill::Empty => this.child(star().text_color(empty)),
-            // An empty star with its leading half filled. Both are the same
-            // solid shape, so the split is clean.
-            StarFill::Half => this.child(star().text_color(empty)).child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .h_full()
-                    .w(relative(0.5))
-                    .overflow_hidden()
-                    .child(star().text_color(filled)),
-            ),
-        })
 }
 
 #[cfg(test)]
