@@ -1686,3 +1686,26 @@ mod community_review_tests {
         assert_eq!(r.paragraphs().collect::<Vec<_>>(), ["First.", "Second."]);
     }
 }
+
+/// A book not yet released in a series the reader follows
+/// ([`crate::api::Client::upcoming_in_series`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct UpcomingBook {
+    pub book: BookSummary,
+    pub release_date: Date,
+    /// Each of the asked-for series the book is in, in the order Hardcover
+    /// listed them, with the book's position there (fractional for a
+    /// novella, `None` when unnumbered).
+    pub series: Vec<SeriesRef>,
+}
+
+impl UpcomingBook {
+    pub fn new(book: BookSummary, release_date: Date) -> Self {
+        Self {
+            book,
+            release_date,
+            series: Vec::new(),
+        }
+    }
+}

@@ -956,5 +956,42 @@
         377193
       ]
     }
+  ],
+  "upcoming": [
+    {
+      "id": 99000001,
+      "title": "Untitled Empyrean #4",
+      "series": "The Empyrean",
+      "position": 4.0,
+      "days": 6
+    },
+    {
+      "id": 99000002,
+      "title": "Untitled Reidverse Novel",
+      "series": "Reidverse",
+      "position": null,
+      "days": 1
+    },
+    {
+      "id": 99000003,
+      "title": "Untitled Mistborn Novella",
+      "series": "The Mistborn Saga: The Original Trilogy",
+      "position": 3.5,
+      "days": 75
+    },
+    {
+      "id": 99000004,
+      "title": "Untitled Empyrean #5",
+      "series": "The Empyrean",
+      "position": 5.0,
+      "days": 420
+    },
+    {
+      "id": 99000005,
+      "title": "Untitled Stormlight Archive #6",
+      "series": "The Stormlight Archive",
+      "position": 6.0,
+      "days": 1900
+    }
   ]
 }

@@ -51,6 +51,8 @@ use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::stats::stats_view::StatsView;
+use crate::upcoming::model::UpcomingModel;
+use crate::upcoming::upcoming_view::UpcomingView;
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
 use crate::{
     FocusSearch, GoBack, OpenSettings, Refresh, ShowAbout, ShowCurrentlyReading, ShowDidNotFinish,
@@ -201,6 +203,8 @@ pub struct Workspace {
     goals_section: Entity<GoalsSection>,
     lists: Entity<ListsModel>,
     list_page: Entity<ListView>,
+    upcoming: Entity<UpcomingModel>,
+    upcoming_page: Entity<UpcomingView>,
     signing_out: bool,
     /// Whether the sidebar shows its keyboard shortcuts: only while Ctrl is
     /// held, so the rest of the time the rows stay clean.
@@ -239,7 +243,9 @@ impl Workspace {
         let reauthorize = cx.new(|_| Reauthorize::new(model.clone()));
         let goals = cx.new(|cx| GoalsModel::new(model.clone(), cx));
         let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
-        let home = cx.new(|cx| HomeView::new(model.clone(), goals.clone(), cx));
+        let upcoming = cx.new(|cx| UpcomingModel::new(model.clone(), cx));
+        let upcoming_page = cx.new(|cx| UpcomingView::new(upcoming.clone(), model.clone(), cx));
+        let home = cx.new(|cx| HomeView::new(model.clone(), goals.clone(), upcoming.clone(), cx));
         model.update(cx, |m, cx| m.start(cx));
         goals.update(cx, |g, cx| g.load(cx));
         lists.update(cx, |l, cx| l.load(cx));
@@ -315,6 +321,8 @@ impl Workspace {
             goals_section,
             lists,
             list_page,
+            upcoming,
+            upcoming_page,
             signing_out: false,
             key_hints: false,
             _key_hint_delay: None,
@@ -402,6 +410,7 @@ impl Workspace {
             Some(Page::Book(book)) => self.book_page.update(cx, |p, cx| {
                 p.set_subject(Some(Subject::Book(book)), window, cx)
             }),
+            Some(Page::Upcoming) => {}
             None => return,
         }
         self.focus_page(window, cx);
@@ -421,7 +430,7 @@ impl Workspace {
                 self.author_page
                     .update(cx, |p, cx| p.focus(&fallback, window, cx))
             }
-            Some(Page::Book(_)) => window.focus(&self.page_focus, cx),
+            Some(Page::Book(_)) | Some(Page::Upcoming) => window.focus(&self.page_focus, cx),
             None => {}
         }
     }
@@ -431,6 +440,7 @@ impl Workspace {
             Page::Series(_) => self.series_page.clone().into_any_element(),
             Page::Author(_) => self.author_page.clone().into_any_element(),
             Page::Book(_) => self.book_page.clone().into_any_element(),
+            Page::Upcoming => self.upcoming_page.clone().into_any_element(),
         };
         v_flex()
             .id("catalog-page")
@@ -466,6 +476,7 @@ impl Workspace {
         Services::set_scopes(event.scopes.clone(), cx);
         self.goals.update(cx, |g, cx| g.load(cx));
         self.lists.update(cx, |l, cx| l.reload(cx));
+        self.upcoming.update(cx, |u, cx| u.load(cx));
         cx.notify();
     }
 
@@ -473,6 +484,7 @@ impl Workspace {
         self.model.update(cx, |m, cx| m.sync(cx));
         self.goals.update(cx, |g, cx| g.load(cx));
         self.lists.update(cx, |l, cx| l.reload(cx));
+        self.upcoming.update(cx, |u, cx| u.load(cx));
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {

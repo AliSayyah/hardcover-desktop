@@ -1271,6 +1271,65 @@ mod community_review_tests {
     }
 }
 
+// ---------- upcoming books ----------
+
+/// One `book_series` row of `UpcomingInSeries`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawUpcomingRow {
+    pub position: Option<f64>,
+    #[serde(default)]
+    pub compilation: bool,
+    pub series: Option<RawSeries>,
+    pub book: Option<RawUpcomingBook>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawUpcomingBook {
+    #[serde(flatten)]
+    pub book: RawBook,
+    pub release_date: Option<String>,
+    pub is_partial_book: Option<bool>,
+}
+
+/// One book per id, in the order of its first row, with every series it was
+/// listed under. Compilations, partial books and books without a release
+/// date are left out.
+pub(crate) fn upcoming_books(rows: Vec<RawUpcomingRow>) -> Vec<UpcomingBook> {
+    let mut books: Vec<UpcomingBook> = Vec::new();
+    for row in rows {
+        let Some(raw) = row.book else { continue };
+        if row.compilation || raw.is_partial_book == Some(true) {
+            continue;
+        }
+        let Some(release_date) = raw.release_date.as_deref().and_then(parse_date) else {
+            continue;
+        };
+        let id = BookId::new(raw.book.id);
+        let ix = match books.iter().position(|b| b.book.id == id) {
+            Some(ix) => ix,
+            None => {
+                books.push(UpcomingBook::new(raw.book.into_summary(), release_date));
+                books.len() - 1
+            }
+        };
+        let series = series_refs(vec![RawBookSeries {
+            position: row.position,
+            featured: false,
+            series: row.series,
+        }]);
+        for s in series {
+            let known = books[ix]
+                .series
+                .iter()
+                .any(|o| o.id == s.id && o.name == s.name);
+            if !known {
+                books[ix].series.push(s);
+            }
+        }
+    }
+    books
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
