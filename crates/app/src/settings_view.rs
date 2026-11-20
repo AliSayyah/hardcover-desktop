@@ -3,20 +3,20 @@
 //! Every change applies at once and is saved; there is nothing to confirm, so
 //! the dialog only has its close button.
 
-use gpui_kit::component::avatar::Avatar;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement as _, Render,
+    AnyElement, Context, Entity, EventEmitter, IntoElement, ParentElement as _, Render,
     SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::prefs::ThemePreference;
 
-use crate::app_state::cover_file;
+use crate::design::TypeRoles as _;
 use crate::library::model::LibraryModel;
 use crate::preferences::{AppPreferences, PreferencesModel, theme_override};
+use crate::ui::Avatar;
 use crate::update::{UpdateModel, UpdateState, Updates, automatic_checks_unavailable};
 
 const THEMES: [(ThemePreference, &str); 3] = [
@@ -76,7 +76,6 @@ impl SettingsView {
                 choices,
                 cx,
             ),
-            cx,
         )
     }
 
@@ -121,7 +120,6 @@ impl SettingsView {
         );
         let updates = self.updates.clone();
         let check = Button::new("check-for-updates")
-            .outline()
             .small()
             .label("Check now")
             .loading(matches!(model.state(), UpdateState::Checking))
@@ -135,84 +133,72 @@ impl SettingsView {
             check,
             cx,
         );
-        section(
-            "Updates",
-            v_flex().gap_4().child(automatic).child(version),
-            cx,
-        )
+        section("Updates", v_flex().gap_4().child(automatic).child(version))
     }
 
-    fn render_account(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_account(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let user = self.library.read(cx).user().cloned();
         let username: SharedString = user
             .as_ref()
             .map(|u| u.username.clone().into())
             .unwrap_or_else(|| "Signed in".into());
-        let avatar = user
-            .as_ref()
-            .and_then(|u| u.avatar.as_ref())
-            .map(|a| a.url.clone())
-            .and_then(|url| cover_file(&url, window, cx));
+        let avatar = Avatar::new(
+            user.as_ref()
+                .and_then(|u| u.name.clone())
+                .filter(|name| !name.trim().is_empty())
+                .map_or_else(|| username.clone(), SharedString::from),
+        )
+        .image(
+            user.as_ref()
+                .and_then(|u| u.avatar.as_ref())
+                .map(|a| a.url.clone()),
+        );
         let view = cx.entity().downgrade();
-        let sign_out = Button::new("sign-out")
-            .outline()
-            .small()
-            .label("Sign out…")
-            .on_click(move |_, _, cx| {
-                let _ = view.update(cx, |_, cx| cx.emit(SignOutRequested));
-            });
+        let sign_out =
+            Button::new("sign-out")
+                .small()
+                .label("Sign out…")
+                .on_click(move |_, _, cx| {
+                    let _ = view.update(cx, |_, cx| cx.emit(SignOutRequested));
+                });
         section(
             "Account",
             h_flex()
                 .gap_3()
                 .items_center()
-                .child(
-                    Avatar::new()
-                        .small()
-                        .name(username.clone())
-                        .when_some(avatar, |this, path| this.src(path)),
-                )
+                .child(avatar)
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .text_sm()
+                        .body_strong()
                         .truncate()
                         .child(username),
                 )
                 .child(sign_out),
-            cx,
         )
     }
 }
 
 impl Render for SettingsView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // The top padding sets the first section apart from the dialog title.
+        // Dialogs don't inherit the shell's family, so the roles set it.
         v_flex()
             .pt_2()
             .gap_6()
+            .body()
             .child(self.render_appearance(cx))
             .child(self.render_updates(cx))
-            .child(self.render_account(window, cx))
+            .child(self.render_account(cx))
     }
 }
 
 /// A titled group of settings.
-fn section(
-    title: &'static str,
-    content: impl IntoElement,
-    cx: &Context<SettingsView>,
-) -> AnyElement {
+fn section(title: &'static str, content: impl IntoElement) -> AnyElement {
     v_flex()
         .gap_3()
-        .child(
-            div()
-                .text_sm()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(cx.theme().muted_foreground)
-                .child(title),
-        )
+        .child(div().heading().child(title))
         .child(content)
         .into_any_element()
 }
@@ -232,14 +218,9 @@ fn setting_row(
                 .flex_1()
                 .min_w_0()
                 .gap_1()
-                .child(div().text_sm().child(label.into()))
+                .child(div().body().child(label.into()))
                 .when_some(description, |this, description| {
-                    this.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(description),
-                    )
+                    this.child(div().caption(cx).child(description))
                 }),
         )
         .child(div().flex_none().child(control))

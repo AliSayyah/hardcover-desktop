@@ -11,17 +11,19 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{
+    Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
+};
 use gpui_kit::{
-    AppContext as _, ClipboardItem, Context, Entity, EventEmitter, FontWeight, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Task, Window, div,
-    prelude::FluentBuilder as _, rems,
+    AppContext as _, ClipboardItem, Context, Entity, EventEmitter, IntoElement, ParentElement as _,
+    Render, SharedString, Styled as _, Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::{
     CancelHandle, GrantedScopes, KeyringTokenStore, OAuthConfig, Session, begin_sign_in,
 };
 use hardcover_core::{Client, Error};
 
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::error_message;
 use crate::ui::kit::RaisedField as _;
 
@@ -147,22 +149,28 @@ impl SignInView {
 
 impl Render for SignInView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
+        let colors = colors(cx);
+        // The one command on the screen, so it isn't primary (primary marks a
+        // dialog's commit). While the browser opens it keeps its label and
+        // shows that it is busy.
+        let sign_in = |loading: bool| {
+            Button::new("sign-in")
+                .label("Sign in with Hardcover")
+                .loading(loading)
+                .disabled(loading)
+        };
         let body = match &self.state {
             State::Idle { error } => v_flex()
-                .gap_4()
+                .gap_3()
                 .items_center()
                 .child(
-                    Button::new("sign-in")
-                        .primary()
-                        .large()
-                        .label("Sign in with Hardcover")
+                    sign_in(false)
                         .on_click(cx.listener(|this, _, window, cx| this.start(window, cx))),
                 )
                 .when_some(error.clone(), |this, error| {
-                    this.child(div().text_sm().text_color(cx.theme().danger).child(error))
+                    this.child(div().text_center().text_color(colors.danger).child(error))
                 }),
-            State::Starting => v_flex().items_center().child(Spinner::new().large()),
+            State::Starting => v_flex().items_center().child(sign_in(true)),
             State::Waiting { .. } => v_flex()
                 .gap_3()
                 .w_full()
@@ -170,17 +178,12 @@ impl Render for SignInView {
                     h_flex()
                         .gap_2()
                         .justify_center()
-                        .child(Spinner::new().small())
-                        .child(
-                            div()
-                                .text_sm()
-                                .child("Waiting for approval in your browser…"),
-                        ),
+                        .child(Spinner::new().small().color(colors.fg_muted))
+                        .child("Waiting for approval in your browser…"),
                 )
                 .child(
                     div()
-                        .text_xs()
-                        .text_color(muted)
+                        .caption(cx)
                         .text_center()
                         .child("If the browser didn't open, copy this link into it."),
                 )
@@ -191,18 +194,12 @@ impl Render for SignInView {
                             Input::new(&self.url)
                                 .raised_field(false, cx)
                                 .readonly(true)
-                                .small()
                                 .flex_1()
                                 .min_w_0(),
                         )
-                        .child(
-                            Button::new("copy-link")
-                                .small()
-                                .label("Copy link")
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.copy_link(window, cx)),
-                                ),
-                        ),
+                        .child(Button::new("copy-link").label("Copy link").on_click(
+                            cx.listener(|this, _, window, cx| this.copy_link(window, cx)),
+                        )),
                 )
                 .child(
                     h_flex().justify_center().child(
@@ -219,10 +216,11 @@ impl Render for SignInView {
             .flex()
             .items_center()
             .justify_center()
-            .bg(cx.theme().background)
+            .bg(colors.bg)
+            .body()
             .child(
                 v_flex()
-                    .w(rems(28.))
+                    .w(size::DIALOG_FORM)
                     .gap_6()
                     .p_8()
                     .items_center()
@@ -230,14 +228,20 @@ impl Render for SignInView {
                         v_flex()
                             .gap_2()
                             .items_center()
-                            .child(div().text_2xl().font_weight(FontWeight::SEMIBOLD).child("Hardcover"))
                             .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(muted)
-                                    .text_center()
-                                    .child("Sign in with your Hardcover account in the browser to keep your reading library up to date."),
-                            ),
+                                h_flex()
+                                    .gap_2()
+                                    .page_title()
+                                    .child(
+                                        Icon::new(IconName::BookOpen)
+                                            .size_6()
+                                            .text_color(colors.accent),
+                                    )
+                                    .child("Hardcover"),
+                            )
+                            .child(div().text_center().text_color(colors.fg_muted).child(
+                                "Sign in with your Hardcover account in the browser to keep your reading library up to date.",
+                            )),
                     )
                     .child(body),
             )

@@ -1,20 +1,21 @@
-//! The sidebar's "Reading goal" section: each current goal with its progress,
-//! or a way to set one.
+//! The sidebar's "Reading goal" section: each current goal as a goal row
+//! (`ui::GoalRow`: the period, "9 of 12 books" and a meter with its pace
+//! tick), or a way to set one.
 
 use gpui_kit::component::IconName;
-use gpui_kit::component::sidebar::{SidebarGroup, SidebarItem as _, SidebarMenu, SidebarMenuItem};
 use gpui_kit::{
-    Context, Entity, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
-    Subscription, Window, div, rems,
+    App, Context, Entity, IntoElement, ParentElement as _, Render, SharedString, Subscription,
+    Window, div,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_GOALS};
+use hardcover_core::{Date, Goal};
 
 use super::goal_view::{open_goal, open_new_goal};
 use super::model::{GoalsModel, GoalsStatus};
 use crate::app_state::Services;
-use crate::format::{goal_pace, goal_period, goal_progress};
+use crate::format::{goal_pace, goal_period, goal_progress, needs_permission};
 use crate::library::model::LibraryModel;
-use crate::ui::Meter;
+use crate::ui::{GoalRow, NavRow, sidebar_label};
 
 pub struct GoalsSection {
     goals: Entity<GoalsModel>,
@@ -37,7 +38,7 @@ impl GoalsSection {
 
     /// True if the section has something to show: the session can read goals,
     /// and they have loaded (or failed to) at least once.
-    pub fn is_visible(&self, cx: &gpui_kit::App) -> bool {
+    pub fn is_visible(&self, cx: &App) -> bool {
         let model = self.goals.read(cx);
         Services::global(cx).has_scope(READ_GOALS)
             && !matches!(model.status(), GoalsStatus::Idle)
@@ -45,71 +46,79 @@ impl GoalsSection {
     }
 }
 
+/// Where steady progress would put the goal today, as a percentage of its
+/// target: the meter's pace tick. `None` once the goal is reached or outside
+/// its dates, where a tick means nothing.
+pub fn pace_percent(goal: &Goal, today: Date) -> Option<f32> {
+    let reached = goal.progress >= f64::from(goal.target);
+    (!reached && goal.is_current(today)).then(|| {
+        let expected = goal.expected_by(today) / f64::from(goal.target.max(1));
+        (expected.clamp(0.0, 1.0) * 100.0) as f32
+    })
+}
+
 impl Render for GoalsSection {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let today = chrono::Local::now().date_naive();
         let model = self.goals.read(cx);
         let can_write = Services::global(cx).has_scope(WRITE_GOALS);
         let goals = self.goals.clone();
         let library = self.library.clone();
 
-        let mut items: Vec<SidebarMenuItem> = model
+        let mut rows: Vec<gpui_kit::AnyElement> = model
             .current(today)
             .map(|goal| {
                 let period = goal_period(goal.start, goal.end);
-                let progress = goal_progress(goal);
-                // A calendar year names itself; other dates would not fit.
-                let label = if period.len() == 4 {
-                    format!("{period} · {progress}")
-                } else {
-                    progress
+                let count = goal_progress(goal);
+                let accessible: SharedString = match goal_pace(goal, today) {
+                    Some(pace) => format!("{period} reading goal, {count}, {pace}").into(),
+                    None => format!("{period} reading goal, {count}").into(),
                 };
                 let percent = (goal.fraction() * 100.0).clamp(0.0, 100.0) as f32;
-                let accessible: SharedString = match goal_pace(goal, today) {
-                    Some(pace) => format!("{label}, {pace}").into(),
-                    None => label.clone().into(),
-                };
                 let (goals, library, id) = (goals.clone(), library.clone(), goal.id);
-                SidebarMenuItem::new(label)
-                    .icon(IconName::ChartPie)
-                    .accessibility_label(accessible)
-                    .suffix(move |_, _| {
-                        div().w(rems(2.5)).child(
-                            Meter::new(SharedString::from(format!("goal-bar-{id}")), percent)
-                                .thin(),
-                        )
-                    })
-                    .on_click(move |_, window, cx| {
-                        open_goal(goals.clone(), library.clone(), id, window, cx)
-                    })
+                GoalRow::new(
+                    SharedString::from(format!("goal-row-{id}")),
+                    period,
+                    count,
+                    percent,
+                )
+                .pace(pace_percent(goal, today))
+                .accessibility_label(accessible)
+                .on_click(move |_, window, cx| {
+                    open_goal(goals.clone(), library.clone(), id, window, cx)
+                })
+                .into_any_element()
             })
             .collect();
-        if items.is_empty() {
-            items.push(match model.status() {
+        let count = rows.len();
+        if rows.is_empty() {
+            rows.push(match model.status() {
                 GoalsStatus::Failed(_) if model.goals().is_empty() => {
                     let goals = goals.clone();
-                    SidebarMenuItem::new("Couldn't load goals. Retry")
-                        .icon(IconName::CircleAlert)
-                        .on_click(move |_, _, cx| goals.update(cx, |m, cx| m.load(cx)))
+                    NavRow::new(
+                        "goal-retry",
+                        IconName::CircleAlert,
+                        "Couldn't load. Try again",
+                    )
+                    .on_click(move |_, _, cx| goals.update(cx, |m, cx| m.load(cx)))
+                    .into_any_element()
                 }
                 _ => {
                     let goals = goals.clone();
-                    SidebarMenuItem::new("Set a reading goal…")
-                        .icon(IconName::Plus)
-                        .disable(!can_write)
+                    NavRow::new("goal-new", IconName::Plus, "Set a reading goal…")
+                        .muted(true)
+                        .disabled(!can_write)
+                        .tooltip((!can_write).then(|| needs_permission(WRITE_GOALS)))
                         .on_click(move |_, window, cx| open_new_goal(goals.clone(), window, cx))
+                        .into_any_element()
                 }
             });
         }
-        let label = if items.len() > 1 {
+        let label = if count > 1 {
             "Reading goals"
         } else {
             "Reading goal"
         };
-        div().child(
-            SidebarGroup::new(label)
-                .child(SidebarMenu::new().children(items))
-                .render("goals", window, cx),
-        )
+        div().child(sidebar_label(label, cx)).children(rows)
     }
 }

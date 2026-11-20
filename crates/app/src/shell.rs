@@ -5,40 +5,33 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui_kit::component::avatar::Avatar;
-use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariant};
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::sidebar::{
-    Sidebar, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem,
-};
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{
-    ActiveTheme as _, Collapsible, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _,
-    h_flex, v_flex,
+    Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
-    Action, AnyElement, AnyView, App, AppContext as _, Context, ElementId, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, Modifiers,
-    ModifiersChangedEvent, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
+    Action, AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement as _, IntoElement, Modifiers, ModifiersChangedEvent,
+    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
     prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::store::LibraryCache;
 use hardcover_core::{ListId, ReadingStatus};
 
 use crate::about::open_about;
-use crate::app_state::{CoverService, Services, Startup, cover_file, startup};
+use crate::app_state::{CoverService, Services, Startup, startup};
 use crate::book::detail_view::{BookDetailView, Subject};
 use crate::catalog::author_view::AuthorView;
 use crate::catalog::discover_view::DiscoverView;
 use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
 use crate::catalog::series_view::SeriesView;
-use crate::design::TypeRoles as _;
 use crate::design::type_roles::Family;
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
 use crate::goals::model::GoalsModel;
 use crate::goals::sidebar::GoalsSection;
@@ -47,14 +40,16 @@ use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
 use crate::lists::list_view::ListView;
 use crate::lists::model::{ListsEvent, ListsModel};
-use crate::lists::sidebar::lists_group;
+use crate::lists::sidebar::lists_section;
 use crate::search::search_view::SearchView;
 use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::stats::stats_view::StatsView;
 use crate::ui::kit::{open_alert_dialog, open_dialog};
-use crate::ui::{BackTo, ObjectBar, back_label, tools_of};
+use crate::ui::{
+    AccountRow, Avatar, BackTo, NavRow, ObjectBar, back_label, brand_row, sidebar_label, tools_of,
+};
 use crate::upcoming::model::UpcomingModel;
 use crate::upcoming::upcoming_view::UpcomingView;
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
@@ -162,8 +157,8 @@ impl Render for Shell {
             // popovers are outside, see `bidi::WrappingText`.
             .type_family(Family::Sans)
             .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
+            .bg(colors(cx).bg)
+            .text_color(colors(cx).fg)
             .map(|this| match &self.screen {
                 Screen::Starting => this,
                 Screen::SignIn(view) => this.child(view.clone()),
@@ -548,7 +543,7 @@ impl Workspace {
         open_dialog(window, cx, move |dialog, window, _| {
             dialog
                 .title("Settings")
-                .w(rems(30.).to_pixels(window.rem_size()))
+                .w(size::DIALOG_FORM.to_pixels(window.rem_size()))
                 .child(view.clone())
         });
     }
@@ -637,111 +632,118 @@ impl Workspace {
                 .then(|| Kbd::global_binding_for_action(action, window))
                 .flatten()
         };
-        let nav_item =
-            |label: &'static str, icon: IconName, destination: Destination, action: &dyn Action| {
-                let view = view.clone();
-                let hint = hint(action);
-                SidebarMenuItem::new(label)
-                    .icon(icon)
-                    .active(self.destination == destination)
-                    .when_some(hint, |item, hint| item.suffix(move |_, _| hint.clone()))
-                    .on_click(move |_, window, cx| {
-                        let _ = view.update(cx, |this, cx| this.show(destination, window, cx));
-                    })
-            };
+        let nav_row = |id: &'static str,
+                       label: &'static str,
+                       icon: IconName,
+                       destination: Destination,
+                       action: &dyn Action| {
+            let view = view.clone();
+            NavRow::new(id, icon, label)
+                .selected(self.destination == destination)
+                .hint(hint(action))
+                .on_click(move |_, window, cx| {
+                    let _ = view.update(cx, |this, cx| this.show(destination, window, cx));
+                })
+        };
         let shelves = SIDEBAR_SHELVES.map(|status| {
-            let count = model.count(status);
             let action = shelf_action(status);
-            let item = nav_item(
+            nav_row(
+                shelf_row_id(status),
                 status_label(status),
                 crate::chip::status_icon(status),
                 Destination::Shelf(status),
                 action.as_ref(),
-            );
-            if key_hints {
-                return item;
-            }
-            item.suffix(move |_, cx| {
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(count.to_string())
-            })
+            )
+            .count(model.count(status).to_string())
         });
+        let goals = self
+            .goals_section
+            .read(cx)
+            .is_visible(cx)
+            .then(|| self.goals_section.clone());
+        let lists = lists_section(
+            &self.lists,
+            match self.destination {
+                Destination::List(id) => Some(id),
+                _ => None,
+            },
+            Rc::new({
+                let view = view.clone();
+                move |id, window, cx| {
+                    let _ =
+                        view.update(cx, |this, cx| this.show(Destination::List(id), window, cx));
+                }
+            }),
+            cx,
+        );
+        let colors = colors(cx);
 
-        Sidebar::new("sidebar")
-            .collapsible(false)
-            .w(rems(15.))
-            .header(
-                h_flex()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .child(Icon::new(IconName::BookOpen))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child("Hardcover")),
+        // The brand and the foot stay put; the destinations between them
+        // scroll. The 8 inset sits inside the scroller, so a focus ring
+        // isn't clipped and the scrollbar sits on the sidebar's edge.
+        v_flex()
+            .flex_none()
+            .w(size::SIDEBAR)
+            .h_full()
+            .bg(colors.sidebar)
+            .border_r(size::HAIRLINE)
+            .border_color(colors.border)
+            .child(div().flex_none().px_2().pt_2().child(brand_row(cx)))
+            .child(
+                div()
+                    .id("sidebar-destinations")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .child(
+                        v_flex()
+                            .p_2()
+                            .child(nav_row(
+                                "nav-home",
+                                "Home",
+                                IconName::LayoutDashboard,
+                                Destination::Home,
+                                &ShowHome,
+                            ))
+                            .child(nav_row(
+                                "nav-search",
+                                "Search",
+                                IconName::Search,
+                                Destination::Search,
+                                &FocusSearch,
+                            ))
+                            .child(nav_row(
+                                "nav-discover",
+                                "Discover",
+                                IconName::Globe,
+                                Destination::Discover,
+                                &ShowDiscover,
+                            ))
+                            .child(nav_row(
+                                "nav-stats",
+                                "Stats",
+                                IconName::ChartPie,
+                                Destination::Stats,
+                                &ShowStats,
+                            ))
+                            .child(sidebar_label("Library", cx))
+                            .children(shelves)
+                            .children(goals)
+                            .children(lists),
+                    ),
             )
-            .child(NavSection::Menu(Box::new(
-                SidebarMenu::new()
-                    .child(nav_item(
-                        "Home",
-                        IconName::LayoutDashboard,
-                        Destination::Home,
-                        &ShowHome,
-                    ))
-                    .child(nav_item(
-                        "Search",
-                        IconName::Search,
-                        Destination::Search,
-                        &FocusSearch,
-                    ))
-                    .child(nav_item(
-                        "Discover",
-                        IconName::Globe,
-                        Destination::Discover,
-                        &ShowDiscover,
-                    ))
-                    .child(nav_item(
-                        "Stats",
-                        IconName::ChartPie,
-                        Destination::Stats,
-                        &ShowStats,
-                    )),
-            )))
-            .child(NavSection::Group(
-                SidebarGroup::new("Library").child(SidebarMenu::new().children(shelves)),
-            ))
-            .when(self.goals_section.read(cx).is_visible(cx), |this| {
-                this.child(NavSection::View(self.goals_section.clone().into()))
-            })
-            .when_some(
-                lists_group(
-                    &self.lists,
-                    match self.destination {
-                        Destination::List(id) => Some(id),
-                        _ => None,
-                    },
-                    Rc::new({
-                        let view = view.clone();
-                        move |id, window, cx| {
-                            let _ = view.update(cx, |this, cx| {
-                                this.show(Destination::List(id), window, cx)
-                            });
-                        }
-                    }),
-                    cx,
-                ),
-                |this, group| this.child(NavSection::Group(group)),
-            )
-            .footer(
+            .child(
                 v_flex()
-                    .w_full()
+                    .flex_none()
+                    .px_2()
+                    .pb_2()
                     .gap_2()
                     .when(
                         self.reauthorize.read(cx).is_needed(Services::global(cx)),
                         |this| this.child(self.reauthorize.clone()),
                     )
                     .children(self.render_update(cx))
-                    .child(self.render_account(window, cx)),
+                    .child(self.render_account(cx)),
             )
     }
 
@@ -754,31 +756,22 @@ impl Workspace {
         let button = match updates.state() {
             UpdateState::Idle | UpdateState::Checking => return None,
             UpdateState::Available(release) => Button::new("update")
-                .outline()
                 .icon(IconName::ArrowUp)
                 .label(format!("Update to {}…", release.version))
                 .on_click(move |_, window, cx| {
                     let _ = view.update(cx, |this, cx| this.open_update_dialog(window, cx));
                 }),
             UpdateState::Installing(release) => Button::new("update")
-                .outline()
                 .loading(true)
                 .disabled(true)
                 .label(format!("Installing {}…", release.version)),
             UpdateState::Installed(version) => Button::new("update")
-                .primary()
                 .icon(IconName::RotateCw)
                 .label("Restart to update")
                 .tooltip(format!("Version {version} is installed"))
                 .on_click(|_, _, cx| cx.restart()),
         };
-        Some(
-            div()
-                .w_full()
-                .px_2()
-                .child(button.small().w_full())
-                .into_any_element(),
-        )
+        Some(button.small().w_full().into_any_element())
     }
 
     fn check_for_updates(&mut self, cx: &mut Context<Self>) {
@@ -877,35 +870,30 @@ impl Workspace {
         });
     }
 
-    fn render_account(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_account(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let model = self.model.read(cx);
         let user = model.user().cloned();
-        let muted = cx.theme().muted_foreground;
-        let (status_icon, status_text): (Option<AnyElement>, SharedString) =
-            match model.sync_status() {
-                SyncStatus::Syncing => (
-                    Some(Spinner::new().xsmall().into_any_element()),
-                    match model.sync_fetched() {
-                        0 => "Syncing…".into(),
-                        n => format!("Syncing… {n} books").into(),
-                    },
-                ),
-                SyncStatus::Failed { offline: true, .. } => (
-                    Some(Icon::new(IconName::CircleAlert).xsmall().into_any_element()),
-                    "Offline".into(),
-                ),
-                SyncStatus::Failed { .. } => (
-                    Some(Icon::new(IconName::CircleAlert).xsmall().into_any_element()),
-                    "Couldn't sync".into(),
-                ),
-                SyncStatus::Synced | SyncStatus::Idle => match model.last_synced_at() {
-                    Some(at) => (
-                        None,
-                        format!("Updated {}", relative_time(&chrono::Utc::now(), &at)).into(),
-                    ),
-                    None => (None, "Not synced yet".into()),
+        let (status_icon, status_text): (Option<IconName>, SharedString) = match model.sync_status()
+        {
+            SyncStatus::Syncing => (
+                None,
+                match model.sync_fetched() {
+                    0 => "Syncing…".into(),
+                    n => format!("Syncing… {n} books").into(),
                 },
-            };
+            ),
+            SyncStatus::Failed { offline: true, .. } => {
+                (Some(IconName::CircleAlert), "Offline".into())
+            }
+            SyncStatus::Failed { .. } => (Some(IconName::CircleAlert), "Couldn't sync".into()),
+            SyncStatus::Synced | SyncStatus::Idle => match model.last_synced_at() {
+                Some(at) => (
+                    None,
+                    format!("Updated {}", relative_time(&chrono::Utc::now(), &at)).into(),
+                ),
+                None => (None, "Not synced yet".into()),
+            },
+        };
         let sync_tooltip = match model.sync_status() {
             SyncStatus::Failed {
                 message,
@@ -918,11 +906,19 @@ impl Workspace {
             .as_ref()
             .map(|u| u.username.clone().into())
             .unwrap_or_else(|| "Account".into());
-        let avatar = user
-            .as_ref()
-            .and_then(|u| u.avatar.as_ref())
-            .map(|a| a.url.clone())
-            .and_then(|url| cover_file(&url, window, cx));
+        // Initials from the name when there is one ("Jane Quill"), else the
+        // username.
+        let avatar = Avatar::new(
+            user.as_ref()
+                .and_then(|u| u.name.clone())
+                .filter(|name| !name.trim().is_empty())
+                .map_or_else(|| username.clone(), SharedString::from),
+        )
+        .image(
+            user.as_ref()
+                .and_then(|u| u.avatar.as_ref())
+                .map(|a| a.url.clone()),
+        );
         let profile_url = user
             .as_ref()
             .map(|u| format!("https://hardcover.app/@{}", u.username));
@@ -937,111 +933,76 @@ impl Workspace {
                 services.session().is_some() && !services.missing_scopes().is_empty()
             }
         };
+        let status = h_flex()
+            .min_w_0()
+            .gap_1()
+            .children(status_icon.map(|icon| Icon::new(icon).size_3().flex_none()))
+            .child(div().min_w_0().truncate().tabular().child(status_text));
 
-        // The dropdown wrapper sizes to its content; this block lets the
-        // footer (and its hover surface) span the sidebar.
-        div().w_full().child(
-            SidebarFooter::new()
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .flex_1()
-                        .min_w_0()
-                        .child(
-                            Avatar::new()
-                                .small()
-                                .name(username.clone())
-                                .when_some(avatar, |this, path| this.src(path)),
-                        )
-                        .child(
-                            v_flex()
-                                .min_w_0()
-                                .flex_1()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .truncate()
-                                        .child(username),
-                                )
-                                .child(
-                                    h_flex()
-                                        .id("sync-status")
-                                        .min_w_0()
-                                        .gap_1()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .children(status_icon)
-                                        .child(div().min_w_0().truncate().child(status_text))
-                                        .when_some(sync_tooltip, |this, tip| {
-                                            this.tooltip(move |window, cx| {
-                                                gpui_kit::component::tooltip::Tooltip::new(
-                                                    tip.clone(),
-                                                )
-                                                .build(window, cx)
-                                            })
-                                        }),
-                                ),
-                        ),
-                )
-                .child(
-                    Icon::new(IconName::ChevronsUpDown)
-                        .xsmall()
-                        .text_color(muted),
-                )
-                .dropdown_menu(move |menu, _, _| {
-                    let view = view.clone();
-                    let menu = menu.action_context(focus.clone()).menu_with_icon(
-                        "Refresh library",
-                        IconName::RefreshCw,
-                        Box::new(Refresh),
-                    );
-                    let menu = match &profile_url {
-                        Some(url) => menu.link_with_icon(
-                            "Open profile on Hardcover",
-                            IconName::CircleUser,
-                            url.clone(),
-                        ),
-                        None => menu,
-                    };
-                    let menu =
-                        if offer_permissions {
-                            let reauthorize = reauthorize.clone();
-                            menu.item(PopupMenuItem::new("Grant new permissions…").on_click(
-                                move |_, _, cx| reauthorize.update(cx, |r, cx| r.show(cx)),
-                            ))
-                        } else {
-                            menu
-                        };
-                    let updates_view = view.clone();
-                    menu.separator()
-                        .menu_with_icon("Settings…", IconName::Settings, Box::new(OpenSettings))
-                        .item(
-                            PopupMenuItem::new("Check for updates").on_click(move |_, _, cx| {
-                                let _ =
-                                    updates_view.update(cx, |this, cx| this.check_for_updates(cx));
-                            }),
-                        )
-                        .menu_with_icon(
-                            "About Hardcover Desktop…",
-                            IconName::Info,
-                            Box::new(ShowAbout),
-                        )
-                        .separator()
-                        .item(
-                            PopupMenuItem::new("Sign out…").on_click(move |_, window, cx| {
-                                let _ =
-                                    view.update(cx, |this, cx| this.confirm_sign_out(window, cx));
-                            }),
-                        )
-                }),
-        )
+        AccountRow::new("account", avatar, username, status)
+            .status_tooltip(sync_tooltip)
+            .dropdown_menu(move |menu, _, _| {
+                let view = view.clone();
+                let menu = menu.action_context(focus.clone()).menu_with_icon(
+                    "Refresh library",
+                    IconName::RefreshCw,
+                    Box::new(Refresh),
+                );
+                let menu = match &profile_url {
+                    Some(url) => menu.link_with_icon(
+                        "Open profile on Hardcover",
+                        IconName::CircleUser,
+                        url.clone(),
+                    ),
+                    None => menu,
+                };
+                let menu = if offer_permissions {
+                    let reauthorize = reauthorize.clone();
+                    menu.item(
+                        PopupMenuItem::new("Grant new permissions…")
+                            .on_click(move |_, _, cx| reauthorize.update(cx, |r, cx| r.show(cx))),
+                    )
+                } else {
+                    menu
+                };
+                let updates_view = view.clone();
+                menu.separator()
+                    .menu_with_icon("Settings…", IconName::Settings, Box::new(OpenSettings))
+                    .item(
+                        PopupMenuItem::new("Check for updates").on_click(move |_, _, cx| {
+                            let _ = updates_view.update(cx, |this, cx| this.check_for_updates(cx));
+                        }),
+                    )
+                    .menu_with_icon(
+                        "About Hardcover Desktop…",
+                        IconName::Info,
+                        Box::new(ShowAbout),
+                    )
+                    .separator()
+                    .item(
+                        PopupMenuItem::new("Sign out…").on_click(move |_, window, cx| {
+                            let _ = view.update(cx, |this, cx| this.confirm_sign_out(window, cx));
+                        }),
+                    )
+            })
     }
 }
 
 /// Ctrl alone, or with Shift (Discover and Stats): what the sidebar hints are for.
 fn ctrl_held(modifiers: Modifiers) -> bool {
     modifiers.control && !modifiers.alt && !modifiers.platform && !modifiers.function
+}
+
+/// A shelf's sidebar row, keyed by its status.
+fn shelf_row_id(status: ReadingStatus) -> &'static str {
+    match status {
+        ReadingStatus::CurrentlyReading => "nav-currently-reading",
+        ReadingStatus::WantToRead => "nav-want-to-read",
+        ReadingStatus::Read => "nav-read",
+        ReadingStatus::Paused => "nav-paused",
+        ReadingStatus::DidNotFinish => "nav-did-not-finish",
+        ReadingStatus::Ignored => "nav-ignored",
+    }
 }
 
 /// The action that shows a shelf, bound to Ctrl+1…6 in `main`.
@@ -1115,48 +1076,5 @@ impl Render for Workspace {
                     (None, Destination::List(_)) => this.child(self.list_page.clone()),
                 }
             }))
-    }
-}
-
-/// The sidebar's sections. `Sidebar` takes one item type, and Search,
-/// Discover and Stats sit above the Library group without a group of their
-/// own. A view draws a section that keeps its own state (the reading goals).
-#[derive(Clone)]
-enum NavSection {
-    Menu(Box<SidebarMenu>),
-    Group(SidebarGroup<SidebarMenu>),
-    View(AnyView),
-}
-
-impl Collapsible for NavSection {
-    fn collapsed(self, collapsed: bool) -> Self {
-        match self {
-            Self::Menu(m) => Self::Menu(Box::new(m.collapsed(collapsed))),
-            Self::Group(g) => Self::Group(g.collapsed(collapsed)),
-            Self::View(v) => Self::View(v),
-        }
-    }
-
-    fn is_collapsed(&self) -> bool {
-        match self {
-            Self::Menu(m) => m.is_collapsed(),
-            Self::Group(g) => g.is_collapsed(),
-            Self::View(_) => false,
-        }
-    }
-}
-
-impl SidebarItem for NavSection {
-    fn render(
-        self,
-        id: impl Into<ElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> impl IntoElement {
-        match self {
-            Self::Menu(m) => (*m).render(id, window, cx).into_any_element(),
-            Self::Group(g) => g.render(id, window, cx).into_any_element(),
-            Self::View(v) => v.into_any_element(),
-        }
     }
 }

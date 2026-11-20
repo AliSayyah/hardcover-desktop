@@ -486,10 +486,10 @@ pub fn goal_period(start: Date, end: Date) -> String {
     }
 }
 
-/// `9 / 12 books`.
+/// `9 of 12 books`.
 pub fn goal_progress(goal: &Goal) -> String {
     format!(
-        "{} / {} {}",
+        "{} of {} {}",
         goal_amount(&goal.metric, goal.progress),
         goal.target,
         goal_unit(&goal.metric, f64::from(goal.target))
@@ -699,7 +699,7 @@ mod tests {
     fn goal_copy() {
         let d = |y, m, d| Date::from_ymd_opt(y, m, d).unwrap();
         let books = goal(GoalMetric::Books, 12, 9.0);
-        assert_eq!(goal_progress(&books), "9 / 12 books");
+        assert_eq!(goal_progress(&books), "9 of 12 books");
         assert_eq!(goal_period(books.start, books.end), "2026");
         assert_eq!(
             goal_period(d(2026, 3, 1), d(2026, 6, 30)),
@@ -728,13 +728,13 @@ mod tests {
             "Goal reached"
         );
         let hours = goal(GoalMetric::Hours, 100, 12.5);
-        assert_eq!(goal_progress(&hours), "12.5 / 100 hours");
+        assert_eq!(goal_progress(&hours), "12.5 of 100 hours");
         // Rounded down once, so an amount short of the target never shows as it.
         let hours = |progress| goal_progress(&goal(GoalMetric::Hours, 100, progress));
-        assert_eq!(hours(99.96), "99.9 / 100 hours");
-        assert_eq!(hours(100.0), "100 / 100 hours");
-        assert_eq!(hours(2.3), "2.3 / 100 hours");
-        assert_eq!(hours(0.04), "0 / 100 hours");
+        assert_eq!(hours(99.96), "99.9 of 100 hours");
+        assert_eq!(hours(100.0), "100 of 100 hours");
+        assert_eq!(hours(2.3), "2.3 of 100 hours");
+        assert_eq!(hours(0.04), "0 of 100 hours");
         assert_eq!(
             goal_pace(&goal(GoalMetric::Hours, 100, 99.96), d(2027, 1, 5)).unwrap(),
             "Ended 1 hour short"

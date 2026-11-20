@@ -640,13 +640,8 @@ fn remove_stale_scaled(cover_dir: &Path) {
     }
 }
 
-/// The cover file for `url`, starting a background load on first use. The
+/// The row thumbnail for `url`, starting a background load on first use. The
 /// calling view re-renders when it finishes.
-pub fn cover_file(url: &str, window: &mut Window, cx: &mut App) -> Option<Arc<Path>> {
-    window.use_asset::<CoverFile>(&url.to_owned(), cx).flatten()
-}
-
-/// The row thumbnail for `url`, loaded like [`cover_file`].
 pub fn cover_thumbnail(url: &str, window: &mut Window, cx: &mut App) -> Option<Arc<RenderImage>> {
     window
         .use_asset::<CoverThumbnail>(&url.to_owned(), cx)

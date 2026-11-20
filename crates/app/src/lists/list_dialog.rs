@@ -7,22 +7,23 @@ use gpui_kit::component::form::{Field, Form};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::{Radio, RadioGroup};
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     App, AppContext as _, Axis, Context, Entity, IntoElement, ParentElement as _, Pixels, Render,
-    SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, rems,
+    SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::WRITE_LISTS;
 use hardcover_core::{BookSummary, ListDraft, ListId, Privacy};
 
 use super::model::ListsModel;
 use crate::app_state::Services;
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::needs_permission;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::open_dialog;
 
 fn dialog_width(window: &Window) -> Pixels {
-    rems(30.).to_pixels(window.rem_size())
+    size::DIALOG_FORM.to_pixels(window.rem_size())
 }
 
 /// Opens the form for a new list. With `book`, the book goes on the new list.
@@ -195,7 +196,7 @@ impl Render for ListDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let writing = self.lists.read(cx).is_writing();
         let can_write = Services::global(cx).has_scope(WRITE_LISTS);
-        let muted = cx.theme().muted_foreground;
+        let colors = colors(cx);
         let view = cx.entity().downgrade();
         let privacy = RadioGroup::horizontal("list-privacy")
             .children(PRIVACY.map(|p| Radio::new(SharedString::from(p.label())).label(p.label())))
@@ -222,12 +223,14 @@ impl Render for ListDialog {
             Mode::Create(book) => ("Create", book.as_ref().map(|b| b.title.clone())),
             Mode::Edit(_) => ("Save", None),
         };
+        // Dialogs don't inherit the shell's family, so the roles set it.
         v_flex()
             .gap_4()
+            .body()
             .child(
                 Form::new()
                     .label_layout(Axis::Horizontal)
-                    .label_width(rems(6.).to_pixels(window.rem_size()))
+                    .label_width(size::KEY.to_pixels(window.rem_size()))
                     .child(
                         Field::new().label("Name").child(
                             Input::new(&self.name)
@@ -245,33 +248,29 @@ impl Render for ListDialog {
                     .child(Field::new().label("Visible to").child(privacy))
                     .child(
                         Field::new().label("Order").child(
-                            v_flex().gap_1().child(ranked).child(
-                                div()
-                                    .text_xs()
-                                    .text_color(muted)
-                                    .child("A ranked list numbers its books."),
-                            ),
+                            v_flex()
+                                .gap_1()
+                                .child(ranked)
+                                .child(div().caption(cx).child("A ranked list numbers its books.")),
                         ),
                     ),
             )
             .when_some(adds, |this, title| {
                 this.child(
                     div()
-                        .text_sm()
-                        .text_color(muted)
+                        .text_color(colors.fg_muted)
                         .child(format!("“{title}” goes on the new list.")),
                 )
             })
             .when(!can_write, |this| {
                 this.child(
                     div()
-                        .text_sm()
-                        .text_color(muted)
+                        .text_color(colors.fg_muted)
                         .child(needs_permission(WRITE_LISTS)),
                 )
             })
             .when_some(self.error.clone(), |this, error| {
-                this.child(div().text_sm().text_color(cx.theme().danger).child(error))
+                this.child(div().text_color(colors.danger).child(error))
             })
             .child(
                 h_flex()

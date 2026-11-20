@@ -755,44 +755,23 @@ The foundation is in place: the palette on the kit's theme
 (`cover.rs`) with the cloth cover, and chips at 20 on the chip overlay.
 
 The shared components are built, in `crates/app/src/ui/` (its module doc
-lists each with what to use it for): the object bar, panel, rail, blocks,
-headers and the greeting, sequences, list rows, lanes, the property list,
-the meter, empty states, skeletons, text buttons, byline links, external
-links, stars, nav rows, avatars, row focus and the kit fixes. The demo
-build shows them all on one page with `HARDCOVER_GALLERY=1`. Only drop-in
-swaps are done: the empty states
-(`empty_state`), every meter and skeleton, the book titles on Home and in
-Coming soon, the reviewers' avatars and bylines, and the full page's Back
-bar. The account avatar is still the kit's.
+lists each with what to use it for), and the demo build shows them all on
+one page with `HARDCOVER_GALLERY=1`. Every screen is on them, the type roles
+and the tokens: the sidebar and the shell's chrome (the account menu,
+Settings, About, the goal and list dialogs, sign-in and the permissions
+notice), Home and Coming soon, the book pane and page, and the collections
+(shelves, search, Discover, list pages, series and author pages, Stats).
 
-The collections are done: the shelves (header, filter and sort, list rows
-with their lanes, empty and loading states), search (its sections, author
-and series rows), Discover, list pages, series and author pages (the
-author's large `ui::Avatar`) and Stats (display figures, sections, charts on
-the theme's chart tokens) are on the system's rows, headers, type roles and
-tokens. The screens below still need their layouts moved onto the rest.
-
-3. **Sidebar.** It still uses the kit's sidebar menu, which hovers at
-   `sidebar_accent` × 0.8 (8%, not 5%) and has no accent icon when
-   selected. `ui::NavRow` is the system's row; the sidebar moves onto it,
-   with the goal row and the brand row.
-4. **States and the kit.** The theme gives the kit's controls the ink
-   overlays, solid where a control paints its own fill, and the focus ring
-   (3 px accent at 50% plus a 1 px accent edge). `ui::kit` fixes inputs,
-   selects and text areas (`RaisedField`) and dialogs
-   (`open_dialog`, `open_alert_dialog`) onto `raised`, and skeletons pulse
-   (`ui::Skeleton`). What neither the theme nor the app can reach without
-   patching the kit:
-   - menus (`PopupMenu`) and the Select dropdown round at 6, not 8, and use
-     the kit's own shadow, not `shadow-popover` (the app's own popovers take
-     `ui::kit::PopoverSurface`);
-   - menu items hover at 10% in dark mode: the kit's `accent` serves both
-     menu items and ghost buttons, and ghost buttons take half of it there;
-   - the `DatePicker`'s field stays paper;
-   - a dialog keeps the kit's shadow.
-5. **Type.** The roles exist as helpers (`design::TypeRoles`: `.page_title()`,
-   `.body_strong()`, `.caption(cx)`, `.display_24()`, `.tabular()`, ...), but
-   the sidebar and shell, the dialogs, Settings, About and sign-in still set
-   sizes with `text_sm`/`text_lg`/`text_2xl` at GPUI's default line height
-   and without tabular figures. Move each screen to the roles as it is
-   redesigned.
+What remains is what neither the theme nor the app can reach without
+patching the kit. The theme gives the kit's controls the ink overlays, solid
+where a control paints its own fill, and the focus ring (3 px accent at 50%
+plus a 1 px accent edge); `ui::kit` puts inputs, selects and text areas
+(`RaisedField`) and dialogs (`open_dialog`, `open_alert_dialog`) on
+`raised`. Still off the system:
+- menus (`PopupMenu`) and the Select dropdown round at 6, not 8, and use the
+  kit's own shadow, not `shadow-popover` (the app's own popovers take
+  `ui::kit::PopoverSurface`);
+- menu items hover at 10% in dark mode: the kit's `accent` serves both menu
+  items and ghost buttons, and ghost buttons take half of it there;
+- the `DatePicker`'s field stays paper;
+- a dialog keeps the kit's shadow.

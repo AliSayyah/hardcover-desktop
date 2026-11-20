@@ -10,6 +10,12 @@
 //!   the focus ring.
 //! - While Ctrl is held, the destination's shortcut ([`NavRow::hint`],
 //!   usually a `Kbd`) takes the place of its count.
+//! - A command row in the sidebar ("New list…", "Set a reading goal…") is
+//!   [`NavRow::muted`]: its label in `fg-muted`, so it reads apart from the
+//!   destinations around it.
+//! - Disabled ([`NavRow::disabled`]): 50% opacity, no hover or press, out of
+//!   the Tab order, with the reason in its tooltip ([`NavRow::tooltip`],
+//!   usually `format::needs_permission`).
 //!
 //! ```ignore
 //! NavRow::new("nav-home", IconName::LayoutDashboard, "Home")
@@ -22,6 +28,7 @@
 use std::rc::Rc;
 
 use gpui_kit::base::Button as BaseButton;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::{
     AnyElement, App, ClickEvent, ElementId, FontWeight, InteractiveElement as _, IntoElement,
@@ -43,6 +50,9 @@ pub struct NavRow {
     count: Option<SharedString>,
     hint: Option<AnyElement>,
     selected: bool,
+    muted: bool,
+    disabled: bool,
+    tooltip: Option<SharedString>,
     on_click: Option<ClickHandler>,
 }
 
@@ -55,6 +65,9 @@ impl NavRow {
             count: None,
             hint: None,
             selected: false,
+            muted: false,
+            disabled: false,
+            tooltip: None,
             on_click: None,
         }
     }
@@ -78,6 +91,24 @@ impl NavRow {
         self
     }
 
+    /// A command among destinations ("New list…"): the label in `fg-muted`.
+    pub fn muted(mut self, muted: bool) -> Self {
+        self.muted = muted;
+        self
+    }
+
+    /// Unavailable: 50% opacity, no response. Say why with [`NavRow::tooltip`].
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    /// A tooltip, such as why the row is disabled.
+    pub fn tooltip(mut self, tooltip: Option<impl Into<SharedString>>) -> Self {
+        self.tooltip = tooltip.map(Into::into);
+        self
+    }
+
     pub fn on_click(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -94,7 +125,9 @@ impl RenderOnce for NavRow {
         let focused = focus_visible(&focus, window);
         let radius = control_radius(cx);
         let selected = self.selected;
+        let disabled = self.disabled;
         let on_click = self.on_click;
+        let tooltip = self.tooltip;
         let trailing: Option<AnyElement> = match (self.hint, self.count) {
             (Some(hint), _) => Some(hint),
             (None, Some(count)) => Some(
@@ -111,6 +144,7 @@ impl RenderOnce for NavRow {
         BaseButton::new(self.id)
             .track_focus(&focus)
             .selected(selected)
+            .disabled(disabled)
             .accessibility_label(self.label.clone())
             .relative()
             .w_full()
@@ -124,9 +158,14 @@ impl RenderOnce for NavRow {
             .when(selected, |this| {
                 this.bg(colors.selected).font_weight(FontWeight::MEDIUM)
             })
-            .when(!selected, |this| {
+            .when(self.muted, |this| this.text_color(colors.fg_muted))
+            .when(disabled, |this| this.opacity(0.5))
+            .when(!selected && !disabled, |this| {
                 this.hover(|style| style.bg(colors.hover))
                     .active(|style| style.bg(colors.selected))
+            })
+            .when_some(tooltip, |this, tooltip| {
+                this.tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
             })
             .when_some(on_click, |this, handler| {
                 this.on_click(move |event, window, cx| handler(event, window, cx))
@@ -174,6 +213,29 @@ mod tests {
             }
         });
         tab(cx);
+        tab(cx);
+        press(cx, "enter");
+        assert_eq!(chosen.get(), Some(1));
+    }
+
+    #[gpui_kit::test]
+    fn a_disabled_row_is_skipped_and_reports_no_press(cx: &mut TestAppContext) {
+        let chosen = Rc::new(Cell::new(None));
+        let cx = host(cx, {
+            let chosen = chosen.clone();
+            move |_, _| {
+                div()
+                    .children((0..2usize).map(|ix| {
+                        let chosen = chosen.clone();
+                        NavRow::new(("nav", ix), IconName::Plus, "New list…")
+                            .disabled(ix == 0)
+                            .tooltip(Some("No permission"))
+                            .on_click(move |_, _, _| chosen.set(Some(ix)))
+                    }))
+                    .into_any_element()
+            }
+        });
+        // The first Tab skips the disabled row and lands on the second.
         tab(cx);
         press(cx, "enter");
         assert_eq!(chosen.get(), Some(1));
