@@ -1235,11 +1235,7 @@ impl Client {
     /// Creates a list. Needs `write:lists`.
     pub fn create_list(&self, draft: &ListDraft) -> Result<UserList> {
         let name = list_name(&draft.name)?;
-        let mut object = json!({
-            "name": name,
-            "description": draft.description.trim(),
-            "ranked": draft.ranked,
-        });
+        let mut object = list_draft_object(name, draft);
         if let Some(privacy) = draft.privacy {
             object["privacy_setting_id"] = json!(privacy.id());
         }
@@ -1269,11 +1265,7 @@ impl Client {
             ));
         }
         let name = list_name(&draft.name)?;
-        let mut object = json!({
-            "name": name,
-            "description": draft.description.trim(),
-            "ranked": draft.ranked,
-        });
+        let mut object = list_draft_object(name, draft);
         // Sent back as read when unchanged, even an id this version doesn't know.
         if let Some(privacy) = draft.privacy.map(Privacy::id).or(list.privacy_id) {
             object["privacy_setting_id"] = json!(privacy);
@@ -1665,6 +1657,14 @@ fn list_name(name: &str) -> Result<&str> {
     Some(name.trim())
         .filter(|n| !n.is_empty())
         .ok_or_else(|| Error::InvalidInput("a list needs a name".into()))
+}
+
+fn list_draft_object(name: &str, draft: &ListDraft) -> Value {
+    json!({
+        "name": name,
+        "description": draft.description.trim(),
+        "ranked": draft.ranked,
+    })
 }
 
 /// `fraction` of `total`, to the nearest unit. An unfinished read never lands
