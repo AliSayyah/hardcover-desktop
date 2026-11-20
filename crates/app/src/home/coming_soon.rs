@@ -1,27 +1,31 @@
-//! Home's "Coming soon" card: the next releases in the reader's series within
-//! the coming 12 months, and the way to the full list.
+//! Home's "Coming soon" (`hardcover-design`, Screens → Home): the section
+//! that closes the main column. The `section` title with a small ghost "See
+//! all 5", then up to five upcoming rows due in the coming 12 months. With
+//! none due but some further off, one muted sentence says so and "See all"
+//! stays. It hides when nothing is coming.
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    App, Entity, FontWeight, ParentElement as _, Styled as _, div, prelude::FluentBuilder as _,
+    AnyElement, App, Entity, IntoElement, ParentElement as _, Styled as _, div,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::Date;
 
-use super::home_view::card;
 use crate::catalog::navigation::{self, Page};
+use crate::design::{TypeRoles as _, colors};
+use crate::format::books_count_text;
 use crate::library::model::LibraryModel;
+use crate::ui::{SectionHeader, Sequence, see_all};
 use crate::upcoming::model::UpcomingModel;
 use crate::upcoming::row::UpcomingRow;
 use crate::upcoming::schedule::{next_releases, shown};
 
-/// The card, or `None` when nothing is coming in the reader's series.
-pub fn coming_soon_card(
+/// The section, or `None` when nothing is coming in the reader's series.
+pub fn coming_soon_section(
     upcoming: &Entity<UpcomingModel>,
     library: &Entity<LibraryModel>,
     today: Date,
     cx: &App,
-) -> Option<gpui_kit::Div> {
+) -> Option<AnyElement> {
     let model = library.read(cx);
     let books = shown(
         upcoming.read(cx).books(),
@@ -33,36 +37,56 @@ pub fn coming_soon_card(
     }
     let next = next_releases(&books, today);
     let later = books.len() - next.len();
-    let rows = next.iter().enumerate().map(|(ix, book)| {
-        UpcomingRow::new("home-upcoming", book, today, library.clone()).divided(ix > 0)
-    });
-    let muted = cx.theme().muted_foreground;
+    let rows = next
+        .iter()
+        .map(|book| UpcomingRow::new("home-upcoming", book, today, library.clone()));
+    let total = u32::try_from(books.len()).unwrap_or(u32::MAX);
     Some(
-        card(cx)
-            .child(
-                h_flex()
-                    .justify_between()
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child("Coming soon"))
-                    .child(
-                        Button::new("home-upcoming-all")
-                            .ghost()
-                            .xsmall()
-                            .label(match books.len() {
-                                1 => "See all".to_owned(),
-                                n => format!("See all {n}"),
-                            })
-                            .on_click(|_, _, cx| navigation::open(Page::Upcoming, cx)),
-                    ),
-            )
-            // With nothing in the coming 12 months, says what is further off.
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(SectionHeader::new("Coming soon").action(see_all(
+                "home-upcoming-all",
+                (total > 1).then_some(total),
+                |_, _, cx| navigation::open(Page::Upcoming, cx),
+            )))
             .when(next.is_empty(), |this| {
-                this.child(div().text_sm().text_color(muted).child(match later {
-                    1 => "Nothing is due in the next 12 months. 1 book is further off.".to_owned(),
-                    n => {
-                        format!("Nothing is due in the next 12 months. {n} books are further off.")
-                    }
-                }))
+                this.child(
+                    div()
+                        .body()
+                        .text_color(colors(cx).fg_muted)
+                        .child(further_off_text(later)),
+                )
             })
-            .child(v_flex().children(rows)),
+            .when(!next.is_empty(), |this| {
+                this.child(Sequence::new().children(rows))
+            })
+            .into_any_element(),
     )
+}
+
+/// What Home says when nothing is due within 12 months but `later` books are
+/// further off.
+pub fn further_off_text(later: usize) -> String {
+    let books = books_count_text(u32::try_from(later).unwrap_or(u32::MAX));
+    let verb = if later == 1 { "is" } else { "are" };
+    format!("Nothing is due in the next 12 months. {books} {verb} further off.")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn far_off_books_are_counted() {
+        assert_eq!(
+            further_off_text(1),
+            "Nothing is due in the next 12 months. 1 book is further off."
+        );
+        assert_eq!(
+            further_off_text(2),
+            "Nothing is due in the next 12 months. 2 books are further off."
+        );
+    }
 }

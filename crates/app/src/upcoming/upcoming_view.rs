@@ -1,22 +1,36 @@
-//! The full "Coming soon" list, a catalogue page opened from Home: every book
-//! still to come in the reader's series, under a heading per month for the
-//! coming 12 months, then per year.
+//! The full "Coming soon" list (`hardcover-design`, Screens → Coming soon), a
+//! catalogue page opened from Home: every book still to come in the reader's
+//! series, under a `label` per month for the coming 12 months, then per year.
+//! The workspace draws the object bar with Back above it.
+//!
+//! - **Content:** inset 32, at most 768 wide: the page title, a muted line
+//!   with the count, then the groups (24 above each label, 4 below), each a
+//!   sequence of upcoming rows.
+//! - **Loading:** skeleton rows where the rows will be.
+//! - **Failed:** one muted sentence with "Try again".
+//! - **Empty:** the empty state.
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{IconName, Sizable as _, h_flex};
 use gpui_kit::{
-    AnyElement, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Subscription, Window, div,
-    prelude::FluentBuilder as _, rems,
+    AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, SharedString, Styled as _, Subscription, Window, div, rems,
 };
 
 use super::model::{UpcomingModel, UpcomingStatus};
 use super::row::UpcomingRow;
 use super::schedule::{grouped, shown};
+use crate::cover::CoverSize;
+use crate::design::{TypeRoles as _, colors};
+use crate::format::count_text;
 use crate::library::model::LibraryModel;
-use crate::ui::empty_state;
+use crate::ui::{Lane, PageHeader, Sequence, Skeleton, empty_state};
+
+/// The widest the list gets (768): dates stay near their titles.
+const MAX_WIDTH: f32 = 48.;
+/// Skeleton rows while the list loads.
+const SKELETON_ROWS: usize = 4;
 
 pub struct UpcomingView {
     upcoming: Entity<UpcomingModel>,
@@ -40,6 +54,66 @@ impl UpcomingView {
             _subscriptions: subscriptions,
         }
     }
+
+    /// "Couldn't load …" and "Try again", in one muted line.
+    fn failed(&self, message: SharedString, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .flex_wrap()
+            .gap_2()
+            .child(div().body().text_color(colors(cx).fg_muted).child(message))
+            .child(
+                Button::new("upcoming-retry")
+                    .small()
+                    .label("Try again")
+                    .on_click(
+                        cx.listener(|this, _, _, cx| this.upcoming.update(cx, |u, cx| u.load(cx))),
+                    ),
+            )
+    }
+}
+
+/// The muted line under the title.
+pub fn count_line(books: usize) -> String {
+    match books {
+        1 => "1 book still to come in the series on your shelves".to_owned(),
+        n => format!(
+            "{} books still to come in the series on your shelves",
+            count_text(u32::try_from(n).unwrap_or(u32::MAX))
+        ),
+    }
+}
+
+/// An upcoming row while the list loads: its cover, two lines and the lanes.
+fn skeleton_row() -> AnyElement {
+    h_flex()
+        .w_full()
+        .gap_3()
+        .child(Skeleton::cover(CoverSize::Sm))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .gap_2()
+                .child(Skeleton::line().w_3_5())
+                .child(Skeleton::line().w_2_5()),
+        )
+        .child(Lane::action())
+        .into_any_element()
+}
+
+/// The page's column: inset 32, at most 768 wide.
+fn column() -> gpui_kit::Div {
+    div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .max_w(rems(MAX_WIDTH))
+        .p_8()
+}
+
+fn group_label(label: impl Into<SharedString>, cx: &App) -> impl IntoElement {
+    div().label(cx).pt_6().pb_1().child(label.into())
 }
 
 impl Render for UpcomingView {
@@ -53,31 +127,20 @@ impl Render for UpcomingView {
             |id| library.entry_for_book(id).map(|e| e.status),
             today,
         );
-        let muted = cx.theme().muted_foreground;
         let root = div().id("upcoming-page").size_full();
 
         if books.is_empty() {
             let body: AnyElement = match status {
-                UpcomingStatus::Idle | UpcomingStatus::Loading => h_flex()
-                    .size_full()
-                    .justify_center()
-                    .child(Spinner::new())
+                UpcomingStatus::Idle | UpcomingStatus::Loading => column()
+                    .child(PageHeader::new("Coming soon"))
+                    .child(div().pt_6().child(
+                        Sequence::new().children((0..SKELETON_ROWS).map(|_| skeleton_row())),
+                    ))
                     .into_any_element(),
-                UpcomingStatus::Failed(message) => v_flex()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
+                UpcomingStatus::Failed(message) => column()
                     .gap_2()
-                    .text_sm()
-                    .child(div().text_color(muted).child(message))
-                    .child(
-                        Button::new("upcoming-retry")
-                            .small()
-                            .label("Try again")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.upcoming.update(cx, |u, cx| u.load(cx))
-                            })),
-                    )
+                    .child(PageHeader::new("Coming soon"))
+                    .child(self.failed(message, cx))
                     .into_any_element(),
                 UpcomingStatus::Loaded => empty_state(
                     IconName::Calendar,
@@ -89,59 +152,48 @@ impl Render for UpcomingView {
             return root.child(body).into_any_element();
         }
 
-        let count = match books.len() {
-            1 => "1 book still to come in the series on your shelves".to_owned(),
-            n => format!("{n} books still to come in the series on your shelves"),
-        };
-        let failed = match &status {
-            UpcomingStatus::Failed(message) => Some(message.clone()),
+        let count = count_line(books.len());
+        let groups = grouped(&books, today)
+            .into_iter()
+            .map(|(group, books)| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(group_label(group.label(today), cx))
+                    .child(Sequence::new().children(books.iter().map(|book| {
+                        UpcomingRow::new("upcoming", book, today, self.library.clone())
+                    })))
+            })
+            .collect::<Vec<_>>();
+        let failed = match status {
+            UpcomingStatus::Failed(message) => Some(div().pt_2().child(self.failed(message, cx))),
             _ => None,
         };
-        let groups = grouped(&books, today).into_iter().map(|(group, books)| {
-            let rows = books.iter().enumerate().map(|(ix, book)| {
-                UpcomingRow::new("upcoming", book, today, self.library.clone()).divided(ix > 0)
-            });
-            v_flex()
-                .id(SharedString::from(format!(
-                    "upcoming-group-{}",
-                    group.key()
-                )))
-                .gap_1()
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(muted)
-                        .child(group.label(today)),
-                )
-                .child(v_flex().children(rows))
-        });
 
         root.overflow_y_scrollbar()
             .child(
-                v_flex()
-                    .w_full()
-                    .max_w(rems(48.))
-                    .px_6()
-                    .pt_6()
-                    .pb_5()
-                    .gap_5()
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_2xl()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Coming soon"),
-                            )
-                            .child(div().text_sm().text_color(muted).child(count))
-                            .when_some(failed, |this, message| {
-                                this.child(div().text_sm().text_color(muted).child(message))
-                            }),
-                    )
+                column()
+                    .child(PageHeader::new("Coming soon").line(count))
+                    .children(failed)
                     .children(groups),
             )
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_count_line_counts_books() {
+        assert_eq!(
+            count_line(1),
+            "1 book still to come in the series on your shelves"
+        );
+        assert_eq!(
+            count_line(1200),
+            "1,200 books still to come in the series on your shelves"
+        );
     }
 }

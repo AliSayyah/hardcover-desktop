@@ -105,7 +105,8 @@ impl Render for Gallery {
             .child(blocks_and_properties(cx))
             .child(skeletons())
             .child(kit_fixes(&self.input, cx))
-            .child(empty(cx));
+            .child(empty(cx))
+            .child(shelf_and_columns(cx));
 
         v_flex()
             .track_focus(&self.focus)
@@ -531,4 +532,43 @@ fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
         .section(
             RailSection::new("Sidebar rows").child(div().bg(c.sidebar).p_2().children(nav_rows)),
         )
+}
+
+fn shelf_and_columns(cx: &App) -> AnyElement {
+    let shelf = || {
+        CoverShelf::new(CoverSize::Md).books(
+            [
+                "Fourth Wing",
+                "Tomorrow, and Tomorrow, and Tomorrow",
+                "ملت عشق",
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(ix, title)| {
+                (
+                    Cover::new(CoverSize::Md, title),
+                    TextButton::new(("g-shelf", ix), title),
+                )
+            }),
+        )
+    };
+    let main = || {
+        div()
+            .body()
+            .text_color(colors(cx).fg_muted)
+            .child("The main column")
+    };
+    let section = || RailSection::new("Newest on Want to read").child(shelf());
+    specimen(
+        "Cover shelf; columns, wide and folded",
+        v_flex()
+            .gap_8()
+            .child(Columns::new(main()).wide_gap().rail([section()]))
+            .child(
+                Columns::new(main())
+                    .wide_gap()
+                    .rail([section(), RailSection::new("Up next")])
+                    .folded(true),
+            ),
+    )
 }

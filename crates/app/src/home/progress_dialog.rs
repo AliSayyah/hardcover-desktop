@@ -6,13 +6,14 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, rems,
+    Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{Length, LibraryEntry, UserBookId};
 
 use crate::app_state::Services;
-use crate::format::{duration_text, parse_progress, position_text, progress_summary};
+use crate::design::{TypeRoles as _, size};
+use crate::format::{count_text, duration_text, parse_progress, position_text, progress_summary};
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::open_dialog;
@@ -32,7 +33,7 @@ pub fn open_progress(
         // the write succeeds, and closes itself then.
         dialog
             .title("Update progress")
-            .w(rems(24.).to_pixels(window.rem_size()))
+            .w(size::DIALOG_CONFIRM.to_pixels(window.rem_size()))
             .on_ok(move |_, window, cx| {
                 ok_view.update(cx, |this, cx| this.save(window, cx));
                 false
@@ -150,14 +151,14 @@ impl Render for ProgressDialog {
         let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
         let muted = cx.theme().muted_foreground;
         let total = match length {
-            Some(Length::Pages(total)) => Some(format!("of {total}")),
+            Some(Length::Pages(total)) => Some(format!("of {}", count_text(total))),
             Some(Length::Seconds(total)) => Some(format!("of {}", duration_text(total))),
             None => None,
         };
         let title = model.entry(self.id).map(|e| e.book.title.clone());
         v_flex()
             .gap_3()
-            .children(title.map(|t| div().text_sm().truncate().child(t)))
+            .children(title.map(|t| div().body_strong().truncate().child(t)))
             .child(
                 h_flex()
                     .gap_2()
@@ -168,7 +169,7 @@ impl Render for ProgressDialog {
                             .raised_field(busy || !can_write, cx),
                     )
                     .when_some(total, |this, total| {
-                        this.child(div().text_sm().text_color(muted).child(total))
+                        this.child(div().body().tabular().text_color(muted).child(total))
                     })
                     .child(div().flex_1())
                     .child(
@@ -181,7 +182,7 @@ impl Render for ProgressDialog {
                     ),
             )
             .when_some(self.error.clone(), |this, error| {
-                this.child(div().text_sm().text_color(cx.theme().danger).child(error))
+                this.child(div().body().text_color(cx.theme().danger).child(error))
             })
     }
 }

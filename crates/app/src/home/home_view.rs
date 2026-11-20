@@ -1,52 +1,69 @@
-//! The Home destination, shown at launch: the books being read with their
-//! pace, books finished lately to rate, the reading goal, what to read next,
-//! and what is coming soon in the reader's series. Everything comes from the
-//! library on this computer and the goals and upcoming books already loaded;
-//! Home asks Hardcover for nothing until the reader acts.
+//! The Home destination, shown at launch (`hardcover-design`, Screens →
+//! Home): the books being read with their pace, books finished lately to
+//! rate, the reading goal, what to read next, and what is coming soon in the
+//! reader's series. Everything comes from the library on this computer and
+//! the goals and upcoming books already loaded; Home asks Hardcover for
+//! nothing until the reader acts.
+//!
+//! - **Header:** the date and the greeting (`ui::Greeting`), inset 32.
+//! - **Main column:** "Continue reading": the lead book (the most recently
+//!   updated one, xl cover), the other books being read and the latest paused
+//!   one, as a sequence; then "Rate what you finished" and "Coming soon".
+//! - **Rail:** the reading goal, Up next (the next book in a series) and the
+//!   newest on Want to read. A section that doesn't apply disappears; the
+//!   rail folds under the main column in a narrow window (`ui::Columns`).
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex,
-    v_flex,
-};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
-    prelude::FluentBuilder as _, px, rems,
+    HighlightStyle, InteractiveElement as _, IntoElement, ParentElement as _, Render, RenderImage,
+    SharedString, StatefulInteractiveElement as _, Styled as _, StyledText, Subscription, Window,
+    div, prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_LIBRARY};
 use hardcover_core::{
     Client, Date, Error, Goal, GoalMetric, LibraryEntry, Rating, ReadingStatus, UserBookId,
 };
 
-use super::coming_soon::coming_soon_card;
+use super::coming_soon::coming_soon_section;
 use super::digest::{
     Digest, Reading, SeriesNext, ToRate, compute, finished_per_month, finishing_by, to_rate,
 };
 use super::progress_dialog::open_progress;
-use crate::app_state::Services;
+use crate::app_state::{Services, release_cover_image};
+use crate::bidi::is_rtl;
 use crate::book::star_rating::StarRating;
 use crate::catalog::navigation::Page;
-use crate::cover::{Cover, CoverSize};
-use crate::design::colors;
+use crate::chip::StatusChip;
+use crate::cover::{Cover, CoverArt, CoverSize, detail_art};
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{
-    authors_text, goal_amount, goal_pace, goal_period, goal_unit, needs_permission,
-    progress_summary, rating_text, series_position_text,
+    ProgressSummary, authors_text, books_count_text, count_text, goal_amount, goal_pace,
+    goal_period, goal_unit, needs_permission, progress_summary, rating_text, series_position_text,
 };
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::ui::kit::open_alert_dialog;
-use crate::ui::{Meter, TextButton, empty_state};
+use crate::ui::{
+    Columns, CoverShelf, Greeting, Lane, Meter, RailSection, RowSpacing, SectionHeader, Sequence,
+    Skeleton, TextButton, date_line, empty_state, folds, greeting_at, see_all,
+};
 use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
+
+/// The widest Home's content gets (1024): beyond it the rows' actions drift
+/// away from their books. The main column takes the surplus up to it.
+const MAX_WIDTH: f32 = 64.;
 
 pub struct HomeView {
     model: Entity<LibraryModel>,
@@ -61,6 +78,9 @@ pub struct HomeView {
     rated_here: HashSet<UserBookId>,
     /// A rating being saved, shown until the write lands.
     saving_ratings: HashMap<UserBookId, Option<Rating>>,
+    /// The lead book's detail cover (the xl cover needs more than a
+    /// thumbnail), released when the lead changes.
+    lead_cover: Option<(String, Option<Arc<RenderImage>>)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -90,6 +110,7 @@ impl HomeView {
             computed: None,
             rated_here: HashSet::new(),
             saving_ratings: HashMap::new(),
+            lead_cover: None,
             _subscriptions: subscriptions,
         }
     }
@@ -134,6 +155,22 @@ impl HomeView {
             .find(|g| g.metric == GoalMetric::Books)
             .or_else(|| goals.current(today).next())
             .cloned()
+    }
+
+    /// The lead's detail cover, releasing the previous one if the lead
+    /// changed.
+    fn lead_art(&mut self, url: Option<String>, window: &mut Window, cx: &mut App) -> CoverArt {
+        if self.lead_cover.as_ref().map(|(u, _)| u) != url.as_ref()
+            && let Some((old, image)) = self.lead_cover.take()
+        {
+            release_cover_image(&old, image, window, cx);
+        }
+        let Some(url) = url else {
+            return CoverArt::None;
+        };
+        let art = detail_art(&url, window, cx);
+        self.lead_cover = Some((url, art.image()));
+        art
     }
 
     /// Runs a write on `id` in the background; the model applies the entry it
@@ -216,200 +253,6 @@ impl HomeView {
         );
     }
 
-    // ----- sections -----
-
-    fn render_reading(
-        &self,
-        digest: &Digest,
-        today: Date,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::Div {
-        let model = self.model.read(cx);
-        let books: Vec<(Reading, LibraryEntry)> = digest
-            .reading
-            .iter()
-            .filter_map(|r| Some((r.clone(), model.entry(r.id)?.clone())))
-            .collect();
-        let rows: Vec<AnyElement> = books
-            .iter()
-            .enumerate()
-            .map(|(ix, (reading, entry))| {
-                self.reading_row(ix, reading, entry, today, cx)
-                    .into_any_element()
-            })
-            .collect();
-        let paused = digest
-            .paused
-            .and_then(|id| self.model.read(cx).entry(id).cloned())
-            .map(|entry| self.paused_row(&entry, digest.paused_count, today, cx));
-        let empty = rows.is_empty();
-        section("Continue reading", (!empty).then_some(rows.len()), cx)
-            .when(empty, |this| {
-                this.child(note(
-                    "You're not reading anything right now. Start a book from Up next, or from any book's page.",
-                    cx,
-                ))
-            })
-            .child(v_flex().children(rows))
-            .children(paused)
-    }
-
-    fn reading_row(
-        &self,
-        ix: usize,
-        reading: &Reading,
-        entry: &LibraryEntry,
-        today: Date,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let id = entry.user_book_id;
-        let muted = cx.theme().muted_foreground;
-        let progress = progress_summary(entry);
-        let pending = self.model.read(cx).pending_write(id);
-        let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
-        let disabled_reason = (!can_write).then(|| needs_permission(WRITE_LIBRARY));
-
-        let mut position = progress.text();
-        if let Some(pct) = progress.percent
-            && (progress.page.is_some() || progress.seconds.is_some())
-        {
-            position.push_str(&format!(" · {}%", pct.round() as u32));
-        }
-        let mut meta: Vec<AnyElement> = vec![
-            div()
-                .text_color(cx.theme().foreground)
-                .child(position)
-                .into_any_element(),
-        ];
-        if let Some(pace) = reading.pace {
-            meta.push(
-                div()
-                    .child(pages_a_day(pace.pages_per_day))
-                    .into_any_element(),
-            );
-            if reading.idle_days.is_none()
-                && let Some(finish) = pace.finish
-            {
-                meta.push(
-                    h_flex()
-                        .gap_1()
-                        .child("Done around")
-                        .child(
-                            div()
-                                .text_color(cx.theme().foreground)
-                                .child(short_date(finish, today)),
-                        )
-                        .into_any_element(),
-                );
-            }
-        }
-        if let Some(days) = reading.idle_days {
-            // The icon carries the colour: amber text is hard to read.
-            meta.push(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        Icon::new(IconName::TriangleAlert)
-                            .xsmall()
-                            .text_color(cx.theme().warning),
-                    )
-                    .child(format!("Last updated {days} days ago"))
-                    .into_any_element(),
-            );
-        }
-
-        let mut byline = authors_text(&entry.book.authors);
-        if let Some(series) = entry.series.first() {
-            let name = match series.position {
-                Some(p) => format!("{} {}", series.name, series_position_text(p)),
-                None => series.name.clone(),
-            };
-            byline = if byline.is_empty() {
-                name
-            } else {
-                format!("{byline} · {name}")
-            };
-        }
-
-        let model = self.model.clone();
-        let entry_for_dialog = entry.clone();
-        h_flex()
-            .id(SharedString::from(format!("home-reading-{id}")))
-            .gap_4()
-            .py_2()
-            .when(ix > 0, |this| {
-                this.border_t_1().border_color(cx.theme().border)
-            })
-            .child(cover(entry, CoverSize::Md, true))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_0p5()
-                    .child(
-                        TextButton::book(
-                            SharedString::from(format!("home-title-{}", entry.user_book_id)),
-                            &entry.book,
-                        )
-                        .font_weight(FontWeight::SEMIBOLD),
-                    )
-                    .when(!byline.is_empty(), |this| {
-                        this.child(div().text_sm().text_color(muted).truncate().child(byline))
-                    })
-                    .child(
-                        div().pt_1().child(
-                            Meter::new(
-                                SharedString::from(format!("home-progress-{id}")),
-                                progress.percent.unwrap_or(0.0),
-                            )
-                            .thin()
-                            .accessibility_label("Reading progress"),
-                        ),
-                    )
-                    .child(
-                        h_flex()
-                            .flex_wrap()
-                            .gap_x_4()
-                            .gap_y_0p5()
-                            .text_sm()
-                            .text_color(muted)
-                            .children(meta),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .flex_shrink_0()
-                    .w(rems(9.5))
-                    .gap_1()
-                    .child(
-                        Button::new(SharedString::from(format!("home-update-{id}")))
-                            .outline()
-                            .small()
-                            .w_full()
-                            .label("Update progress…")
-                            .loading(pending == Some(WriteKind::Progress))
-                            .disabled(pending.is_some() || !can_write)
-                            .when_some(disabled_reason.clone(), |b, r| b.tooltip(r))
-                            .on_click(move |_, window, cx| {
-                                open_progress(model.clone(), &entry_for_dialog, window, cx)
-                            }),
-                    )
-                    .child(
-                        Button::new(SharedString::from(format!("home-finish-{id}")))
-                            .ghost()
-                            .small()
-                            .w_full()
-                            .label("Mark as read")
-                            .loading(pending == Some(WriteKind::Status))
-                            .disabled(pending.is_some() || !can_write)
-                            .when_some(disabled_reason, |b, r| b.tooltip(r))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.confirm_finished(id, window, cx)
-                            })),
-                    ),
-            )
-    }
-
     /// Asks before finishing a book: the read ends today, and moving the
     /// book back to Currently Reading would start another read.
     fn confirm_finished(&mut self, id: UserBookId, window: &mut Window, cx: &mut Context<Self>) {
@@ -433,64 +276,320 @@ impl HomeView {
         });
     }
 
-    /// The most recently paused book, so it isn't forgotten. Opening it is
-    /// the way back: moving it to Currently Reading would start a new read.
-    fn paused_row(
-        &self,
-        entry: &LibraryEntry,
-        count: usize,
+    // ----- Continue reading -----
+
+    fn render_reading(
+        &mut self,
+        digest: &Digest,
         today: Date,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
-        let progress = progress_summary(entry);
-        let mut details = String::from("Paused");
-        if let Some(pct) = progress.percent {
-            details.push_str(&format!(" at {}%", pct.round() as u32));
+        let model = self.model.read(cx);
+        let books: Vec<(Reading, LibraryEntry)> = digest
+            .reading
+            .iter()
+            .filter_map(|r| Some((r.clone(), model.entry(r.id)?.clone())))
+            .collect();
+        let paused = digest
+            .paused
+            .and_then(|id| model.entry(id).cloned())
+            .map(|entry| self.paused_row(&entry, digest.paused_count, today, cx));
+
+        let lead_url = books
+            .first()
+            .and_then(|(_, entry)| entry.cover())
+            .map(|c| c.url.clone());
+        let lead_art = self.lead_art(lead_url, window, cx);
+        let mut rows: Vec<AnyElement> = Vec::new();
+        let mut books = books.into_iter();
+        if let Some((reading, entry)) = books.next() {
+            rows.push(self.lead(&reading, &entry, lead_art, today, cx));
         }
-        if let Some(updated) = entry.updated_at {
-            let day = updated.with_timezone(&chrono::Local).date_naive();
-            details.push_str(&format!(", since {}", short_date(day, today)));
-        }
-        h_flex()
-            .mt_2()
+        rows.extend(books.map(|(reading, entry)| self.reading_row(&reading, &entry, today, cx)));
+        let reading_nothing = rows.is_empty();
+        rows.extend(paused);
+
+        div()
+            .flex()
+            .flex_col()
             .gap_3()
-            .px_3()
-            .py_2()
-            .rounded(cx.theme().radius_lg)
-            .bg(colors(cx).surface)
-            .child(cover(entry, CoverSize::Sm, false))
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_2()
-                    .child(
-                        TextButton::book(
-                            SharedString::from(format!("home-paused-{}", entry.user_book_id)),
-                            &entry.book,
-                        )
-                        .font_weight(FontWeight::MEDIUM),
-                    )
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .text_sm()
-                            .text_color(muted)
-                            .child(details),
-                    ),
-            )
-            .when(count > 1, |this| {
+            .child(SectionHeader::new("Continue reading"))
+            .when(reading_nothing, |this| {
+                this.child(muted_line(
+                    "You're not reading anything right now. Start a book from Up next, or from any book's page.",
+                    cx,
+                ))
+            })
+            .when(!rows.is_empty(), |this| {
                 this.child(
-                    Button::new("home-all-paused")
-                        .ghost()
-                        .small()
-                        .label(format!("All {count} paused"))
-                        .on_click(|_, window, cx| window.dispatch_action(Box::new(ShowPaused), cx)),
+                    Sequence::new()
+                        .spacing(RowSpacing::Reviews)
+                        .flush_top()
+                        .children(rows),
                 )
             })
             .into_any_element()
     }
+
+    /// The two commands of a book being read: "Update progress…" (default)
+    /// and "Mark as read…" (ghost). Small inside a row.
+    fn reading_actions(
+        &self,
+        entry: &LibraryEntry,
+        small: bool,
+        cx: &mut Context<Self>,
+    ) -> [Button; 2] {
+        let id = entry.user_book_id;
+        let pending = self.model.read(cx).pending_write(id);
+        let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
+        let disabled_reason = (!can_write).then(|| needs_permission(WRITE_LIBRARY));
+        let model = self.model.clone();
+        let entry_for_dialog = entry.clone();
+        let size = |button: Button| if small { button.small() } else { button };
+        [
+            size(Button::new(SharedString::from(format!("home-update-{id}"))))
+                .label("Update progress…")
+                .loading(pending == Some(WriteKind::Progress))
+                .disabled(pending.is_some() || !can_write)
+                .when_some(disabled_reason.clone(), |b, r| b.tooltip(r))
+                .on_click(move |_, window, cx| {
+                    open_progress(model.clone(), &entry_for_dialog, window, cx)
+                }),
+            size(Button::new(SharedString::from(format!("home-finish-{id}"))))
+                .ghost()
+                .label("Mark as read…")
+                .loading(pending == Some(WriteKind::Status))
+                .disabled(pending.is_some() || !can_write)
+                .when_some(disabled_reason, |b, r| b.tooltip(r))
+                .on_click(
+                    cx.listener(move |this, _, window, cx| this.confirm_finished(id, window, cx)),
+                ),
+        ]
+    }
+
+    /// The most recently updated book being read: an xl cover, the title in
+    /// `display-24`, the progress block and its two commands.
+    fn lead(
+        &self,
+        reading: &Reading,
+        entry: &LibraryEntry,
+        art: CoverArt,
+        today: Date,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = entry.user_book_id;
+        let muted = colors(cx).fg_muted;
+        let progress = progress_summary(entry);
+        let author = authors_text(&entry.book.authors);
+        let pace = pace_line(reading, today);
+        let [update, finish] = self.reading_actions(entry, false, cx);
+
+        div()
+            .flex()
+            .flex_row()
+            .gap_6()
+            .child(
+                Cover::new(CoverSize::Xl, entry.book.title.clone())
+                    .author(entry.book.authors.first().cloned())
+                    .art(art)
+                    .shadow(true)
+                    .opens(
+                        SharedString::from(format!("home-cover-{id}")),
+                        Page::Book(entry.book.clone()),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        TextButton::book(
+                            SharedString::from(format!("home-title-{id}")),
+                            &entry.book,
+                        )
+                        .display_24()
+                        .wrap(),
+                    )
+                    .when(!author.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .mt_1()
+                                .body()
+                                .text_color(muted)
+                                .truncate()
+                                .child(author),
+                        )
+                    })
+                    // The progress block sits at the foot of the cover.
+                    .child(div().flex_1().min_h_4())
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .w_full()
+                            .max_w(size::METER_MAX)
+                            .gap_2()
+                            .child(
+                                h_flex()
+                                    .items_baseline()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .truncate()
+                                            .body_strong()
+                                            .tabular()
+                                            .child(position_text(&progress)),
+                                    )
+                                    .children(progress.percent.map(|pct| {
+                                        div()
+                                            .flex_none()
+                                            .body()
+                                            .tabular()
+                                            .text_color(muted)
+                                            .child(percent_text(pct))
+                                    })),
+                            )
+                            .child(
+                                Meter::new(
+                                    SharedString::from(format!("home-progress-{id}")),
+                                    progress.percent.unwrap_or(0.0),
+                                )
+                                .accessibility_label("Reading progress"),
+                            )
+                            .children(
+                                pace.map(|pace| {
+                                    div().body().tabular().text_color(muted).child(pace)
+                                }),
+                            ),
+                    )
+                    .child(h_flex().mt_4().gap_2().child(update).child(finish)),
+            )
+            .into_any_element()
+    }
+
+    /// Another book being read: an md cover, the title in `title-18`, a 2 px
+    /// meter with the percentage, a caption, and the two commands stacked on
+    /// the trailing edge.
+    fn reading_row(
+        &self,
+        reading: &Reading,
+        entry: &LibraryEntry,
+        today: Date,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = entry.user_book_id;
+        let muted = colors(cx).fg_muted;
+        let progress = progress_summary(entry);
+        let author = authors_text(&entry.book.authors);
+        let mut caption = position_text(&progress);
+        if let Some(pace) = pace_line(reading, today) {
+            caption.push_str(" · ");
+            caption.push_str(&pace);
+        }
+        let [update, finish] = self.reading_actions(entry, true, cx);
+
+        h_flex()
+            .w_full()
+            .gap_4()
+            .child(cover(entry, CoverSize::Md, true))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        TextButton::book(
+                            SharedString::from(format!("home-title-{id}")),
+                            &entry.book,
+                        )
+                        .title_18(),
+                    )
+                    .when(!author.is_empty(), |this| {
+                        this.child(div().body().text_color(muted).truncate().child(author))
+                    })
+                    .children(progress.percent.map(|pct| {
+                        h_flex()
+                            .mt_2()
+                            .gap_2()
+                            .child(
+                                Meter::new(SharedString::from(format!("home-progress-{id}")), pct)
+                                    .thin()
+                                    .w(size::METER_IN_ROW)
+                                    .accessibility_label("Reading progress"),
+                            )
+                            .child(div().caption(cx).tabular().child(percent_text(pct)))
+                    }))
+                    .child(div().mt_1().caption(cx).tabular().child(caption)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_none()
+                    .items_end()
+                    .gap_1()
+                    .child(update)
+                    .child(finish),
+            )
+            .into_any_element()
+    }
+
+    /// The most recently paused book, so it isn't forgotten: an sm row with
+    /// the Paused chip. Opening it is the way back: moving it to Currently
+    /// Reading would start a new read.
+    fn paused_row(&self, entry: &LibraryEntry, count: usize, today: Date, cx: &App) -> AnyElement {
+        let progress = progress_summary(entry);
+        let since = entry
+            .updated_at
+            .map(|updated| updated.with_timezone(&chrono::Local).date_naive());
+        h_flex()
+            .w_full()
+            .gap_4()
+            .child(cover(entry, CoverSize::Sm, false))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(TextButton::book(
+                        SharedString::from(format!("home-paused-{}", entry.user_book_id)),
+                        &entry.book,
+                    ))
+                    .child(
+                        div()
+                            .caption(cx)
+                            .tabular()
+                            .truncate()
+                            .child(paused_text(&progress, since, today)),
+                    ),
+            )
+            .child(
+                Lane::fit()
+                    .stacked()
+                    .child(StatusChip(ReadingStatus::Paused))
+                    .when(count > 1, |this| {
+                        this.child(
+                            Button::new("home-all-paused")
+                                .ghost()
+                                .small()
+                                .label(format!("All {} paused", count_text(count as u32)))
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(ShowPaused), cx)
+                                }),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    // ----- Rate what you finished -----
 
     /// Books finished lately with no rating, each with its stars. Hidden
     /// without `write:library`, as there is nothing to do in it then.
@@ -500,7 +599,7 @@ impl HomeView {
         unrated: usize,
         today: Date,
         cx: &mut Context<Self>,
-    ) -> gpui_kit::Div {
+    ) -> AnyElement {
         let library = self.model.read(cx);
         let books: Vec<(Date, LibraryEntry)> = rows
             .iter()
@@ -508,20 +607,28 @@ impl HomeView {
             .collect();
         let rows = books
             .iter()
-            .enumerate()
-            .map(|(ix, (finished, entry))| self.rate_row(ix, entry, *finished, today, cx))
+            .map(|(finished, entry)| self.rate_row(entry, *finished, today, cx))
             .collect::<Vec<_>>();
-        section(
-            "Rate what you finished",
-            (unrated > 0).then_some(unrated),
-            cx,
-        )
-        .child(v_flex().children(rows))
+        let mut header = SectionHeader::new("Rate what you finished");
+        if unrated > 0 {
+            header = header.action(
+                div()
+                    .caption(cx)
+                    .tabular()
+                    .child(books_count_text(unrated as u32)),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(header)
+            .child(Sequence::new().spacing(RowSpacing::Reviews).children(rows))
+            .into_any_element()
     }
 
     fn rate_row(
         &self,
-        ix: usize,
         entry: &LibraryEntry,
         finished: Date,
         today: Date,
@@ -533,278 +640,269 @@ impl HomeView {
             Some(saving) if pending == Some(WriteKind::Rating) => *saving,
             _ => entry.rating,
         };
-        let muted = cx.theme().muted_foreground;
-        let mut byline = authors_text(&entry.book.authors);
-        let finished_text = format!("Finished {}", short_date(finished, today));
-        byline = if byline.is_empty() {
-            finished_text
-        } else {
-            format!("{byline} · {finished_text}")
-        };
+        let byline = finished_byline(&entry.book.authors, finished, today);
         h_flex()
-            .id(SharedString::from(format!("home-rate-{id}")))
-            .gap_3()
-            .py_1p5()
-            .when(ix > 0, |this| {
-                this.border_t_1().border_color(cx.theme().border)
-            })
+            .w_full()
+            .gap_4()
             .child(cover(entry, CoverSize::Sm, false))
             .child(
-                v_flex()
+                div()
+                    .flex()
+                    .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .child(
-                        TextButton::book(
-                            SharedString::from(format!("home-rate-title-{}", entry.user_book_id)),
-                            &entry.book,
-                        )
-                        .font_weight(FontWeight::MEDIUM),
-                    )
-                    .child(div().text_sm().text_color(muted).truncate().child(byline)),
-            )
-            .child(
-                h_flex()
-                    .flex_shrink_0()
-                    .gap_2()
-                    .child(
-                        StarRating::new(SharedString::from(format!("home-stars-{id}")))
-                            .value(rating)
-                            .on_change(cx.listener(
-                                move |this, rating: &Option<Rating>, window, cx| {
-                                    this.rate(id, *rating, window, cx)
-                                },
-                            )),
-                    )
-                    // Fixed width, so the stars line up from row to row.
+                    .child(TextButton::book(
+                        SharedString::from(format!("home-rate-title-{id}")),
+                        &entry.book,
+                    ))
                     .child(
                         div()
-                            .w(rems(1.75))
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .map(|this| {
-                                if pending == Some(WriteKind::Rating) {
-                                    this.child(Spinner::new().small())
-                                } else {
-                                    this.children(rating.map(rating_text))
-                                }
-                            }),
+                            .body()
+                            .tabular()
+                            .text_color(colors(cx).fg_muted)
+                            .truncate()
+                            .child(byline),
                     ),
+            )
+            // The stars show the new rating at once; it saves behind them.
+            .child(
+                StarRating::new(SharedString::from(format!("home-stars-{id}")))
+                    .value(rating)
+                    .on_change(
+                        cx.listener(move |this, rating: &Option<Rating>, window, cx| {
+                            this.rate(id, *rating, window, cx)
+                        }),
+                    ),
+            )
+            .child(
+                Lane::trailing().child(
+                    div()
+                        .body_strong()
+                        .tabular()
+                        .children(rating.map(rating_text)),
+                ),
             )
             .into_any_element()
     }
 
-    fn render_goal(
+    // ----- the rail -----
+
+    /// The reading goal: the figure, the goal meter with its pace tick, one
+    /// sentence, and books per month for a calendar-year goal counted in
+    /// books.
+    fn goal_section(
         &self,
         goal: &Goal,
         digest: &Digest,
         today: Date,
         cx: &mut Context<Self>,
-    ) -> gpui_kit::Div {
-        let muted = cx.theme().muted_foreground;
+    ) -> AnyElement {
+        let muted = colors(cx).fg_muted;
         let period = goal_period(goal.start, goal.end);
         let title = if period.len() == 4 {
             format!("{period} reading goal")
         } else {
             "Reading goal".to_owned()
         };
-        let fraction = goal.fraction().clamp(0.0, 1.0) as f32;
         let reached = goal.progress >= f64::from(goal.target);
-        let expected =
-            (goal.expected_by(today) / f64::from(goal.target.max(1))).clamp(0.0, 1.0) as f32;
+        let expected = (goal.expected_by(today) / f64::from(goal.target.max(1))) * 100.0;
         let library = self.model.read(cx);
         let months = (goal.metric == GoalMetric::Books)
             .then(|| finished_per_month(goal, library.entries()))
             .flatten();
+        let finishing: Vec<String> = if reached {
+            Vec::new()
+        } else {
+            finishing_by(goal, digest, today)
+                .into_iter()
+                .filter_map(|id| library.entry(id).map(|e| e.book.title.clone()))
+                .collect()
+        };
+        let sentence = goal_sentence(goal, today, &finishing);
 
-        let mut status = goal_pace(goal, today).unwrap_or_default();
-        let days_left = (goal.end - today).num_days();
-        if !reached && goal.is_current(today) {
-            status.push_str(&match days_left {
-                0 => ", and today is the last day".to_owned(),
-                1 => ", with 1 day left".to_owned(),
-                n => format!(", with {n} days left"),
-            });
-        }
-        let mut notes: Vec<String> = Vec::new();
-        let finishing = finishing_by(goal, digest, today);
-        if !reached && finishing > 0 {
-            let total = goal.progress.floor() as usize + finishing;
-            notes.push(match finishing {
-                1 => {
-                    format!("1 book you're reading should be done by the end, which makes {total}.")
-                }
-                n => format!(
-                    "{n} books you're reading should be done by the end, which makes {total}."
-                ),
-            });
-        }
         let goals = self.goals.clone();
         let model = self.model.clone();
         let goal_id = goal.id;
-        let progress_text = goal_amount(&goal.metric, goal.progress);
         let target_text = format!(
             "of {} {}",
-            goal.target,
+            count_text(goal.target),
             goal_unit(&goal.metric, f64::from(goal.target))
         );
 
-        card(cx)
+        RailSection::new(title)
+            .action(
+                Button::new("home-goal-details")
+                    .ghost()
+                    .small()
+                    .label("Details…")
+                    .on_click(move |_, window, cx| {
+                        open_goal(goals.clone(), model.clone(), goal_id, window, cx)
+                    }),
+            )
             .child(
                 h_flex()
-                    .justify_between()
-                    .items_start()
+                    .items_baseline()
+                    .gap_2()
                     .child(
-                        v_flex()
-                            .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
-                            .child(
-                                h_flex()
-                                    .items_baseline()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .text_2xl()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .child(progress_text),
-                                    )
-                                    .child(div().text_sm().text_color(muted).child(target_text)),
-                            ),
+                        div()
+                            .display_30()
+                            .child(goal_amount(&goal.metric, goal.progress)),
                     )
-                    .child(
-                        Button::new("home-goal-details")
-                            .ghost()
-                            .xsmall()
-                            .label("Details…")
-                            .on_click(move |_, window, cx| {
-                                open_goal(goals.clone(), model.clone(), goal_id, window, cx)
-                            }),
-                    ),
+                    .child(div().body().tabular().text_color(muted).child(target_text)),
             )
-            .child(goal_bar(
-                fraction,
-                (!reached && goal.is_current(today)).then_some(expected),
-            ))
             .child(
-                v_flex()
-                    .gap_1()
-                    .text_sm()
-                    .child(div().font_weight(FontWeight::MEDIUM).child(status))
-                    .children(notes.into_iter().map(|n| div().text_color(muted).child(n))),
+                div().pt_1().child(
+                    Meter::new("home-goal-bar", (goal.fraction() * 100.0) as f32)
+                        .pace(
+                            (!reached && goal.is_current(today))
+                                .then_some(expected.clamp(0.0, 100.0) as f32),
+                        )
+                        .accessibility_label("Progress toward the goal"),
+                ),
             )
-            .when_some(months, |this, months| {
-                this.child(month_bars(&months, today, goal, cx))
-            })
+            .children(sentence.map(|(text, title)| {
+                let fg = colors(cx).fg;
+                let highlights = title.map(|range| {
+                    (
+                        range,
+                        HighlightStyle {
+                            color: Some(fg),
+                            font_weight: Some(FontWeight::MEDIUM),
+                            ..Default::default()
+                        },
+                    )
+                });
+                div()
+                    .pt_1()
+                    .body()
+                    .text_color(muted)
+                    .child(StyledText::new(text).with_highlights(highlights))
+            }))
+            .children(months.map(|months| month_bars(&months, today, goal, cx)))
+            .into_any_element()
     }
 
-    fn render_up_next(&self, digest: &Digest, cx: &mut Context<Self>) -> gpui_kit::Div {
+    /// The next book in a series the reader has started.
+    fn up_next_section(
+        &self,
+        next: &SeriesNext,
+        entry: &LibraryEntry,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = entry.user_book_id;
+        let pending = self.model.read(cx).pending_write(id);
+        let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
+        let author = authors_text(&entry.book.authors);
+        RailSection::new("Up next")
+            .child(
+                h_flex()
+                    .items_start()
+                    .gap_4()
+                    .child(cover(entry, CoverSize::Md, true))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .caption(cx)
+                                    .tabular()
+                                    .truncate()
+                                    .child(series_next_text(next)),
+                            )
+                            .child(
+                                TextButton::book(
+                                    SharedString::from(format!("home-series-next-{id}")),
+                                    &entry.book,
+                                )
+                                .title_18()
+                                .wrap(),
+                            )
+                            .when(!author.is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .body()
+                                        .text_color(colors(cx).fg_muted)
+                                        .truncate()
+                                        .child(author),
+                                )
+                            })
+                            .child(
+                                h_flex().mt_2().child(
+                                    Button::new("home-start-next")
+                                        .small()
+                                        .label("Start reading")
+                                        .loading(pending == Some(WriteKind::Status))
+                                        .disabled(pending.is_some() || !can_write)
+                                        .when(!can_write, |b| {
+                                            b.tooltip(needs_permission(WRITE_LIBRARY))
+                                        })
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.set_status(
+                                                id,
+                                                ReadingStatus::CurrentlyReading,
+                                                window,
+                                                cx,
+                                            )
+                                        })),
+                                ),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// The newest books on Want to read, as a shelf of covers.
+    fn want_to_read_section(&self, digest: &Digest, cx: &App) -> AnyElement {
         let library = self.model.read(cx);
-        let pick = digest.series_next.as_ref().and_then(|n| {
-            Some((
-                n.clone(),
-                library.entry(n.id)?.clone(),
-                library.entry(n.after)?.clone(),
-            ))
-        });
-        let rows: Vec<AnyElement> = digest
+        let books = digest
             .up_next
             .iter()
             .filter_map(|id| library.entry(*id))
             .map(|e| {
-                compact_row(
-                    "home-next",
-                    e,
-                    e.total_pages().map(|p| format!("{p} pages")),
-                    cx,
+                (
+                    cover(e, CoverSize::Md, false),
+                    TextButton::book(
+                        SharedString::from(format!("home-want-{}", e.user_book_id)),
+                        &e.book,
+                    ),
                 )
-            })
-            .collect();
-        let count = digest.want_to_read;
-        card(cx)
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("Up next"))
-            .children(pick.map(|(next, entry, after)| self.series_pick(&next, &entry, &after, cx)))
-            .child(v_flex().gap_1().children(rows))
+            });
+        let count = u32::try_from(digest.want_to_read).unwrap_or(u32::MAX);
+        RailSection::new("Newest on Want to read")
+            .action(see_all(
+                "home-all-want",
+                (count > 1).then_some(count),
+                |_, window, cx| window.dispatch_action(Box::new(ShowWantToRead), cx),
+            ))
             .child(
-                h_flex().child(
-                    Button::new("home-all-want")
-                        .ghost()
-                        .small()
-                        .label(match count {
-                            1 => "Want to Read shelf".to_owned(),
-                            n => format!("All {n} on Want to Read"),
-                        })
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(Box::new(ShowWantToRead), cx)
-                        }),
-                ),
-            )
-    }
-
-    fn series_pick(
-        &self,
-        next: &SeriesNext,
-        entry: &LibraryEntry,
-        after: &LibraryEntry,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
-        let id = entry.user_book_id;
-        let pending = self.model.read(cx).pending_write(id);
-        let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
-        let after_text = match after.rating.map(rating_text) {
-            Some(r) if r == "1" => format!("you rated {} 1 star", after.book.title),
-            Some(r) => format!("you rated {} {r} stars", after.book.title),
-            None => format!("after {}", after.book.title),
-        };
-        let details = format!(
-            "{} {} · {after_text}",
-            next.series,
-            series_position_text(next.position)
-        );
-        h_flex()
-            .gap_3()
-            .p_3()
-            .rounded(cx.theme().radius_lg)
-            .bg(colors(cx).surface)
-            .child(cover(entry, CoverSize::Md, true))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_0p5()
-                    .child(div().text_xs().text_color(muted).child("Next in a series"))
-                    .child(
-                        TextButton::book(
-                            SharedString::from(format!("home-series-next-{}", entry.user_book_id)),
-                            &entry.book,
-                        )
-                        .font_weight(FontWeight::SEMIBOLD),
-                    )
-                    .child(div().text_xs().text_color(muted).truncate().child(details)),
-            )
-            .child(
-                Button::new("home-start-next")
-                    .outline()
-                    .small()
-                    .label("Start reading")
-                    .loading(pending == Some(WriteKind::Status))
-                    .disabled(pending.is_some() || !can_write)
-                    .when(!can_write, |b| b.tooltip(needs_permission(WRITE_LIBRARY)))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.set_status(id, ReadingStatus::CurrentlyReading, window, cx)
-                    })),
+                div()
+                    .pt_1()
+                    .child(CoverShelf::new(CoverSize::Md).books(books)),
             )
             .into_any_element()
     }
 }
 
 impl Render for HomeView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let today = chrono::Local::now().date_naive();
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let now = chrono::Local::now();
+        let today = now.date_naive();
+        let header = Greeting::new(date_line(today), greeting_at(now));
         let loaded = self.model.read(cx).is_loaded();
-        let digest = self.digest(today, cx);
         let root = div().id("home").track_focus(&self.focus_handle).size_full();
         if !loaded {
-            return root.into_any_element();
+            return root
+                .child(
+                    page()
+                        .child(header)
+                        .child(div().pt_6().child(lead_skeleton())),
+                )
+                .into_any_element();
         }
+        let digest = self.digest(today, cx);
         let goal = self.goal(today, cx);
         let model = self.model.read(cx);
         let (rate_rows, unrated) = if Services::global(cx).has_scope(WRITE_LIBRARY) {
@@ -815,7 +913,7 @@ impl Render for HomeView {
         // A rating stays on screen only while it is being saved.
         self.saving_ratings
             .retain(|id, _| model.pending_write(*id) == Some(WriteKind::Rating));
-        let coming_soon = coming_soon_card(&self.upcoming, &self.model, today, cx);
+        let coming_soon = coming_soon_section(&self.upcoming, &self.model, today, cx);
         if digest.is_empty() && rate_rows.is_empty() && goal.is_none() && coming_soon.is_none() {
             return root
                 .child(empty_state(
@@ -826,51 +924,46 @@ impl Render for HomeView {
                 ))
                 .into_any_element();
         }
-        // Want to Read books that are all still to come leave nothing to suggest.
-        let up_next = (digest.series_next.is_some() || !digest.up_next.is_empty())
-            .then(|| self.render_up_next(&digest, cx));
-        let goal_card = goal.map(|g| self.render_goal(&g, &digest, today, cx));
-        let reading = self.render_reading(&digest, today, cx);
+
+        let reading = self.render_reading(&digest, today, window, cx);
         let rate =
             (!rate_rows.is_empty()).then(|| self.render_rate(&rate_rows, unrated, today, cx));
+        let main = div()
+            .flex()
+            .flex_col()
+            .gap_6()
+            .child(reading)
+            .children(rate)
+            .children(coming_soon);
+
+        let goal_section = goal.map(|g| self.goal_section(&g, &digest, today, cx));
+        let series_next = digest.series_next.as_ref().and_then(|next| {
+            let entry = self.model.read(cx).entry(next.id)?.clone();
+            Some(self.up_next_section(next, &entry, cx))
+        });
+        // Want to Read books that are all still to come leave nothing to suggest.
+        let want = (!digest.up_next.is_empty()).then(|| self.want_to_read_section(&digest, cx));
+        let rail: Vec<AnyElement> = [goal_section, series_next, want]
+            .into_iter()
+            .flatten()
+            .collect();
+
+        // The sidebar is fixed, so the columns get the rest of the window,
+        // up to the widest Home gets, less the page's insets.
+        let rem = window.rem_size();
+        let width = (window.viewport_size().width - size::SIDEBAR.to_pixels(rem))
+            .min(rems(MAX_WIDTH).to_pixels(rem))
+            - rems(4.).to_pixels(rem);
         root.overflow_y_scrollbar()
             .child(
-                v_flex()
-                    .w_full()
-                    .max_w(rems(56.))
-                    .px_6()
-                    .py_5()
-                    .gap_5()
-                    .child(
-                        h_flex()
-                            .items_baseline()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .text_2xl()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Home"),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(today.format("%A, %B %-d").to_string()),
-                            ),
-                    )
-                    .child(reading)
-                    .children(rate)
-                    .when(goal_card.is_some() || up_next.is_some(), |this| {
-                        this.child(
-                            h_flex()
-                                .flex_wrap()
-                                .items_start()
-                                .gap_4()
-                                .children(goal_card.map(|c| c.flex_1().min_w(rems(18.))))
-                                .children(up_next.map(|c| c.flex_1().min_w(rems(18.)))),
-                        )
-                    })
-                    .children(coming_soon),
+                page().child(header).child(
+                    div().pt_6().child(
+                        Columns::new(main)
+                            .wide_gap()
+                            .rail(rail)
+                            .folded(folds(width, rem, true)),
+                    ),
+                ),
             )
             .into_any_element()
     }
@@ -878,63 +971,39 @@ impl Render for HomeView {
 
 // ----- pieces -----
 
-/// A section heading, with a count beside it when there is one.
-fn section(title: &'static str, count: Option<usize>, cx: &App) -> gpui_kit::Div {
-    v_flex().gap_2().child(
-        h_flex()
-            .items_baseline()
-            .gap_2()
-            .child(
-                div()
-                    .text_base()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(title),
-            )
-            .when_some(count, |this, n| {
-                this.child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(n.to_string()),
-                )
-            }),
-    )
-}
-
-pub(super) fn card(cx: &App) -> gpui_kit::Div {
-    v_flex()
-        .gap_2p5()
-        .p_4()
-        .border_1()
-        .border_color(cx.theme().border)
-        .rounded(cx.theme().radius_lg)
-}
-
-fn note(text: impl Into<SharedString>, cx: &App) -> AnyElement {
+/// Home's column: inset 32, at most [`MAX_WIDTH`].
+fn page() -> gpui_kit::Div {
     div()
-        .text_sm()
-        .text_color(cx.theme().muted_foreground)
+        .flex()
+        .flex_col()
+        .w_full()
+        .max_w(rems(MAX_WIDTH))
+        .p_8()
+}
+
+/// The lead while the library loads.
+fn lead_skeleton() -> impl IntoElement {
+    h_flex()
+        .items_start()
+        .gap_6()
+        .child(Skeleton::cover(CoverSize::Xl))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .gap_2()
+                .child(Skeleton::line().w_2_3())
+                .child(Skeleton::line().w_1_3()),
+        )
+}
+
+fn muted_line(text: impl Into<SharedString>, cx: &App) -> AnyElement {
+    div()
+        .body()
+        .text_color(colors(cx).fg_muted)
         .child(text.into())
         .into_any_element()
-}
-
-/// "16 pages a day"; "Under a page a day" below one.
-fn pages_a_day(pages: f64) -> String {
-    match pages.round() as u32 {
-        0 => "Under a page a day".to_owned(),
-        1 => "1 page a day".to_owned(),
-        n => format!("{n} pages a day"),
-    }
-}
-
-/// "Nov 30", with the year when it isn't this year's.
-fn short_date(date: Date, today: Date) -> String {
-    use chrono::Datelike as _;
-    if date.year() == today.year() {
-        date.format("%b %-d").to_string()
-    } else {
-        date.format("%b %-d, %Y").to_string()
-    }
 }
 
 /// A book's cover; a click opens the book's page. `shadow` where the cover
@@ -950,59 +1019,152 @@ fn cover(entry: &LibraryEntry, size: CoverSize, shadow: bool) -> Cover {
         )
 }
 
-/// One line for a book: small cover, title, and something about it.
-fn compact_row(
-    prefix: &str,
-    entry: &LibraryEntry,
-    trailing: Option<String>,
-    cx: &App,
-) -> AnyElement {
-    let page = Page::Book(entry.book.clone());
-    let image_url = entry.cover().map(|c| c.url.clone());
-    let muted = cx.theme().muted_foreground;
-    h_flex()
-        .id(SharedString::from(format!(
-            "{prefix}-row-{}",
-            entry.user_book_id
-        )))
-        .gap_2()
-        .child(
-            Cover::new(CoverSize::Xs, entry.book.title.clone())
-                .thumbnail(image_url)
-                .opens(
-                    SharedString::from(format!("{prefix}-cover-{}", entry.user_book_id)),
-                    page,
-                ),
-        )
-        .child(
-            div().flex_1().min_w_0().child(
-                TextButton::book(
-                    SharedString::from(format!("{prefix}-{}", entry.user_book_id)),
-                    &entry.book,
-                )
-                .font_weight(FontWeight::NORMAL),
-            ),
-        )
-        .when_some(trailing, |this, t| {
-            this.child(div().flex_shrink_0().text_sm().text_color(muted).child(t))
-        })
-        .into_any_element()
+/// "Page 418 of 1,007", with thousands separators; otherwise the summary's
+/// own words ("2h 5m of 10h 30m", "42%", "Not started").
+pub fn position_text(progress: &ProgressSummary) -> String {
+    match (progress.page, progress.total_pages) {
+        (Some(page), Some(total)) => format!("Page {} of {}", count_text(page), count_text(total)),
+        (Some(page), None) => format!("Page {}", count_text(page)),
+        _ => progress.text(),
+    }
 }
 
-/// The goal's progress, with a tick where steady progress would be today.
-fn goal_bar(fraction: f32, expected: Option<f32>) -> impl IntoElement {
-    Meter::new("home-goal-bar", fraction * 100.)
-        .pace(expected.map(|e| e * 100.))
-        .accessibility_label("Progress toward the goal")
+/// "66%".
+fn percent_text(percent: f32) -> String {
+    format!("{}%", percent.round() as u32)
 }
 
-/// Books finished each month of the goal's year; months still to come are
-/// outlined.
-fn month_bars(months: &[u32; 12], today: Date, goal: &Goal, cx: &App) -> impl IntoElement {
+/// The pace line of a book being read: "16 pages a day · done around Dec 1",
+/// or "Last updated 8 days ago" for a book left idle, which gets no finish
+/// date. `None` when there is nothing to say.
+pub fn pace_line(reading: &Reading, today: Date) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(pace) = reading.pace {
+        parts.push(pages_a_day(pace.pages_per_day));
+        if reading.idle_days.is_none()
+            && let Some(finish) = pace.finish
+        {
+            parts.push(format!("done around {}", short_date(finish, today)));
+        }
+    }
+    if let Some(days) = reading.idle_days {
+        parts.push(format!("Last updated {days} days ago"));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// "16 pages a day"; "Under a page a day" below one.
+fn pages_a_day(pages: f64) -> String {
+    match pages.round() as u32 {
+        0 => "Under a page a day".to_owned(),
+        1 => "1 page a day".to_owned(),
+        n => format!("{} pages a day", count_text(n)),
+    }
+}
+
+/// The paused row's caption: "Paused at page 230 of 1,104 · since Oct 1".
+pub fn paused_text(progress: &ProgressSummary, since: Option<Date>, today: Date) -> String {
+    let mut text = match (progress.page, progress.total_pages, progress.percent) {
+        (Some(page), Some(total), _) => {
+            format!(
+                "Paused at page {} of {}",
+                count_text(page),
+                count_text(total)
+            )
+        }
+        (Some(page), None, _) => format!("Paused at page {}", count_text(page)),
+        (None, _, Some(pct)) => format!("Paused at {}", percent_text(pct)),
+        (None, _, None) => "Paused".to_owned(),
+    };
+    if let Some(since) = since {
+        text.push_str(&format!(" · since {}", short_date(since, today)));
+    }
+    text
+}
+
+/// A rating row's second line: "Andy Weir · Finished Nov 3".
+fn finished_byline(authors: &[String], finished: Date, today: Date) -> String {
+    format!(
+        "{} · Finished {}",
+        authors_text(authors),
+        short_date(finished, today)
+    )
+}
+
+/// Up next's caption: "Next in Dune · #2".
+pub fn series_next_text(next: &SeriesNext) -> String {
+    format!(
+        "Next in {} · {}",
+        next.series,
+        series_position_text(next.position)
+    )
+}
+
+/// The goal's one sentence, and where the title it names sits in it:
+/// "2 books behind schedule, with 41 days left. Project Hail Mary should
+/// finish in time, which makes 10." `finishing` holds the titles of the books
+/// being read that should finish before the goal ends. One left-to-right
+/// title is named; more books, or a right-to-left title (GPUI can't wrap one
+/// inside a sentence), are counted. `None` for a goal with nothing to say.
+pub fn goal_sentence(
+    goal: &Goal,
+    today: Date,
+    finishing: &[String],
+) -> Option<(String, Option<Range<usize>>)> {
+    let reached = goal.progress >= f64::from(goal.target);
+    let mut text = goal_pace(goal, today).unwrap_or_default();
+    if text.is_empty() {
+        return None;
+    }
+    if !reached && goal.is_current(today) {
+        text.push_str(&match (goal.end - today).num_days() {
+            0 => ", and today is the last day".to_owned(),
+            1 => ", with 1 day left".to_owned(),
+            n => format!(", with {} days left", count_text(n as u32)),
+        });
+    }
+    text.push('.');
+    let mut title = None;
+    if !reached && !finishing.is_empty() {
+        let total = goal.progress.floor() as usize + finishing.len();
+        let total = count_text(total as u32);
+        text.push(' ');
+        match finishing {
+            [one] if !is_rtl(one) => {
+                title = Some(text.len()..text.len() + one.len());
+                text.push_str(&format!(
+                    "{one} should finish in time, which makes {total}."
+                ));
+            }
+            [_] => text.push_str(&format!(
+                "1 book you're reading should finish in time, which makes {total}."
+            )),
+            many => text.push_str(&format!(
+                "{} books you're reading should finish in time, which makes {total}.",
+                many.len()
+            )),
+        }
+    }
+    Some((text, title))
+}
+
+/// "Nov 30", with the year when it isn't this year's.
+fn short_date(date: Date, today: Date) -> String {
     use chrono::Datelike as _;
+    if date.year() == today.year() {
+        date.format("%b %-d").to_string()
+    } else {
+        date.format("%b %-d, %Y").to_string()
+    }
+}
+
+/// Books finished each month of the goal's year: `accent` bars on the
+/// `track`, months still to come outlined.
+fn month_bars(months: &[u32; 12], today: Date, goal: &Goal, cx: &App) -> AnyElement {
+    use chrono::Datelike as _;
+    let c = colors(cx);
     let max = months.iter().copied().max().unwrap_or(0).max(1);
     let this_year = goal.start.year() == today.year();
-    let bar_area: Pixels = px(32.);
     let names = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
     let full = [
         "January",
@@ -1020,62 +1182,209 @@ fn month_bars(months: &[u32; 12], today: Date, goal: &Goal, cx: &App) -> impl In
     ];
     let bars = months.iter().enumerate().map(|(ix, &n)| {
         let future = this_year && ix > today.month0() as usize || goal.start.year() > today.year();
-        let height = if n == 0 {
-            px(2.)
-        } else {
-            bar_area * (n as f32 / max as f32)
-        };
         let tip: SharedString = match n {
             1 => format!("{}: 1 book", full[ix]).into(),
             n => format!("{}: {n} books", full[ix]).into(),
         };
-        v_flex()
+        div()
             .id(SharedString::from(format!("home-month-{ix}")))
+            .flex()
+            .flex_col()
             .flex_1()
-            .gap_1()
             .items_center()
-            .tooltip(move |window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-            })
-            .child(
-                div()
-                    .h(bar_area)
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .justify_end()
-                    .child(
-                        div()
-                            .w_full()
-                            .h(if future { bar_area } else { height })
-                            .rounded_t(px(2.))
-                            .map(|this| {
-                                if future {
-                                    this.border_1()
-                                        .border_dashed()
-                                        .border_color(cx.theme().border)
-                                } else if n == 0 {
-                                    this.bg(cx.theme().border)
-                                } else {
-                                    this.bg(cx.theme().progress_bar)
-                                }
-                            }),
-                    ),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(names[ix]),
-            )
+            .gap_1()
+            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            .child(div().h_8().w_full().flex().flex_col().justify_end().child(
+                div().w_full().rounded_t(size::HAIRLINE * 2.).map(|this| {
+                    if future {
+                        this.h_full()
+                            .border_1()
+                            .border_dashed()
+                            .border_color(c.border)
+                    } else if n == 0 {
+                        this.h_0p5().bg(c.track)
+                    } else {
+                        this.h(gpui_kit::relative(n as f32 / max as f32))
+                            .bg(c.accent)
+                    }
+                }),
+            ))
+            .child(div().caption(cx).child(names[ix]))
     });
-    v_flex()
+    div()
+        .flex()
+        .flex_col()
         .gap_1()
-        .child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child("Finished each month"),
-        )
+        .pt_2()
+        .child(div().caption(cx).child("Finished each month"))
         .child(h_flex().gap_1().items_end().children(bars))
+        .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::home::digest::Pace;
+    use hardcover_core::GoalId;
+
+    fn day(s: &str) -> Date {
+        s.parse().unwrap()
+    }
+
+    fn progress(page: Option<u32>, total: Option<u32>, percent: Option<f32>) -> ProgressSummary {
+        ProgressSummary {
+            page,
+            total_pages: total,
+            seconds: None,
+            total_seconds: None,
+            percent,
+        }
+    }
+
+    #[test]
+    fn positions_have_thousands_separators() {
+        assert_eq!(
+            position_text(&progress(Some(418), Some(1007), Some(41.5))),
+            "Page 418 of 1,007"
+        );
+        assert_eq!(
+            position_text(&progress(Some(1200), None, None)),
+            "Page 1,200"
+        );
+        assert_eq!(position_text(&progress(None, None, Some(42.))), "42%");
+        assert_eq!(position_text(&progress(None, None, None)), "Not started");
+    }
+
+    #[test]
+    fn the_pace_line_names_the_pace_and_the_finish() {
+        let today = day("2026-11-20");
+        let mut reading = Reading {
+            id: UserBookId::new(1),
+            pace: Some(Pace {
+                pages_per_day: 16.2,
+                finish: Some(day("2026-12-01")),
+            }),
+            idle_days: None,
+        };
+        assert_eq!(
+            pace_line(&reading, today).as_deref(),
+            Some("16 pages a day · done around Dec 1")
+        );
+        // An idle book gets no finish date.
+        reading.idle_days = Some(8);
+        assert_eq!(
+            pace_line(&reading, today).as_deref(),
+            Some("16 pages a day · Last updated 8 days ago")
+        );
+        reading.pace = None;
+        assert_eq!(
+            pace_line(&reading, today).as_deref(),
+            Some("Last updated 8 days ago")
+        );
+        reading.idle_days = None;
+        assert_eq!(pace_line(&reading, today), None);
+    }
+
+    #[test]
+    fn the_paused_row_says_where_and_since_when() {
+        let today = day("2026-11-20");
+        assert_eq!(
+            paused_text(
+                &progress(Some(230), Some(1104), Some(20.8)),
+                Some(day("2026-10-01")),
+                today
+            ),
+            "Paused at page 230 of 1,104 · since Oct 1"
+        );
+        assert_eq!(
+            paused_text(
+                &progress(None, None, Some(42.4)),
+                Some(day("2025-12-01")),
+                today
+            ),
+            "Paused at 42% · since Dec 1, 2025"
+        );
+        assert_eq!(
+            paused_text(&progress(None, None, None), None, today),
+            "Paused"
+        );
+    }
+
+    #[test]
+    fn a_rating_row_says_when_the_book_was_finished() {
+        let today = day("2026-11-20");
+        assert_eq!(
+            finished_byline(&["Andy Weir".to_owned()], day("2026-11-03"), today),
+            "Andy Weir · Finished Nov 3"
+        );
+        assert_eq!(
+            finished_byline(&[], day("2026-11-03"), today),
+            "Unknown author · Finished Nov 3"
+        );
+    }
+
+    #[test]
+    fn up_next_names_the_series_and_position() {
+        let next = SeriesNext {
+            id: UserBookId::new(2),
+            series: "Dune".to_owned(),
+            position: 2.0,
+            after: UserBookId::new(1),
+            after_position: 1.0,
+        };
+        assert_eq!(series_next_text(&next), "Next in Dune · #2");
+    }
+
+    fn books_goal(progress: f64) -> Goal {
+        let mut goal = Goal::new(
+            GoalId::new(1),
+            GoalMetric::Books,
+            12,
+            day("2026-01-01"),
+            day("2026-12-31"),
+        );
+        goal.progress = progress;
+        goal
+    }
+
+    #[test]
+    fn the_goal_sentence_names_one_book_and_counts_more() {
+        let today = day("2026-11-20");
+        let goal = books_goal(9.0);
+        let (text, title) = goal_sentence(&goal, today, &["Project Hail Mary".to_owned()]).unwrap();
+        assert!(
+            text.ends_with(
+                ", with 41 days left. Project Hail Mary should finish in time, which makes 10."
+            ),
+            "{text}"
+        );
+        assert_eq!(&text[title.unwrap()], "Project Hail Mary");
+
+        let (text, title) = goal_sentence(&goal, today, &["A".to_owned(), "B".to_owned()]).unwrap();
+        assert!(
+            text.ends_with("2 books you're reading should finish in time, which makes 11."),
+            "{text}"
+        );
+        assert_eq!(title, None);
+
+        // A right-to-left title is counted, not named.
+        let (text, title) = goal_sentence(&goal, today, &["ملت عشق".to_owned()]).unwrap();
+        assert!(
+            text.ends_with("1 book you're reading should finish in time, which makes 10."),
+            "{text}"
+        );
+        assert_eq!(title, None);
+
+        let (text, title) = goal_sentence(&goal, today, &[]).unwrap();
+        assert!(text.ends_with(", with 41 days left."), "{text}");
+        assert_eq!(title, None);
+    }
+
+    #[test]
+    fn a_reached_goal_says_so_and_nothing_more() {
+        let today = day("2026-11-20");
+        let (text, title) = goal_sentence(&books_goal(12.0), today, &["Dune".to_owned()]).unwrap();
+        assert_eq!(text, "Goal reached.");
+        assert_eq!(title, None);
+    }
 }

@@ -15,6 +15,8 @@
 //! | [`ObjectBar`], [`ObjectTools`], [`tools_of`] | The 56 bar above a book pane or a page: Back on a page, the object's tools ("Lists", "more") |
 //! | [`panel`] | The one inset panel of a pane: progress, Not started |
 //! | [`Rail`], [`RailSection`] | The 272 column beside Home's or the book page's main column, sections between hairlines |
+//! | [`Columns`], [`folds`] | A page's main column and its rail, the rail folding under it when the region is narrow |
+//! | [`CoverShelf`] | A few books in a row, each a cover over a two-line title: "Newest on Want to read", Similar books |
 //! | [`Block`], [`blocks`] | A pane's blocks ("About this book", "Details"): a heading, an optional small action, 24 apart |
 //! | [`PageHeader`] | A destination's title, with its count or a muted line |
 //! | [`Greeting`], [`greeting`], [`date_line`] | Home's header: the date over "Good morning" |
@@ -41,6 +43,8 @@
 
 mod avatar;
 mod byline_link;
+mod columns;
+mod cover_shelf;
 mod empty_state;
 pub mod focus;
 #[cfg(feature = "demo")]
@@ -62,6 +66,8 @@ mod text_button;
 pub use self::{
     avatar::{Avatar, AvatarSize, initials},
     byline_link::BylineLink,
+    columns::{Columns, MAIN_MIN, folds},
+    cover_shelf::CoverShelf,
     empty_state::{EmptyState, empty_state, empty_state_with_action},
     headers::{Greeting, PageHeader, SectionHeader, date_line, greeting, greeting_at, see_all},
     meter::Meter,
