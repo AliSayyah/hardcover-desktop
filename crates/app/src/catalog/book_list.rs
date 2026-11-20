@@ -16,11 +16,11 @@
 //! (`size::PAGE_LIST_MIN`).
 
 use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{IconName, IndexPath};
 use gpui_kit::{
     App, AppContext as _, Context, Div, ElementId, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, Styled as _, Subscription, Window, div,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
+    Window, div,
 };
 use hardcover_core::{BookSummary, ReadingStatus};
 
@@ -54,8 +54,8 @@ pub fn page_header_scrolling(
         .id(id)
         .flex_shrink_1()
         .min_h_0()
+        .overflow_y_scroll()
         .child(content)
-        .overflow_y_scrollbar()
 }
 
 /// The region a page's list fills, under its header. It keeps

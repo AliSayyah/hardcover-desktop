@@ -339,6 +339,9 @@ impl AuthorView {
                                 Button::new("toggle-bio")
                                     .ghost()
                                     .small()
+                                    // The label on the bio's spine, not the
+                                    // button's edge.
+                                    .ml_neg_2()
                                     .label(if self.bio_expanded {
                                         "Show less"
                                     } else {
