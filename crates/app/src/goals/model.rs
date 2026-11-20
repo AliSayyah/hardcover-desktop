@@ -179,7 +179,9 @@ impl GoalsModel {
         cx: &mut Context<Self>,
     ) -> Task<Result<(), SharedString>> {
         if self.writing {
-            return Task::ready(Err("Another change is still being saved.".into()));
+            return Task::ready(Err(
+                "Another change is still being saved. Try again in a moment.".into(),
+            ));
         }
         if !Services::global(cx).has_scope(WRITE_GOALS) {
             return Task::ready(Err(crate::format::needs_permission(WRITE_GOALS).into()));
