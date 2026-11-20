@@ -163,7 +163,7 @@ The workspace has two crates, in `crates/*`.
 
 Two skills live in `.claude/skills`:
 - **`hardcover-design`** is the app's own design system. It is the only design authority. Use it before any visible change: tokens, type, covers, components, states, screen layouts, right-to-left text and copy. `docs/design/mockup.html` is its reference mockup; open it in a browser. The app is still migrating to the system. The skill's "Migration status" lists what the code lacks; update that list in the commit that changes it. GPUI Kit's generic Design Guides are deliberately not used here.
-- **`gpui-kit`** covers GPUI and the component APIs. Use it before any UI or architecture work. When it and the crate disagree, the crate source wins: `~/.cargo/registry/src/index.crates.io-*/gpui-component-0.10.0`. For example, `ActiveTheme` is imported from `gpui_kit::component::ActiveTheme`.
+- **`gpui-kit`** covers GPUI and the component APIs. Use it before any UI or architecture work. It is vendored from longbridge/gpui-kit (`skills-lock.json`) and patched here so that its design links point at `hardcover-design`. After updating it, patch it again and don't restore `gpui-kit-design-guides`. When it and the crate disagree, the crate source wins: `~/.cargo/registry/src/index.crates.io-*/gpui-component-0.10.0`. For example, `ActiveTheme` is imported from `gpui_kit::component::ActiveTheme`.
 
 ## CI and releases
 

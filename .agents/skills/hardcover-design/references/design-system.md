@@ -39,7 +39,9 @@ Tokens are the only source of values. In code:
 - the gpui-component theme carries the colours the kit's components read;
 - app-only roles (gold, cloth, the cover's edge, hinge and shadow, star-empty)
   live in one app module;
-- sizes use GPUI's rem helpers, at a 16 px rem.
+- sizes use GPUI's rem helpers, at a 16 px rem. The helpers exist for the
+  Tailwind steps (`_0p5` to `_12`, then `_16`, `_20`, `_24`, `_32`, `_40`,
+  `_48`, `_56`, `_64`, `_72`, `_80`, `_96`); any other size is `rems(..)`.
 
 The mapping to theme fields is under "Implementing in GPUI".
 
@@ -180,15 +182,15 @@ selection fill or a nested surface its own radius.
 | Small control (inside a row, panel or rail) | 24 high | `h_6` |
 | Chip | 20 high | `h_5` |
 | Tall row (brand, sidebar goal) | 40 high | `h_10` |
-| Object bar (book tools, Back) | 56 high | `h_14` |
+| Object bar (book tools, Back) | 56 high | `h(rems(3.5))` |
 | Icons | 16; 12 in small controls and chips; 24 in empty states | `size_4`, `size_3`, `size_6` |
-| Sidebar | 240 wide | `w_60` |
+| Sidebar | 240 wide | `w(rems(15.))` |
 | Shelf list | 384 wide by default (resizable) | `w_96` |
-| Rail (Home, full book page) | 272 wide | `rems(17.)` |
-| Key column in a property list | 96; 72 in a rail | `w_24`, `w_18` |
-| Select | 168; small 128 | `rems(10.5)`, `w_32` |
+| Rail (Home, full book page) | 272 wide | `w(rems(17.))` |
+| Key column in a property list | 96; 72 in a rail | `w_24`, `w(rems(4.5))` |
+| Select | 168; small 128 | `w(rems(10.5))`, `w_32` |
 | Meter | 6 high beside words, 2 high inside a row; 400 wide max (160 in a row) | |
-| Prose | 640 wide max | `rems(40.)` |
+| Prose | 640 wide max | `max_w(rems(40.))` |
 | Empty-state text | 288 wide max | `w_72` |
 | Window | 1200 × 800 by default, 800 × 560 minimum | |
 
@@ -227,12 +229,12 @@ Rules:
 
 | Size | Width × height | GPUI | Use |
 | --- | --- | --- | --- |
-| xs | 20 × 30 | `w_5` × `rems(1.875)` | Compact rows, menus |
+| xs | 20 × 30 | `w_5` × `h(rems(1.875))` | Compact rows, menus |
 | sm | 32 × 48 | `w_8 h_12` | List rows (shelves, search, Discover, lists, series and author pages) |
 | md | 64 × 96 | `w_16 h_24` | Home rows, Up next, a rail's shelf |
-| lg | 80 × 120 | `w_20 h_30` | Similar books |
+| lg | 80 × 120 | `w_20` × `h(rems(7.5))` | Similar books |
 | xl | 128 × 192 | `w_32 h_48` | The book pane's header; the Home lead |
-| xxl | 160 × 240 | `w_40 h_60` | The full book page's header |
+| xxl | 160 × 240 | `w_40` × `h(rems(15.))` | The full book page's header |
 
 **The cloth cover** stands in for a missing image, like a bound book with no
 dust jacket.

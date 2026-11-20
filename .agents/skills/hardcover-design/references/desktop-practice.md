@@ -6,6 +6,16 @@ GPUI Kit Design Guides, keeping what holds for this app. Where this file and
 file has the reasoning and the rules for situations the system doesn't
 cover.
 
+## Before you build
+
+Look at the nearest existing feature, the theme tokens and the component's
+source in the `gpui-component` crate. State the primary task, who owns the
+state, how the parts are composed and the keyboard path before writing code.
+Never infer a GPUI API from React or web examples, and never invent a method
+because its name seems plausible. A screenshot that looks right isn't proof:
+keyboard, focus, dynamic content, both themes, resizing and failure states
+are part of the design.
+
 ## Start from the task
 
 Before drawing or changing a screen, write down:
