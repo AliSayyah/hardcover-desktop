@@ -524,6 +524,43 @@ pub(crate) const DELETE_GOAL: &str = "mutation DeleteGoal($id: Int!) {
 }
 ";
 
+/// Other readers' reviews of one book: rows with a review, the user's own
+/// (`$me`) left out.
+macro_rules! book_reviews_where {
+    () => {
+        "{book_id: {_eq: $bookId}, has_review: {_eq: true}, user_id: {_neq: $me}}"
+    };
+}
+
+/// A page of other readers' reviews of a book, the most liked first, then the
+/// newest. Paged by offset; see `Client::book_reviews`.
+pub(crate) const BOOK_REVIEWS: &str = concat!(
+    "query BookReviews($bookId: Int!, $me: Int!, $limit: Int!, $offset: Int!) {
+  user_books(
+    where: ",
+    book_reviews_where!(),
+    "
+    order_by: [{likes_count: desc}, {reviewed_at: desc_nulls_last}, {id: desc}]
+    limit: $limit
+    offset: $offset
+  ) {
+    id rating likes_count reviewed_at review_has_spoilers review_raw
+    user { id username name cached_image }
+  }
+}
+"
+);
+
+/// How many reviews [`BOOK_REVIEWS`] pages through.
+pub(crate) const BOOK_REVIEWS_COUNT: &str = concat!(
+    "query BookReviewsCount($bookId: Int!, $me: Int!) {
+  user_books_aggregate(where: ",
+    book_reviews_where!(),
+    ") { aggregate { count } }
+}
+"
+);
+
 /// Every document the client sends, by name. Validated against
 /// `schema/hardcover.graphql` in the tests below and against the live schema by
 /// the `api_check` example.
@@ -568,6 +605,8 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("DELETE_LIST", DELETE_LIST),
     ("INSERT_LIST_BOOK", INSERT_LIST_BOOK),
     ("DELETE_LIST_BOOK", DELETE_LIST_BOOK),
+    ("BOOK_REVIEWS", BOOK_REVIEWS),
+    ("BOOK_REVIEWS_COUNT", BOOK_REVIEWS_COUNT),
 ];
 
 #[cfg(test)]

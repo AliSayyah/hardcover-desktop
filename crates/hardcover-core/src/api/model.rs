@@ -1543,3 +1543,146 @@ pub struct EditionChange {
     /// The edition change itself went through.
     pub read_left_behind: Option<crate::Error>,
 }
+
+/// Another reader's review of a book, for the book page's "Reviews" section.
+/// Reading them needs `read:social`.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct CommunityReview {
+    /// The reviewer's `user_books` row.
+    pub id: UserBookId,
+    pub reviewer: Reviewer,
+    pub rating: Option<Rating>,
+    /// `likes_count`.
+    pub likes: u32,
+    pub reviewed_at: Option<Date>,
+    pub has_spoilers: bool,
+    /// `review_raw`: plain text, paragraphs separated by line breaks. Never empty.
+    pub text: String,
+}
+
+impl CommunityReview {
+    pub fn new(id: UserBookId, reviewer: Reviewer, text: impl Into<String>) -> Self {
+        Self {
+            id,
+            reviewer,
+            rating: None,
+            likes: 0,
+            reviewed_at: None,
+            has_spoilers: false,
+            text: text.into(),
+        }
+    }
+
+    /// The paragraphs of [`Self::text`], trimmed, without empty ones.
+    pub fn paragraphs(&self) -> impl Iterator<Item = &str> {
+        self.text
+            .split('\n')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+    }
+}
+
+/// The author of a [`CommunityReview`].
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct Reviewer {
+    pub id: UserId,
+    /// `None` when Hardcover sent none: then there is no profile to link to.
+    pub username: Option<String>,
+    /// `None` when blank.
+    pub name: Option<String>,
+    /// `cached_image`. Often a default avatar, sometimes an SVG.
+    pub avatar: Option<Cover>,
+    /// `cached_image.color`, the avatar's main colour, as RGB.
+    pub color: Option<[u8; 3]>,
+}
+
+impl Reviewer {
+    pub fn new(id: UserId) -> Self {
+        Self {
+            id,
+            username: None,
+            name: None,
+            avatar: None,
+            color: None,
+        }
+    }
+
+    /// The name to show: the name, else `@username`, else "A reader".
+    pub fn display_name(&self) -> String {
+        match (&self.name, &self.username) {
+            (Some(name), _) => name.clone(),
+            (None, Some(username)) => format!("@{username}"),
+            (None, None) => "A reader".to_owned(),
+        }
+    }
+
+    /// The reviewer's profile on hardcover.app, if their username is known.
+    pub fn profile_url(&self) -> Option<String> {
+        self.username
+            .as_deref()
+            .map(|u| format!("https://hardcover.app/@{u}"))
+    }
+
+    /// The avatar, unless it is an SVG: the cover pipeline decodes only
+    /// raster images.
+    pub fn raster_avatar(&self) -> Option<&Cover> {
+        self.avatar.as_ref().filter(|a| {
+            let path = a.url.split(['?', '#']).next().unwrap_or_default();
+            !path.to_ascii_lowercase().ends_with(".svg")
+        })
+    }
+}
+
+/// One page of [`CommunityReview`]s, from [`crate::api::Client::book_reviews`].
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct ReviewsPage {
+    /// The page's reviews. Rows with no text are left out, so this can be
+    /// shorter than the page.
+    pub reviews: Vec<CommunityReview>,
+    /// The offset of the next page: this page's offset plus the rows it read.
+    pub next_offset: u32,
+    /// True if Hardcover has more rows after this page.
+    pub has_more: bool,
+}
+
+#[cfg(test)]
+mod community_review_tests {
+    use super::*;
+
+    #[test]
+    fn a_reviewer_is_named_by_name_then_username() {
+        let mut r = Reviewer::new(UserId::new(7));
+        assert_eq!(r.display_name(), "A reader");
+        assert_eq!(r.profile_url(), None);
+        r.username = Some("quill".into());
+        assert_eq!(r.display_name(), "@quill");
+        assert_eq!(
+            r.profile_url().as_deref(),
+            Some("https://hardcover.app/@quill")
+        );
+        r.name = Some("Jane Quill".into());
+        assert_eq!(r.display_name(), "Jane Quill");
+    }
+
+    #[test]
+    fn svg_avatars_are_not_raster() {
+        let mut r = Reviewer::new(UserId::new(7));
+        r.avatar = Some(Cover::new("https://assets.example/users/7/a.SVG?v=2"));
+        assert!(r.raster_avatar().is_none());
+        r.avatar = Some(Cover::new("https://assets.example/users/7/a.png"));
+        assert!(r.raster_avatar().is_some());
+    }
+
+    #[test]
+    fn paragraphs_skip_blank_lines() {
+        let r = CommunityReview::new(
+            UserBookId::new(1),
+            Reviewer::new(UserId::new(2)),
+            "First.\n\n  Second.  \n\n\n",
+        );
+        assert_eq!(r.paragraphs().collect::<Vec<_>>(), ["First.", "Second."]);
+    }
+}

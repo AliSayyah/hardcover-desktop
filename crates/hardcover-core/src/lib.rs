@@ -33,6 +33,7 @@ pub use api::{
     ReviewedEntry, SearchHits, SearchPage, SeriesBook, SeriesDetails, SeriesHit, SeriesId,
     SeriesRef, Timestamp, TokenSource, TrendingPeriod, User, UserBookId, UserId, UserList,
 };
+pub use api::{CommunityReview, REVIEWS_PER_PAGE, Reviewer, ReviewsPage};
 pub use error::{Error, Result};
 
 /// `User-Agent` sent with every request (API, OAuth and cover downloads).

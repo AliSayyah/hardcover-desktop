@@ -193,6 +193,7 @@ impl BookDetailView {
         if !details.alternative_titles.is_empty() {
             sections.push(render_other_titles(&details.alternative_titles, cx));
         }
+        sections.extend(self.render_community_reviews(book.id, window, cx));
         if let Some(similar) = self.render_similar(book, details, window, cx) {
             sections.push(similar);
         }

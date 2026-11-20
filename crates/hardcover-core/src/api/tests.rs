@@ -2098,3 +2098,88 @@ fn remove_from_list_takes_the_row_id() {
         Err(Error::Api(_))
     ));
 }
+
+fn review_row(id: i64, user: i64, text: Option<&str>) -> Value {
+    json!({
+        "id": id,
+        "rating": 4.0,
+        "likes_count": 3,
+        "reviewed_at": "2026-02-22T00:00:00",
+        "review_has_spoilers": false,
+        "review_raw": text,
+        "user": {
+            "id": user,
+            "username": format!("reader{user}"),
+            "name": "",
+            "cached_image": {"url": format!("https://assets.example/users/{user}.png"),
+                             "color": "#336699", "width": 64, "height": 64},
+        },
+    })
+}
+
+#[test]
+fn book_reviews_page_by_offset_and_ask_one_row_ahead() {
+    let (c, http) = client(TestTokens::new(false));
+    // Eleven rows: a full page and one more. The second row has no text.
+    let rows: Vec<Value> = (1..=11)
+        .map(|i| {
+            review_row(
+                i,
+                100 + i,
+                (i != 2).then_some("A synthetic review.\n\nTwo paragraphs."),
+            )
+        })
+        .collect();
+    http.push(200, &data(json!({ "user_books": rows })));
+    let page = c
+        .book_reviews(BookId::new(1001), UserId::new(77), 20)
+        .unwrap();
+    assert_eq!(
+        vars(&http, 0),
+        json!({"bookId": 1001, "me": 77, "limit": 11, "offset": 20})
+    );
+    assert!(page.has_more);
+    // The textless row is left out but still counts towards the offset; the
+    // eleventh row is the next page's.
+    assert_eq!(page.reviews.len(), 9);
+    assert_eq!(page.next_offset, 30);
+    let first = &page.reviews[0];
+    assert_eq!(first.id, UserBookId::new(1));
+    assert_eq!(first.reviewer.display_name(), "@reader101");
+    assert_eq!(first.reviewer.color, Some([0x33, 0x66, 0x99]));
+    assert_eq!(first.rating, Rating::new(4.0));
+    assert_eq!(first.likes, 3);
+    assert_eq!(
+        first.reviewed_at,
+        chrono::NaiveDate::from_ymd_opt(2026, 2, 22)
+    );
+    assert_eq!(first.paragraphs().count(), 2);
+
+    http.push(
+        200,
+        &data(json!({ "user_books": [review_row(31, 131, Some("Last."))] })),
+    );
+    let last = c
+        .book_reviews(BookId::new(1001), UserId::new(77), 30)
+        .unwrap();
+    assert!(!last.has_more);
+    assert_eq!(last.next_offset, 31);
+    assert_eq!(last.reviews.len(), 1);
+}
+
+#[test]
+fn book_reviews_count_reads_the_aggregate() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({ "user_books_aggregate": { "aggregate": { "count": 42 } } })),
+    );
+    assert_eq!(
+        c.book_reviews_count(BookId::new(1001), UserId::new(77))
+            .unwrap(),
+        42
+    );
+    assert_eq!(vars(&http, 0), json!({"bookId": 1001, "me": 77}));
+    let body = http.requests()[0].json.clone().unwrap();
+    assert_eq!(body["operationName"], "BookReviewsCount");
+}

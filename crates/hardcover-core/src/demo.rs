@@ -38,6 +38,8 @@ use crate::http::{HttpRequest, HttpResponse, HttpTransport, Method, RequestBody,
 use crate::ratelimit::TokenBucket;
 use crate::{Error, Result};
 
+mod reviews;
+
 /// The reply to every write.
 pub const READ_ONLY: &str = "The demo library is read-only.";
 
@@ -816,6 +818,8 @@ fn answer(op: &str, vars: &Value) -> Value {
                 .collect();
             json!({ "list_books": rows })
         }
+        "BookReviews" => reviews::page(catalogue, vars),
+        "BookReviewsCount" => reviews::count(catalogue, vars),
         "InsertUserBook"
         | "UpdateUserBook"
         | "DeleteUserBook"
