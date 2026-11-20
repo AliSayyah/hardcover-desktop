@@ -495,6 +495,9 @@ pub fn summarize(
 }
 
 /// Every started series in `series`, in group order, each group sorted.
+/// A series none of whose books has a position (a publisher's line such as
+/// "Grokking", where Hardcover numbers nothing) has no order to show and is
+/// left out; it would otherwise read as finished, with an empty strip.
 pub fn summaries(
     series: &[TrackedSeries],
     entries: &[LibraryEntry],
@@ -507,6 +510,7 @@ pub fn summaries(
         .iter()
         .filter(|s| started.binary_search(&s.id).is_ok())
         .map(|s| summarize(s, &library, upcoming, today))
+        .filter(|s| !s.books.is_empty())
         .collect();
     out.sort_by(|a, b| {
         a.group
@@ -770,6 +774,27 @@ mod tests {
         ];
         let ids: Vec<i64> = started_series(&entries).iter().map(|s| s.get()).collect();
         assert_eq!(ids, [10, 30, 40, 50, 80]);
+    }
+
+    #[test]
+    fn a_series_with_no_numbered_book_is_left_out() {
+        // Hardcover lists no positioned book, and the reader's own has no position.
+        let unnumbered = tracked(90, "Grokking", &[]);
+        let mut e = finished(entry(9, ReadingStatus::Read, &[(90, 1.0)]), "2026-03-01");
+        e.series[0].position = None;
+        let numbered = tracked(10, "Lantern", &[(1, 1.0)]);
+        let entries = [
+            e,
+            finished(entry(1, ReadingStatus::Read, &[(10, 1.0)]), "2026-03-01"),
+        ];
+        let out = summaries(
+            &[unnumbered, numbered],
+            &entries,
+            &HashMap::new(),
+            day(TODAY),
+        );
+        let names: Vec<&str> = out.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["Lantern"]);
     }
 
     #[test]
