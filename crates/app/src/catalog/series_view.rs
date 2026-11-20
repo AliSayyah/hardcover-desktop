@@ -21,8 +21,8 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{SeriesDetails, SeriesId};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, follow_list, load_failed, new_list, page_body, page_header_scrolling,
-    page_list, read_summary, reset_scroll, row_details,
+    CatalogBooks, CatalogRow, focus_list_if_fallback_is_focused, follow_list, load_failed,
+    new_list, page_body, page_header_scrolling, page_list, read_summary, reset_scroll, row_details,
 };
 use super::navigation::Page;
 use crate::app_state::Services;
@@ -129,11 +129,13 @@ impl SeriesView {
                 };
                 this.pages.insert(id, page);
                 this.fill_list(window, cx);
-                if this.is_ready()
-                    && let Some(fallback) = this.focus_when_ready.take()
-                    && fallback.is_focused(window)
-                {
-                    crate::ui::enter_list(&this.list, window, cx);
+                if this.is_ready() {
+                    focus_list_if_fallback_is_focused(
+                        &this.list,
+                        this.focus_when_ready.take(),
+                        window,
+                        cx,
+                    );
                 }
                 cx.notify();
             });

@@ -18,9 +18,9 @@
 use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::{IconName, IndexPath};
 use gpui_kit::{
-    App, AppContext as _, Context, Div, ElementId, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Window, div,
+    App, AppContext as _, Context, Div, ElementId, Entity, FocusHandle, InteractiveElement as _,
+    IntoElement, ParentElement as _, ScrollHandle, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, div,
 };
 use hardcover_core::{BookSummary, ReadingStatus};
 
@@ -82,6 +82,21 @@ pub fn page_body() -> Div {
 /// A page's list, its rows' text on the header's spine.
 pub fn page_list<D: ListDelegate>(list: &Entity<ListState<D>>) -> List<D> {
     List::new(list).size_full().px_6().pb_6()
+}
+
+/// Gives the list focus after a catalogue page loads, if the page's fallback
+/// control still owns focus.
+pub fn focus_list_if_fallback_is_focused(
+    list: &Entity<ListState<CatalogBooks>>,
+    fallback: Option<FocusHandle>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(fallback) = fallback
+        && fallback.is_focused(window)
+    {
+        crate::ui::enter_list(list, window, cx);
+    }
 }
 
 /// A page that failed to load: what happened, in one muted sentence, and
