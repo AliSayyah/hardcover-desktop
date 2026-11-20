@@ -215,12 +215,15 @@ pub fn is_rtl(text: &str) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Piece {
     pub segments: Vec<String>,
+    /// The piece's own text, before mirroring: what lines are built from,
+    /// so that laying a line out runs the algorithm once.
+    pub source: String,
 }
 
 impl Piece {
-    /// The piece as text, in reading order (for measuring).
+    /// The piece's text as written (for measuring and building lines).
     fn text(&self) -> String {
-        self.segments.concat()
+        self.source.clone()
     }
 
     /// Whether the piece has no letter or digit: punctuation standing alone,
@@ -249,6 +252,7 @@ pub fn pieces(text: &str) -> Vec<Piece> {
     let info = BidiInfo::new(text, Some(Level::rtl()));
     let mut pieces: Vec<Piece> = Vec::new();
     let mut current: Vec<String> = Vec::new();
+    let mut source = String::new();
     // The segment being built: its text and whether it reads left to right.
     let mut segment = String::new();
     let mut segment_ltr = false;
@@ -258,17 +262,21 @@ pub fn pieces(text: &str) -> Vec<Piece> {
             current.push(std::mem::take(segment));
         }
     };
-    let flush_piece = |current: &mut Vec<String>, pieces: &mut Vec<Piece>| {
+    let flush_piece = |current: &mut Vec<String>, source: &mut String, pieces: &mut Vec<Piece>| {
+        let source = std::mem::take(source);
         if current.is_empty() {
             return;
         }
         let piece = Piece {
             segments: std::mem::take(current),
+            source,
         };
         match pieces.last_mut() {
             Some(previous) if piece.is_punctuation() => {
                 previous.segments.push(" ".to_owned());
                 previous.segments.extend(piece.segments);
+                previous.source.push(' ');
+                previous.source.push_str(&piece.source);
             }
             _ => pieces.push(piece),
         }
@@ -279,9 +287,10 @@ pub fn pieces(text: &str) -> Vec<Piece> {
         let class = bidi_class(c);
         if level.is_rtl() && (c.is_whitespace() || class == BidiClass::B) {
             flush_segment(&mut segment, &mut current);
-            flush_piece(&mut current, &mut pieces);
+            flush_piece(&mut current, &mut source, &mut pieces);
             continue;
         }
+        source.push(c);
         if level.is_ltr() {
             if !segment_ltr {
                 flush_segment(&mut segment, &mut current);
@@ -310,7 +319,7 @@ pub fn pieces(text: &str) -> Vec<Piece> {
         }
     }
     flush_segment(&mut segment, &mut current);
-    flush_piece(&mut current, &mut pieces);
+    flush_piece(&mut current, &mut source, &mut pieces);
     pieces
 }
 
@@ -638,6 +647,19 @@ mod tests {
         );
         // With a clamp, the cut word still ends in an ellipsis.
         assert_eq!(lines("Supercalifragilistic", 6., Some(1)), ["Super…"]);
+    }
+
+    #[test]
+    fn a_line_built_from_pieces_is_mirrored_once() {
+        // The width path joins the pieces into lines, then lays each line
+        // out again: the brackets must come out as from the first pass.
+        let text = "کتاب (جلد اول) «سلام»";
+        let units: Vec<String> = pieces(text).iter().map(Piece::text).collect();
+        assert_eq!(segs(&units.join(" ")), segs(text));
+        assert_eq!(
+            segs(text),
+            v(&[&["کتاب"], &[")", "جلد"], &["اول", "("], &["»", "سلام", "«"]])
+        );
     }
 
     #[test]

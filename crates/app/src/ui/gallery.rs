@@ -616,7 +616,7 @@ fn shelf_and_columns(cx: &App) -> AnyElement {
             [
                 "Fourth Wing",
                 "Tomorrow, and Tomorrow, and Tomorrow",
-                "ملت عشق",
+                "ملت عشق (جلد اول)",
             ]
             .into_iter()
             .enumerate()
@@ -686,7 +686,7 @@ fn wrapping_text(cx: &App) -> AnyElement {
                     )
                     .child(Cover::new(
                         CoverSize::Md,
-                        "کتابی پرکشش و پر از امید، دوستی دو شخصیت",
+                        "کتابی پرکشش (جلد اول) «امید»، دوستی دو شخصیت",
                     )),
             )
             .child(
