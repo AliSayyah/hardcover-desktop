@@ -139,10 +139,17 @@ pub fn parse_position(text: &str) -> Option<u32> {
         .map(|p| p.parse().ok())
         .collect::<Option<_>>()?;
     match parts[..] {
-        [h, m] if m < 60 => Some(h * 3600 + m * 60),
-        [h, m, s] if m < 60 && s < 60 => Some(h * 3600 + m * 60 + s),
+        [h, m] if m < 60 => time_position(h, m, 0),
+        [h, m, s] if m < 60 && s < 60 => time_position(h, m, s),
         _ => None,
     }
+}
+
+fn time_position(hours: u32, minutes: u32, seconds: u32) -> Option<u32> {
+    hours
+        .checked_mul(3600)?
+        .checked_add(minutes.checked_mul(60)?)?
+        .checked_add(seconds)
 }
 
 /// What the user typed as their place in a book of `length`: a page, or for
@@ -864,6 +871,7 @@ mod tests {
         assert_eq!(parse_position(" 0:45:30 "), Some(2_730));
         assert_eq!(parse_position("2:75"), None);
         assert_eq!(parse_position("125"), None);
+        assert_eq!(parse_position("1193047:00"), None);
         assert_eq!(parse_position(""), None);
     }
 

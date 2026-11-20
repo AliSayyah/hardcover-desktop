@@ -13,11 +13,10 @@
 //!   the dates line up.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, h_flex};
 use gpui_kit::{
-    App, AppContext as _, Entity, IntoElement, ParentElement as _, RenderOnce, SharedString,
-    Styled as _, Window, div, prelude::FluentBuilder as _,
+    App, Entity, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _, Window,
+    div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{BookSummary, Date, ReadingStatus, UpcomingBook};
@@ -30,6 +29,7 @@ use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRoles as _, colors};
 use crate::format::needs_permission;
 use crate::library::model::LibraryModel;
+use crate::library::writes;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{Lane, TextButton};
 
@@ -141,33 +141,5 @@ pub fn add_to_want_to_read(
     window: &mut Window,
     cx: &mut App,
 ) {
-    if !library.update(cx, |m, cx| m.begin_add(book.id, cx)) {
-        return;
-    }
-    let client = Services::global(cx).client().clone();
-    let book_id = book.id;
-    window
-        .spawn(cx, async move |cx| {
-            let result = cx
-                .background_spawn(async move {
-                    client.add_to_library(book_id, ReadingStatus::WantToRead)
-                })
-                .await;
-            library.update(cx, |m, cx| {
-                m.end_add(book_id, cx);
-                if let Ok(entry) = &result {
-                    m.apply_written(entry.clone(), cx);
-                }
-            });
-            if let Err(error) = result {
-                let _ = cx.update(|window, cx| {
-                    let message = Services::error_message(&error, Some(WRITE_LIBRARY), cx);
-                    window.push_notification(
-                        Notification::error(message).title("Couldn't add the book"),
-                        cx,
-                    );
-                });
-            }
-        })
-        .detach();
+    writes::add_to_library(library, book.id, ReadingStatus::WantToRead, window, cx);
 }

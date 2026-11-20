@@ -52,6 +52,7 @@ use crate::format::{
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::library::writes;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
@@ -210,14 +211,7 @@ impl HomeView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.write(
-            id,
-            WriteKind::Status,
-            "Couldn't change the status",
-            move |client| client.set_status(id, status),
-            window,
-            cx,
-        );
+        writes::set_status(self.model.clone(), id, status, window, cx);
     }
 
     fn rate(

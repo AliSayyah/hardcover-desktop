@@ -6,8 +6,6 @@
 //! (against the live ones), which includes this file with `#[path]` because
 //! apollo-compiler is a dev-dependency.
 
-#![allow(dead_code)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use apollo_compiler::ast::{OperationType, Value as GqlValue};
@@ -18,6 +16,7 @@ use apollo_compiler::{ExecutableDocument, Schema};
 use serde_json::Value;
 
 /// The committed schema, parsed once.
+#[cfg(test)]
 pub fn schema() -> &'static Valid<Schema> {
     static SCHEMA: std::sync::OnceLock<Valid<Schema>> = std::sync::OnceLock::new();
     SCHEMA.get_or_init(|| {

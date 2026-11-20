@@ -1148,11 +1148,7 @@ pub(crate) struct ProgressContext {
 
 impl Lengths {
     fn length(&self) -> Option<Length> {
-        match (opt_u32(self.pages), opt_u32(self.audio_seconds)) {
-            (Some(p), _) if p > 0 => Some(Length::Pages(p)),
-            (_, Some(s)) if s > 0 => Some(Length::Seconds(s)),
-            _ => None,
-        }
+        length_from_parts(opt_u32(self.pages), opt_u32(self.audio_seconds))
     }
 }
 

@@ -17,12 +17,11 @@
 //! be virtual: the name and every line are single, truncated lines.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, h_flex};
 use gpui_kit::{
-    App, AppContext as _, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, RenderOnce, ScrollHandle, SharedString, Styled as _, Window, div,
-    prelude::FluentBuilder as _, rems,
+    App, Entity, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
+    RenderOnce, ScrollHandle, SharedString, Styled as _, Window, div, prelude::FluentBuilder as _,
+    rems,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{Date, ReadingStatus, UserBookId};
@@ -40,6 +39,7 @@ use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, needs_permission, progress_summary};
 use crate::home::home_view::paused_text;
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::library::writes;
 use crate::ui::focus::{keyed_focus, reveal_when};
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{SeriesStrip, StripItem, TextButton};
@@ -392,34 +392,7 @@ fn want_to_read(
 /// reading" does; the library applies the entry the write returns. A
 /// failure is shown as a notification.
 fn start_reading(library: Entity<LibraryModel>, id: UserBookId, window: &mut Window, cx: &mut App) {
-    if !library.update(cx, |m, cx| m.begin_write(id, WriteKind::Status, cx)) {
-        return;
-    }
-    let client = Services::global(cx).client().clone();
-    window
-        .spawn(cx, async move |cx| {
-            let result = cx
-                .background_spawn(
-                    async move { client.set_status(id, ReadingStatus::CurrentlyReading) },
-                )
-                .await;
-            library.update(cx, |m, cx| {
-                m.end_write(id, cx);
-                if let Ok(entry) = &result {
-                    m.apply_written(entry.clone(), cx);
-                }
-            });
-            if let Err(error) = result {
-                let _ = cx.update(|window, cx| {
-                    let message = Services::error_message(&error, Some(WRITE_LIBRARY), cx);
-                    window.push_notification(
-                        Notification::error(message).title("Couldn't change the status"),
-                        cx,
-                    );
-                });
-            }
-        })
-        .detach();
+    writes::set_status(library, id, ReadingStatus::CurrentlyReading, window, cx);
 }
 
 /// A row while the series load: a skeleton name line and a strip of

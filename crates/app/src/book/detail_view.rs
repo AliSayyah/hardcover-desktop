@@ -49,6 +49,7 @@ use crate::app_state::Services;
 use crate::design::size;
 use crate::format::{error_message, read_dates_text};
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::library::writes;
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::ui::kit::open_alert_dialog;
@@ -855,37 +856,7 @@ impl BookDetailView {
         let Some(Subject::Book(book)) = self.subject.clone() else {
             return;
         };
-        let model = self.model.clone();
-        if !model.update(cx, |m, cx| m.begin_add(book.id, cx)) {
-            return;
-        }
-        let client = Services::global(cx).client().clone();
-        let book_id = book.id;
-        cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { client.add_to_library(book_id, status) })
-                .await;
-            model.update(cx, |m, cx| {
-                m.end_add(book_id, cx);
-                if let Ok(entry) = &result {
-                    m.apply_written(entry.clone(), cx);
-                }
-            });
-            if let Err(error) = result {
-                let _ = this.update_in(cx, |_, window, cx| {
-                    window.push_notification(
-                        Notification::error(Services::error_message(
-                            &error,
-                            Some(WRITE_LIBRARY),
-                            cx,
-                        ))
-                        .title("Couldn't add the book"),
-                        cx,
-                    );
-                });
-            }
-        })
-        .detach();
+        writes::add_to_library(self.model.clone(), book.id, status, window, cx);
     }
 }
 

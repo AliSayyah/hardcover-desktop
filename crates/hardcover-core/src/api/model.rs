@@ -408,11 +408,7 @@ impl EditionSummary {
     /// The edition's length: pages, or for an audiobook without a page count,
     /// its running time.
     pub fn length(&self) -> Option<Length> {
-        match (self.pages, self.audio_seconds) {
-            (Some(p), _) if p > 0 => Some(Length::Pages(p)),
-            (_, Some(s)) if s > 0 => Some(Length::Seconds(s)),
-            _ => None,
-        }
+        length_from_parts(self.pages, self.audio_seconds)
     }
 }
 
@@ -421,6 +417,14 @@ impl EditionSummary {
 pub enum Length {
     Pages(u32),
     Seconds(u32),
+}
+
+pub(crate) fn length_from_parts(pages: Option<u32>, audio_seconds: Option<u32>) -> Option<Length> {
+    match (pages, audio_seconds) {
+        (Some(p), _) if p > 0 => Some(Length::Pages(p)),
+        (_, Some(s)) if s > 0 => Some(Length::Seconds(s)),
+        _ => None,
+    }
 }
 
 /// One read-through of a book (`user_book_reads`).
