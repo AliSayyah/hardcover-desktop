@@ -37,14 +37,14 @@ const STARS: u8 = 5;
 
 /// How much of one star is filled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StarFill {
+pub(crate) enum StarFill {
     Empty,
     Half,
     Full,
 }
 
 /// The fill of star `star` (1-based) for `value` stars.
-pub fn star_fill(value: f32, star: u8) -> StarFill {
+pub(crate) fn star_fill(value: f32, star: u8) -> StarFill {
     let star = f32::from(star);
     if value >= star {
         StarFill::Full
@@ -56,7 +56,7 @@ pub fn star_fill(value: f32, star: u8) -> StarFill {
 }
 
 /// The value a click on `target` requests: clicking the current value clears.
-pub fn clicked_value(current: Option<Rating>, target: f32) -> Option<Rating> {
+pub(crate) fn clicked_value(current: Option<Rating>, target: f32) -> Option<Rating> {
     match current {
         Some(r) if r.value() == target => None,
         _ => Rating::new(target),
@@ -65,7 +65,7 @@ pub fn clicked_value(current: Option<Rating>, target: f32) -> Option<Rating> {
 
 /// The value after one keyboard step of half a star (`up` or down). Stepping
 /// down from half a star clears; stepping up from none gives half a star.
-pub fn stepped_value(current: Option<Rating>, up: bool) -> Option<Rating> {
+pub(crate) fn stepped_value(current: Option<Rating>, up: bool) -> Option<Rating> {
     let v = current.map_or(0.0, Rating::value);
     let next = if up {
         (v + 0.5).min(Rating::MAX)
