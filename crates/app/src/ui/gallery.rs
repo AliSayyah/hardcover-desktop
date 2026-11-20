@@ -16,7 +16,7 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, Styled as _, Window, div,
+    ParentElement as _, Render, Styled as _, Window, div, rems,
 };
 use gpui_kit::{
     FocusHandle, KeyDownEvent, ScrollHandle, StatefulInteractiveElement as _, point, px,
@@ -24,6 +24,7 @@ use gpui_kit::{
 
 use super::kit::{PopoverSurface as _, RaisedField as _, open_alert_dialog, open_dialog};
 use super::*;
+use crate::bidi::WrappingText;
 use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverSize};
 use crate::design::type_roles::Family;
@@ -108,7 +109,8 @@ impl Render for Gallery {
             .child(kit_fixes(&self.input, cx))
             .child(empty(cx))
             .child(stars_and_links())
-            .child(shelf_and_columns(cx));
+            .child(shelf_and_columns(cx))
+            .child(wrapping_text(cx));
 
         v_flex()
             .track_focus(&self.focus)
@@ -201,6 +203,12 @@ fn meters(cx: &App) -> AnyElement {
                     .thin()
                     .pace(Some(100.))
                     .w(size::METER_IN_ROW),
+            )
+            .child(
+                div().w(size::RAIL).child(
+                    MonthBars::new("g-months", [1, 0, 2, 1, 0, 3, 1, 0, 1, 0, 0, 0])
+                        .future_from(Some(10)),
+                ),
             ),
     )
 }
@@ -608,7 +616,7 @@ fn shelf_and_columns(cx: &App) -> AnyElement {
             [
                 "Fourth Wing",
                 "Tomorrow, and Tomorrow, and Tomorrow",
-                "ملت عشق",
+                "ملت عشق (جلد اول)",
             ]
             .into_iter()
             .enumerate()
@@ -637,6 +645,54 @@ fn shelf_and_columns(cx: &App) -> AnyElement {
                     .wide_gap()
                     .rail([section(), RailSection::new("Up next")])
                     .folded(true),
+            ),
+    )
+}
+
+/// Wrapped right-to-left text and cloth covers with long titles: the
+/// punctuation, digits, brackets and Latin runs `WrappingText` lays out
+/// itself, and titles broken between words.
+fn wrapping_text(cx: &App) -> AnyElement {
+    let paragraph = "کتابی پرکشش و پر از امید. دوستی دو شخصیت اصلی (Rocky و Grace) را خیلی دوست داشتم، \
+        و تا صفحهٔ ۴۷۶ نتوانستم کتاب را زمین بگذارم. چرا زودتر نخوانده بودم؟ «پروژهٔ هیل مری» در 2021 منتشر شد.";
+    specimen(
+        "Right-to-left text; cloth covers with long titles",
+        v_flex()
+            .gap_4()
+            .child(
+                div()
+                    .max_w(rems(20.))
+                    .reader()
+                    .child(WrappingText::new(paragraph)),
+            )
+            .child(
+                h_flex()
+                    .items_start()
+                    .gap_4()
+                    .child(Cover::new(
+                        CoverSize::Md,
+                        "Tomorrow, and Tomorrow, and Tomorrow",
+                    ))
+                    .child(
+                        Cover::new(CoverSize::Lg, "Tomorrow, and Tomorrow, and Tomorrow")
+                            .author(Some("Gabrielle Zevin")),
+                    )
+                    .child(
+                        Cover::new(
+                            CoverSize::Xl,
+                            "The Hitchhiker's Guide to the Galaxy: The Trilogy of Five",
+                        )
+                        .author(Some("Douglas Adams")),
+                    )
+                    .child(Cover::new(
+                        CoverSize::Md,
+                        "کتابی پرکشش (جلد اول) «امید»، دوستی دو شخصیت",
+                    )),
+            )
+            .child(
+                div()
+                    .caption(cx)
+                    .child("Cloth titles break between words, at most four lines."),
             ),
     )
 }

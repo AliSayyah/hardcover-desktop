@@ -3177,6 +3177,7 @@ dependencies = [
  "image",
  "tempfile",
  "unicode-bidi",
+ "unicode-bidi-mirroring",
 ]
 
 [[package]]

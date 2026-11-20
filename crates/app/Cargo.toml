@@ -18,8 +18,10 @@ fast_image_resize = "6"
 gpui-kit = "0.10"
 hardcover-core = { path = "../hardcover-core" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "qoi"] }
-# Already in the tree through GPUI's text system; finds right-to-left text.
+# Already in the tree through GPUI's text system: right-to-left text is laid
+# out by the bidirectional algorithm (`bidi.rs`), with mirrored brackets.
 unicode-bidi = "0.3"
+unicode-bidi-mirroring = "0.4"
 
 [dev-dependencies]
 # GPUI's test support, for the shared components' tests (`ui/`). Turned on in

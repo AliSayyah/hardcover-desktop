@@ -139,8 +139,14 @@ pub fn is_released(entry: &LibraryEntry, today: Date, unreleased: &HashSet<BookI
 }
 
 /// Pages per day since the open read started, and the finish that implies.
-/// Only for books counted in pages, with a start date and a page reached.
+/// Only for books being read (Currently Reading), counted in pages, with a
+/// start date and a page reached. A paused read has no pace: the days it
+/// sits on the Paused shelf would drag the figure down, and the finish date
+/// would promise what nobody is doing.
 pub fn pace(entry: &LibraryEntry, today: Date) -> Option<Pace> {
+    if entry.status != ReadingStatus::CurrentlyReading {
+        return None;
+    }
     let read = entry.open_read()?;
     let Some(Length::Pages(total)) = entry.length() else {
         return None;
@@ -410,6 +416,22 @@ mod tests {
         edition.audio_seconds = Some(36_000);
         audio.edition = Some(edition);
         assert_eq!(pace(&audio, today), None);
+    }
+
+    #[test]
+    fn a_book_not_being_read_has_no_pace() {
+        let today = day("2026-11-20");
+        let reading_now = reading(1, 476, Some("2026-11-01"), Some(312));
+        assert!(pace(&reading_now, today).is_some());
+        for status in [
+            ReadingStatus::Paused,
+            ReadingStatus::DidNotFinish,
+            ReadingStatus::Read,
+        ] {
+            let mut e = reading_now.clone();
+            e.status = status;
+            assert_eq!(pace(&e, today), None, "{status:?}");
+        }
     }
 
     #[test]

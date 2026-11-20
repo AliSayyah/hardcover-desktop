@@ -5,8 +5,9 @@
 //! - Books that don't fit wrap onto another row, 16 below (Similar books in
 //!   a narrow pane).
 //! - Each book is as wide as its cover; the title under it, 8 below, is a
-//!   [`TextButton`] at 12/500 in ink, at most two lines, so the cover is
-//!   never the only keyboard path to the book.
+//!   [`TextButton`] at 12/500 in ink, at most two lines broken between
+//!   words (the second ends in "…" when the title is longer), so the cover
+//!   is never the only keyboard path to the book.
 //! - The covers take a shadow only where they lead their block (Similar
 //!   books), never in a rail; that is the [`Cover`]'s own `shadow`.
 //!
@@ -17,7 +18,7 @@
 //! ```
 
 use gpui_kit::{
-    AnyElement, App, IntoElement, ParentElement as _, RenderOnce, Styled as _, Window, div,
+    AnyElement, App, IntoElement, ParentElement as _, RenderOnce, Styled as _, Window, div, px,
 };
 
 use super::TextButton;
@@ -54,6 +55,9 @@ impl RenderOnce for CoverShelf {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let fg = colors(cx).fg;
         let width = self.size.width();
+        // The title breaks its own lines at the cover's width: GPUI's
+        // wrapping would start the second line with the space it broke at.
+        let width_px = px(self.size.width_px());
         div()
             .flex()
             .flex_row()
@@ -73,11 +77,10 @@ impl RenderOnce for CoverShelf {
                             .child(cover)
                             .child(
                                 title
-                                    .wrap()
-                                    .label(cx)
-                                    .text_color(fg)
+                                    .wrap_width(width_px)
                                     .line_clamp(TITLE_LINES)
-                                    .text_ellipsis(),
+                                    .label(cx)
+                                    .text_color(fg),
                             )
                             .into_any_element()
                     }),

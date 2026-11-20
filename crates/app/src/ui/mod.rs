@@ -27,6 +27,7 @@
 //! | [`Lane`] | A fixed, right-aligned lane for trailing figures or actions, kept when empty |
 //! | [`PropertyList`] | Key and value rows: Edition, Owned, Privacy, Added |
 //! | [`Meter`] | Progress: 6 px beside words, 2 px in a row, with an optional pace tick |
+//! | [`MonthBars`] | Books finished in each month of a year, the counts over the bars: Home's reading goal |
 //! | [`EmptyState`], [`empty_state`] | A region with nothing to show: icon, title, one sentence, a button |
 //! | [`Skeleton`], [`SkeletonText`], [`SkeletonRow`] | Content still loading: pulsing shapes, lines, a row |
 //! | [`TextButton`] | In-app navigation inside content: a book title, an author, a series |
@@ -57,6 +58,7 @@ pub mod gallery;
 mod headers;
 pub mod kit;
 mod meter;
+mod month_bars;
 mod nav_row;
 mod object_bar;
 mod row_focus;
@@ -80,6 +82,7 @@ pub use self::{
     external_link::ExternalLink,
     headers::{Greeting, PageHeader, SectionHeader, date_line, greeting, greeting_at, see_all},
     meter::Meter,
+    month_bars::MonthBars,
     nav_row::NavRow,
     object_bar::{BackTo, ObjectBar, ObjectTools, back_label, tools_of},
     row_focus::RowFocus,
