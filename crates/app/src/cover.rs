@@ -22,7 +22,15 @@
 //! ```
 //!
 //! A click opens the book, but the cover is never the only keyboard path to
-//! it: its title is a button too.
+//! it: its title is a button too. Like that title, it keeps the arrow
+//! cursor: the pointing hand is for links (`desktop-practice.md`).
+//!
+//! The cloth cover's title and author are broken into lines here
+//! (`WrappingText::width`), between words, at most four lines for the title
+//! and two for the author, the last ending in "…" when more is cut. A word
+//! wider than the cover's text column is set smaller, down to three
+//! quarters of the size, so it stays whole; only a word too long even then
+//! is cut between letters, never clipped.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -40,13 +48,20 @@ use crate::catalog::navigation::{self, Page};
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors};
 
+/// Lines a cloth cover's title may take.
+const CLOTH_TITLE_LINES: usize = 4;
+/// Lines a cloth cover's author may take (lg and up).
+const CLOTH_AUTHOR_LINES: usize = 2;
+/// The smallest a cloth cover's type gets, as a share of its size, to keep
+/// a long word whole.
+const CLOTH_MIN_SCALE: f32 = 0.75;
+
 /// The six cover sizes. Use the one the system names for the place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// lg (similar books) and xxl (the full book page) arrive with the book
-// page's redesign.
-#[allow(dead_code)]
 pub enum CoverSize {
-    /// 20 × 30: compact rows, menus.
+    /// 20 × 30: compact rows, menus. In the system, but no screen uses it
+    /// yet.
+    #[cfg_attr(not(test), allow(dead_code))]
     Xs,
     /// 32 × 48: list rows (shelves, search, Discover, lists, series and
     /// author pages), upcoming rows.
@@ -298,7 +313,6 @@ impl RenderOnce for Cover {
         match self.click {
             Some((id, handler)) => cover
                 .id(id)
-                .cursor_pointer()
                 .on_click(move |event, window, cx| handler(event, window, cx))
                 .into_any_element(),
             None => cover.into_any_element(),
@@ -378,7 +392,13 @@ fn cloth(size: CoverSize, title: &str, author: Option<&SharedString>, cx: &App) 
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_size(px(title_px))
                 .line_height(px(title_line))
-                .child(WrappingText::new(title.to_owned()).centered().line_clamp(4)),
+                .child(
+                    WrappingText::new(title.to_owned())
+                        .centered()
+                        .width(px(content))
+                        .line_clamp(CLOTH_TITLE_LINES)
+                        .fit_words(CLOTH_MIN_SCALE),
+                ),
         )
         .child(
             div()
@@ -399,7 +419,13 @@ fn cloth(size: CoverSize, title: &str, author: Option<&SharedString>, cx: &App) 
                         .text_color(ink.opacity(0.85))
                         .text_size(px(author_px))
                         .line_height(px(author_px * 1.2))
-                        .child(WrappingText::new(author).centered().line_clamp(2)),
+                        .child(
+                            WrappingText::new(author)
+                                .centered()
+                                .width(px(content))
+                                .line_clamp(CLOTH_AUTHOR_LINES)
+                                .fit_words(CLOTH_MIN_SCALE),
+                        ),
                 )
             },
         )

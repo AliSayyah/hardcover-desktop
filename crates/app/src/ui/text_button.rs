@@ -23,7 +23,7 @@ use gpui_kit::base::Button as BaseButton;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::StyledExt as _;
 use gpui_kit::{
-    App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement as _,
+    App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
     RenderOnce, SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
 };
 
@@ -44,6 +44,7 @@ pub struct TextButton {
     style: StyleRefinement,
     wrap: bool,
     line_clamp: Option<usize>,
+    width: Option<Pixels>,
     on_click: Option<ClickHandler>,
 }
 
@@ -56,6 +57,7 @@ impl TextButton {
             style: StyleRefinement::default(),
             wrap: false,
             line_clamp: None,
+            width: None,
             on_click: None,
         }
     }
@@ -97,6 +99,17 @@ impl TextButton {
     }
 }
 
+impl TextButton {
+    /// Breaks the wrapped label's lines itself for a box this wide (a cover
+    /// shelf's titles, as wide as their covers): between words, never with a
+    /// space or a comma at the start of a line. See `WrappingText::width`.
+    pub fn wrap_width(mut self, width: Pixels) -> Self {
+        self.wrap = true;
+        self.width = Some(width);
+        self
+    }
+}
+
 impl Styled for TextButton {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
@@ -113,6 +126,7 @@ impl RenderOnce for TextButton {
         let underline = !is_rtl(&self.label);
         let wrap = self.wrap;
         let line_clamp = self.line_clamp;
+        let width = self.width;
         let label = self.label.clone();
         let on_click = self.on_click;
 
@@ -141,7 +155,8 @@ impl RenderOnce for TextButton {
                         .min_w_0()
                         .child(
                             WrappingText::new(label)
-                                .when_some(line_clamp, |this, lines| this.line_clamp(lines)),
+                                .when_some(line_clamp, |this, lines| this.line_clamp(lines))
+                                .when_some(width, |this, width| this.width(width)),
                         )
                         .into_any_element()
                 } else {

@@ -21,13 +21,12 @@ use std::sync::Arc;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
     HighlightStyle, InteractiveElement as _, IntoElement, ParentElement as _, Render, RenderImage,
-    SharedString, StatefulInteractiveElement as _, Styled as _, StyledText, Subscription, Window,
-    div, prelude::FluentBuilder as _, rems,
+    SharedString, Styled as _, StyledText, Subscription, Window, div, prelude::FluentBuilder as _,
+    rems,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_LIBRARY};
 use hardcover_core::{
@@ -38,9 +37,9 @@ use super::coming_soon::coming_soon_section;
 use super::digest::{
     Digest, Reading, SeriesNext, ToRate, compute, finished_per_month, finishing_by, to_rate,
 };
-use super::progress_dialog::open_progress;
 use crate::app_state::{Services, release_cover_image};
 use crate::bidi::is_rtl;
+use crate::book::progress_dialog::open_progress;
 use crate::book::star_rating::StarRating;
 use crate::catalog::navigation::Page;
 use crate::chip::StatusChip;
@@ -55,8 +54,8 @@ use crate::goals::model::GoalsModel;
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
-    Columns, CoverShelf, Greeting, Lane, Meter, RailSection, RowSpacing, SectionHeader, Sequence,
-    Skeleton, TextButton, date_line, empty_state, folds, greeting_at, see_all,
+    Columns, CoverShelf, Greeting, Lane, Meter, MonthBars, RailSection, RowSpacing, SectionHeader,
+    Sequence, Skeleton, TextButton, date_line, empty_state, folds, greeting_at, see_all,
 };
 use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
@@ -434,7 +433,8 @@ impl HomeView {
                             .gap_2()
                             .child(
                                 h_flex()
-                                    .items_baseline()
+                                    // Both runs are 14 px, so centring them shares a baseline.
+                                    .items_center()
                                     .gap_2()
                                     .child(
                                         div()
@@ -486,17 +486,14 @@ impl HomeView {
         let muted = colors(cx).fg_muted;
         let progress = progress_summary(entry);
         let author = authors_text(&entry.book.authors);
-        let mut caption = position_text(&progress);
-        if let Some(pace) = pace_line(reading, today) {
-            caption.push_str(" · ");
-            caption.push_str(&pace);
-        }
+        let mut facts = vec![position_text(&progress)];
+        facts.extend(pace_facts(reading, today));
         let [update, finish] = self.reading_actions(entry, true, cx);
 
-        h_flex()
+        // The book and its meter beside the two commands.
+        let top = h_flex()
             .w_full()
             .gap_4()
-            .child(cover(entry, CoverSize::Md, true))
             .child(
                 div()
                     .flex()
@@ -524,8 +521,7 @@ impl HomeView {
                                     .accessibility_label("Reading progress"),
                             )
                             .child(div().caption(cx).tabular().child(percent_text(pct)))
-                    }))
-                    .child(div().mt_1().caption(cx).tabular().child(caption)),
+                    })),
             )
             .child(
                 div()
@@ -536,6 +532,22 @@ impl HomeView {
                     .gap_1()
                     .child(update)
                     .child(finish),
+            );
+
+        // The caption runs under the commands too, so it keeps to one line
+        // in the default window; narrower, it wraps between its facts.
+        h_flex()
+            .w_full()
+            .gap_4()
+            .child(cover(entry, CoverSize::Md, true))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(top)
+                    .child(caption_facts(facts, cx).mt_1()),
             )
             .into_any_element()
     }
@@ -550,7 +562,7 @@ impl HomeView {
             .map(|updated| updated.with_timezone(&chrono::Local).date_naive());
         h_flex()
             .w_full()
-            .gap_4()
+            .gap_3()
             .child(cover(entry, CoverSize::Sm, false))
             .child(
                 div()
@@ -643,7 +655,7 @@ impl HomeView {
         let byline = finished_byline(&entry.book.authors, finished, today);
         h_flex()
             .w_full()
-            .gap_4()
+            .gap_3()
             .child(cover(entry, CoverSize::Sm, false))
             .child(
                 div()
@@ -667,6 +679,7 @@ impl HomeView {
             // The stars show the new rating at once; it saves behind them.
             .child(
                 StarRating::new(SharedString::from(format!("home-stars-{id}")))
+                    .small()
                     .value(rating)
                     .on_change(
                         cx.listener(move |this, rating: &Option<Rating>, window, cx| {
@@ -784,7 +797,7 @@ impl HomeView {
                     .text_color(muted)
                     .child(StyledText::new(text).with_highlights(highlights))
             }))
-            .children(months.map(|months| month_bars(&months, today, goal, cx)))
+            .children(months.map(|months| div().pt_2().child(month_bars(&months, today, goal))))
             .into_any_element()
     }
 
@@ -1044,6 +1057,12 @@ fn percent_text(percent: f32) -> String {
 /// or "Last updated 8 days ago" for a book left idle, which gets no finish
 /// date. `None` when there is nothing to say.
 pub fn pace_line(reading: &Reading, today: Date) -> Option<String> {
+    let parts = pace_facts(reading, today);
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// The pace line's facts, each a phrase a caption keeps on one line.
+fn pace_facts(reading: &Reading, today: Date) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(pace) = reading.pace {
         parts.push(pages_a_day(pace.pages_per_day));
@@ -1056,7 +1075,26 @@ pub fn pace_line(reading: &Reading, today: Date) -> Option<String> {
     if let Some(days) = reading.idle_days {
         parts.push(format!("Last updated {days} days ago"));
     }
-    (!parts.is_empty()).then(|| parts.join(" · "))
+    parts
+}
+
+/// A row's caption made of facts ("Page 418 of 1,007 · 13 pages a day ·
+/// done around Jan 5, 2027"). It wraps between facts only, never inside one
+/// (a date keeps its year), and a wrapped line never starts with the dot.
+fn caption_facts(facts: Vec<String>, cx: &App) -> gpui_kit::Div {
+    let last = facts.len().saturating_sub(1);
+    h_flex()
+        .flex_wrap()
+        .caption(cx)
+        .tabular()
+        .children(facts.into_iter().enumerate().map(move |(i, fact)| {
+            let text = if i < last {
+                format!("{fact} ·\u{a0}")
+            } else {
+                fact
+            };
+            div().whitespace_nowrap().child(text)
+        }))
 }
 
 /// "16 pages a day"; "Under a page a day" below one.
@@ -1107,51 +1145,62 @@ pub fn series_next_text(next: &SeriesNext) -> String {
 }
 
 /// The goal's one sentence, and where the title it names sits in it:
-/// "2 books behind schedule, with 41 days left. Project Hail Mary should
-/// finish in time, which makes 10." `finishing` holds the titles of the books
-/// being read that should finish before the goal ends. One left-to-right
-/// title is named; more books, or a right-to-left title (GPUI can't wrap one
-/// inside a sentence), are counted. `None` for a goal with nothing to say.
+/// "2 behind pace, 3 to go in 41 days. Project Hail Mary should finish in
+/// time." `finishing` holds the titles of the books being read that should
+/// finish before the goal ends. One left-to-right title is named; more books,
+/// or a right-to-left title (GPUI can't wrap one inside a sentence), are
+/// counted. A goal not running today says how it stands ("Goal reached.",
+/// "Starts Jan 1, 2027."). `None` for a goal with nothing to say.
 pub fn goal_sentence(
     goal: &Goal,
     today: Date,
     finishing: &[String],
 ) -> Option<(String, Option<Range<usize>>)> {
     let reached = goal.progress >= f64::from(goal.target);
-    let mut text = goal_pace(goal, today).unwrap_or_default();
-    if text.is_empty() {
-        return None;
+    let standing = goal_pace(goal, today)?;
+    if reached || !goal.is_current(today) {
+        return Some((format!("{standing}."), None));
     }
-    if !reached && goal.is_current(today) {
-        text.push_str(&match (goal.end - today).num_days() {
-            0 => ", and today is the last day".to_owned(),
-            1 => ", with 1 day left".to_owned(),
-            n => format!(", with {} days left", count_text(n as u32)),
-        });
-    }
-    text.push('.');
+    let pace = goal.pace(today).round();
+    let standing = if pace == 0.0 {
+        "On pace".to_owned()
+    } else {
+        let side = if pace > 0.0 { "ahead of" } else { "behind" };
+        format!("{} {side} pace", pace_amount(goal, pace.abs()))
+    };
+    let left = pace_amount(goal, (f64::from(goal.target) - goal.progress).ceil());
+    let to_go = match (goal.end - today).num_days() {
+        0 => format!("{left} to go today"),
+        1 => format!("{left} to go in 1 day"),
+        n => format!("{left} to go in {} days", count_text(n as u32)),
+    };
+    let mut text = format!("{standing}, {to_go}.");
     let mut title = None;
-    if !reached && !finishing.is_empty() {
-        let total = goal.progress.floor() as usize + finishing.len();
-        let total = count_text(total as u32);
+    if !finishing.is_empty() {
         text.push(' ');
         match finishing {
             [one] if !is_rtl(one) => {
                 title = Some(text.len()..text.len() + one.len());
-                text.push_str(&format!(
-                    "{one} should finish in time, which makes {total}."
-                ));
+                text.push_str(&format!("{one} should finish in time."));
             }
-            [_] => text.push_str(&format!(
-                "1 book you're reading should finish in time, which makes {total}."
-            )),
+            [_] => text.push_str("1 book you're reading should finish in time."),
             many => text.push_str(&format!(
-                "{} books you're reading should finish in time, which makes {total}.",
+                "{} books you're reading should finish in time.",
                 many.len()
             )),
         }
     }
     Some((text, title))
+}
+
+/// An amount in the goal's terms: a bare number for books, which the figure
+/// above already names ("2"), else with its unit ("120 pages").
+fn pace_amount(goal: &Goal, n: f64) -> String {
+    let amount = goal_amount(&goal.metric, n);
+    match goal.metric {
+        GoalMetric::Books => amount,
+        _ => format!("{amount} {}", goal_unit(&goal.metric, n)),
+    }
 }
 
 /// "Nov 30", with the year when it isn't this year's.
@@ -1164,67 +1213,16 @@ fn short_date(date: Date, today: Date) -> String {
     }
 }
 
-/// Books finished each month of the goal's year: `accent` bars on the
-/// `track`, months still to come outlined.
-fn month_bars(months: &[u32; 12], today: Date, goal: &Goal, cx: &App) -> AnyElement {
+/// Books finished each month of the goal's year ([`MonthBars`]), months
+/// still to come marked as such.
+fn month_bars(months: &[u32; 12], today: Date, goal: &Goal) -> MonthBars {
     use chrono::Datelike as _;
-    let c = colors(cx);
-    let max = months.iter().copied().max().unwrap_or(0).max(1);
-    let this_year = goal.start.year() == today.year();
-    let names = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
-    let full = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
-    let bars = months.iter().enumerate().map(|(ix, &n)| {
-        let future = this_year && ix > today.month0() as usize || goal.start.year() > today.year();
-        let tip: SharedString = match n {
-            1 => format!("{}: 1 book", full[ix]).into(),
-            n => format!("{}: {n} books", full[ix]).into(),
-        };
-        div()
-            .id(SharedString::from(format!("home-month-{ix}")))
-            .flex()
-            .flex_col()
-            .flex_1()
-            .items_center()
-            .gap_1()
-            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
-            .child(div().h_8().w_full().flex().flex_col().justify_end().child(
-                div().w_full().rounded_t(size::HAIRLINE * 2.).map(|this| {
-                    if future {
-                        this.h_full()
-                            .border_1()
-                            .border_dashed()
-                            .border_color(c.border)
-                    } else if n == 0 {
-                        this.h_0p5().bg(c.track)
-                    } else {
-                        this.h(gpui_kit::relative(n as f32 / max as f32))
-                            .bg(c.accent)
-                    }
-                }),
-            ))
-            .child(div().caption(cx).child(names[ix]))
-    });
-    div()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .pt_2()
-        .child(div().caption(cx).child("Finished each month"))
-        .child(h_flex().gap_1().items_end().children(bars))
-        .into_any_element()
+    let future_from = match goal.start.year().cmp(&today.year()) {
+        std::cmp::Ordering::Greater => Some(0),
+        std::cmp::Ordering::Equal => Some(today.month0() as usize + 1),
+        std::cmp::Ordering::Less => None,
+    };
+    MonthBars::new("home-months", *months).future_from(future_from)
 }
 
 #[cfg(test)]
@@ -1358,32 +1356,68 @@ mod tests {
         let today = day("2026-11-20");
         let goal = books_goal(9.0);
         let (text, title) = goal_sentence(&goal, today, &["Project Hail Mary".to_owned()]).unwrap();
-        assert!(
-            text.ends_with(
-                ", with 41 days left. Project Hail Mary should finish in time, which makes 10."
-            ),
-            "{text}"
+        assert_eq!(
+            text,
+            "2 behind pace, 3 to go in 41 days. Project Hail Mary should finish in time."
         );
         assert_eq!(&text[title.unwrap()], "Project Hail Mary");
 
         let (text, title) = goal_sentence(&goal, today, &["A".to_owned(), "B".to_owned()]).unwrap();
-        assert!(
-            text.ends_with("2 books you're reading should finish in time, which makes 11."),
-            "{text}"
+        assert_eq!(
+            text,
+            "2 behind pace, 3 to go in 41 days. 2 books you're reading should finish in time."
         );
         assert_eq!(title, None);
 
         // A right-to-left title is counted, not named.
         let (text, title) = goal_sentence(&goal, today, &["ملت عشق".to_owned()]).unwrap();
-        assert!(
-            text.ends_with("1 book you're reading should finish in time, which makes 10."),
-            "{text}"
+        assert_eq!(
+            text,
+            "2 behind pace, 3 to go in 41 days. 1 book you're reading should finish in time."
         );
         assert_eq!(title, None);
 
         let (text, title) = goal_sentence(&goal, today, &[]).unwrap();
-        assert!(text.ends_with(", with 41 days left."), "{text}");
+        assert_eq!(text, "2 behind pace, 3 to go in 41 days.");
         assert_eq!(title, None);
+    }
+
+    #[test]
+    fn the_goal_sentence_says_ahead_on_pace_and_the_days_left() {
+        // 11 by Nov 20 is about the 10.9 expected.
+        let (text, _) = goal_sentence(&books_goal(11.0), day("2026-11-20"), &[]).unwrap();
+        assert_eq!(text, "On pace, 1 to go in 41 days.");
+        let (text, _) = goal_sentence(&books_goal(10.0), day("2026-06-01"), &[]).unwrap();
+        assert_eq!(text, "5 ahead of pace, 2 to go in 213 days.");
+        let (text, _) = goal_sentence(&books_goal(11.0), day("2026-12-30"), &[]).unwrap();
+        assert_eq!(text, "1 behind pace, 1 to go in 1 day.");
+        let (text, _) = goal_sentence(&books_goal(11.0), day("2026-12-31"), &[]).unwrap();
+        assert_eq!(text, "1 behind pace, 1 to go today.");
+    }
+
+    #[test]
+    fn a_goal_in_pages_names_its_unit() {
+        let mut goal = Goal::new(
+            GoalId::new(2),
+            GoalMetric::Pages,
+            1000,
+            day("2026-01-01"),
+            day("2026-12-31"),
+        );
+        goal.progress = 400.0;
+        let (text, _) = goal_sentence(&goal, day("2026-07-02"), &[]).unwrap();
+        assert!(text.ends_with("pages to go in 182 days."), "{text}");
+        assert!(text.contains("pages behind pace"), "{text}");
+    }
+
+    #[test]
+    fn a_goal_not_running_today_says_how_it_stands() {
+        let (text, title) =
+            goal_sentence(&books_goal(3.0), day("2025-12-01"), &["Dune".to_owned()]).unwrap();
+        assert_eq!(text, "Starts Jan 1, 2026.");
+        assert_eq!(title, None);
+        let (text, _) = goal_sentence(&books_goal(3.0), day("2027-01-05"), &[]).unwrap();
+        assert_eq!(text, "Ended 9 books short.");
     }
 
     #[test]
