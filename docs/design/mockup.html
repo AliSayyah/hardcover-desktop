@@ -13,7 +13,7 @@
 <title>Hardcover Desktop: design system mockup</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400&family=Noto+Naskh+Arabic:wght@400;500;600&family=Vazirmatn:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400&family=Vazirmatn:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 /* =====================================================================
    Tokens. Every rule below uses these; the token sheet reads them back
@@ -84,7 +84,7 @@
      Literata is used at two fixed optical sizes, as two families: Text (12pt)
      up to 18 px and Display (36pt) from 24 px. Nothing depends on letter-spacing. */
   --sans: "Inter", "Vazirmatn", system-ui, sans-serif;
-  --serif: "Literata", "Noto Naskh Arabic", Georgia, serif;
+  --serif: "Literata", "Vazirmatn", Georgia, serif;
 
   /* Type sizes (rem steps: xs, sm, base, lg, xl, 2xl, 3xl) and their line heights */
   --t-12: 12px; --l-12: 16px;
@@ -273,7 +273,7 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .ph .pt { font-weight: 600; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .ph .rule { width: 24%; height: 1px; background: currentColor; opacity: .6; margin-top: 10%; flex: none; }
 .ph .pa { margin-top: auto; opacity: .85; line-height: 1.2; font-size: .8em; }
-.ph[dir="rtl"] .pt { font-size: 1.25em; line-height: 1.5; }
+.ph[dir="rtl"] .pt { line-height: 1.5; }
 .ph.initial { justify-content: center; padding: 0; font-weight: 600; line-height: 1; gap: 3px; }
 .ph.initial .rule { margin: 0; width: 8px; }
 .cv-xs .ph.initial .rule { width: 6px; }
@@ -811,7 +811,7 @@ function tokensScales() {
       ${t("prose · 16/26 · Text 400", "prose", "A schoolteacher wakes up alone on a spaceship light-years from home.", "max-width:320px")}
       ${t("figure · display-30, lining", "display d-30 num", "9 &nbsp; 4.63")}
     </div><div class="note">Seven sizes in all: 12, 14, 16, 18, 20, 24, 30. No letter-spacing anywhere; the Display cut does the tightening.</div></div>
-    <div><h4>Persian and Arabic: Noto Naskh Arabic under the serif, Vazirmatn under the sans</h4><div class="ts">
+    <div><h4>Persian and Arabic: Vazirmatn everywhere, under the serif roles too</h4><div class="ts">
       ${t("display-24, leading 1.5", "display d-24 rtl", "بوف کور", "").replace("<span", '<span dir="rtl"')}
       ${t("body-strong", "strong rtl", "بوف کور", "").replace("<span", '<span dir="rtl"')}
       ${t("body, muted", "muted rtl", "صادق هدایت", "").replace("<span", '<span dir="rtl"')}
@@ -848,8 +848,8 @@ function tokensScales() {
 
 // ---------- Assemble ----------
 const shots = [
-  ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail; Coming soon closes the main column (scrolled content shown in full)", "light", 1000, home()],
-  ["Home", "dark", "dark", 1000, home()],
+  ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail; Coming soon closes the main column (scrolled content shown in full)", "light", 1020, home()],
+  ["Home", "dark", "dark", 1020, home()],
   ["Library: Currently reading", "light · the book's tools sit in a bar above it; status and rating first, then progress", "light", 800, library("cr")],
   ["Library: Want to read", "dark · a Persian title, a book with no cover, a hovered row · Start reading sits in the panel that holds progress once the book is started", "dark", 800, library("wtr")],
   ["Book page over Discover", "light · the rail starts at the top; scrolled content shown in full", "light", 920, bookPage()],
@@ -878,7 +878,7 @@ addEventListener("resize", fit);
 
 // ---------- Audit (console): fonts, contrast, clipped content ----------
 document.fonts.ready.then(() => {
-  const ok = ["600 16px Literata", "16px Inter", "16px 'Noto Naskh Arabic'", "16px Vazirmatn"].map(f => `${f}: ${document.fonts.check(f)}`);
+  const ok = ["600 16px Literata", "16px Inter", "16px Vazirmatn"].map(f => `${f}: ${document.fonts.check(f)}`);
   console.log("fonts", ok.join(", "));
   for (const t of ["light", "dark"]) {
     const line = [["--fg"], ["--fg-muted", [...fills(t), over(t, "--chip", "--bg"), over(t, "--chip", "--sidebar")]], ["--fg-faint", plain(t, "--bg", "--raised")], ["--accent"], ["--danger", plain(t, "--bg", "--raised")], ["--warning", [over(t, "--chip", "--bg")]]]

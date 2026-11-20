@@ -140,6 +140,10 @@ Every size has a fixed line height.
 - The serif is the book's voice: its title and its description. Reviews and
   notes are readers' voices, so they are set in Inter (`reader`), never in
   the serif.
+- Persian and Arabic have no serif. Literata has no Arabic script, so
+  right-to-left text is set in Vazirmatn wherever it appears, at the role's
+  size and weight. A book title or description keeps its serif role in
+  every other respect (size, line height, position).
 - Inter is bundled with its static faces (`fonts.rs`). Never fall back to
   the system UI font: on Linux it is often variable, and GPUI draws a
   variable font's default instance only.
@@ -259,8 +263,8 @@ dust jacket.
   - lg and up: all of md, plus the author at the foot, at 0.8× the title
     size and 85% opacity.
 - **Padding:** 16% top, 13% sides and bottom.
-- **Right-to-left titles:** set right to left, at 1.25× size and 1.5 line
-  height, so Naskh reads well.
+- **Right-to-left titles:** set right to left in Vazirmatn 600, at a 1.5
+  line height.
 
 ## Components
 
@@ -623,9 +627,10 @@ interface.
 - **Implementation:** wrapping right-to-left text goes through `WrappingText`
   (`bidi.rs`), because GPUI on Linux draws wrapped right-to-left text in the
   wrong place. A single truncated line (rows) can use GPUI's own layout.
-- **Fonts:** Noto Naskh Arabic falls under the serif and Vazirmatn under the
-  sans, both as static faces. Display sizes use a 1.5 line height for
-  Naskh. If the fallback doesn't pick them glyph by glyph, set the family
+- **Fonts:** Persian and Arabic are set in Vazirmatn (static faces)
+  everywhere, under the serif roles as well as the sans ones, so the script
+  reads the same across the app. Display sizes use a 1.5 line height. If
+  GPUI's fallback doesn't pick Vazirmatn glyph by glyph, set the family
   explicitly for right-to-left runs: `WrappingText` already knows the
   direction.
 - **Covers:** a cloth cover with a right-to-left title sets it right to left.
@@ -714,8 +719,7 @@ it when you wire it.
   installs.
   - Literata Text (12 pt) at 400, 400 italic and 600, and Display (36 pt) at
     600.
-  - Noto Naskh Arabic at 400 and 600.
-  - Vazirmatn at 400, 500 and 600.
+  - Vazirmatn at 400, 500 and 600, for Persian and Arabic everywhere.
   - If a release lacks a static instance, cut one from the variable font
     with `fonttools varLib.instancer` and commit the static output.
   - The test in `fonts.rs` that rejects variable faces covers every new face.
@@ -726,8 +730,8 @@ What the code still lacks. Remove an item in the commit that finishes it.
 
 1. **Palette.** The app still runs gpui-component's default black-and-white
    theme. Apply the paper and ink tokens to both themes.
-2. **Fonts.** Only Inter is bundled. Literata (Text and Display), Noto Naskh
-   Arabic and Vazirmatn are still to come.
+2. **Fonts.** Only Inter is bundled. Literata (Text and Display) and
+   Vazirmatn are still to come.
 3. **App token module.**
    - Only `star::color` and `star::empty_color` exist.
    - The sidebar's muted text is `sidebar_foreground.opacity(0.7)`, repeated
