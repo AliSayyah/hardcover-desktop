@@ -366,7 +366,9 @@ impl BookDetailView {
             .gap_3()
             .child(
                 Avatar::new(name.clone())
-                    .image(review.reviewer.raster_avatar().map(|a| a.url.clone()))
+                    // `Avatar` draws SVG pictures from the cached file and
+                    // falls back to initials when a picture fails.
+                    .image(review.reviewer.avatar.as_ref().map(|a| a.url.clone()))
                     .data_color(review.reviewer.color),
             )
             .child(
