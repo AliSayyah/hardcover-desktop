@@ -10,6 +10,7 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::list::ListItem;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
@@ -20,7 +21,7 @@ use gpui_kit::{
     FocusHandle, KeyDownEvent, ScrollHandle, StatefulInteractiveElement as _, point, px,
 };
 
-use super::kit::{RaisedField as _, open_alert_dialog, open_dialog};
+use super::kit::{PopoverSurface as _, RaisedField as _, open_alert_dialog, open_dialog};
 use super::*;
 use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverSize};
@@ -430,13 +431,23 @@ fn kit_fixes(input: &Entity<InputState>, cx: &App) -> AnyElement {
                     .ok_text("Delete")
             })
         });
+    let popover = Popover::new("g-popover")
+        .trigger(Button::new("g-popover-trigger").label("Popover…"))
+        .content(|_, _, _| {
+            div()
+                .body()
+                .max_w(size::EMPTY_TEXT)
+                .child("A popover on raised, at r-box, with shadow-popover.")
+        })
+        .popover_surface(cx);
     specimen(
-        "Kit fixes: raised field and dialogs",
+        "Kit fixes: raised field, dialogs, popover",
         h_flex()
             .gap_2()
             .child(Input::new(input).raised_field(false, cx).w(size::SELECT))
             .child(dialog)
-            .child(alert),
+            .child(alert)
+            .child(popover),
     )
 }
 

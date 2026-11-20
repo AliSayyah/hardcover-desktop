@@ -753,8 +753,8 @@ lists each with what to use it for): the object bar, panel, rail, blocks,
 headers and the greeting, sequences, list rows, lanes, the property list,
 the meter, empty states, skeletons, text buttons, byline links, nav rows,
 avatars and the kit fixes. The demo build shows them all on one page with
-`HARDCOVER_GALLERY=1`. Only drop-in swaps are done: every empty state,
-meter and skeleton, the book titles on Home and in Coming soon, the
+`HARDCOVER_GALLERY=1`. Only drop-in swaps are done: the empty states
+(`empty_state`), every meter and skeleton, the book titles on Home and in Coming soon, the
 reviewers' avatars and bylines, and the full page's Back bar. The account
 and author avatars are still the kit's. The screens below still need
 their layouts moved onto the rest.
