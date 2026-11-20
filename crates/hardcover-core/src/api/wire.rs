@@ -694,6 +694,12 @@ pub(crate) struct RawSearch {
     pub results: Value,
 }
 
+impl RawSearch {
+    fn total(&self) -> Option<u32> {
+        self.results.get("found").and_then(as_u32)
+    }
+}
+
 /// `results` is the Typesense response: `{found, page, hits: [{document: {...}}]}`.
 /// Hits without a usable id are skipped.
 pub(crate) fn search_page(raw: RawSearch, page: u32, per_page: u32) -> SearchPage {
@@ -715,7 +721,7 @@ pub(crate) fn search_page(raw: RawSearch, page: u32, per_page: u32) -> SearchPag
             .and_then(|n| u32::try_from(n).ok())
             .unwrap_or(per_page),
     );
-    p.total = results.get("found").and_then(as_u32);
+    p.total = raw.total();
     p
 }
 
@@ -841,7 +847,7 @@ pub(crate) fn search_hits<T>(
             .and_then(|n| u32::try_from(n).ok())
             .unwrap_or(per_page),
     );
-    p.total = results.get("found").and_then(as_u32);
+    p.total = raw.total();
     p
 }
 
