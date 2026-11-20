@@ -861,10 +861,7 @@ impl SearchPage {
     }
 
     pub fn has_more(&self) -> bool {
-        match self.total {
-            Some(total) => u64::from(self.page) * u64::from(self.per_page) < u64::from(total),
-            None => self.books.len() as u32 >= self.per_page,
-        }
+        has_more(self.page, self.per_page, self.total, self.books.len())
     }
 }
 
@@ -1118,10 +1115,14 @@ impl<T> SearchHits<T> {
     }
 
     pub fn has_more(&self) -> bool {
-        match self.total {
-            Some(total) => u64::from(self.page) * u64::from(self.per_page) < u64::from(total),
-            None => self.hits.len() as u32 >= self.per_page,
-        }
+        has_more(self.page, self.per_page, self.total, self.hits.len())
+    }
+}
+
+fn has_more(page: u32, per_page: u32, total: Option<u32>, item_count: usize) -> bool {
+    match total {
+        Some(total) => u64::from(page) * u64::from(per_page) < u64::from(total),
+        None => item_count as u32 >= per_page,
     }
 }
 
