@@ -43,7 +43,7 @@ impl Gallery {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         Self {
-            input: cx.new(|cx| InputState::new(window, cx).placeholder("Filter books")),
+            input: cx.new(|cx| InputState::new(window, cx).placeholder("Filter")),
             selected_nav: 1,
             focus,
             scroll: ScrollHandle::new(),

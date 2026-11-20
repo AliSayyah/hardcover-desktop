@@ -116,6 +116,8 @@ pub fn on_keyboard_entry<V: 'static, D: ListDelegate>(
             .is_some_and(|list| list.read(cx).selected_index().is_none());
         if unselected && window.last_input_was_keyboard() {
             select_first(view, window, cx);
+            cx.notify();
+            window.refresh();
         }
     })
 }
@@ -134,6 +136,9 @@ pub fn select_first_row<D: ListDelegate>(
             cx.notify();
         }
     });
+    // Focus listeners run as a frame finishes; draw the selection now, not
+    // at the next input.
+    window.refresh();
 }
 
 #[cfg(test)]

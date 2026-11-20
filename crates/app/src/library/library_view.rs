@@ -145,7 +145,7 @@ pub struct LibraryView {
 
 impl LibraryView {
     pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter books"));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
         let options: Vec<SortOption> = SortOrder::ALL
             .into_iter()
             .map(|o| SortOption(o, o.label().into()))
