@@ -629,10 +629,11 @@ interface.
   wrong place. A single truncated line (rows) can use GPUI's own layout.
 - **Fonts:** Persian and Arabic are set in Vazirmatn (static faces)
   everywhere, under the serif roles as well as the sans ones, so the script
-  reads the same across the app. Display sizes use a 1.5 line height. If
-  GPUI's fallback doesn't pick Vazirmatn glyph by glyph, set the family
-  explicitly for right-to-left runs: `WrappingText` already knows the
-  direction.
+  reads the same across the app. Display sizes use a 1.5 line height. The
+  fallback is named, not left to GPUI: each type role names it, and
+  `WrappingText` names it for the family it inherits. (A family without
+  Latin, such as Noto Naskh Arabic, can't be used: GPUI drops a family that
+  has no "m".)
 - **Covers:** a cloth cover with a right-to-left title sets it right to left.
 
 ## Copy

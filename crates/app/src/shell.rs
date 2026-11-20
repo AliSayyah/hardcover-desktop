@@ -37,6 +37,8 @@ use crate::catalog::author_view::AuthorView;
 use crate::catalog::discover_view::DiscoverView;
 use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
 use crate::catalog::series_view::SeriesView;
+use crate::design::TypeRoles as _;
+use crate::design::type_roles::Family;
 use crate::format::{SIDEBAR_SHELVES, relative_time, status_label};
 use crate::goals::model::GoalsModel;
 use crate::goals::sidebar::GoalsSection;
@@ -154,6 +156,9 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            // Inter over Vazirmatn for everything inside; dialogs and
+            // popovers are outside, see `bidi::WrappingText`.
+            .type_family(Family::Sans)
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)

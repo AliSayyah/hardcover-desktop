@@ -5,20 +5,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, FontWeight, IntoElement, ObjectFit, ParentElement as _,
-    SharedString, Styled as _, StyledImage as _, Window, div, img, prelude::FluentBuilder as _,
-    relative, rems,
+    AnyElement, AppContext as _, Context, FontWeight, IntoElement, ParentElement as _,
+    SharedString, Styled as _, Window, div, prelude::FluentBuilder as _, relative, rems,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookDetails, BookId, BookSummary, Contributor, RatingBucket, SeriesRef};
 
 use super::{BookDetailView, Details, section};
-use crate::app_state::{Services, cover_thumbnail};
+use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::catalog::navigation::{self, Page};
 use crate::chip::{TAG_HEIGHT, TagChip};
+use crate::cover::{Cover, CoverSize};
 use crate::format::{authors_text, series_position_text};
 
 /// Similar books fetched for one book.
@@ -194,7 +194,7 @@ impl BookDetailView {
             sections.push(render_other_titles(&details.alternative_titles, cx));
         }
         sections.extend(self.render_community_reviews(book.id, window, cx));
-        if let Some(similar) = self.render_similar(book, details, window, cx) {
+        if let Some(similar) = self.render_similar(book, details, cx) {
             sections.push(similar);
         }
         sections
@@ -337,7 +337,6 @@ impl BookDetailView {
         &self,
         book: &BookSummary,
         details: &BookDetails,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if details.similar_book_ids.is_empty() {
@@ -350,11 +349,7 @@ impl BookDetailView {
                 .flex_wrap()
                 .items_start()
                 .gap_3()
-                .children(
-                    books
-                        .iter()
-                        .map(|b| similar_book(b, window, cx).into_any_element()),
-                )
+                .children(books.iter().map(|b| similar_book(b).into_any_element()))
                 .into_any_element(),
             Some(Similar::Failed(message)) => h_flex()
                 .gap_2()
@@ -449,16 +444,7 @@ fn render_other_titles(titles: &[String], cx: &mut Context<BookDetailView>) -> A
 }
 
 /// A cover with its title under it; opens the book.
-fn similar_book(
-    book: &BookSummary,
-    window: &mut Window,
-    cx: &mut Context<BookDetailView>,
-) -> impl IntoElement {
-    let thumbnail = book
-        .cover
-        .as_ref()
-        .and_then(|c| cover_thumbnail(&c.url, window, cx));
-    let muted = cx.theme().muted_foreground;
+fn similar_book(book: &BookSummary) -> impl IntoElement {
     let page = Page::Book(book.clone());
     Button::new(("similar-book", book.id.get() as u64))
         .text()
@@ -469,23 +455,11 @@ fn similar_book(
                 .w_16()
                 .gap_1()
                 .child(
-                    div()
-                        .w_16()
-                        .h_24()
-                        .rounded(cx.theme().radius)
-                        .overflow_hidden()
-                        .bg(cx.theme().muted)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .map(|this| match thumbnail {
-                            Some(image) => {
-                                this.child(img(image).size_full().object_fit(ObjectFit::Cover))
-                            }
-                            None => {
-                                this.child(Icon::new(IconName::BookOpen).small().text_color(muted))
-                            }
-                        }),
+                    // The button opens the book; the cover needs no click of
+                    // its own.
+                    Cover::new(CoverSize::Md, book.title.clone())
+                        .thumbnail(book.cover.as_ref().map(|c| c.url.clone()))
+                        .shadow(true),
                 )
                 .child(
                     // Buttons keep labels on one line; titles may take two.

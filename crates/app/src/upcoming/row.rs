@@ -5,21 +5,21 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex,
-    v_flex,
+    ActiveTheme as _, Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
-    App, AppContext as _, Entity, FontWeight, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _,
-    StyledImage as _, Window, div, img, prelude::FluentBuilder as _, rems,
+    App, AppContext as _, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, RenderOnce, SharedString, Styled as _, Window, div,
+    prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{BookSummary, Date, ReadingStatus, UpcomingBook};
 
 use super::schedule::{release_text, series_text, soon_text};
-use crate::app_state::{Services, cover_thumbnail};
+use crate::app_state::Services;
 use crate::catalog::navigation::{self, Page};
 use crate::chip::StatusChip;
+use crate::cover::{Cover, CoverSize};
 use crate::format::needs_permission;
 use crate::library::model::LibraryModel;
 
@@ -61,17 +61,11 @@ impl UpcomingRow {
 }
 
 impl RenderOnce for UpcomingRow {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let id = self.book.book.id;
         let prefix = self.prefix;
         let muted = cx.theme().muted_foreground;
         let page = Page::Book(self.book.book.clone());
-        let image = self
-            .book
-            .book
-            .cover
-            .as_ref()
-            .and_then(|c| cover_thumbnail(&c.url, window, cx));
         let library = self.library.read(cx);
         let status = library.entry_for_book(id).map(|e| e.status);
         let adding = library.is_adding(id);
@@ -111,30 +105,12 @@ impl RenderOnce for UpcomingRow {
                 this.border_t_1().border_color(cx.theme().border)
             })
             .child(
-                div()
-                    .id(SharedString::from(format!("{prefix}-cover-{id}")))
-                    .flex_shrink_0()
-                    .w(rems(1.5))
-                    .h(rems(2.25))
-                    .rounded(cx.theme().radius)
-                    .overflow_hidden()
-                    .bg(cx.theme().secondary)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .on_click({
-                        let page = page.clone();
-                        move |_, _, cx| navigation::open(page.clone(), cx)
-                    })
-                    .map(|this| match image {
-                        Some(image) => {
-                            this.child(img(image).size_full().object_fit(ObjectFit::Cover))
-                        }
-                        None => {
-                            this.child(Icon::new(IconName::BookOpen).xsmall().text_color(muted))
-                        }
-                    }),
+                Cover::new(CoverSize::Sm, self.book.book.title.clone())
+                    .thumbnail(self.book.book.cover.as_ref().map(|c| c.url.clone()))
+                    .opens(
+                        SharedString::from(format!("{prefix}-cover-{id}")),
+                        page.clone(),
+                    ),
             )
             .child(
                 v_flex()

@@ -17,12 +17,19 @@
 //! (reviews) and text fields keep GPUI's own layout. The pieces stay in
 //! reading order in the element tree, only the layout reverses them, so
 //! assistive technology reads them in order.
+//!
+//! [`WrappingText`] also names the Persian and Arabic fallback, Vazirmatn,
+//! for the family it inherits. A type role does that too, but dialogs and
+//! popovers don't inherit from the shell, and GPUI's own fallback would pick
+//! a system font.
 
 use gpui_kit::{
-    App, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _, Window, div,
-    prelude::FluentBuilder as _,
+    App, FontFallbacks, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _,
+    Window, div, prelude::FluentBuilder as _,
 };
 use unicode_bidi::{Direction, get_base_direction};
+
+use crate::design::type_roles::Family;
 
 /// A paragraph of text that wraps, in either direction. Font, size and color
 /// come from the parent, as for a plain string child.
@@ -30,6 +37,7 @@ use unicode_bidi::{Direction, get_base_direction};
 pub struct WrappingText {
     text: SharedString,
     line_clamp: Option<usize>,
+    centered: bool,
 }
 
 impl WrappingText {
@@ -37,7 +45,15 @@ impl WrappingText {
         Self {
             text: text.into(),
             line_clamp: None,
+            centered: false,
         }
+    }
+
+    /// Centres each line, as on a cloth cover. Left-to-right text also needs
+    /// the parent's `text_center`.
+    pub fn centered(mut self) -> Self {
+        self.centered = true;
+        self
     }
 
     /// Shows at most `lines` lines. Left-to-right text ends the last one with
@@ -50,18 +66,23 @@ impl WrappingText {
 
 impl RenderOnce for WrappingText {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+        // The parent's text style is in effect here.
+        let style = window.text_style();
+        let fallback = Family::of(&style.font_family).script_fallback();
+        let mut root = div();
+        root.text_style().font_fallbacks =
+            Some(FontFallbacks::from_fonts(vec![fallback.to_owned()]));
         if !is_rtl(&self.text) {
-            return div()
+            return root
                 .when_some(self.line_clamp, |this, lines| this.line_clamp(lines))
                 .child(self.text);
         }
-        // The parent's text style is in effect here, so this is the height of
-        // one line of this text.
-        let line_height = window.text_style().line_height_in_pixels(window.rem_size());
+        // The height of one line of this text.
+        let line_height = style.line_height_in_pixels(window.rem_size());
         let pieces = pieces(&self.text);
         let last = pieces.len().saturating_sub(1);
-        div()
-            .flex()
+        root.flex()
+            .when(self.centered, |this| this.justify_center())
             .flex_row_reverse()
             .flex_wrap()
             .when_some(self.line_clamp, |this, lines| {

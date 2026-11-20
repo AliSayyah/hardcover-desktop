@@ -18,9 +18,9 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
-    InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, Pixels, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription,
-    Window, div, img, prelude::FluentBuilder as _, px, relative, rems,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
+    prelude::FluentBuilder as _, px, relative, rems,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_LIBRARY};
 use hardcover_core::{
@@ -32,9 +32,10 @@ use super::digest::{
     Digest, Reading, SeriesNext, ToRate, compute, finished_per_month, finishing_by, to_rate,
 };
 use super::progress_dialog::open_progress;
-use crate::app_state::{Services, cover_thumbnail};
+use crate::app_state::Services;
 use crate::book::star_rating::StarRating;
 use crate::catalog::navigation::{self, Page};
+use crate::cover::{Cover, CoverSize};
 use crate::format::{
     authors_text, goal_amount, goal_pace, goal_period, goal_unit, needs_permission,
     progress_summary, rating_text, series_position_text,
@@ -220,7 +221,6 @@ impl HomeView {
         &self,
         digest: &Digest,
         today: Date,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::Div {
         let model = self.model.read(cx);
@@ -233,14 +233,14 @@ impl HomeView {
             .iter()
             .enumerate()
             .map(|(ix, (reading, entry))| {
-                self.reading_row(ix, reading, entry, today, window, cx)
+                self.reading_row(ix, reading, entry, today, cx)
                     .into_any_element()
             })
             .collect();
         let paused = digest
             .paused
             .and_then(|id| self.model.read(cx).entry(id).cloned())
-            .map(|entry| self.paused_row(&entry, digest.paused_count, today, window, cx));
+            .map(|entry| self.paused_row(&entry, digest.paused_count, today, cx));
         let empty = rows.is_empty();
         section("Continue reading", (!empty).then_some(rows.len()), cx)
             .when(empty, |this| {
@@ -259,7 +259,6 @@ impl HomeView {
         reading: &Reading,
         entry: &LibraryEntry,
         today: Date,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let id = entry.user_book_id;
@@ -340,7 +339,7 @@ impl HomeView {
             .when(ix > 0, |this| {
                 this.border_t_1().border_color(cx.theme().border)
             })
-            .child(cover(entry, CoverSize::Large, window, cx))
+            .child(cover(entry, CoverSize::Md, true))
             .child(
                 v_flex()
                     .flex_1()
@@ -432,7 +431,6 @@ impl HomeView {
         entry: &LibraryEntry,
         count: usize,
         today: Date,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
@@ -452,7 +450,7 @@ impl HomeView {
             .py_2()
             .rounded(cx.theme().radius_lg)
             .bg(cx.theme().muted)
-            .child(cover(entry, CoverSize::Small, window, cx))
+            .child(cover(entry, CoverSize::Sm, false))
             .child(
                 h_flex()
                     .flex_1()
@@ -486,7 +484,6 @@ impl HomeView {
         rows: &[ToRate],
         unrated: usize,
         today: Date,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::Div {
         let library = self.model.read(cx);
@@ -497,7 +494,7 @@ impl HomeView {
         let rows = books
             .iter()
             .enumerate()
-            .map(|(ix, (finished, entry))| self.rate_row(ix, entry, *finished, today, window, cx))
+            .map(|(ix, (finished, entry))| self.rate_row(ix, entry, *finished, today, cx))
             .collect::<Vec<_>>();
         section(
             "Rate what you finished",
@@ -513,7 +510,6 @@ impl HomeView {
         entry: &LibraryEntry,
         finished: Date,
         today: Date,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = entry.user_book_id;
@@ -537,7 +533,7 @@ impl HomeView {
             .when(ix > 0, |this| {
                 this.border_t_1().border_color(cx.theme().border)
             })
-            .child(cover(entry, CoverSize::Small, window, cx))
+            .child(cover(entry, CoverSize::Sm, false))
             .child(
                 v_flex()
                     .flex_1()
@@ -679,12 +675,7 @@ impl HomeView {
             })
     }
 
-    fn render_up_next(
-        &self,
-        digest: &Digest,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::Div {
+    fn render_up_next(&self, digest: &Digest, cx: &mut Context<Self>) -> gpui_kit::Div {
         let library = self.model.read(cx);
         let pick = digest.series_next.as_ref().and_then(|n| {
             Some((
@@ -709,11 +700,7 @@ impl HomeView {
         let count = digest.want_to_read;
         card(cx)
             .child(div().font_weight(FontWeight::SEMIBOLD).child("Up next"))
-            .children(
-                pick.map(|(next, entry, after)| {
-                    self.series_pick(&next, &entry, &after, window, cx)
-                }),
-            )
+            .children(pick.map(|(next, entry, after)| self.series_pick(&next, &entry, &after, cx)))
             .child(v_flex().gap_1().children(rows))
             .child(
                 h_flex().child(
@@ -736,7 +723,6 @@ impl HomeView {
         next: &SeriesNext,
         entry: &LibraryEntry,
         after: &LibraryEntry,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
@@ -758,7 +744,7 @@ impl HomeView {
             .p_3()
             .rounded(cx.theme().radius_lg)
             .bg(cx.theme().muted)
-            .child(cover(entry, CoverSize::Medium, window, cx))
+            .child(cover(entry, CoverSize::Md, true))
             .child(
                 v_flex()
                     .flex_1()
@@ -789,7 +775,7 @@ impl HomeView {
 }
 
 impl Render for HomeView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let today = chrono::Local::now().date_naive();
         let loaded = self.model.read(cx).is_loaded();
         let digest = self.digest(today, cx);
@@ -820,11 +806,11 @@ impl Render for HomeView {
         }
         // Want to Read books that are all still to come leave nothing to suggest.
         let up_next = (digest.series_next.is_some() || !digest.up_next.is_empty())
-            .then(|| self.render_up_next(&digest, window, cx));
+            .then(|| self.render_up_next(&digest, cx));
         let goal_card = goal.map(|g| self.render_goal(&g, &digest, today, cx));
-        let reading = self.render_reading(&digest, today, window, cx);
-        let rate = (!rate_rows.is_empty())
-            .then(|| self.render_rate(&rate_rows, unrated, today, window, cx));
+        let reading = self.render_reading(&digest, today, cx);
+        let rate =
+            (!rate_rows.is_empty()).then(|| self.render_rate(&rate_rows, unrated, today, cx));
         root.overflow_y_scrollbar()
             .child(
                 v_flex()
@@ -929,49 +915,17 @@ fn short_date(date: Date, today: Date) -> String {
     }
 }
 
-#[derive(Clone, Copy)]
-enum CoverSize {
-    Small,
-    Medium,
-    Large,
-}
-
-/// A book's cover at a fixed 2:3 size; a click opens the book's page.
-fn cover(entry: &LibraryEntry, size: CoverSize, window: &mut Window, cx: &mut App) -> AnyElement {
-    let width = match size {
-        CoverSize::Small => rems(1.5),
-        CoverSize::Medium => rems(2.5),
-        CoverSize::Large => rems(3.),
-    };
-    let image = entry
-        .cover()
-        .and_then(|c| cover_thumbnail(&c.url, window, cx));
-    let page = Page::Book(entry.book.clone());
-    div()
-        .id(SharedString::from(format!(
-            "home-cover-{}",
-            entry.user_book_id
-        )))
-        .flex_shrink_0()
-        .w(width)
-        .h(width * 1.5)
-        .rounded(cx.theme().radius)
-        .overflow_hidden()
-        .bg(cx.theme().secondary)
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
-        .on_click(move |_, _, cx| navigation::open(page.clone(), cx))
-        .map(|this| match image {
-            Some(image) => this.child(img(image).size_full().object_fit(ObjectFit::Cover)),
-            None => this.child(
-                Icon::new(IconName::BookOpen)
-                    .small()
-                    .text_color(cx.theme().muted_foreground),
-            ),
-        })
-        .into_any_element()
+/// A book's cover; a click opens the book's page. `shadow` where the cover
+/// leads its row.
+fn cover(entry: &LibraryEntry, size: CoverSize, shadow: bool) -> Cover {
+    Cover::new(size, entry.book.title.clone())
+        .author(entry.book.authors.first().cloned())
+        .thumbnail(entry.cover().map(|c| c.url.clone()))
+        .shadow(shadow)
+        .opens(
+            SharedString::from(format!("home-cover-{}", entry.user_book_id)),
+            Page::Book(entry.book.clone()),
+        )
 }
 
 /// The book's title as a quiet button that opens its page: reachable by
@@ -1018,23 +972,12 @@ fn compact_row(
         )))
         .gap_2()
         .child(
-            div()
-                .id(SharedString::from(format!(
-                    "{prefix}-cover-{}",
-                    entry.user_book_id
-                )))
-                .flex_shrink_0()
-                .w(rems(1.25))
-                .h(rems(1.875))
-                .rounded(px(2.))
-                .overflow_hidden()
-                .bg(cx.theme().secondary)
-                .cursor_pointer()
-                .on_click({
-                    let page = page.clone();
-                    move |_, _, cx| navigation::open(page.clone(), cx)
-                })
-                .child(CompactCover(image_url)),
+            Cover::new(CoverSize::Xs, entry.book.title.clone())
+                .thumbnail(image_url)
+                .opens(
+                    SharedString::from(format!("{prefix}-cover-{}", entry.user_book_id)),
+                    page,
+                ),
         )
         .child(
             div()
@@ -1046,22 +989,6 @@ fn compact_row(
             this.child(div().flex_shrink_0().text_sm().text_color(muted).child(t))
         })
         .into_any_element()
-}
-
-/// A small cover image, loaded where the window is at hand.
-#[derive(IntoElement)]
-struct CompactCover(Option<String>);
-
-impl gpui_kit::RenderOnce for CompactCover {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let image = self
-            .0
-            .as_deref()
-            .and_then(|url| cover_thumbnail(url, window, cx));
-        div().size_full().when_some(image, |this, image| {
-            this.child(img(image).size_full().object_fit(ObjectFit::Cover))
-        })
-    }
 }
 
 /// The goal's progress, with a tick where steady progress would be today.
