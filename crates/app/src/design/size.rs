@@ -52,6 +52,10 @@ pub const PROSE: Rems = rems(40.);
 /// The widest an empty state's sentence gets (288; `w_72`).
 pub const EMPTY_TEXT: Rems = rems(18.);
 
+/// A menu's reason row (288): why its items are disabled ("… no
+/// permission …"), wrapped at this width. The kit's menu labels don't wrap.
+pub const MENU_REASON: Rems = rems(18.);
+
 /// A dialog that confirms (24 rem).
 pub const DIALOG_CONFIRM: Rems = rems(24.);
 /// A dialog with a form (30 rem).

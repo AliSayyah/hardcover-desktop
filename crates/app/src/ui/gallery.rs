@@ -204,6 +204,13 @@ fn meters(cx: &App) -> AnyElement {
                     .pace(Some(100.))
                     .w(size::METER_IN_ROW),
             )
+            // Hardcover's figures: a ratings breakdown row.
+            .child(
+                Meter::new("g-muted", 62.)
+                    .muted()
+                    .max_w(size::METER_MAX)
+                    .accessibility_label("4 stars"),
+            )
             .child(
                 div().w(size::RAIL).child(
                     MonthBars::new("g-months", [1, 0, 2, 1, 0, 3, 1, 0, 1, 0, 0, 0])

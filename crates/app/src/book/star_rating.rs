@@ -16,6 +16,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::h_flex;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
     App, ElementId, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _,
     RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, actions, div,
@@ -82,6 +83,7 @@ pub struct StarRating {
     value: Option<Rating>,
     disabled: bool,
     small: bool,
+    tooltip: Option<SharedString>,
     on_change: Option<ChangeHandler>,
 }
 
@@ -92,6 +94,7 @@ impl StarRating {
             value: None,
             disabled: false,
             small: false,
+            tooltip: None,
             on_change: None,
         }
     }
@@ -103,6 +106,13 @@ impl StarRating {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// A tooltip, shown even while disabled: say why it is
+    /// (`format::needs_permission`).
+    pub fn tooltip(mut self, tooltip: impl Into<SharedString>) -> Self {
+        self.tooltip = Some(tooltip.into());
         self
     }
 
@@ -252,6 +262,9 @@ impl RenderOnce for StarRating {
                 this.opacity(0.5).children(
                     (1..=STARS).map(|n| render_star(n, shown, small, filled_color, empty_color)),
                 )
+            })
+            .when_some(self.tooltip, |this, tip| {
+                this.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
             })
             .when(focused, |this| this.focus_ring(radius, cx))
     }

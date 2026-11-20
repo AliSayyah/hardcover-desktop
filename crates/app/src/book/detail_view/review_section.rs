@@ -261,6 +261,9 @@ impl BookDetailView {
         self.review.text.update(cx, |s, cx| {
             s.set_value(draft.text.clone(), window, cx);
             if focus {
+                // The cursor at the end, to go on writing.
+                let end = s.value().len();
+                s.set_selected_range(end..end, cx);
                 s.focus(window, cx);
             }
         });
@@ -434,7 +437,7 @@ impl BookDetailView {
     // ----- rendering -----
 
     /// The "Your review" block: the review in `reader` with "Edit…" on the
-    /// heading, "No review yet." with "Write a review…", or the editor.
+    /// heading, "No review yet" with "Write a review…", or the editor.
     pub(super) fn render_review(
         &self,
         entry: &LibraryEntry,
@@ -504,23 +507,26 @@ impl BookDetailView {
             div()
                 .body()
                 .text_color(muted)
-                .child("No review yet.")
+                .child("No review yet")
                 .into_any_element()
         };
         // A review shown from before a failed refetch may be out of date.
         let refresh_failed = error.filter(|_| fetched).map(|error| {
             h_flex()
+                .flex_wrap()
                 .gap_2()
                 .items_center()
-                .body()
-                .text_color(muted)
-                .child("Couldn't refresh")
+                .child(
+                    div()
+                        .min_w_0()
+                        .body()
+                        .text_color(muted)
+                        .child(format!("Couldn't refresh your review. {error}")),
+                )
                 .child(
                     Button::new("refresh-review")
-                        .ghost()
                         .small()
                         .label("Try again")
-                        .tooltip(error)
                         .on_click(cx.listener(|this, _, _, cx| this.retry_review(cx))),
                 )
         });

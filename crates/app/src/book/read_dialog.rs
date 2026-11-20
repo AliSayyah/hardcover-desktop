@@ -13,11 +13,10 @@ use gpui_kit::component::{ActiveTheme as _, WindowExt as _, v_flex};
 use gpui_kit::{
     App, AppContext as _, Axis, Context, Entity, EventEmitter, IntoElement, ParentElement as _,
     Render, SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
-    rems,
 };
 use hardcover_core::{Date, ReadId, ReadSession};
 
-use crate::design::TypeRoles as _;
+use crate::design::{TypeRoles as _, size};
 
 /// What the dialog is for.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -97,7 +96,7 @@ impl ReadDialog {
             let ok_view = view.clone();
             dialog
                 .title(title)
-                .w(rems(24.).to_pixels(window.rem_size()))
+                .w(size::DIALOG_FORM.to_pixels(window.rem_size()))
                 .child(view.clone())
                 .on_ok(move |_, _, cx| ok_view.update(cx, |this, cx| this.confirm(cx)))
                 .footer(

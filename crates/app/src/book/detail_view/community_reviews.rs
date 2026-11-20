@@ -214,7 +214,7 @@ impl BookDetailView {
             Some(state) if state.reviews.is_empty() && !state.has_more => div()
                 .body()
                 .text_color(muted)
-                .child("No reviews yet.")
+                .child("No reviews yet")
                 .into_any_element(),
             Some(state) => v_flex()
                 .items_start()
@@ -333,9 +333,12 @@ impl BookDetailView {
                 )
                 .when(collapsed.is_some(), |this| {
                     this.child(
+                        // Its label on the text's spine: back by the
+                        // ghost button's padding.
                         Button::new(("review-more", key))
                             .ghost()
                             .small()
+                            .ml_neg_2()
                             .label(if expanded { "Show less" } else { "Read more" })
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 let expanded = &mut this.community_reviews.expanded;

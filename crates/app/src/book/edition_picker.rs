@@ -21,7 +21,7 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookId, EDITIONS_PER_PAGE, EditionId, EditionSummary};
 
 use crate::app_state::Services;
-use crate::design::TypeRoles as _;
+use crate::design::{TypeRoles as _, size};
 use crate::format::edition_text;
 use crate::ui::kit::open_dialog;
 
@@ -108,7 +108,7 @@ impl EditionPicker {
         open_dialog(window, cx, move |dialog: Dialog, window, _| {
             dialog
                 .title("Choose an edition")
-                .w(rems(32.).to_pixels(window.rem_size()))
+                .w(size::DIALOG_FORM.to_pixels(window.rem_size()))
                 .child(view.clone())
         });
     }

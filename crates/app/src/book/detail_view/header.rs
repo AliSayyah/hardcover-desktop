@@ -14,7 +14,7 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, IconName, Side, Sizable as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Side, Sizable as _, h_flex, v_flex,
 };
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, IntoElement, ParentElement as _, SharedString,
@@ -32,7 +32,7 @@ use crate::book::star_rating::StarRating;
 use crate::catalog::navigation::Page;
 use crate::chip::{TagChip, status_icon};
 use crate::cover::{Cover, CoverArt, CoverSize, detail_art};
-use crate::design::{TypeRoles as _, colors};
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{
     average_rating_text, count_text, duration_text, needs_permission, series_position_text,
     status_label,
@@ -139,9 +139,7 @@ impl BookDetailView {
             .when(rtl_title, |this| this.line_height(relative(1.5)))
             .child(WrappingText::new(book.title.clone()));
 
-        let info = v_flex()
-            .flex_1()
-            .min_w(INFO_MIN)
+        let text = v_flex()
             .gap_1()
             .child(title)
             .when_some(book.subtitle.clone(), |this, subtitle| {
@@ -182,21 +180,19 @@ impl BookDetailView {
                         .pt_2()
                         .children(genres.into_iter().map(TagChip::new)),
                 )
-            })
-            // The action row sits at the cover's foot, or right under the
-            // info when that runs longer.
-            .child(div().flex_1())
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_4()
-                    .pt_4()
-                    .child(match entry {
-                        Some(entry) => self.render_actions(entry, cx),
-                        None => self.render_add(book, cx),
-                    }),
-            );
+            });
+        // The action row sits at the cover's foot, or 16 under the info
+        // when that runs longer.
+        let info = v_flex()
+            .flex_1()
+            .min_w(INFO_MIN)
+            .justify_between()
+            .gap_4()
+            .child(text)
+            .child(match entry {
+                Some(entry) => self.render_actions(entry, cx),
+                None => self.render_add(book, cx),
+            });
 
         h_flex()
             .w_full()
@@ -315,12 +311,18 @@ impl BookDetailView {
                 }
                 menu
             });
+        // The stars and Clear rating stay enabled while a write runs, so
+        // they keep the keyboard focus; `change_rating` drops a change made
+        // meanwhile.
         let rate = h_flex()
             .gap_2()
             .child(
                 StarRating::new("your-rating")
                     .value(rating)
-                    .disabled(busy || !can_write)
+                    .disabled(!can_write)
+                    .when(!can_write, |this| {
+                        this.tooltip(needs_permission(WRITE_LIBRARY))
+                    })
                     .on_change(cx.listener(|this, rating: &Option<Rating>, window, cx| {
                         this.change_rating(*rating, window, cx)
                     })),
@@ -335,8 +337,12 @@ impl BookDetailView {
                         .ghost()
                         .small()
                         .icon(IconName::Close)
-                        .tooltip("Clear rating")
-                        .disabled(busy || !can_write)
+                        .tooltip(if can_write {
+                            "Clear rating".to_owned()
+                        } else {
+                            needs_permission(WRITE_LIBRARY)
+                        })
+                        .disabled(!can_write)
                         .on_click(
                             cx.listener(|this, _, window, cx| this.change_rating(None, window, cx)),
                         ),
@@ -413,36 +419,50 @@ impl BookDetailView {
                     .icon(IconName::Ellipsis)
                     .tooltip("More actions")
                     .disabled(busy)
-                    .dropdown_menu(move |menu, _, _| {
+                    .dropdown_menu(move |menu, _, cx| {
+                        // Disabled, the kit's muted colour shows instead.
+                        let danger = can_write.then(|| colors(cx).danger);
                         let remove_view = view.clone();
-                        // Ownership is per edition on Hardcover.
-                        let own_label = if has_edition {
-                            "Add to Owned list…"
-                        } else {
-                            "Add to Owned list (choose an edition first)"
-                        };
                         let owned_entry = owned_entry.clone();
                         let menu = if one_way_owned {
                             menu.item(
-                                PopupMenuItem::new(own_label)
+                                PopupMenuItem::new("Add to Owned list…")
                                     .disabled(!has_edition || owning || !can_write)
                                     .on_click(move |_, window, cx| {
                                         book_lists::confirm_owned(&owned_entry, window, cx)
                                     }),
                             )
+                            // Ownership is per edition on Hardcover. Without
+                            // write:library the last row says why, for both.
+                            .when(can_write && !has_edition, |menu| {
+                                menu.item(reason_row("Choose an edition first"))
+                            })
                             .separator()
                         } else {
                             menu
                         };
+                        // The destructive command, in danger and set apart:
+                        // the kit's menu items take no colour, so it is an
+                        // element item, its icon coloured too.
                         menu.item(
-                            PopupMenuItem::new("Remove from library…")
-                                .icon(IconName::Delete)
-                                .disabled(!can_write)
-                                .on_click(move |_, window, cx| {
-                                    let _ = remove_view
-                                        .update(cx, |this, cx| this.confirm_remove(window, cx));
-                                }),
+                            PopupMenuItem::element(move |_, _| {
+                                div()
+                                    .when_some(danger, |this, danger| this.text_color(danger))
+                                    .child("Remove from library…")
+                            })
+                            .icon(
+                                Icon::new(IconName::Delete)
+                                    .when_some(danger, |this, danger| this.text_color(danger)),
+                            )
+                            .disabled(!can_write)
+                            .on_click(move |_, window, cx| {
+                                let _ = remove_view
+                                    .update(cx, |this, cx| this.confirm_remove(window, cx));
+                            }),
                         )
+                        .when(!can_write, |menu| {
+                            menu.item(reason_row(needs_permission(WRITE_LIBRARY)))
+                        })
                     })
                     .into_any_element(),
             );
@@ -485,6 +505,14 @@ fn contributor_name(c: &Contributor, id: (&'static str, usize), byline: bool) ->
         .into_any_element(),
         None => style(div().child(c.name.clone()), byline).into_any_element(),
     }
+}
+
+/// A menu row saying why the items above it are disabled: muted, and
+/// wrapped at [`size::MENU_REASON`], since the kit's menu labels don't wrap.
+fn reason_row(reason: impl Into<SharedString>) -> PopupMenuItem {
+    let reason = reason.into();
+    PopupMenuItem::element(move |_, _| div().w(size::MENU_REASON).child(reason.clone()))
+        .disabled(true)
 }
 
 /// "Saving…" beside a control whose write is in flight.

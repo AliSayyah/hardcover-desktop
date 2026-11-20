@@ -201,7 +201,8 @@ impl RenderOnce for Lane {
 
 /// Key and value rows: each at least 24 high, 8 apart. The key column is 96
 /// (72 in a rail) in `fg-muted`; the value is ink, with small controls
-/// inline.
+/// inline. A value that runs to a second line (a hint under a switch in a
+/// rail) keeps its key on the first line, which is 24 high.
 ///
 /// ```ignore
 /// PropertyList::new()
@@ -249,17 +250,26 @@ impl RenderOnce for PropertyList {
             .children(self.rows.into_iter().map(move |(key, value)| {
                 h_flex()
                     .w_full()
-                    .min_h(size::CONTROL_SMALL)
+                    .items_start()
                     .child(
                         div()
+                            .flex()
                             .flex_none()
+                            .items_center()
                             .w(key_width)
+                            .h(size::CONTROL_SMALL)
                             .pr_2()
                             .text_color(muted)
-                            .truncate()
-                            .child(key),
+                            .child(div().min_w_0().truncate().child(key)),
                     )
-                    .child(h_flex().flex_1().min_w_0().gap_2().child(value))
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h(size::CONTROL_SMALL)
+                            .gap_2()
+                            .child(value),
+                    )
             }))
     }
 }

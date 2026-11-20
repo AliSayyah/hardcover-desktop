@@ -210,9 +210,13 @@ impl BookDetailView {
                     ),
             );
         let privacy_value = h_flex()
-            .gap_2()
+            .flex_wrap()
+            .gap_x_2()
             .child(
-                div().w(size::SELECT_SMALL).child(
+                // The full select width, not the small one: at the kit's
+                // 14 px "Followers only" doesn't fit in 128. It returns to
+                // `SELECT_SMALL` once small selects are set at 12 px.
+                div().w(size::SELECT).child(
                     Select::new(&self.privacy)
                         .small()
                         .placeholder("Unknown")
@@ -240,7 +244,7 @@ impl BookDetailView {
         }
     }
 
-    /// Notes: the saved notes with "Edit…", or "No notes." with "Add a
+    /// Notes: the saved notes with "Edit…", or "No notes" with "Add a
     /// note…"; the editor in place once opened, or while it holds a draft.
     pub(super) fn render_notes(
         &self,
@@ -287,7 +291,7 @@ impl BookDetailView {
                     v_flex()
                         .items_start()
                         .gap_3()
-                        .child(div().body().text_color(muted).child("No notes."))
+                        .child(div().body().text_color(muted).child("No notes"))
                         .child(edit("add-notes", "Add a note…"))
                         .into_any_element(),
                     None,
@@ -438,7 +442,7 @@ impl BookDetailView {
                     div()
                         .body()
                         .text_color(colors(cx).fg_muted)
-                        .child("No reads recorded."),
+                        .child("No reads recorded"),
                 )
             })
             .children(rows);
@@ -518,13 +522,17 @@ fn short_position(progress: &ProgressSummary) -> Option<String> {
 }
 
 /// The muted line under the meter: "Started Nov 1 · 16 pages a day · done
-/// around Dec 1", as much of it as is known.
+/// around Dec 1", as much of it as is known. A paused book has no pace and
+/// no finish date: only when it started.
 fn pace_line(entry: &LibraryEntry, today: Date) -> Option<SharedString> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(started) = entry.open_read().and_then(|r| r.started_at) {
         parts.push(format!("Started {}", short_date(started, today)));
     }
-    if let Some(pace) = crate::home::digest::pace(entry, today) {
+    let pace = (entry.status != ReadingStatus::Paused)
+        .then(|| crate::home::digest::pace(entry, today))
+        .flatten();
+    if let Some(pace) = pace {
         parts.push(match pace.pages_per_day.round() as u32 {
             0 => "under a page a day".to_owned(),
             1 => "1 page a day".to_owned(),
@@ -614,6 +622,30 @@ mod tests {
             short_date(Date::from_ymd_opt(2027, 1, 5).unwrap(), today),
             "Jan 5, 2027"
         );
+    }
+
+    #[test]
+    fn a_paused_book_has_no_pace() {
+        use hardcover_core::{BookId, BookSummary, ReadId, UserBookId, UserId};
+        let today = Date::from_ymd_opt(2026, 11, 20).unwrap();
+        let mut book = BookSummary::new(BookId::new(1), "Book");
+        book.pages = Some(476);
+        let mut entry = LibraryEntry::new(
+            UserBookId::new(1),
+            UserId::new(1),
+            book,
+            ReadingStatus::CurrentlyReading,
+        );
+        let mut read = ReadSession::new(ReadId::new(1));
+        read.started_at = Date::from_ymd_opt(2026, 11, 1);
+        read.progress_pages = Some(312);
+        entry.reads.push(read);
+        assert_eq!(
+            pace_line(&entry, today).unwrap(),
+            "Started Nov 1 · 16 pages a day · done around Dec 1"
+        );
+        entry.status = ReadingStatus::Paused;
+        assert_eq!(pace_line(&entry, today).unwrap(), "Started Nov 1");
     }
 
     #[test]
