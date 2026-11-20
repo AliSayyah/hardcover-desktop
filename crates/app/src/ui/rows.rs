@@ -11,8 +11,8 @@
 //!   kept even when a row has nothing for it, so columns stay aligned.
 //! - [`PropertyList`]: key and value rows ("Edition", "Owned", "Privacy").
 
+use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
-use gpui_kit::component::{ActiveTheme as _, h_flex};
 use gpui_kit::{
     AnyElement, App, IntoElement, ParentElement, Rems, RenderOnce, SharedString, Styled, Window,
     div, prelude::FluentBuilder as _,
@@ -120,7 +120,7 @@ impl ListRow for ListItem {
             .gap_3()
             .mb_0p5()
             .rounded(box_radius(cx))
-            .text_color(cx.theme().foreground)
+            .text_color(colors(cx).fg)
             .when(focused, |this| this.focus_row(box_radius(cx), cx))
     }
 }

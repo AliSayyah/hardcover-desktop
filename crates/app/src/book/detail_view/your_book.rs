@@ -14,7 +14,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::select::Select;
-use gpui_kit::component::{Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, Context, ElementId, IntoElement, ParentElement as _, SharedString, Styled as _,
     div, prelude::FluentBuilder as _,
@@ -34,6 +34,7 @@ use crate::format::{
 use crate::library::model::WriteKind;
 use crate::lists::book_lists;
 use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::{SmallControl as _, SmallIconButton as _};
 use crate::ui::{Block, Meter, PropertyList, RailSection, panel};
 
 impl BookDetailView {
@@ -114,7 +115,7 @@ impl BookDetailView {
                     .when(open, |this| {
                         this.child(
                             Button::new("update-progress")
-                                .small()
+                                .small_control()
                                 .label("Update progress…")
                                 .loading(pending == Some(WriteKind::Progress))
                                 .disabled(pending.is_some() || !can_write)
@@ -198,7 +199,7 @@ impl BookDetailView {
             )
             .child(
                 Button::new("change-edition")
-                    .small()
+                    .small_control()
                     .label(if chosen { "Change…" } else { "Choose…" })
                     .loading(pending == Some(WriteKind::Edition))
                     .disabled(busy || !can_write)
@@ -213,12 +214,9 @@ impl BookDetailView {
             .flex_wrap()
             .gap_x_2()
             .child(
-                // The full select width, not the small one: at the kit's
-                // 14 px "Followers only" doesn't fit in 128. It returns to
-                // `SELECT_SMALL` once small selects are set at 12 px.
-                div().w(size::SELECT).child(
+                div().w(size::SELECT_SMALL).child(
                     Select::new(&self.privacy)
-                        .small()
+                        .small_control()
                         .placeholder("Unknown")
                         .disabled(busy || !can_write)
                         .raised_field(busy || !can_write, cx),
@@ -268,7 +266,7 @@ impl BookDetailView {
             let saved = self.notes_saved == Some(id);
             let edit = |id: &'static str, label: &'static str| {
                 Button::new(id)
-                    .small()
+                    .small_control()
                     .label(label)
                     .disabled(pending.is_some() || !can_write)
                     .when(!can_write, |this| {
@@ -332,7 +330,7 @@ impl BookDetailView {
                     .child(
                         Button::new("save-notes")
                             .primary()
-                            .small()
+                            .small_control()
                             .label("Save")
                             .tooltip(if can_write {
                                 "Ctrl+Enter".to_owned()
@@ -348,7 +346,7 @@ impl BookDetailView {
                     .child(
                         Button::new("discard-notes")
                             .ghost()
-                            .small()
+                            .small_control()
                             .label(if dirty { "Discard" } else { "Cancel" })
                             .disabled(saving_notes)
                             .on_click(
@@ -426,7 +424,7 @@ impl BookDetailView {
             .collect();
         let add = Button::new("add-read")
             .ghost()
-            .small()
+            .small_control()
             .icon(IconName::Plus)
             .label("Add a past read…")
             .loading(pending == Some(WriteKind::Reads))
@@ -471,7 +469,7 @@ impl BookDetailView {
         let read_id = read.id;
         Button::new(ElementId::Name(format!("read-{}", read.id).into()))
             .ghost()
-            .small()
+            .small_icon_button()
             .icon(IconName::Ellipsis)
             .tooltip("Read actions")
             .disabled(disabled)

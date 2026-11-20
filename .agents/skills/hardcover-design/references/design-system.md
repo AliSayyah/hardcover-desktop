@@ -61,10 +61,11 @@ selected row.
 | `hover` | ink 5% `rgba(31,28,23,.05)` | ink 5% `rgba(238,234,227,.05)` | Pointer over a row, nav item, menu item or ghost button |
 | `selected` | ink 10% | ink 10% | The current row or destination; a pressed control |
 | `chip` | ink 7% | ink 8% | Chip fill |
-| `skeleton` | `#E9E4DA` | `#23211E` | Something still loading |
+| `skeleton` | `#E9E4DA` | `#2B2825` | Something still loading (about 1.2:1 on paper in both themes) |
 | `border` | `#E4DED3` | `#292623` | Hairlines between regions and sections |
 | `border-strong` | `#D0C8BA` | `#3D3934` | Control outlines |
 | `track` | `#E0D9CC` | `#35312C` | The empty part of a meter; an off switch |
+| `switch-thumb` | `#FFFFFF` (`raised`) | `#EEEAE3` (`fg`) | A switch's thumb, on `track` and on `accent`. In dark mode a `raised` thumb on `track` is 1.2:1, and gone once a disabled switch fades its track |
 | `fg` | `#1F1C17` | `#EEEAE3` | Ink: text |
 | `fg-muted` | `#5F574B` | `#ABA498` | Secondary text that carries information: authors, facts, counts, labels |
 | `fg-faint` | `#857D70` | `#807A6F` | Placeholders, disabled hints, empty-state icons. Nothing a reader must read |
@@ -73,6 +74,7 @@ selected row.
 | `accent-soft` | accent 10% | accent 14% | The avatar's fill |
 | `ring` | accent 50% | accent 50% | The 3 px focus ring |
 | `gold` | `#F59E0B` (amber 500) | `#FBBF24` (amber 400) | The user's own rating, nothing else |
+| `gold-preview` | gold 55% | gold 55% | The rating control's hover preview: the stars a click would set |
 | `star-empty` | ink 14% | ink 14% | An unfilled star |
 | `danger` | `#B42318` | `#F97066` | Destructive commands and errors |
 | `warning` | `#B54708` | `#FDB022` | A content warning's icon; warnings |
@@ -109,20 +111,26 @@ Rules:
 Two families with fixed roles, and seven sizes: 12, 14, 16, 18, 20, 24, 30.
 Every size has a fixed line height.
 
-| Role | Family, weight | Size / line | GPUI | Use |
+| Role | Family, weight | Size / line | In code | Use |
 | --- | --- | --- | --- | --- |
-| `page-title` | Inter 600 | 20 / 28 | `text_xl` | A destination's title: "Currently reading" |
-| `section` | Inter 600 | 16 / 24 | `text_base` | A section on a page: "Continue reading" |
-| `heading` | Inter 600 | 14 / 20 | `text_sm` | A block in a pane: "About this book", "Details" |
-| `body` | Inter 400 | 14 / 20 | `text_sm` | Everything by default |
-| `body-strong` | Inter 500 | 14 / 20 | `text_sm` | Row titles, values that lead |
-| `label` | Inter 500, muted | 12 / 16 | `text_xs` | Sidebar and rail section labels: "Reading goal", "On Hardcover" |
-| `caption` | Inter 400, muted | 12 / 16 | `text_xs` | Counts, trailing figures, timestamps, helper text |
-| `display-30` | Literata Display 600 | 30 / 36 | `text_3xl` | Book title on the full page; the Home greeting; figures ("9", "4.63") |
-| `display-24` | Literata Display 600 | 24 / 30 | `text_2xl` | Book title in the pane and the Home lead |
-| `title-18` | Literata Text 600 | 18 / 24 | `text_lg` | Book titles in Home rows and Up next |
-| `prose` | Literata Text 400 | 16 / 26 | `text_base` | Descriptions; at most 640 px wide |
-| `reader` | Inter 400 | 14 / 22 | `text_sm` | Readers' words: your review, other readers' reviews, notes that run long; at most 640 px wide, 8 between paragraphs |
+| `page-title` | Inter 600 | 20 / 28 | `.page_title()` | A destination's title: "Currently reading" |
+| `section` | Inter 600 | 16 / 24 | `.section()` | A section on a page: "Continue reading" |
+| `byline` | Inter 500 | 16 / 24 | `.byline()` | A book's author and series under its title in the header |
+| `heading` | Inter 600 | 14 / 20 | `.heading()` | A block in a pane: "About this book", "Details" |
+| `body` | Inter 400 | 14 / 20 | `.body()` | Everything by default |
+| `body-strong` | Inter 500 | 14 / 20 | `.body_strong()` | Row titles, values that lead |
+| `label` | Inter 500, muted | 12 / 16 | `.label(cx)` | Sidebar and rail section labels: "Reading goal", "On Hardcover" |
+| `caption` | Inter 400, muted | 12 / 16 | `.caption(cx)` | Counts, trailing figures, timestamps, helper text |
+| `display-30` | Literata Display 600 | 30 / 36 | `.display_30()` | Book title on the full page; the Home greeting; figures ("9", "4.63") |
+| `display-24` | Literata Display 600 | 24 / 30 | `.display_24()` | Book title in the pane and the Home lead |
+| `title-18` | Literata Text 600 | 18 / 24 | `.title_18()` | Book titles in Home rows and Up next |
+| `prose` | Literata Text 400 | 16 / 26 | `.prose()` | Descriptions; at most 640 px wide |
+| `reader` | Inter 400 | 14 / 22 | `.reader()` | Readers' words: your review, other readers' reviews, notes that run long; at most 640 px wide, 8 between paragraphs |
+
+The role helpers are `design::TypeRoles`; each sets the family, its
+Persian fallback, the weight, the size and the line height. Never use
+GPUI's own size helpers (`text_sm`, `text_xl` and the rest): they set
+GPUI's line heights and no family. `.tabular()` adds tabular figures.
 
 - Literata comes in two optical cuts, registered as two families: **Text**
   (the 12 pt cut) up to 18 px, and **Display** (the 36 pt cut) from 24 px.
@@ -200,14 +208,16 @@ selection fill or a nested surface its own radius.
 | Object bar (book tools, Back) | 56 high | `h(rems(3.5))` |
 | Icons | 16; 12 in small controls and chips; 24 in empty states | `size_4`, `size_3`, `size_6` |
 | Sidebar | 240 wide | `w(rems(15.))` |
-| Shelf list | 384 wide by default (resizable) | `w_96` |
+| Shelf list | 384 wide by default, resizable from 272 (its filter, a small select and the inset) to 640 | `size::LIST`, `LIST_MIN`, `LIST_MAX` |
 | Rail (Home, full book page) | 272 wide | `w(rems(17.))` |
 | Next lane (a series row) | 240 wide | `size::NEXT_LANE` |
 | Strip item (a series row) | 40 wide | `size::STRIP_ITEM` |
 | Key column in a property list | 96; 72 in a rail | `w_24`, `w(rems(4.5))` |
-| Select | 168; small 128 | `w(rems(10.5))`, `w_32` |
+| Select | 168; small 128 | `size::SELECT`, `size::SELECT_SMALL` |
 | Meter | 6 high beside words, 2 high inside a row; 400 wide max (160 in a row) | |
-| Prose | 640 wide max | `max_w(rems(40.))` |
+| Prose | 640 wide max | `size::PROSE` |
+| Page content | 768 wide max (`size::PAGE_MAX`), inside the 32 inset (`PAGE_FRAME_MAX` is both) | |
+| Home | 1024 wide max, its inset included | `size::HOME_MAX` |
 | Series page | 896 wide max | `size::SERIES_COLUMN` |
 | Empty-state text | 288 wide max | `w_72` |
 | Window | 1200 × 800 by default, 800 × 560 minimum | |
@@ -291,7 +301,10 @@ dust jacket.
 | Byline link | Ink, 14/500, underline on hover, pointing hand | A reviewer's name, which opens their Hardcover profile in the browser. It repeats on every review, so it stays quiet; a right-to-left name goes without the underline, which GPUI on Linux draws beside it |
 
 - **Sizes:** default 32 (padding 12, icon 16, gap 8); small 24 (padding 8,
-  12 px text, icon 12, gap 4). Use small inside rows, panels and rails.
+  12 px text, icon 12, gap 4). Use small inside rows, panels and rails. In
+  code a small button or select is `.small_control()` (`ui::kit`), an
+  icon-only one `.small_icon_button()`; never the kit's `.small()`, which
+  sets 14 px text.
 - **Menu buttons:** a button that owns a menu ends with a 12 px chevron, and
   stays pressed while the menu is open. The status button shows the status's
   icon.
@@ -305,8 +318,12 @@ dust jacket.
   - Placeholder: `fg-faint`.
   - A leading icon: 16 px, `fg-muted`.
   - A small select is 24 high.
-- A switch is 28 × 16: `track` when off, `accent` when on, with a `raised`
-  thumb.
+- A switch is 28 × 16 (the kit's `.small()`): `track` when off, `accent`
+  when on, with a `switch-thumb` thumb (`raised` in light mode, `fg` in
+  dark).
+- A setting fixed from outside the app (an environment variable) shows its
+  value as text with the reason under it, not as a control the user can't
+  operate.
 - A field's label is visible and its help sits next to it. In property lists
   the key column holds the label.
 
@@ -335,6 +352,9 @@ Never colour-code chips, and never use a badge for ordinary metadata.
 - **An empty star:** the same shape in `star-empty`, so a half star splits
   cleanly.
 - An unrated rating control reads "Rate" beside it, in `fg-muted`.
+- **Hover preview:** over the rating control, the stars a click would set
+  show in `gold-preview` (gold 55%). It is the pointer's preview, never a
+  saved rating; the keyboard changes the rating itself.
 - In code: the rating control is `book::star_rating::StarRating` (20;
   `.small()` 16 in a row); a rating only shown is `ui::Stars` (16;
   `.small()` 12 inline).
@@ -355,7 +375,10 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   Not started block for a Want to read book.
 - **Rail:** a column with a 1 px leading hairline and a 24 inset. Sections
   inside it start with a `label` and are separated by hairlines with 24
-  above and below. Never boxes.
+  above and below (to the label's line box). A section's small action
+  ("Add a past read…") is centred on the label's line and hangs over it,
+  so the label sits in the same place with or without one. The rail runs
+  the page's height, to its foot on a short page. Never boxes.
 - **Hairline:** 1 px `border`, drawn by exactly one of the two regions it
   separates.
 - Never put a card inside a card.
@@ -371,7 +394,9 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   - The lane is kept even when a row has nothing to put in it, so columns
     stay aligned.
 - **Catalogue row** (search, Discover, series, author and list pages): the
-  same, with the StatusChip trailing.
+  same, with the StatusChip trailing. In a list narrower than 360 the chip
+  shrinks to its icon (`StatusIconChip`, the status in its tooltip and
+  accessible name), so the title keeps its room.
 - **Selectable or not.** A collection you select from (a shelf, search
   results, a list) uses list rows, with hover and selected fills. A read-only
   sequence on Home or a page (Continue reading, Coming soon, reviews) uses
@@ -445,6 +470,8 @@ Never colour-code chips, and never use a badge for ordinary metadata.
 - **Popover and menu:** `raised`, `r-box`, `shadow-popover`, padding 4.
   - Menu items are 32 high, padding 8, `r-control`, with a 16 px icon in a
     fixed slot. They use the same hover and selected fills as rows.
+  - The app has no popover of its own; its menus are the kit's, which keep
+    their own radius, shadow, item height and icon size (Kit limits).
 - **Dialogs:**
   - **Width:** confirmations 24 rem; forms 30 rem.
   - **Title:** the decision ("Delete “Book club picks”?").
@@ -493,7 +520,7 @@ Each state has one treatment, on every control. Hover is never the only cue.
 | State | Treatment |
 | --- | --- |
 | Rest | As specified for the component |
-| Hover | The `hover` fill. A text button gains its underline |
+| Hover | The `hover` fill. A text button gains its underline. The rating control previews the stars a click would set in `gold-preview` |
 | Pressed, selected, open | The `selected` fill. A selected nav row also takes weight 500 and the accent icon. A menu button stays pressed while its menu is open |
 | Focus-visible | A 3 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
 | Disabled | 50% opacity, with no hover or pressed response. When the reason isn't obvious, say it beside the control or in its tooltip (`format::needs_permission`) |
@@ -520,17 +547,27 @@ Every screen starts from its task:
 - The sidebar (240) sits beside the destination.
 - Book, series and author pages open over the destination with a Back bar.
   A sidebar destination clears them.
+- **Surplus width:** content keeps to its maximum (768 for pages, 1024 for
+  Home, 896 for Series) on the leading edge, on the same spine as Back; the
+  rest of a wide window stays paper on the trailing side. Content is never
+  centred in the window. A book pane's tools stay over its content.
+- **Short window:** when the sidebar's destinations don't all fit, a
+  hairline over the account says the list scrolls under it.
 
 ### Shelf: list plus book pane
 
 - **List:** 384 wide by default, with a trailing hairline.
   - **Header:** padding 12/16, a hairline under it. The page title has its
-    count beside it in `fg-muted`; under that, the filter input (filling the
-    width) and the sort select (168), 8 apart.
+    count beside it in `fg-muted`; under that, the filter input ("Filter",
+    filling the width) and the sort select (168), 8 apart. As the list
+    narrows, the select gives way first, down to the small 128; the filter
+    keeps at least 104.
   - **Rows:** list rows, inset 8.
 - **Book pane:**
   - **Object bar:** 56 high, no hairline. "Lists" (a ghost menu button with
-    the layers icon) and "more" (an icon button) sit on the trailing edge.
+    the gallery-vertical-end icon, the sidebar's list icon) and "more" (an
+    icon button) sit on the trailing edge, over the content: in a wide
+    window the bar keeps to the content's width and inset.
     The book's tools live here, never over the title.
   - **Content:** inset 24, with 0 above.
 - **Header:** an xl cover beside the info column, 24 apart. The info column
@@ -769,7 +806,7 @@ it when you wire it.
 | `secondary_hover`, `secondary_active` | `hover`, `selected` blended into `surface` |
 | `primary_hover`, `primary_active` | `hover`, `selected` blended into `accent` |
 | `button_danger` | clear: `danger` text, with `hover` and `selected` on hover and press |
-| `switch` (off), `switch_thumb` | `track`, `raised` |
+| `switch` (off), `switch_thumb` | `track`, `switch-thumb` |
 | `scrollbar_thumb`, `scrollbar_thumb_hover` | `border-strong`, `fg-faint` |
 | `tab_bar_segmented` | `chip` blended into `bg` |
 | `chart_1` to `chart_5`, `chart_grid` | `accent`, `track` |
@@ -784,7 +821,7 @@ it when you wire it.
 The app builds this as two theme configs (`design::theme`), so every mode
 change applies it. `ring` is the solid accent: the kit draws the 3 px ring
 at 50% of it, plus a 1 px accent edge. What the kit doesn't let the theme
-reach is listed under "Migration status".
+reach is listed under "Kit limits".
 
 **Notes:**
 - **App-owned roles** live in one app module and nowhere else: gold,
@@ -809,33 +846,35 @@ reach is listed under "Migration status".
     with `fonttools varLib.instancer` and commit the static output.
   - The test in `fonts.rs` that rejects variable faces covers every new face.
 
-## Migration status
+## Kit limits
 
-What the code still lacks. Remove an item in the commit that finishes it.
+The app follows this system everywhere: the palette is on the kit's theme
+(`design::theme`), every value comes from the token module
+(`design::colors`, `design::size`, `design::TypeRoles`), the fonts are
+bundled (`fonts.rs`), covers have one component (`cover.rs`), and every
+screen is built from the shared components in `crates/app/src/ui/` (the
+demo build shows them all with `HARDCOVER_GALLERY=1`).
 
-The foundation is in place: the palette on the kit's theme
-(`design::theme`), the token module (`design::colors`, `design::size`,
-`design::TypeRoles`), the bundled fonts (`fonts.rs`), one cover component
-(`cover.rs`) with the cloth cover, and chips at 20 on the chip overlay.
+`ui::kit` fixes what the theme can't reach and the kit lets the app
+refine: inputs, selects and text areas on `raised` (`RaisedField`), small
+controls at 12 px (`SmallControl`, `SmallIconButton`), dialogs on `raised`
+with the system's widths and keys (`open_dialog`, `open_alert_dialog`,
+`bind_keys`), and quiet buttons on the text spine (`OnTextSpine`).
 
-The shared components are built, in `crates/app/src/ui/` (its module doc
-lists each with what to use it for), and the demo build shows them all on
-one page with `HARDCOVER_GALLERY=1`. Every screen is on them, the type roles
-and the tokens: the sidebar and the shell's chrome (the account menu,
-Settings, About, the goal and list dialogs, sign-in and the permissions
-notice), Home and Coming soon, the book pane and page, and the collections
-(shelves, search, Discover, list pages, series and author pages, Stats).
-
-What remains is what neither the theme nor the app can reach without
-patching the kit. The theme gives the kit's controls the ink overlays, solid
-where a control paints its own fill, and the focus ring (3 px accent at 50%
-plus a 1 px accent edge); `ui::kit` puts inputs, selects and text areas
-(`RaisedField`) and dialogs (`open_dialog`, `open_alert_dialog`) on
-`raised`. Still off the system:
-- menus (`PopupMenu`) and the Select dropdown round at 6, not 8, and use the
-  kit's own shadow, not `shadow-popover` (the app's own popovers take
-  `ui::kit::PopoverSurface`);
-- menu items hover at 10% in dark mode: the kit's `accent` serves both menu
-  items and ghost buttons, and ghost buttons take half of it there;
-- the `DatePicker`'s field stays paper;
-- a dialog keeps the kit's shadow.
+What follows is off the system and can't be fixed without patching the
+kit. Keep it in step with `ui::kit`'s module doc; remove an item in the
+commit that fixes it.
+- Menus (`PopupMenu`) and the Select dropdown round at 6, not 8, and use
+  the kit's own shadow, not `shadow-popover`.
+- Menu items are 26 high (one every 28), not 32, with 12 px icons, not 16:
+  the menu sets both itself.
+- Menu items hover at 10% in dark mode: the kit's `accent` serves both menu
+  items and ghost buttons, and ghost buttons take half of it there.
+- The sidebar's menu hover is 8%, not 5%.
+- The segmented tab bar's sliding indicator is always paper.
+- A disabled switch fades its track, not its thumb.
+- A radio's circle takes no style from outside: unchecked and disabled, it
+  is faint, most in dark mode. Settings shows a fixed theme as text rather
+  than disabled radios; a form's radios are disabled only while it saves.
+- The `DatePicker`'s field stays paper.
+- A dialog keeps the kit's shadow.

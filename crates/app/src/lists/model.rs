@@ -485,7 +485,9 @@ impl ListsModel {
         cx: &mut Context<Self>,
     ) -> Task<Result<R, SharedString>> {
         if self.writing {
-            return Task::ready(Err("Another change is still being saved.".into()));
+            return Task::ready(Err(
+                "Another change is still being saved. Try again in a moment.".into(),
+            ));
         }
         let Some(services) = services(cx) else {
             return Task::ready(Err(SIGNED_OUT.into()));
@@ -606,7 +608,7 @@ impl ListsModel {
     ) -> Task<Result<(), SharedString>> {
         if self.busy_books.contains(&book) {
             return Task::ready(Err(
-                "Another change to this book is still being saved.".into()
+                "Another change to this book is still being saved. Try again in a moment.".into(),
             ));
         }
         let Some(services) = services(cx) else {
@@ -726,7 +728,7 @@ impl ListsModel {
         }
         let Some(edition) = edition else {
             return Task::ready(Err(
-                "Choose an edition first: Hardcover owns editions.".into()
+                "Choose an edition first. Hardcover marks editions as owned, not books.".into(),
             ));
         };
         self.write_book(

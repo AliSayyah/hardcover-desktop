@@ -1,5 +1,5 @@
 //! Where the kit's components miss the system and the theme can't reach
-//! (`hardcover-design`, Migration status → States and the kit). Each fix is a
+//! (`hardcover-design`, Kit limits). Each fix is a
 //! style the kit lets the app refine; use them wherever the kit component
 //! appears.
 //!
@@ -15,32 +15,48 @@
 //!   button, as Space does, instead of the kit's dialog-wide Confirm; so
 //!   does Enter on a row's own button in a list ([`row_action`]), instead of
 //!   the list's Confirm, which opens the row.
+//! - [`SmallControl`]: the system's small button and select (24 high,
+//!   padding 8, 12 px text, 12 px icon, gap 4). The kit's `Size::Small` sets
+//!   14 px text and a 14 px icon; use `.small_control()` (or
+//!   `.small_icon_button()` for an icon alone) wherever a small control
+//!   goes, never `.small()`.
 //! - [`OnTextSpine`]: a quiet button (ghost, or a danger label) that starts a
 //!   line puts its label, not its padding, on the content's leading edge.
-//! - [`PopoverSurface`]: the kit's `Popover` at `r-box` with
-//!   `shadow-popover`.
 //!
-//! What can't be fixed without patching the kit:
+//! What can't be fixed without patching the kit (the same list as the
+//! system's "Kit limits"):
 //! - **Menus** (`PopupMenu`: dropdown and context menus) and the **Select
 //!   dropdown** take no style from outside: they round at 6, not 8, and keep
-//!   the kit's shadow.
+//!   the kit's shadow, not `shadow-popover`.
+//! - **Menu items** are 26 high (one every 28 with the gap), not 32, and
+//!   their icons are 12, not 16: the menu sets both itself. An element item
+//!   only gets a minimum height, and rebuilding every item as one would lose
+//!   the kit's icon slot, check marks and key hints, and mix two heights.
 //! - **Menu hover in dark mode** stays at 10%: the kit reads one colour
 //!   (`accent`) for menu items and ghost buttons, and halves it for ghost
 //!   buttons in dark mode. The theme picks 10% so ghost buttons get the
 //!   system's 5%.
+//! - **A disabled switch** fades its track only, not its thumb.
+//! - **Radios** draw their outline in `border-strong` and halve it when
+//!   disabled; a style reaches the radio's row, not its circle. An
+//!   unchecked disabled radio is faint, most in dark mode, so the app avoids
+//!   one where it can (Settings shows a theme fixed by `HARDCOVER_THEME` as
+//!   a value); a form's radios are disabled only while it saves.
 //! - **`DatePicker`** paints its field on an inner element the style doesn't
 //!   reach, so it stays paper.
 //! - **A dialog's shadow** is set after its style is applied, so it keeps
 //!   the kit's.
 
+use gpui_kit::component::button::Button;
 use gpui_kit::component::dialog::{AlertDialog, Dialog};
-use gpui_kit::component::{ActiveTheme as _, WindowExt as _};
+use gpui_kit::component::select::{Select, SelectDelegate, SelectItem};
+use gpui_kit::component::{Icon, IconName, Sizable as _, WindowExt as _};
 use gpui_kit::{
     App, Div, InteractiveElement as _, IntoElement, KeyBinding, NoAction, ParentElement as _,
-    Styled, Window, div,
+    Styled, Window, div, rems,
 };
 
-use crate::design::{colors, size};
+use crate::design::{TypeRole, colors, size};
 
 /// Enter in a dialog, outside a text field, goes to the focused control
 /// (a button presses, as with Space) rather than to the kit's dialog-wide
@@ -89,6 +105,57 @@ pub trait RaisedField: Styled + Sized {
 
 impl<T: Styled + Sized> RaisedField for T {}
 
+/// The system's small control: 24 high, padding 8, 12 px text, a 12 px icon,
+/// 4 between icon and label (`hardcover-design`, Buttons and links → Sizes;
+/// Inputs). The kit's `Size::Small` is 24 high but sets 14 px text and a
+/// 14 px icon, so a small control would read as loud as a default one.
+///
+/// ```ignore
+/// Button::new("update").label("Update progress…").small_control()
+/// Button::new("read-menu").ghost().icon(IconName::Ellipsis).small_icon_button()
+/// Select::new(&self.privacy).small_control().w(size::SELECT_SMALL)
+/// ```
+///
+/// Call it instead of `.small()`, and don't size the control again after it.
+pub trait SmallControl: Sized {
+    fn small_control(self) -> Self;
+}
+
+impl SmallControl for Button {
+    /// The kit's extra-small button has the system's small text, icon and
+    /// gap; its height and padding go back to the small control's.
+    fn small_control(self) -> Self {
+        self.xsmall().h(size::CONTROL_SMALL).px_2()
+    }
+}
+
+impl<D> SmallControl for Select<D>
+where
+    D: SelectDelegate + 'static,
+    <D::Item as SelectItem>::Value: PartialEq + Clone,
+{
+    /// The kit's small select (24 high, padding 8, its menu's rows at the
+    /// kit's small size) with 12 px text and a 12 px chevron.
+    fn small_control(self) -> Self {
+        let (text, line) = TypeRole::Caption.scale();
+        self.small()
+            .icon(Icon::new(IconName::ChevronDown))
+            .text_size(rems(text / 16.))
+            .line_height(rems(line / 16.))
+    }
+}
+
+/// A small button that shows only an icon: 24 square, the icon 12.
+pub trait SmallIconButton: Sized {
+    fn small_icon_button(self) -> Self;
+}
+
+impl SmallIconButton for Button {
+    fn small_icon_button(self) -> Self {
+        self.xsmall().size(size::CONTROL_SMALL)
+    }
+}
+
 /// A quiet button whose label starts a line: pulled back by the kit's own
 /// label inset, so the label sits on the text spine like the content above
 /// it (`hardcover-design`, Alignment: peers attach to the same spine).
@@ -103,7 +170,7 @@ pub trait OnTextSpine: Styled + Sized {
     }
 }
 
-impl OnTextSpine for gpui_kit::component::button::Button {}
+impl OnTextSpine for Button {}
 
 /// The kit's label inset in a button: `px_2p5`, and `px_2` when small.
 const KIT_INSET: gpui_kit::Rems = gpui_kit::rems(0.625);
@@ -176,18 +243,6 @@ fn open_alert(
         }
     });
 }
-
-/// The kit's `Popover` as the system's popover: `raised`, `r-box`,
-/// `shadow-popover`. Its padding stays the kit's.
-pub trait PopoverSurface: Styled + Sized {
-    fn popover_surface(self, cx: &App) -> Self {
-        self.bg(colors(cx).raised)
-            .rounded(cx.theme().radius_lg)
-            .shadow(colors(cx).shadow_popover())
-    }
-}
-
-impl<T: Styled + Sized> PopoverSurface for T {}
 
 #[cfg(test)]
 mod tests {

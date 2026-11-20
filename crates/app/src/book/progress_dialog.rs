@@ -7,7 +7,7 @@
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
     Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
@@ -16,7 +16,7 @@ use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{Length, LibraryEntry, UserBookId};
 
 use crate::app_state::Services;
-use crate::design::{TypeRoles as _, size};
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{
     count_text, duration_text, needs_permission, parse_progress, position_text, progress_summary,
 };
@@ -158,7 +158,7 @@ impl Render for ProgressDialog {
         let busy = model.pending_write(self.id).is_some();
         let length = model.entry(self.id).and_then(LibraryEntry::length);
         let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
-        let muted = cx.theme().muted_foreground;
+        let muted = colors(cx).fg_muted;
         let total = match length {
             Some(Length::Pages(total)) => Some(format!("of {}", count_text(total))),
             Some(Length::Seconds(total)) => Some(format!("of {}", duration_text(total))),
@@ -199,7 +199,7 @@ impl Render for ProgressDialog {
                     ),
             )
             .when_some(self.error.clone(), |this, error| {
-                this.child(div().body().text_color(cx.theme().danger).child(error))
+                this.child(div().body().text_color(colors(cx).danger).child(error))
             })
     }
 }

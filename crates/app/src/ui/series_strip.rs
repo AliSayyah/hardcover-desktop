@@ -193,6 +193,9 @@ impl SeriesStrip {
         Self::default()
     }
 
+    // One at a time is how the gallery builds its strips; screens pass
+    // their items at once.
+    #[cfg_attr(not(feature = "demo"), allow(dead_code))]
     pub fn item(mut self, item: StripItem) -> Self {
         self.items.push(item);
         self

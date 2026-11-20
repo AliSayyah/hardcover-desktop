@@ -17,7 +17,7 @@ use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::list::ListState;
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
-use gpui_kit::component::{IndexPath, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{IndexPath, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement as _,
     Render, SharedString, Styled as _, Subscription, Task, Window, div,
@@ -35,6 +35,7 @@ use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
 use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::SmallControl as _;
 use crate::ui::{Avatar, AvatarSize, ExternalLink, SectionHeader, Skeleton};
 
 /// How an author's books are ordered.
@@ -345,7 +346,7 @@ impl AuthorView {
                             this.child(
                                 Button::new("toggle-bio")
                                     .ghost()
-                                    .small()
+                                    .small_control()
                                     // The label on the bio's spine, not the
                                     // button's edge.
                                     .ml_neg_2()
@@ -372,7 +373,7 @@ impl AuthorView {
             SectionHeader::new("Books").action(
                 div().w(size::SELECT_SMALL).child(
                     Select::new(&self.order_select)
-                        .small()
+                        .small_control()
                         .raised_field(false, cx),
                 ),
             ),
@@ -403,7 +404,7 @@ impl Render for AuthorView {
             Some(Err(message)) => load_failed(
                 message,
                 Button::new("retry-author")
-                    .small()
+                    .small_control()
                     .label("Try again")
                     .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
                 cx,

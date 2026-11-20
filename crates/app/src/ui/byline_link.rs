@@ -12,7 +12,6 @@
 //! ```
 
 use gpui_kit::base::Button as BaseButton;
-use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
     App, ElementId, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, Role,
     SharedString, Styled as _, Window, div, prelude::FluentBuilder as _,
@@ -21,7 +20,7 @@ use gpui_kit::{
 use super::focus::{FocusTreatment as _, control_radius, focus_visible, keyed_focus};
 use super::reveal::probe;
 use crate::bidi::is_rtl;
-use crate::design::TypeRoles as _;
+use crate::design::{TypeRoles as _, colors};
 
 /// A name that opens a profile in the browser. See the module doc.
 #[derive(IntoElement)]
@@ -64,7 +63,7 @@ impl RenderOnce for BylineLink {
                     .justify_start()
                     .rounded(radius)
                     .cursor_pointer()
-                    .text_color(cx.theme().foreground)
+                    .text_color(colors(cx).fg)
                     .body_strong()
                     .when(underline, |this| this.hover(|style| style.underline()))
                     .on_click(move |_, _, cx| cx.open_url(&url))

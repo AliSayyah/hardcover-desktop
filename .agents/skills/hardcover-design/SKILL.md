@@ -30,17 +30,18 @@ components; this skill tells you *what* to build and how it must look.
   need to see a layout. When the mockup and the reference disagree, the
   reference wins; fix the mockup in the same change.
 
-## The app is migrating to this system
+## The app follows this system
 
-The system was designed ahead of the code (see "Migration status" at the end
-of `design-system.md`). Until that list is empty:
+Every screen is built from the tokens and the shared components in
+`crates/app/src/ui/`. What the kit doesn't let the app reach is listed under
+"Kit limits" at the end of `design-system.md`.
 
-- New UI follows this system, never an older screen that contradicts it.
-- When you change a screen, bring the parts you touch into line, then update
-  the migration list in the same commit.
-- Don't copy a value from existing code without checking it against the
-  tokens. The code still has today's black-and-white theme in places, and
-  ad hoc sizes.
+- New UI follows this system. Compose the shared components; if a part is
+  missing, add it to `ui/` (and the gallery) rather than beside a screen.
+- A value comes from the token module (`design::colors`, `design::size`,
+  `design::TypeRoles`), never from a literal.
+- When a change meets a kit limit, add it to "Kit limits" and `ui::kit`'s
+  module doc in the same commit; remove one in the commit that fixes it.
 
 ## Non-negotiables
 

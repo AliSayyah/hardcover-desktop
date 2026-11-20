@@ -15,7 +15,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::text::TextView;
-use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, ElementId, Entity, IntoElement, ParentElement as _,
     SharedString, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
@@ -31,6 +31,7 @@ use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{date_text, needs_permission};
 use crate::library::model::WriteKind;
 use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{Block, ExternalLink, Skeleton};
 
@@ -460,7 +461,7 @@ impl BookDetailView {
         let refreshing = self.review_refreshing(id, cx);
         let open_editor = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
             Button::new(id)
-                .small()
+                .small_control()
                 .label(label)
                 .disabled(!can_write || busy || refreshing)
                 .when(!can_write, |this| {
@@ -489,7 +490,7 @@ impl BookDetailView {
                 .child(div().body().text_color(muted).child(error))
                 .child(
                     Button::new("retry-review")
-                        .small()
+                        .small_control()
                         .label("Try again")
                         .on_click(cx.listener(|this, _, _, cx| this.retry_review(cx))),
                 )
@@ -525,7 +526,7 @@ impl BookDetailView {
                 )
                 .child(
                     Button::new("refresh-review")
-                        .small()
+                        .small_control()
                         .label("Try again")
                         .on_click(cx.listener(|this, _, _, cx| this.retry_review(cx))),
                 )
@@ -672,7 +673,7 @@ impl BookDetailView {
                     .child(
                         Button::new("save-review")
                             .primary()
-                            .small()
+                            .small_control()
                             .label("Save")
                             .tooltip(if !can_write {
                                 needs_permission(WRITE_REVIEWS)
@@ -691,7 +692,7 @@ impl BookDetailView {
                     .child(
                         Button::new("cancel-review")
                             .ghost()
-                            .small()
+                            .small_control()
                             .label("Cancel")
                             .disabled(saving)
                             .on_click(
@@ -702,7 +703,7 @@ impl BookDetailView {
                         this.child(div().flex_1()).child(
                             Button::new("delete-review")
                                 .danger()
-                                .small()
+                                .small_control()
                                 .label("Delete review…")
                                 .loading(writing == Some(ReviewWrite::Delete))
                                 .disabled(!can_write || !editable || pending.is_some())

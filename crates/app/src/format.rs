@@ -340,6 +340,13 @@ where
 
 /// What to tell the user when a request fails, with a recovery hint.
 pub fn error_message(error: &Error) -> String {
+    // The demo refuses every write; trying again can't help.
+    #[cfg(feature = "demo")]
+    if let Error::Api(msg) = error
+        && msg == hardcover_core::demo::READ_ONLY
+    {
+        return msg.clone();
+    }
     match error {
         Error::RateLimited { .. } => {
             "Hardcover's rate limit was reached. Try again in a minute.".to_owned()
@@ -355,15 +362,21 @@ pub fn error_message(error: &Error) -> String {
                 .to_owned()
         }
         Error::InvalidInput(msg) => sentence(msg),
-        Error::Storage(msg) => format!("Couldn't save data on this computer: {msg}."),
-        Error::Auth(msg) => format!("Sign-in failed: {msg}."),
+        Error::Storage(msg) => format!(
+            "Couldn't read or save data on this computer: {}. Check that the disk has free space and the keyring is unlocked, then try again.",
+            msg.trim_end_matches('.')
+        ),
+        Error::Auth(msg) => format!(
+            "Sign-in failed: {}. Try signing in again.",
+            msg.trim_end_matches('.')
+        ),
         Error::Cancelled => "Sign-in was cancelled.".to_owned(),
         Error::Api(msg) => format!(
-            "Hardcover reported an error: {}.",
+            "Hardcover reported an error: {}. Try again later.",
             msg.trim_end_matches('.')
         ),
         Error::Decode(_) => "Hardcover sent an unexpected response. Try again later.".to_owned(),
-        _ => format!("{error}."),
+        _ => format!("{}. Try again.", error.to_string().trim_end_matches('.')),
     }
 }
 
@@ -890,16 +903,31 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "demo")]
+    #[test]
+    fn the_demo_says_only_that_it_is_read_only() {
+        let refused = Error::Api(hardcover_core::demo::READ_ONLY.into());
+        assert_eq!(error_message(&refused), hardcover_core::demo::READ_ONLY);
+    }
+
     #[test]
     fn error_copy() {
         // One full stop, whether or not Hardcover's message ends with one.
         assert_eq!(
-            error_message(&Error::Api("The demo library is read-only.".into())),
-            "Hardcover reported an error: The demo library is read-only."
+            error_message(&Error::Api("The list is full.".into())),
+            "Hardcover reported an error: The list is full. Try again later."
         );
         assert_eq!(
             error_message(&Error::Api("not found".into())),
-            "Hardcover reported an error: not found."
+            "Hardcover reported an error: not found. Try again later."
+        );
+        assert_eq!(
+            error_message(&Error::Storage("keyring: locked.".into())),
+            "Couldn't read or save data on this computer: keyring: locked. Check that the disk has free space and the keyring is unlocked, then try again."
+        );
+        assert_eq!(
+            error_message(&Error::Auth("code exchange rejected (expired)".into())),
+            "Sign-in failed: code exchange rejected (expired). Try signing in again."
         );
         assert_eq!(
             error_message(&Error::RateLimited { retry_after: None }),

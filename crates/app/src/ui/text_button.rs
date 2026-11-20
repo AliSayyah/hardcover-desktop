@@ -20,7 +20,6 @@
 use std::rc::Rc;
 
 use gpui_kit::base::Button as BaseButton;
-use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::StyledExt as _;
 use gpui_kit::{
     App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
@@ -33,7 +32,7 @@ use hardcover_core::BookSummary;
 
 use crate::bidi::{WrappingText, is_rtl};
 use crate::catalog::navigation::{self, Page};
-use crate::design::TypeRoles as _;
+use crate::design::{TypeRoles as _, colors};
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -144,7 +143,7 @@ impl RenderOnce for TextButton {
                     .justify_start()
                     .text_left()
                     .rounded(radius)
-                    .text_color(cx.theme().foreground)
+                    .text_color(colors(cx).fg)
                     .body_strong()
                     .when(underline, |this| this.hover(|style| style.underline()))
                     .when_some(on_click, |this, handler| {

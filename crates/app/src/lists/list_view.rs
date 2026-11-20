@@ -14,9 +14,7 @@ use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{
-    Disableable as _, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{Disableable as _, IconName, IndexPath, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
@@ -39,6 +37,7 @@ use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{authors_text, needs_permission};
 use crate::library::book_row::BookRow;
 use crate::library::model::LibraryModel;
+use crate::ui::kit::{SmallControl as _, SmallIconButton as _};
 use crate::ui::kit::{open_alert_dialog, row_action};
 use crate::ui::{
     ExternalLink, ListRow as _, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
@@ -275,7 +274,7 @@ impl ListDelegate for ListBooks {
                     row_action(
                         Button::new(("remove-list-book", book.id.get() as u64))
                             .ghost()
-                            .small()
+                            .small_icon_button()
                             .icon(IconName::Close)
                             .tooltip(remove_tooltip.clone())
                             .disabled(busy || !can_write)
@@ -307,7 +306,7 @@ impl ListDelegate for ListBooks {
                 "Couldn't load this list".into(),
                 message,
                 Button::new("retry-list-empty")
-                    .small()
+                    .small_control()
                     .label("Try again")
                     .on_click(cx.listener(|state, _, window, cx| {
                         state.delegate_mut().retry(window, cx);
@@ -538,7 +537,7 @@ impl ListView {
                 .gap_2()
                 .child(
                     Button::new("edit-list")
-                        .small()
+                        .small_control()
                         .label("Edit…")
                         .disabled(!can_write || writing)
                         .when_some(permission.clone(), |this, tip| this.tooltip(tip))
@@ -549,7 +548,7 @@ impl ListView {
                 .child(
                     Button::new("delete-list")
                         .danger()
-                        .small()
+                        .small_control()
                         .label("Delete…")
                         .disabled(!can_write || writing)
                         .when_some(permission, |this, tip| this.tooltip(tip))
@@ -608,7 +607,7 @@ impl ListView {
                 this.child(load_failed(
                     message,
                     Button::new("retry-list")
-                        .small()
+                        .small_control()
                         .label("Try again")
                         .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
                     cx,

@@ -55,6 +55,7 @@ use crate::library::model::LibraryModel;
 use crate::search::library_matches::{counts_as_shelved, library_matches};
 use crate::search::results::{Hit, Phase, SearchResults};
 use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::SmallControl as _;
 use crate::ui::{
     ListRow as _, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
     select_first_row,
@@ -883,7 +884,7 @@ fn focus_list<T: SearchHit>(
 fn retry_button<T: SearchHit>(view: WeakEntity<SearchView>) -> Button {
     Button::new(("retry-search", T::KIND.index()))
         .ghost()
-        .small()
+        .small_control()
         .label("Try again")
         .on_click(move |_, window, cx| {
             let _ = view.update(cx, |view, cx| view.retry::<T>(window, cx));

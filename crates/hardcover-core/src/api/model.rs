@@ -1624,15 +1624,6 @@ impl Reviewer {
             .as_deref()
             .map(|u| format!("https://hardcover.app/@{u}"))
     }
-
-    /// The avatar, unless it is an SVG: the cover pipeline decodes only
-    /// raster images.
-    pub fn raster_avatar(&self) -> Option<&Cover> {
-        self.avatar.as_ref().filter(|a| {
-            let path = a.url.split(['?', '#']).next().unwrap_or_default();
-            !path.to_ascii_lowercase().ends_with(".svg")
-        })
-    }
 }
 
 /// One page of [`CommunityReview`]s, from [`crate::api::Client::book_reviews`].
@@ -1665,15 +1656,6 @@ mod community_review_tests {
         );
         r.name = Some("Jane Quill".into());
         assert_eq!(r.display_name(), "Jane Quill");
-    }
-
-    #[test]
-    fn svg_avatars_are_not_raster() {
-        let mut r = Reviewer::new(UserId::new(7));
-        r.avatar = Some(Cover::new("https://assets.example/users/7/a.SVG?v=2"));
-        assert!(r.raster_avatar().is_none());
-        r.avatar = Some(Cover::new("https://assets.example/users/7/a.png"));
-        assert!(r.raster_avatar().is_some());
     }
 
     #[test]

@@ -978,14 +978,21 @@ impl BookDetailView {
 
         let content = v_flex()
             .w_full()
-            .max_w(PANE_MAX)
+            .max_w(size::PAGE_MAX)
             .gap_6()
             .child(header)
             .children(entry.and_then(|entry| self.render_panel(entry, cx)))
             .child(blocks().children(column));
         v_flex()
             .size_full()
-            .child(ObjectBar::new().tools(self.render_tools(book, entry, cx)))
+            // As wide as the content and its inset, so in a wide window the
+            // tools stay at the content's trailing edge, not the window's.
+            .child(
+                div()
+                    .w_full()
+                    .max_w(size::PANE_FRAME_MAX)
+                    .child(ObjectBar::new().tools(self.render_tools(book, entry, cx))),
+            )
             .child(
                 div()
                     // Keyed by book, so another book (a similar one) opens at
@@ -1035,7 +1042,7 @@ impl BookDetailView {
         let rem = window.rem_size();
         let width = window.viewport_size().width
             - size::SIDEBAR.to_pixels(rem)
-            - PAGE_INSET.to_pixels(rem) * 2.;
+            - size::PAGE_INSET.to_pixels(rem) * 2.;
         // Keyboard order follows the task, not the tree: the header and
         // panel, then the rail beside them (your book), then the main
         // column's blocks. The blocks are a later tab group inside the
@@ -1051,22 +1058,24 @@ impl BookDetailView {
             .size_full()
             .scroll_y_revealing_focus()
             .child(
-                div().w_full().p_8().tab_group().child(
-                    Columns::new(main)
-                        .rail(rail)
-                        .folded(folds(width, rem, false)),
-                ),
+                // At least the window high, so the rail's hairline runs to
+                // the foot of a short page.
+                div()
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .min_h_full()
+                    .p_8()
+                    .tab_group()
+                    .child(
+                        Columns::new(main)
+                            .rail(rail)
+                            .folded(folds(width, rem, false)),
+                    ),
             )
             .into_any_element()
     }
 }
-
-/// The pane's content keeps to a readable width; the panel and blocks don't
-/// stretch across a wide window.
-const PANE_MAX: gpui_kit::Rems = gpui_kit::rems(48.);
-
-/// The page's inset (32; `p_8`).
-const PAGE_INSET: gpui_kit::Rems = gpui_kit::rems(2.);
 
 impl ObjectTools for BookDetailView {
     fn object_tools(&mut self, _: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {

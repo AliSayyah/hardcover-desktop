@@ -108,6 +108,7 @@ struct Tokens {
     border: Rgba,
     border_strong: Rgba,
     track: Rgba,
+    switch_thumb: Rgba,
     fg: Rgba,
     fg_muted: Rgba,
     fg_faint: Rgba,
@@ -123,7 +124,6 @@ struct Tokens {
     cover_edge: Rgba,
     cover_hinge: Rgba,
     shadow_cover: [ShadowLayer; 2],
-    shadow_popover: [ShadowLayer; 2],
 }
 
 const LIGHT: Tokens = Tokens {
@@ -135,6 +135,8 @@ const LIGHT: Tokens = Tokens {
     border: hex(0xE4DED3),
     border_strong: hex(0xD0C8BA),
     track: hex(0xE0D9CC),
+    // `raised`.
+    switch_thumb: hex(0xFFFFFF),
     fg: hex(0x1F1C17),
     fg_muted: hex(0x5F574B),
     fg_faint: hex(0x857D70),
@@ -152,10 +154,6 @@ const LIGHT: Tokens = Tokens {
         ShadowLayer::new(1., 2., 0., hexa(0x281C10, 0.18)),
         ShadowLayer::new(8., 20., 0., hexa(0x281C10, 0.14)),
     ],
-    shadow_popover: [
-        ShadowLayer::new(0., 0., 1., hexa(0x1E140A, 0.10)),
-        ShadowLayer::new(4., 12., 0., hexa(0x281C10, 0.12)),
-    ],
 };
 
 const DARK: Tokens = Tokens {
@@ -163,10 +161,13 @@ const DARK: Tokens = Tokens {
     sidebar: hex(0x100F0E),
     surface: hex(0x1E1C1A),
     raised: hex(0x262320),
-    skeleton: hex(0x23211E),
+    skeleton: hex(0x2B2825),
     border: hex(0x292623),
     border_strong: hex(0x3D3934),
     track: hex(0x35312C),
+    // `fg`: a `raised` thumb on `track` is 1.2:1 in dark mode, gone once a
+    // disabled switch fades its track.
+    switch_thumb: hex(0xEEEAE3),
     fg: hex(0xEEEAE3),
     fg_muted: hex(0xABA498),
     fg_faint: hex(0x807A6F),
@@ -183,10 +184,6 @@ const DARK: Tokens = Tokens {
     shadow_cover: [
         ShadowLayer::new(1., 2., 0., hexa(0x000000, 0.55)),
         ShadowLayer::new(10., 24., 0., hexa(0x000000, 0.45)),
-    ],
-    shadow_popover: [
-        ShadowLayer::new(0., 0., 1., hexa(0xFFFFFF, 0.08)),
-        ShadowLayer::new(4., 12., 0., hexa(0x000000, 0.5)),
     ],
 };
 
@@ -217,6 +214,9 @@ pub struct Palette {
     pub border_strong: Hsla,
     /// The empty part of a meter; an off switch.
     pub track: Hsla,
+    /// A switch's thumb: `raised` in light mode, `fg` in dark, so it shows
+    /// on `track` and on `accent`, enabled or disabled.
+    pub switch_thumb: Hsla,
     /// Ink: text.
     pub fg: Hsla,
     /// Secondary text that carries information.
@@ -236,6 +236,9 @@ pub struct Palette {
     pub ring: Hsla,
     /// The user's own rating, nothing else.
     pub gold: Hsla,
+    /// The rating control's hover preview: the stars a click would set, at
+    /// gold 55%.
+    pub gold_preview: Hsla,
     /// An unfilled star (ink 14%).
     pub star_empty: Hsla,
     /// Destructive commands and errors.
@@ -251,7 +254,6 @@ pub struct Palette {
     /// The eight cloth colours; [`Palette::cloth_for`] picks one.
     pub cloth: [Hsla; 8],
     shadow_cover: [ShadowLayer; 2],
-    shadow_popover: [ShadowLayer; 2],
 }
 
 impl Palette {
@@ -270,6 +272,7 @@ impl Palette {
             border: t.border.into(),
             border_strong: t.border_strong.into(),
             track: t.track.into(),
+            switch_thumb: t.switch_thumb.into(),
             fg,
             fg_muted: t.fg_muted.into(),
             fg_faint: t.fg_faint.into(),
@@ -278,6 +281,7 @@ impl Palette {
             accent_soft: accent.opacity(t.accent_soft),
             ring: accent.opacity(0.5),
             gold: t.gold.into(),
+            gold_preview: Hsla::from(t.gold).opacity(0.55),
             star_empty: fg.opacity(0.14),
             danger: t.danger.into(),
             warning: t.warning.into(),
@@ -286,7 +290,6 @@ impl Palette {
             cloth_ink: CLOTH_INK.into(),
             cloth: CLOTH.map(Hsla::from),
             shadow_cover: t.shadow_cover,
-            shadow_popover: t.shadow_popover,
         }
     }
 
@@ -305,11 +308,6 @@ impl Palette {
     /// `shadow-cover`: on a cover that leads its row or block.
     pub fn shadow_cover(&self) -> Vec<BoxShadow> {
         self.shadow_cover.map(ShadowLayer::box_shadow).to_vec()
-    }
-
-    /// `shadow-popover`: menus, popovers and dialogs the app draws itself.
-    pub fn shadow_popover(&self) -> Vec<BoxShadow> {
-        self.shadow_popover.map(ShadowLayer::box_shadow).to_vec()
     }
 
     /// The cloth colour of the book titled `title`.

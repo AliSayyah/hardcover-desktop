@@ -11,7 +11,7 @@ use std::sync::Arc;
 use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::list::ListState;
-use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement as _,
     Render, SharedString, Styled as _, Subscription, Task, Window, div,
@@ -30,6 +30,7 @@ use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::series_position_text;
 use crate::library::model::LibraryModel;
+use crate::ui::kit::SmallControl as _;
 use crate::ui::{ExternalLink, Skeleton, TextButton};
 
 enum Loaded {
@@ -275,7 +276,7 @@ impl Render for SeriesView {
             Some(Loaded::Failed(message)) => load_failed(
                 message.clone(),
                 Button::new("retry-series")
-                    .small()
+                    .small_control()
                     .label("Try again")
                     .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
                 cx,

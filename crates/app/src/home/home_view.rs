@@ -21,12 +21,11 @@ use std::sync::Arc;
 use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
     HighlightStyle, InteractiveElement as _, IntoElement, ParentElement as _, Render, RenderImage,
     SharedString, Styled as _, StyledText, Subscription, Window, div, prelude::FluentBuilder as _,
-    rems,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_LIBRARY};
 use hardcover_core::{
@@ -53,6 +52,7 @@ use crate::format::{
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, CoverShelf, Greeting, Lane, Meter, MonthBars, RailSection, RowSpacing, SectionHeader,
@@ -60,10 +60,6 @@ use crate::ui::{
 };
 use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
-
-/// The widest Home's content gets (1024): beyond it the rows' actions drift
-/// away from their books. The main column takes the surplus up to it.
-const MAX_WIDTH: f32 = 64.;
 
 pub struct HomeView {
     model: Entity<LibraryModel>,
@@ -346,7 +342,13 @@ impl HomeView {
         let disabled_reason = (!can_write).then(|| needs_permission(WRITE_LIBRARY));
         let model = self.model.clone();
         let entry_for_dialog = entry.clone();
-        let size = |button: Button| if small { button.small() } else { button };
+        let size = |button: Button| {
+            if small {
+                button.small_control()
+            } else {
+                button
+            }
+        };
         [
             size(Button::new(SharedString::from(format!("home-update-{id}"))))
                 .label("Update progress…")
@@ -591,7 +593,7 @@ impl HomeView {
                         this.child(
                             Button::new("home-all-paused")
                                 .ghost()
-                                .small()
+                                .small_control()
                                 .label(format!("All {} paused", count_text(count as u32)))
                                 .on_click(|_, window, cx| {
                                     window.dispatch_action(Box::new(ShowPaused), cx)
@@ -747,7 +749,7 @@ impl HomeView {
             .action(
                 Button::new("home-goal-details")
                     .ghost()
-                    .small()
+                    .small_control()
                     .label("Details…")
                     .on_click(move |_, window, cx| {
                         open_goal(goals.clone(), model.clone(), goal_id, window, cx)
@@ -852,7 +854,7 @@ impl HomeView {
                             .child(
                                 h_flex().mt_2().child(
                                     Button::new("home-start-next")
-                                        .small()
+                                        .small_control()
                                         .label("Start reading")
                                         .loading(pending == Some(WriteKind::Status))
                                         .disabled(pending.is_some() || !can_write)
@@ -972,8 +974,8 @@ impl Render for HomeView {
         // up to the widest Home gets, less the page's insets.
         let rem = window.rem_size();
         let width = (window.viewport_size().width - size::SIDEBAR.to_pixels(rem))
-            .min(rems(MAX_WIDTH).to_pixels(rem))
-            - rems(4.).to_pixels(rem);
+            .min(size::HOME_MAX.to_pixels(rem))
+            - size::PAGE_INSET.to_pixels(rem) * 2.;
         root.scroll_y_revealing_focus()
             .child(
                 page().child(header).child(
@@ -991,14 +993,10 @@ impl Render for HomeView {
 
 // ----- pieces -----
 
-/// Home's column: inset 32, at most [`MAX_WIDTH`].
+/// Home's column: inset 32, at most [`size::HOME_MAX`]; the main column
+/// takes the surplus up to it.
 fn page() -> gpui_kit::Div {
-    div()
-        .flex()
-        .flex_col()
-        .w_full()
-        .max_w(rems(MAX_WIDTH))
-        .p_8()
+    div().flex().flex_col().w_full().max_w(size::HOME_MAX).p_8()
 }
 
 /// The lead while the library loads.

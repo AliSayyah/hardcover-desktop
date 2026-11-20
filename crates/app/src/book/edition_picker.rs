@@ -9,20 +9,20 @@ use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex,
-    v_flex,
+    Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
-    Task, Window, div, prelude::FluentBuilder as _, rems,
+    Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookId, EDITIONS_PER_PAGE, EditionId, EditionSummary};
 
 use crate::app_state::Services;
-use crate::design::{TypeRoles as _, size};
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::edition_text;
+use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_dialog;
 
 /// The user picked `0`.
@@ -114,7 +114,7 @@ impl EditionPicker {
     }
 
     fn render_row(&self, edition: &EditionSummary, cx: &mut Context<Self>) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
+        let muted = colors(cx).fg_muted;
         let current = self.current == Some(edition.id);
         let headline = edition_text(edition).unwrap_or_else(|| "Edition".to_owned());
         let mut details: Vec<String> = Vec::new();
@@ -172,7 +172,7 @@ impl EditionPicker {
 
 impl Render for EditionPicker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
+        let muted = colors(cx).fg_muted;
         let rows: Vec<AnyElement> = self
             .editions
             .iter()
@@ -184,7 +184,7 @@ impl Render for EditionPicker {
             .child(
                 v_flex()
                     .id("edition-list")
-                    .max_h(rems(24.))
+                    .max_h(size::DIALOG_LIST_MAX)
                     .scroll_y_revealing_focus()
                     .gap_0p5()
                     .children(rows)
@@ -214,7 +214,7 @@ impl Render for EditionPicker {
                         .child(div().text_color(muted).child(error))
                         .child(
                             Button::new("retry-editions")
-                                .small()
+                                .small_control()
                                 .label("Try again")
                                 .on_click(cx.listener(|this, _, _, cx| this.fetch_more(cx))),
                         ),
@@ -226,7 +226,7 @@ impl Render for EditionPicker {
                     this.child(
                         div().child(
                             Button::new("more-editions")
-                                .small()
+                                .small_control()
                                 .label("Show more")
                                 .loading(self.loading)
                                 .disabled(self.loading)
