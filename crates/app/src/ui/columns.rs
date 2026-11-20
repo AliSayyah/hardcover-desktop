@@ -6,8 +6,8 @@
 //!   rail is 272 with its leading hairline, starting at the top. The gap is
 //!   24 on the book page and 32 on Home ([`Columns::wide_gap`]).
 //! - **Folded:** the rail's sections follow the main column, full width,
-//!   under a hairline, separated by hairlines like the rail's (24 above and
-//!   below). Nothing is hidden.
+//!   under a hairline (the column gap above it, 24 below), separated by
+//!   hairlines like the rail's (24 above and below). Nothing is hidden.
 //! - The caller decides with [`folds`], from the width the columns get: GPUI
 //!   has no container queries. Fold when the main column would get less than
 //!   [`MAIN_MIN`].

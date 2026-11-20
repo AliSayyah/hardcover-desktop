@@ -59,7 +59,9 @@ pub fn coming_soon_section(
                         .child(further_off_text(later)),
                 )
             })
-            .child(Sequence::new().children(rows))
+            .when(!next.is_empty(), |this| {
+                this.child(Sequence::new().children(rows))
+            })
             .into_any_element(),
     )
 }
