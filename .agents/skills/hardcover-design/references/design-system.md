@@ -97,8 +97,9 @@ cloth-ink on each is at least 5:1.
 `#6A4A39` `#3A574B` `#414C6B` `#743838` `#7A5D30` `#39596A` `#594567` `#4E5356`
 
 Rules:
-- No raw colour outside the theme and the app's token module. Covers and
-  cloth are image data, not UI colour.
+- No raw colour outside the theme and the app's token module. Covers, cloth
+  and a reviewer's avatar colour from Hardcover (`cached_image.color`) are
+  data, not UI colour.
 - Never use a status colour as decoration, and never encode meaning by colour
   alone.
 - Check every new surface in both themes.
@@ -121,6 +122,7 @@ Every size has a fixed line height.
 | `display-24` | Literata Display 600 | 24 / 30 | `text_2xl` | Book title in the pane and the Home lead |
 | `title-18` | Literata Text 600 | 18 / 24 | `text_lg` | Book titles in Home rows and Up next |
 | `prose` | Literata Text 400 | 16 / 26 | `text_base` | Descriptions; at most 640 px wide |
+| `reader` | Inter 400 | 14 / 22 | `text_sm` | Readers' words: your review, other readers' reviews, notes that run long; at most 640 px wide, 8 between paragraphs |
 
 - Literata comes in two optical cuts, registered as two families: **Text**
   (the 12 pt cut) up to 18 px, and **Display** (the 36 pt cut) from 24 px.
@@ -135,6 +137,9 @@ Every size has a fixed line height.
   a book title of 18 px and up.
 - Book titles in list rows are `body-strong` Inter. The serif starts at
   title size.
+- The serif is the book's voice: its title and its description. Reviews and
+  notes are readers' voices, so they are set in Inter (`reader`), never in
+  the serif.
 - Inter is bundled with its static faces (`fonts.rs`). Never fall back to
   the system UI font: on Linux it is often variable, and GPUI draws a
   variable font's default instance only.
@@ -245,7 +250,9 @@ dust jacket.
   with the cover: xs 10, sm 16, md 9, lg 11, xl 18, xxl 22 px. It stands in
   for an image, so it is the one place off the type scale.
 - **Content by size:**
-  - xs: the title's first letter, skipping a leading "The ";
+  - xs: the title's first letter, skipping a leading "The " or "Untitled "
+    (Hardcover's placeholder titles for unannounced books, such as "Untitled
+    Empyrean #4");
   - sm: that letter and a short rule under it;
   - md: a blind-stamped frame (inset 5%, 1 px cloth-ink at 28%), the title
     (at most four lines), and a rule (24% wide, 60%);
@@ -268,6 +275,7 @@ dust jacket.
 | Icon | 32 square, ghost | Familiar symbols only ("more"), with an accessible name and a tooltip |
 | Text button | Ink text, underline on hover only | In-app navigation inside content: an author, a series, a book title |
 | Link | Accent, underlined, a 12 px external-link icon | Only for things that open the browser: "Open on Hardcover" |
+| Byline link | Ink, 14/500, underline on hover, pointing hand | A reviewer's name, which opens their Hardcover profile in the browser. It repeats on every review, so it stays quiet; a right-to-left name goes without the underline, which GPUI on Linux draws beside it |
 
 - **Sizes:** default 32 (padding 12, icon 16, gap 8); small 24 (padding 8,
   12 px text, icon 12, gap 4). Use small inside rows, panels and rails.
@@ -348,6 +356,21 @@ Never colour-code chips, and never use a badge for ordinary metadata.
     stay aligned.
 - **Catalogue row** (search, Discover, series, author and list pages): the
   same, with the StatusChip trailing.
+- **Selectable or not.** A collection you select from (a shelf, search
+  results, a list) uses list rows, with hover and selected fills. A read-only
+  sequence on Home or a page (Continue reading, Coming soon, reviews) uses
+  **sequence rows**: no fill, a hairline between rows (none above the
+  first), 12 above and below (16 for reviews). Their titles are text buttons.
+- **Upcoming row** (`upcoming/row.rs`, shared by Home and the Coming soon
+  list), a sequence row:
+  - an sm cover (usually a cloth cover; unreleased books rarely have one);
+  - the title in `body-strong` and the series with its position, muted;
+  - a date lane, right-aligned and tabular: the date in `body-strong` ("Nov
+    26", "Feb 3, 2027", or the year when it is further off), with a caption
+    under it when it is within two weeks ("Tomorrow", "In 6 days");
+  - an action lane 136 wide: a small ghost "Want to read" with a plus icon,
+    or the StatusChip when the book is already on the shelf. The lane is
+    kept either way, so the dates line up.
 - **Property list** (Details): rows at least 24 high, 8 apart. The key
   column (96, or 72 in a rail) is `fg-muted`; the value is ink, with small
   controls inline.
@@ -389,6 +412,28 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   - **Buttons:** Cancel, then the result ("Delete" in danger; "Save" in
     primary).
 
+### Reviews (other readers')
+
+The book's "Reviews" block, above Similar books. It hides without
+`read:social`.
+- **Header:** the `heading` "Reviews" with the count as a caption on the
+  trailing edge ("12 reviews").
+- **Each review** is a sequence row (16 above and below), top-aligned:
+  - a 32 avatar: the reader's picture through the cover pipeline, else
+    their initials (12/600, white) on their Hardcover colour, else the
+    kit's initials on `accent-soft`;
+  - the byline link (or `@username` when the name is empty) and their
+    rating in 12 px muted stars, 8 apart;
+  - a caption: "Mar 14, 2026 · 48 likes";
+  - the text in `reader`, collapsed to about six lines, with a small ghost
+    "Read more" / "Show less";
+  - a spoiler review shows only "Contains spoilers" (muted) and a small
+    "Show".
+- **Loading:** two skeleton reviews (an avatar circle and three bars).
+- **More:** a small default "Show more reviews" after the last one.
+- A right-to-left review sits on the leading edge, and its lines run right
+  to left (`WrappingText`).
+
 ### Empty states
 
 An empty state is centred in the region it explains:
@@ -427,6 +472,7 @@ Every screen starts from its task:
 | Home | Pick up where you left off | The lead book |
 | Shelf | Find a book on it | The list |
 | Book | Know the book and update it | Cover, title, status, progress |
+| Coming soon | See what's next in your series, and want it | The dates |
 
 ### Window shell
 
@@ -467,8 +513,8 @@ Every screen starts from its task:
 - **Then blocks, 24 apart,** each with a `heading` and an optional small
   action on the trailing edge: Notes, About this book (`prose`), and Details
   (a property list: Edition, Owned, Privacy, Added). The other existing
-  blocks (review, reads, lists, series, similar books) follow the same
-  pattern.
+  blocks (your review, reads, lists, series, other readers' reviews,
+  similar books) follow the same pattern.
 
 ### Full book page (over Discover, search, a series or an author)
 
@@ -481,6 +527,7 @@ Every screen starts from its task:
   - the progress or Not started panel;
   - About this book;
   - Your review;
+  - Reviews (other readers');
   - Similar books: lg covers with shadow, 16 apart, with titles at 12/500 in
     at most two lines.
 - **Rail:**
@@ -519,6 +566,12 @@ Every screen starts from its task:
   - **"Rate what you finished"** follows, when there is anything to rate.
     It isn't in the mockup. Use the same rows with an sm cover, and put the
     16 px rating control in the trailing lane.
+  - **"Coming soon"** closes the column, 24 below: the `section` title with
+    a small ghost "See all 5" on the trailing edge, then up to five upcoming
+    rows due in the coming 12 months. With none due but some further off,
+    one muted sentence says so ("Nothing is due in the next 12 months. 2
+    books are further off.") and "See all" stays. It hides when nothing is
+    coming.
 - **Rail:**
   - **Reading goal:** a `label` ("2026 reading goal"); the figure ("9" in
     `display-30` with "of 12 books" muted); a goal meter with its pace tick;
@@ -532,6 +585,17 @@ Every screen starts from its task:
     with titles at 12 px in two lines.
 - Sections that don't apply (no goal, missing scope) disappear without
   leaving a gap.
+
+### Coming soon (the full list, over Home)
+
+- **Object bar:** 56 high with a hairline; Back ("Home") on the leading edge.
+- **Content:** inset 32, at most 768 wide. The `page-title` "Coming soon",
+  then a muted line ("5 books still to come in the series on your shelves").
+- **Groups:** a `label` per month for the coming 12 months ("November",
+  "February 2027"), then per year ("Later in 2027", "2028"), with 24 above
+  and 4 below. Under each, upcoming rows.
+- **States:** a failed load says so in one muted sentence with "Try again";
+  an empty list uses the empty state.
 
 ### Screens not in the mockup
 
@@ -668,16 +732,19 @@ What the code still lacks. Remove an item in the commit that finishes it.
    - Only `star::color` and `star::empty_color` exist.
    - The sidebar's muted text is `sidebar_foreground.opacity(0.7)`, repeated
      in four places across three files.
-4. **Cover component.** Covers are drawn by hand in five places, with
-   differing fills (`muted`, `secondary`), radii (`radius`, `radius_lg`, a
-   raw `px(2.)`) and a book-open icon placeholder. There is no edge, hinge,
+4. **Cover component.** Covers are drawn by hand in six places (the
+   upcoming row is the sixth), with differing fills (`muted`, `secondary`),
+   radii (`radius`, `radius_lg`, a raw `px(2.)`), ad hoc sizes (the upcoming
+   row's 24 × 36) and a book-open icon placeholder. There is no edge, hinge,
    shadow or cloth cover yet, and the sizes are ad hoc.
 5. **Book pane and page.**
    - The tools sit at the header's top right.
    - "Your book" is a form grid, and "Open on Hardcover" sits in the header.
    - The full page has no rail. The order and the progress and Not started
      panels are not in place.
-6. **Home.** There is no greeting, lead book or rail.
+6. **Home.** There is no greeting, lead book or rail. Coming soon is a
+   full-width card under the others, with a semibold title and an xsmall
+   "See all", instead of a section closing the main column.
 7. **Sidebar.** The selected treatment (accent icon), the goal row and the
    brand row are still to do.
 8. **States.** The ink-overlay hover and selected fills, the focus treatment
@@ -685,3 +752,7 @@ What the code still lacks. Remove an item in the commit that finishes it.
 9. **Chips.** These are 22 high (status) and 24 (tags) instead of 20.
 10. **Type.** Line heights and tabular figures aren't set explicitly. The
     sizes `text_lg`/`text_2xl` are used outside the roles above.
+11. **Reviews.** The reviewer's name uses the kit's `Link` (accent,
+    underlined) instead of the byline link; reviews sit 20 apart without
+    hairlines; the review text is `text_sm` at the default line height
+    rather than `reader`. Upcoming rows use `py_1p5` instead of 12.

@@ -308,6 +308,22 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .shelf .it { width: var(--cv-md); }
 .shelf.lg .it { width: var(--cv-lg); }
 .shelf .tt { font-size: var(--t-12); line-height: var(--l-12); margin-top: var(--s-8); }
+/* A read-only sequence (Coming soon, reviews): rows separated by hairlines, no hover fill. */
+.seq-row { display: flex; align-items: center; gap: var(--s-12); padding: var(--s-12) 0; border-top: 1px solid var(--border); }
+.seq-row:first-child { border-top: 0; }
+.seq-row .when { flex: none; display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
+.seq-row .lane { width: 136px; flex: none; display: flex; justify-content: flex-end; }
+.group-label { padding-top: var(--s-24); padding-bottom: var(--s-4); }
+.list-page { max-width: 768px; }
+/* Readers' words: Inter, a little more leading than body, never the book's serif. */
+.reader { font-size: var(--t-14); line-height: 22px; max-width: var(--w-prose); }
+.reader p { margin: 0 0 var(--s-8); }
+.reader.clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.review { display: flex; gap: var(--s-12); align-items: flex-start; padding: var(--s-16) 0; border-top: 1px solid var(--border); }
+.review:first-child { border-top: 0; padding-top: 0; }
+.byline { font-weight: 500; }
+.byline.hover { text-decoration: underline; text-underline-offset: 3px; }
+.avatar.data { color: #FFFFFF; }
 
 /* ---------- Library: list content on x=16, pane content on x=24 ---------- */
 .list { width: var(--w-list); flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
@@ -397,6 +413,24 @@ const B = {
   moby: { t: "Moby Dick", a: "Herman Melville" },
 };
 
+const UP = [
+  { t: "Untitled Reidverse Novel", s: "Reidverse", d: "Nov 21", soon: "Tomorrow", g: "November" },
+  { t: "Untitled Empyrean #4", s: "The Empyrean #4", d: "Nov 26", soon: "In 6 days", g: "November", status: true },
+  { t: "Untitled Mistborn Novella", s: "The Mistborn Saga: The Original Trilogy #3.5", d: "Feb 3, 2027", g: "February 2027" },
+  { t: "Untitled Empyrean #5", s: "The Empyrean #5", d: "2028", g: "2028" },
+  { t: "Untitled Stormlight Archive #6", s: "The Stormlight Archive #6", d: "2032", g: "2032" },
+];
+// Other readers' reviews of Project Hail Mary: the demo's invented reviewers and texts.
+const REVIEWS = [
+  { name: "Marigold Ashby", ini: "MA", color: "#3f6e8c", r: 5, d: "Mar 14, 2026", likes: 48, long: true,
+    text: ["I went in knowing almost nothing and that was the right call. The science is dense but never dull, and the friendship at the centre of it carried me through every chapter.", "The pacing is what impressed me most. Every time a problem is solved, a bigger one is waiting behind it, and the flashbacks arrive exactly when you need them to make sense of the present.", "I also liked that the narrator is competent without being a superhero. He gets things wrong, he panics, he talks himself down, and then he does the maths."] },
+  { name: "@orbitalnoodle", ini: "O", color: "#8c5a3f", r: 4.5, d: "May 2, 2026", likes: 31,
+    text: ["Funny, warm and very nerdy. Some of the jokes land better than others, but the heart of it is solid."] },
+  { name: "Fen Okafor", ini: "FO", color: "#5b7d3a", r: 4, d: "Jun 19, 2026", likes: 22, spoiler: true },
+  { name: "شیرین", ini: "ش", color: "#7a4b8f", r: 5, d: "Jul 8, 2026", likes: 17, rtl: true,
+    text: ["کتابی پرکشش و پر از امید. دوستی دو شخصیت اصلی را خیلی دوست داشتم و تا صفحهٔ آخر نتوانستم کتاب را زمین بگذارم."] },
+];
+
 // ---------- Icons (Lucide paths; the star is the app's own) ----------
 const P = {
   book: '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
@@ -451,7 +485,7 @@ function cover(b, size, lift = false, state = "") {
   const cloth = CLOTH[hash(b.t) % CLOTH.length];
   const dir = b.rtl ? ' dir="rtl"' : "";
   const ph = small
-    ? `<div class="ph initial"${dir}><span>${[...b.t.replace(/^The /, "")][0]}</span>${size === "sm" ? '<div class="rule"></div>' : ""}</div>`
+    ? `<div class="ph initial"${dir}><span>${[...b.t.replace(/^(The|Untitled) /, "")][0]}</span>${size === "sm" ? '<div class="rule"></div>' : ""}</div>`
     : `<div class="ph"${dir}><div class="stamp"></div><div class="pt">${b.t}</div><div class="rule"></div>${size === "md" ? "" : `<div class="pa">${b.a}</div>`}</div>`;
   return `<div class="cover cv-${size}${lift ? " lift" : ""}" style="--cloth:${cloth}">${ph}${b.c ? `<img src="${b.c}" alt="" onerror="this.remove()">` : ""}${over}</div>`;
 }
@@ -502,6 +536,8 @@ function home() {
           <div class="fill"><div class="strong one-line">${B.ij.t}</div><div class="small muted num">Paused at page 230 of 1,104 · since Oct 1</div></div>
           <span class="chip">${ic("pause", "xs")}Paused</span>
         </div>
+        <div class="row-c mt-24"><span class="section">Coming soon</span><span class="btn sm ghost push">See all 5</span></div>
+        <div class="col mt-8">${UP.slice(0, 3).map(upRow).join("")}</div>
       </div>
       <div class="rail">
         <div class="label">2026 reading goal</div>
@@ -556,6 +592,15 @@ const details = (added) => `<div class="props">
     <div class="p"><div class="k">Privacy</div><div class="v"><span class="select sm">Private${ic("down", "xs")}</span></div></div>
     ${added ? `<div class="p"><div class="k">Added</div><div class="v num">${added}</div></div>` : ""}
   </div>`;
+const upRow = (u) => `<div class="seq-row">${cover(u, "sm")}<div class="fill"><div class="strong one-line"><span class="textbtn">${u.t}</span></div><div class="muted one-line">${u.s}</div></div>
+    <div class="when"><span class="strong">${u.d}</span>${u.soon ? `<span class="small muted">${u.soon}</span>` : ""}</div>
+    <div class="lane">${u.status ? `<span class="chip">${ic("inbox", "xs")}Want to read</span>` : `<span class="btn sm ghost">${ic("plus", "xs")}Want to read</span>`}</div></div>`;
+const review = (v, hover) => `<div class="review"><div class="avatar data" style="background:${v.color}">${v.ini}</div><div class="fill col g-4">
+    <div class="row-c g-8"><span class="byline${hover ? " hover" : ""}${v.rtl ? " rtl" : ""}"${v.rtl ? ' dir="rtl"' : ""}>${v.name}</span>${stars(v.r, "cat", "xs")}</div>
+    <div class="small muted num">${v.d} · ${v.likes} likes</div>
+    ${v.spoiler ? `<div class="row-c g-8 mt-4"><span class="muted">Contains spoilers</span><span class="btn sm">Show</span></div>`
+      : `<div class="reader mt-4${v.long ? " clamp" : ""}${v.rtl ? " rtl" : ""}"${v.rtl ? ' dir="rtl"' : ""}>${v.text.map(t => `<p>${t}</p>`).join("")}</div>${v.long ? `<span class="btn sm ghost start" style="margin-left:calc(-1 * var(--s-8))">Read more</span>` : ""}`}
+  </div></div>`;
 const emptyState = (icon, title, desc = "", action = "") => `<div class="empty">${ic(icon)}<div class="strong">${title}</div>${desc ? `<div class="d">${desc}</div>` : ""}${action}</div>`;
 
 // ---------- Screen: Library (shelf + detail pane) ----------
@@ -596,6 +641,36 @@ function library(kind) {
 }
 
 // ---------- Screen: full book page, over Discover ----------
+// ---------- Screen: Coming soon, the full list, over Home ----------
+function upcomingPage() {
+  const groups = [...new Set(UP.map(u => u.g))];
+  return sidebar("home") + `<div class="main">
+    <div class="objbar line"><span class="btn ghost back">${ic("left")}Home</span></div>
+    <div class="scroll page"><div class="list-page">
+      <div class="page-title">Coming soon</div>
+      <div class="muted mt-4">5 books still to come in the series on your shelves</div>
+      ${groups.map(g => `<div class="label group-label">${g}</div><div class="col">${UP.filter(u => u.g === g).map(upRow).join("")}</div>`).join("")}
+    </div></div></div>`;
+}
+
+// ---------- Screen: the book page scrolled to other readers' reviews ----------
+function reviewsPage() {
+  return sidebar("cr") + `<div class="main">
+    <div class="objbar line"><span class="btn ghost back">${ic("left")}Currently reading</span><span class="push"></span>${bookTools}</div>
+    <div class="scroll page"><div class="cols"><div class="fill">
+      <div class="block" style="margin-top:0">${blockH("Your review", `<span class="btn sm">${ic("pencil", "xs")}Write a review…</span>`)}<div class="muted">No review yet.</div></div>
+      <div class="block">${blockH("Reviews", `<span class="small muted num">12 reviews</span>`)}
+        <div class="col">${REVIEWS.map((v, i) => review(v, i === 1)).join("")}</div>
+        <span class="btn sm mt-8">Show more reviews</span></div>
+    </div>
+    <div class="rail">
+      <div class="label">On Hardcover</div>
+      <div class="figure"><span class="display d-30 num">4.51</span>${stars(4.51, "cat")}</div>
+      <div class="muted num mt-4">9,223 ratings · 19,561 readers</div>
+      <span class="link row-c g-4 start mt-12">Open on Hardcover ${ic("ext", "xs")}</span>
+    </div></div></div></div>`;
+}
+
 function bookPage() {
   return sidebar("discover") + `<div class="main">
     <div class="objbar line"><span class="btn ghost back">${ic("left")}Discover</span><span class="push"></span>${bookTools}</div>
@@ -773,11 +848,13 @@ function tokensScales() {
 
 // ---------- Assemble ----------
 const shots = [
-  ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail", "light", 800, home()],
-  ["Home", "dark", "dark", 800, home()],
+  ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail; Coming soon closes the main column (scrolled content shown in full)", "light", 1000, home()],
+  ["Home", "dark", "dark", 1000, home()],
   ["Library: Currently reading", "light · the book's tools sit in a bar above it; status and rating first, then progress", "light", 800, library("cr")],
   ["Library: Want to read", "dark · a Persian title, a book with no cover, a hovered row · Start reading sits in the panel that holds progress once the book is started", "dark", 800, library("wtr")],
   ["Book page over Discover", "light · the rail starts at the top; scrolled content shown in full", "light", 920, bookPage()],
+  ["Book page, scrolled to Reviews", "dark · other readers' reviews: a byline that opens their profile, muted stars, a collapsed long review, a spoiler, a Persian review", "dark", 900, reviewsPage()],
+  ["Coming soon", "light · the full list over Home, grouped by month, then by year", "light", 760, upcomingPage()],
   ["Library: empty states", "light · a filter with no matches and no book selected, in the app's own copy", "light", 760, library("none")],
   ["Tokens: colour, elevation and states", "both themes", null, 2300, tokensTheme("light", "Light") + tokensTheme("dark", "Dark")],
   ["Tokens: type, space, shape and size", "the same in both themes", null, 1328, tokensScales()],
