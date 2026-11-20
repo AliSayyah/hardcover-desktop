@@ -150,7 +150,7 @@ impl RenderOnce for RailSection {
 ///
 /// ```ignore
 /// Block::new("Notes")
-///     .action(Button::new("edit-notes").ghost().small().icon(IconName::Pencil).label("Edit"))
+///     .action(Button::new("edit-notes").ghost().small().label("Edit"))
 ///     .child(notes)
 /// ```
 #[derive(IntoElement)]

@@ -43,6 +43,8 @@ mod avatar;
 mod byline_link;
 mod empty_state;
 pub mod focus;
+#[cfg(feature = "demo")]
+pub mod gallery;
 mod headers;
 pub mod kit;
 mod meter;
