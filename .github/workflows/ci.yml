@@ -117,7 +117,8 @@ jobs:
           # The one library the binary links that the runner image lacks.
           sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-0
           home="$RUNNER_TEMP/home"
-          HOME="$home" bash install.sh
+          # Through a pipe, as the README's one-liner runs it.
+          HOME="$home" bash <install.sh
           test -f "$home/.local/share/applications/io.github.alisayyah.HardcoverDesktop.desktop"
           "$home/.local/bin/hardcover-desktop" --version
       - name: Refuse a modified tarball, and one renamed to another version
