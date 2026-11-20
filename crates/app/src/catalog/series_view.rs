@@ -20,13 +20,13 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{SeriesDetails, SeriesId};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, follow_list, load_failed, new_list, page_body, page_header,
+    CatalogBooks, CatalogRow, follow_list, load_failed, new_list, page_body, page_header_scrolling,
     page_list, read_summary, row_details,
 };
 use super::navigation::Page;
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::series_position_text;
 use crate::library::model::LibraryModel;
 use crate::ui::{ExternalLink, Skeleton, TextButton};
@@ -59,7 +59,7 @@ impl SeriesView {
             window,
             cx,
         );
-        let subscriptions = follow_list(&list, &model, cx);
+        let subscriptions = follow_list(&list, &model, window, cx);
         Self {
             model,
             current: None,
@@ -276,7 +276,7 @@ impl Render for SeriesView {
             .into_any_element(),
             None => v_flex()
                 .gap_2()
-                .child(Skeleton::line().h_7().w_64())
+                .child(Skeleton::line_in(TypeRole::PageTitle).w_64())
                 .child(Skeleton::line().w_48())
                 .child(Skeleton::line().w_32())
                 .into_any_element(),
@@ -285,7 +285,7 @@ impl Render for SeriesView {
         v_flex()
             .size_full()
             .min_w_0()
-            .child(page_header().child(header))
+            .child(page_header_scrolling("series-header", header))
             .when(ready, |this| {
                 this.child(page_body().child(page_list(&self.list)))
             })

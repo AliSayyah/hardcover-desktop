@@ -124,6 +124,18 @@ impl<T: Hit> SearchResults<T> {
         Some((self.revision, self.query.clone(), self.page + 1))
     }
 
+    /// After a later page failed: lets the next page be asked again, keeping
+    /// the pages so far. Returns `false` if there is nothing to retry (a
+    /// first page that failed starts the query over instead).
+    pub fn retry_page(&mut self) -> bool {
+        if !matches!(self.phase, Phase::Failed(_)) || self.hits.is_empty() {
+            return false;
+        }
+        self.has_more = true;
+        self.phase = Phase::Loaded;
+        true
+    }
+
     /// Applies a response. Returns `false` (and changes nothing) if it belongs
     /// to an older query.
     pub fn receive(
@@ -148,7 +160,8 @@ impl<T: Hit> SearchResults<T> {
                 self.phase = Phase::Loaded;
             }
             Err(message) => {
-                // No automatic retry of a failed page; a new query starts over.
+                // No automatic retry of a failed page: "Try again" asks for
+                // it again (`retry_page`), and a new query starts over.
                 self.has_more = false;
                 self.phase = Phase::Failed(message.into());
             }
@@ -218,6 +231,20 @@ mod tests {
         assert_eq!(r.hits().len(), 2);
         assert_eq!(r.phase(), &Phase::Failed("rate limited".into()));
         assert!(!r.has_more());
+
+        // "Try again" asks for the failed page, not the first.
+        assert!(r.retry_page());
+        assert_eq!(r.next_page_request(), Some((rev, "dune".into(), 2)));
+        assert!(!r.retry_page(), "only a failed page can be retried");
+    }
+
+    #[test]
+    fn a_failed_first_page_is_not_retried_as_a_page() {
+        let mut r = SearchResults::<BookSummary>::default();
+        let rev = r.start("dune".into()).unwrap();
+        r.receive(rev, Err("offline"));
+        assert!(!r.retry_page());
+        assert_eq!(r.phase(), &Phase::Failed("offline".into()));
     }
 
     #[test]

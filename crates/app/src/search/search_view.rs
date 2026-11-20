@@ -14,17 +14,28 @@
 //! their pages, on Enter or a click.
 //!
 //! Down or Enter in the query field moves into the results, selecting the
-//! first row when none is, so the focus is visible where it lands.
+//! first row when none is, so the focus is visible where it lands. The
+//! results are a tab stop too, after the kind tabs.
+//!
+//! A failed search says why with "Try again": the first page runs the query
+//! again; a later page asks for that page again, keeping the rows so far.
+//!
+//! In a narrow list a row's StatusChip shrinks to its icon
+//! ([`BookRow::compact`]), so the title keeps its room.
 
+use std::cell::Cell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::time::Duration;
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{
-    Icon, IconName, IndexPath, Sizable as _, h_resizable, resizable_panel, v_flex,
+    ElementExt as _, Icon, IconName, IndexPath, Sizable as _, h_flex, h_resizable, resizable_panel,
+    v_flex,
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
@@ -44,9 +55,16 @@ use crate::library::model::LibraryModel;
 use crate::search::library_matches::{counts_as_shelved, library_matches};
 use crate::search::results::{Hit, Phase, SearchResults};
 use crate::ui::kit::RaisedField as _;
-use crate::ui::{ListRow as _, RowFocus, empty_state};
+use crate::ui::{
+    ListRow as _, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
+    select_first_row,
+};
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
+
+/// Below this list width (360) a row's StatusChip shrinks to its icon: the
+/// widest chip ("Currently reading") would leave a title too little room.
+const COMPACT_BELOW: f32 = 22.5;
 
 /// Around the query field. `main` binds Down to [`EnterResults`] in
 /// `SearchField > Input`, over the input's own Down (a no-op on one line).
@@ -213,6 +231,8 @@ pub struct ResultsDelegate<T: SearchHit> {
     model: Entity<LibraryModel>,
     view: WeakEntity<SearchView>,
     focus: RowFocus,
+    /// Whether the list is narrow, as last laid out; shared by the three lists.
+    compact: Rc<Cell<bool>>,
 }
 
 impl<T: SearchHit> ResultsDelegate<T> {
@@ -285,6 +305,8 @@ impl<T: SearchHit> ListDelegate for ResultsDelegate<T> {
     }
 
     fn items_count(&self, section: usize, _: &App) -> usize {
+        self.focus
+            .stop_when_rows(self.library.len() + self.remote().count());
         if self.has_library() && section == 0 {
             self.library.len()
         } else {
@@ -319,7 +341,10 @@ impl<T: SearchHit> ListDelegate for ResultsDelegate<T> {
         let focused = self.focus.shows_focus(ix, window);
         let selected = self.focus.is_selected(ix);
         let hit = self.hit_at(ix)?;
-        let row = hit.row(self.model.read(cx)).selected(selected);
+        let row = hit
+            .row(self.model.read(cx))
+            .selected(selected)
+            .compact(self.compact.get());
         Some(
             ListItem::new(hit.row_id())
                 .list_row(focused, cx)
@@ -344,25 +369,24 @@ impl<T: SearchHit> ListDelegate for ResultsDelegate<T> {
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
-        let (icon, title, description): (IconName, SharedString, SharedString) =
-            match self.results.phase() {
-                Phase::Idle => (
-                    IconName::Search,
-                    "Search Hardcover".into(),
-                    T::hint().into(),
-                ),
-                Phase::Failed(message) => (
-                    IconName::CircleAlert,
-                    "Search failed".into(),
-                    message.clone().into(),
-                ),
-                _ => (
-                    IconName::Search,
-                    "No results".into(),
-                    format!("Nothing on Hardcover matches “{}”.", self.results.query()).into(),
-                ),
-            };
-        empty_state(icon, title, description)
+        match self.results.phase() {
+            Phase::Idle => empty_state(
+                IconName::Search,
+                "Search Hardcover".into(),
+                T::hint().into(),
+            ),
+            Phase::Failed(message) => empty_state_with_action(
+                IconName::CircleAlert,
+                "Couldn't search Hardcover".into(),
+                message.clone().into(),
+                retry_button::<T>(self.view.clone()),
+            ),
+            _ => empty_state(
+                IconName::Search,
+                "No results".into(),
+                format!("Nothing on Hardcover matches “{}”.", self.results.query()).into(),
+            ),
+        }
     }
 
     /// Skeleton rows while the first page is on its way and the library
@@ -410,6 +434,8 @@ pub struct SearchView {
     /// One request per kind, indexed by [`SearchKind::index`]. Replacing one
     /// drops a pending debounce or page for that kind only.
     tasks: [Option<Task<()>>; 3],
+    /// Shared with the lists' delegates: whether the list is narrow.
+    compact: Rc<Cell<bool>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -418,9 +444,10 @@ impl SearchView {
         let input =
             cx.new(|cx| InputState::new(window, cx).placeholder(SearchKind::Books.placeholder()));
         let view = cx.entity().downgrade();
-        let books = new_results_list(&model, &view, window, cx);
-        let authors = new_results_list(&model, &view, window, cx);
-        let series = new_results_list(&model, &view, window, cx);
+        let compact = Rc::new(Cell::new(false));
+        let books = new_results_list(&model, &view, &compact, window, cx);
+        let authors = new_results_list(&model, &view, &compact, window, cx);
+        let series = new_results_list(&model, &view, &compact, window, cx);
         let detail = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
         let subscriptions = vec![
             cx.subscribe_in(
@@ -492,6 +519,19 @@ impl SearchView {
                 });
                 this.sync_list_selection(window, cx);
             }),
+            // Tab into the results lands on a row: the first if none is.
+            on_keyboard_entry(&books, window, cx, |this, window, cx| {
+                let first = this.books.read(cx).delegate().first().cloned();
+                if let Some(book) = first {
+                    this.select(book, window, cx);
+                }
+            }),
+            on_keyboard_entry(&authors, window, cx, |this, window, cx| {
+                select_first_row(&this.authors, window, cx)
+            }),
+            on_keyboard_entry(&series, window, cx, |this, window, cx| {
+                select_first_row(&this.series, window, cx)
+            }),
         ];
         Self {
             input,
@@ -502,8 +542,26 @@ impl SearchView {
             detail,
             selected: None,
             tasks: [None, None, None],
+            compact,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// "Try again" after a failure: the failed page again if earlier pages
+    /// loaded, else the whole query.
+    fn retry<T: SearchHit>(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (page, query) = T::list(self).update(cx, |list, cx| {
+            let results = &mut list.delegate_mut().results;
+            let page = results.retry_page();
+            cx.notify();
+            (page, SharedString::from(results.query().to_owned()))
+        });
+        if page {
+            self.load_next_page::<T>(window, cx);
+        } else {
+            self.search::<T>(query, false, window, cx);
+        }
+        cx.notify();
     }
 
     pub fn focus_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -676,11 +734,17 @@ impl SearchView {
     }
 
     fn render_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (status, busy, list) = match self.kind {
+        let (status, busy, failed, list) = match self.kind {
             SearchKind::Books => results_status(&self.books, cx),
             SearchKind::Authors => results_status(&self.authors, cx),
             SearchKind::Series => results_status(&self.series, cx),
         };
+        let retry = failed.then(|| match self.kind {
+            SearchKind::Books => retry_button::<BookSummary>(cx.entity().downgrade()),
+            SearchKind::Authors => retry_button::<AuthorHit>(cx.entity().downgrade()),
+            SearchKind::Series => retry_button::<SeriesHit>(cx.entity().downgrade()),
+        });
+        let compact = self.compact.clone();
         let view = cx.entity().downgrade();
         let colors = colors(cx);
         // The shelf's header: padding 12/16 and a hairline under it.
@@ -721,15 +785,34 @@ impl SearchView {
                             }),
                     )
                     .child(
-                        div()
-                            .h_4()
-                            .caption(cx)
-                            .tabular()
-                            .truncate()
-                            .children(status),
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .caption(cx)
+                                    .tabular()
+                                    .truncate()
+                                    // A blank line keeps the line's height.
+                                    .child(status.unwrap_or_else(|| "\u{a0}".into())),
+                            )
+                            .children(retry),
                     ),
             )
-            .child(div().flex_1().min_h_0().child(list))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .on_prepaint(move |bounds, window, _| {
+                        let narrow = bounds.size.width < window.rem_size() * COMPACT_BELOW;
+                        if compact.replace(narrow) != narrow {
+                            // The rows were drawn for the other width.
+                            window.refresh();
+                        }
+                    })
+                    .child(list),
+            )
     }
 
     /// Beside the list: the selected book, or what opening a result does.
@@ -755,6 +838,7 @@ impl SearchView {
 fn new_results_list<T: SearchHit>(
     model: &Entity<LibraryModel>,
     view: &WeakEntity<SearchView>,
+    compact: &Rc<Cell<bool>>,
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<ListState<ResultsDelegate<T>>> {
@@ -767,6 +851,7 @@ fn new_results_list<T: SearchHit>(
                 model: model.clone(),
                 view: view.clone(),
                 focus: RowFocus::default(),
+                compact: compact.clone(),
             },
             window,
             cx,
@@ -794,11 +879,23 @@ fn focus_list<T: SearchHit>(
     });
 }
 
-/// The status line under the input, whether a request is running, and the list.
+/// "Try again" after a failed search, for `T`'s list.
+fn retry_button<T: SearchHit>(view: WeakEntity<SearchView>) -> Button {
+    Button::new(("retry-search", T::KIND.index()))
+        .ghost()
+        .small()
+        .label("Try again")
+        .on_click(move |_, window, cx| {
+            let _ = view.update(cx, |view, cx| view.retry::<T>(window, cx));
+        })
+}
+
+/// The status line under the input, whether a request is running, whether a
+/// later page failed (the status line then offers "Try again"), and the list.
 fn results_status<T: SearchHit>(
     list: &Entity<ListState<ResultsDelegate<T>>>,
     cx: &App,
-) -> (Option<SharedString>, bool, AnyElement) {
+) -> (Option<SharedString>, bool, bool, AnyElement) {
     let delegate = list.read(cx).delegate();
     let results = &delegate.results;
     let status: Option<SharedString> = match results.phase() {
@@ -818,9 +915,11 @@ fn results_status<T: SearchHit>(
         _ => None,
     };
     let busy = matches!(results.phase(), Phase::Searching | Phase::LoadingMore);
+    let failed = matches!(results.phase(), Phase::Failed(_)) && !delegate.is_empty();
     (
         status,
         busy,
+        failed,
         List::new(list).size_full().p_2().into_any_element(),
     )
 }
@@ -832,13 +931,12 @@ impl Render for SearchView {
             .child(
                 resizable_panel()
                     .size(rem * size::LIST.0)
-                    .size_range(rem * 16.0..rem * 40.)
+                    .size_range(rem * size::LIST_MIN.0..rem * size::LIST_MAX.0)
                     .child(self.render_results(cx)),
             )
             .child(
                 resizable_panel()
-                    // With the sidebar, 16rem + 18rem fits the 800px minimum window.
-                    .size_range(rem * 18.0..gpui_kit::Pixels::MAX)
+                    .size_range(rem * size::PANE_MIN.0..gpui_kit::Pixels::MAX)
                     .child(self.render_detail()),
             )
     }

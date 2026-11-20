@@ -6,6 +6,9 @@
 //!
 //! - [`Skeleton::line`]: a bar of text, 12 high with `r-control` corners. Set
 //!   its width (`.w_2_3()`); it fills the row by default.
+//! - [`Skeleton::line_in`]: a line in a larger type role (a page title, a
+//!   name in `display-24`): a bar as high as the role's type, in a box as high
+//!   as its line, so the text takes the same room when it lands.
 //! - [`Skeleton::circle`]: an avatar.
 //! - [`Skeleton::cover`]: a cover at a system size.
 //! - [`SkeletonText`]: a paragraph: lines 8 apart, the last one shorter.
@@ -24,12 +27,12 @@ use std::time::Duration;
 use gpui_kit::component::StyledExt as _;
 use gpui_kit::{
     Animation, AnimationExt as _, App, IntoElement, ParentElement as _, RenderOnce,
-    StyleRefinement, Styled, Window, bounce, div, ease_in_out, prelude::FluentBuilder as _,
+    StyleRefinement, Styled, Window, bounce, div, ease_in_out, prelude::FluentBuilder as _, rems,
 };
 
 use super::focus::{box_radius, control_radius};
 use crate::cover::CoverSize;
-use crate::design::{colors, size};
+use crate::design::{TypeRole, colors, size};
 
 /// One full pulse, there and back.
 const PULSE: Duration = Duration::from_secs(2);
@@ -37,6 +40,7 @@ const PULSE: Duration = Duration::from_secs(2);
 #[derive(Clone, Copy)]
 enum Shape {
     Line,
+    Text(TypeRole),
     Circle,
     Cover(CoverSize),
 }
@@ -61,6 +65,11 @@ impl Skeleton {
     /// A line of text, 12 high, filling its row unless given a width.
     pub fn line() -> Self {
         Self::new(Shape::Line)
+    }
+
+    /// A line of text in `role`; see the module doc.
+    pub fn line_in(role: TypeRole) -> Self {
+        Self::new(Shape::Text(role))
     }
 
     /// A 32 px avatar circle.
@@ -94,6 +103,10 @@ impl RenderOnce for Skeleton {
             .map(|this| match self.shape {
                 // 12 high: a 16 line's glyphs, not its leading.
                 Shape::Line => this.w_full().h_3().rounded(control_radius(cx)),
+                Shape::Text(role) => this
+                    .w_full()
+                    .h(rems(role.scale().0 / 16.))
+                    .rounded(control_radius(cx)),
                 Shape::Circle => this.size(size::AVATAR).rounded_full(),
                 Shape::Cover(cover) => this
                     .w(cover.width())
@@ -101,7 +114,7 @@ impl RenderOnce for Skeleton {
                     .rounded(cover.radius()),
             })
             .refine_style(&self.style);
-        if self.still {
+        let shape = if self.still {
             shape.into_any_element()
         } else {
             shape
@@ -113,6 +126,16 @@ impl RenderOnce for Skeleton {
                     |this, delta| this.opacity(1. - delta * 0.5),
                 )
                 .into_any_element()
+        };
+        match self.shape {
+            // The role's line box around its bar, as the text will have.
+            Shape::Text(role) => div()
+                .flex()
+                .items_center()
+                .h(rems(role.scale().1 / 16.))
+                .child(shape)
+                .into_any_element(),
+            _ => shape,
         }
     }
 }

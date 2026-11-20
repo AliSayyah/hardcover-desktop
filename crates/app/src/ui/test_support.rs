@@ -42,6 +42,12 @@ pub fn tab(cx: &mut VisualTestContext) {
     redraw(cx);
 }
 
+/// Moves focus as Shift+Tab does, and draws the frame that shows it.
+pub fn shift_tab(cx: &mut VisualTestContext) {
+    cx.update(|window, cx| window.focus_prev(cx));
+    redraw(cx);
+}
+
 pub fn has_focus(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| window.focused(cx).is_some())
 }

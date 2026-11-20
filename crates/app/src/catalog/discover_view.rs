@@ -99,7 +99,7 @@ impl DiscoverView {
             window,
             cx,
         );
-        let subscriptions = follow_list(&list, &model, cx);
+        let subscriptions = follow_list(&list, &model, window, cx);
         Self {
             period: TrendingPeriod::Month,
             periods: HashMap::new(),

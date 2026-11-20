@@ -3,44 +3,69 @@
 //! status, keyboard-navigable. Enter or a click opens the book. Escape
 //! reaches the page's Back binding: the list's own Cancel lets it through.
 //!
-//! The pages share one frame: content at most [`PAGE_WIDTH`] wide, inset 32
-//! ([`page_header`]), with the list's rows on the same spine
-//! ([`page_list`]: a row's own 8 of padding inside a 24 inset).
+//! The pages share one frame: content at most `size::PAGE_MAX` (768) wide
+//! inside the 32 inset ([`page_header`]), with the list's rows on the same
+//! spine ([`page_list`]: a row's own 8 of padding inside a 24 inset).
+//!
+//! The list is a tab stop after the header's controls, and lands on the
+//! first row when none is selected ([`follow_list`]).
+//!
+//! A header that can run long (a bio, a description) is a
+//! [`page_header_scrolling`]: in a short window it shrinks and scrolls on its
+//! own, and the list under it keeps room for three rows
+//! (`size::PAGE_LIST_MIN`).
 
 use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{IconName, IndexPath};
 use gpui_kit::{
-    App, AppContext as _, Context, Div, Entity, IntoElement, ParentElement as _, Rems,
-    SharedString, Styled as _, Subscription, Window, div, rems,
+    App, AppContext as _, Context, Div, ElementId, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, SharedString, Styled as _, Subscription, Window, div,
 };
 use hardcover_core::{BookSummary, ReadingStatus};
 
 use super::navigation::{self, Page};
-use crate::design::{TypeRoles as _, colors};
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::average_rating_text;
 use crate::library::book_row::{BookRow, loading_rows};
 use crate::library::model::LibraryModel;
-use crate::ui::{ListRow as _, RowFocus, empty_state};
-
-/// The widest a catalogue page's content gets (768), so rows and lines
-/// stay readable in a wide window.
-pub const PAGE_WIDTH: Rems = rems(48.);
+use crate::ui::{ListRow as _, RowFocus, empty_state, on_keyboard_entry, select_first_row};
 
 /// The top of a page: inset 32 on three sides, 16 above the list (whose
-/// rows add their own 8).
+/// rows add their own 8), its content at most `size::PAGE_MAX` wide.
 pub fn page_header() -> Div {
     div()
         .flex_none()
         .w_full()
-        .max_w(PAGE_WIDTH)
+        .max_w(size::PAGE_FRAME_MAX)
         .px_8()
         .pt_8()
         .pb_4()
 }
 
-/// The region a page's list fills, under its header.
+/// A [`page_header`] that gives way in a short window: it shrinks, down to
+/// nothing if it must, and scrolls its content, so the list under it keeps
+/// `size::PAGE_LIST_MIN`. `id` names its scroll position.
+pub fn page_header_scrolling(
+    id: impl Into<ElementId>,
+    content: impl IntoElement,
+) -> impl IntoElement {
+    page_header()
+        .id(id)
+        .flex_shrink_1()
+        .min_h_0()
+        .child(content)
+        .overflow_y_scrollbar()
+}
+
+/// The region a page's list fills, under its header. It keeps
+/// `size::PAGE_LIST_MIN` when a [`page_header_scrolling`] gives way.
 pub fn page_body() -> Div {
-    div().flex_1().min_h_0().w_full().max_w(PAGE_WIDTH)
+    div()
+        .flex_1()
+        .min_h(size::PAGE_LIST_MIN)
+        .w_full()
+        .max_w(size::PAGE_FRAME_MAX)
 }
 
 /// A page's list, its rows' text on the header's spine.
@@ -89,6 +114,7 @@ impl ListDelegate for CatalogBooks {
     type Item = ListItem;
 
     fn items_count(&self, _: usize, _: &App) -> usize {
+        self.focus.stop_when_rows(self.rows.len());
         self.rows.len()
     }
 
@@ -155,13 +181,19 @@ pub fn new_list(
     list
 }
 
-/// Opens the confirmed book. Arrowing only moves the selection.
+/// Opens the confirmed book. Arrowing only moves the selection; the
+/// keyboard bringing focus to the list selects its first row if none is.
 pub fn follow_list<V: 'static>(
     list: &Entity<ListState<CatalogBooks>>,
     model: &Entity<LibraryModel>,
+    window: &mut Window,
     cx: &mut Context<V>,
 ) -> Vec<Subscription> {
+    let entered = list.clone();
     vec![
+        on_keyboard_entry(list, window, cx, move |_, window, cx| {
+            select_first_row(&entered, window, cx)
+        }),
         cx.subscribe(list, |_, list, event: &ListEvent, cx| match event {
             ListEvent::Confirm(ix) => {
                 let book = list.read(cx).delegate().rows.get(ix.row).cloned();

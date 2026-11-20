@@ -5,6 +5,10 @@
 //! in `display-24`, the facts, how many of their books the reader has read
 //! and "Open on Hardcover". The bio follows in `prose`, then "Books" with
 //! the order, and the books as catalogue rows.
+//!
+//! The photo, name and bio scroll on their own in a short window
+//! (`book_list::page_header_scrolling`); "Books" and the list stay, with
+//! room for at least three rows.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,11 +27,11 @@ use hardcover_core::{AuthorBook, AuthorDetails, AuthorId};
 
 use super::book_list::{
     CatalogBooks, CatalogRow, follow_list, load_failed, new_list, page_body, page_header,
-    page_list, read_summary, row_details,
+    page_header_scrolling, page_list, read_summary, row_details,
 };
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::{Avatar, AvatarSize, ExternalLink, SectionHeader, Skeleton};
@@ -132,7 +136,7 @@ impl AuthorView {
             .collect();
         let order_select =
             cx.new(|cx| SelectState::new(options, Some(IndexPath::new(0)), window, cx));
-        let mut subscriptions = follow_list(&list, &model, cx);
+        let mut subscriptions = follow_list(&list, &model, window, cx);
         subscriptions.push(cx.subscribe_in(
             &order_select,
             window,
@@ -348,16 +352,21 @@ impl AuthorView {
                         }),
                 )
             })
-            .child(
-                SectionHeader::new("Books").action(
-                    div().w(size::SELECT_SMALL).child(
-                        Select::new(&self.order_select)
-                            .small()
-                            .raised_field(false, cx),
-                    ),
-                ),
-            )
             .into_any_element()
+    }
+
+    /// "Books" and the order, over the list: 24 under the header (whose own
+    /// 16 of foot this completes).
+    fn render_books_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        page_header().pt_2().child(
+            SectionHeader::new("Books").action(
+                div().w(size::SELECT_SMALL).child(
+                    Select::new(&self.order_select)
+                        .small()
+                        .raised_field(false, cx),
+                ),
+            ),
+        )
     }
 }
 
@@ -397,19 +406,23 @@ impl Render for AuthorView {
                 .child(
                     v_flex()
                         .gap_2()
-                        .child(Skeleton::line().h_7().w_64())
+                        .child(Skeleton::line_in(TypeRole::Display24).w_64())
                         .child(Skeleton::line().w_48())
                         .child(Skeleton::line().w_32()),
                 )
                 .into_any_element(),
         };
-        v_flex()
-            .size_full()
-            .min_w_0()
-            .child(page_header().child(header))
-            .when(ready, |this| {
-                this.child(page_body().child(page_list(&self.list)))
-            })
+        v_flex().size_full().min_w_0().map(|this| {
+            if ready {
+                // The header scrolls on its own when the window is short;
+                // "Books" and the list keep their room.
+                this.child(page_header_scrolling("author-header", header))
+                    .child(self.render_books_bar(cx))
+                    .child(page_body().child(page_list(&self.list)))
+            } else {
+                this.child(page_header().child(header))
+            }
+        })
     }
 }
 
