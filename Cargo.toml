@@ -7,6 +7,14 @@ edition = "2024"
 license = "MIT"
 repository = "https://github.com/AliSayyah/hardcover-desktop"
 
+# No debug info for dependencies in debug builds: a fresh `target/` is about half
+# the size (4.8 GB instead of 9.0 GB) and builds about a fifth faster. Our own
+# crates keep full debug info. Panics still name every frame; dependency frames
+# just lose their file and line. For one session with them back:
+#   cargo run --config 'profile.dev.package."*".debug=true'
+[profile.dev.package."*"]
+debug = false
+
 # Release artifacts. `release` stays the default for local builds.
 [profile.dist]
 inherits = "release"

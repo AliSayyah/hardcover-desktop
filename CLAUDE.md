@@ -35,6 +35,8 @@ The `justfile` wraps these; `just` lists the recipes.
 
 Keep the justfile in step when a command here changes.
 
+Debug builds compile dependencies without debug info (`[profile.dev.package."*"]` in `Cargo.toml`), which halves `target/` and keeps parallel worktrees small; our own crates keep it. To step into a dependency in a debugger, or see its line numbers in a backtrace, pass `--config 'profile.dev.package."*".debug=true'`.
+
 `api_check` is local only and is not run in CI. It uses `HARDCOVER_TOKEN` if set, otherwise the app's keyring session; both see the same schema. It does three things:
 1. Introspects the live schema and lists added, removed and changed types and fields.
 2. Validates every document in `queries::ALL` against the live schema.
