@@ -48,6 +48,7 @@ use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{
     ProgressSummary, authors_text, books_count_text, count_text, goal_amount, goal_pace,
     goal_period, goal_unit, needs_permission, progress_summary, rating_text, series_position_text,
+    short_date,
 };
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
@@ -1200,16 +1201,6 @@ fn pace_amount(goal: &Goal, n: f64) -> String {
     match goal.metric {
         GoalMetric::Books => amount,
         _ => format!("{amount} {}", goal_unit(&goal.metric, n)),
-    }
-}
-
-/// "Nov 30", with the year when it isn't this year's.
-fn short_date(date: Date, today: Date) -> String {
-    use chrono::Datelike as _;
-    if date.year() == today.year() {
-        date.format("%b %-d").to_string()
-    } else {
-        date.format("%b %-d, %Y").to_string()
     }
 }
 

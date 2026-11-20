@@ -171,6 +171,16 @@ pub fn date_text(date: Date) -> String {
     date.format("%b %-d, %Y").to_string()
 }
 
+/// "Nov 30", with the year when it isn't `today`'s ("Nov 30, 2025").
+pub fn short_date(date: Date, today: Date) -> String {
+    use chrono::Datelike as _;
+    if date.year() == today.year() {
+        date.format("%b %-d").to_string()
+    } else {
+        date_text(date)
+    }
+}
+
 /// One line about an edition: "Paperback · 412 pages · Penguin, 2004".
 /// `None` when nothing is known beyond its id.
 pub fn edition_text(edition: &EditionSummary) -> Option<String> {

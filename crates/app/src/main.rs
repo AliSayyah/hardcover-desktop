@@ -14,10 +14,12 @@ mod fonts;
 mod format;
 mod goals;
 mod home;
+mod icons;
 mod library;
 mod lists;
 mod preferences;
 mod search;
+mod series;
 mod settings_view;
 mod shell;
 mod sign_in;
@@ -50,6 +52,7 @@ actions!(
         ShowAbout,
         GoBack,
         ShowDiscover,
+        ShowSeries,
         ShowStats,
         ShowHome,
         RemoveFromList,
@@ -76,6 +79,8 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-5", ShowDidNotFinish, None),
         KeyBinding::new("ctrl-6", ShowIgnored, None),
         KeyBinding::new("ctrl-shift-d", ShowDiscover, None),
+        // Ctrl+Shift+E selects to the end of the line in a text field.
+        KeyBinding::new("ctrl-shift-r", ShowSeries, None),
         KeyBinding::new("ctrl-shift-s", ShowStats, None),
         KeyBinding::new("ctrl-0", ShowHome, None),
         // Down in Search's query field moves into the results.
@@ -141,7 +146,7 @@ fn main() {
     // keeping core calls off the UI thread): the first frame needs the theme.
     let (prefs, prefs_path) = preferences::load();
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(icons::AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             let bundled_fonts = fonts::init(cx);

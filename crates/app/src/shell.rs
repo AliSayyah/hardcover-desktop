@@ -20,6 +20,7 @@ use gpui_kit::{
     ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
     Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _, rems,
 };
+use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::store::LibraryCache;
 use hardcover_core::{ListId, ReadingStatus};
 
@@ -42,6 +43,8 @@ use crate::lists::list_view::ListView;
 use crate::lists::model::{ListsEvent, ListsModel};
 use crate::lists::sidebar::lists_section;
 use crate::search::search_view::SearchView;
+use crate::series::model::SeriesModel;
+use crate::series::tracker_view::SeriesTrackerView;
 use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
@@ -55,7 +58,8 @@ use crate::upcoming::upcoming_view::UpcomingView;
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
 use crate::{
     FocusSearch, GoBack, OpenSettings, Refresh, ShowAbout, ShowCurrentlyReading, ShowDidNotFinish,
-    ShowDiscover, ShowHome, ShowIgnored, ShowPaused, ShowRead, ShowStats, ShowWantToRead,
+    ShowDiscover, ShowHome, ShowIgnored, ShowPaused, ShowRead, ShowSeries, ShowStats,
+    ShowWantToRead,
 };
 
 /// Key context of a catalogue page, where Escape goes back.
@@ -176,6 +180,8 @@ pub enum Destination {
     Home,
     Search,
     Discover,
+    /// Every series the reader has started.
+    Series,
     Stats,
     Shelf(ReadingStatus),
     List(ListId),
@@ -210,6 +216,8 @@ pub struct Workspace {
     list_page: Entity<ListView>,
     upcoming: Entity<UpcomingModel>,
     upcoming_page: Entity<UpcomingView>,
+    series: Entity<SeriesModel>,
+    series_view: Entity<SeriesTrackerView>,
     signing_out: bool,
     /// Whether the sidebar shows its keyboard shortcuts: only while Ctrl is
     /// held, so the rest of the time the rows stay clean.
@@ -257,6 +265,10 @@ impl Workspace {
         let upcoming = cx.new(|cx| UpcomingModel::new(model.clone(), cx));
         let upcoming_page = cx.new(|cx| UpcomingView::new(upcoming.clone(), model.clone(), cx));
         let home = cx.new(|cx| HomeView::new(model.clone(), goals.clone(), upcoming.clone(), cx));
+        let series = cx.new(|cx| SeriesModel::new(model.clone(), upcoming.clone(), cx));
+        let series_view = cx.new(|cx| {
+            SeriesTrackerView::new(series.clone(), model.clone(), upcoming.clone(), window, cx)
+        });
         model.update(cx, |m, cx| m.start(cx));
         goals.update(cx, |g, cx| g.load(cx));
         lists.update(cx, |l, cx| l.load(cx));
@@ -276,6 +288,8 @@ impl Workspace {
             cx.observe(&updates, |_, _, cx| cx.notify()),
             cx.observe(&reauthorize, |_, _, cx| cx.notify()),
             cx.observe(&goals, |_, _, cx| cx.notify()),
+            // The sidebar counts the series not finished.
+            cx.observe(&series, |_, _, cx| cx.notify()),
             // A list shown that is gone after a reload, or no longer
             // readable, hands over to a shelf.
             cx.observe_in(&lists, window, |this, lists, window, cx| {
@@ -335,6 +349,8 @@ impl Workspace {
             list_page,
             upcoming,
             upcoming_page,
+            series,
+            series_view,
             signing_out: false,
             key_hints: false,
             _key_hint_delay: None,
@@ -358,6 +374,7 @@ impl Workspace {
             Destination::Home => self.home.update(cx, |h, cx| h.focus(window, cx)),
             Destination::Search => self.search.update(cx, |s, cx| s.focus_input(window, cx)),
             Destination::Discover => self.discover.update(cx, |d, cx| d.focus(window, cx)),
+            Destination::Series => self.series_view.update(cx, |s, cx| s.focus(window, cx)),
             Destination::Stats => self.stats.update(cx, |s, cx| s.focus(window, cx)),
             Destination::Shelf(_) => self.library.update(cx, |l, cx| l.focus_list(window, cx)),
             Destination::List(_) => self.list_page.update(cx, |l, cx| l.focus(window, cx)),
@@ -378,6 +395,7 @@ impl Workspace {
                 d.show(window, cx);
                 d.focus(window, cx);
             }),
+            Destination::Series => self.series_view.update(cx, |s, cx| s.focus(window, cx)),
             Destination::Stats => self.stats.update(cx, |s, cx| s.focus(window, cx)),
             Destination::Shelf(status) => {
                 self.library
@@ -488,6 +506,7 @@ impl Workspace {
             Destination::Home => SharedString::new_static("Home"),
             Destination::Search => SharedString::new_static("Search"),
             Destination::Discover => SharedString::new_static("Discover"),
+            Destination::Series => SharedString::new_static("Series"),
             Destination::Stats => SharedString::new_static("Stats"),
             Destination::Shelf(status) => SharedString::new_static(status_label(status)),
             Destination::List(id) => self
@@ -524,6 +543,7 @@ impl Workspace {
         self.goals.update(cx, |g, cx| g.load(cx));
         self.lists.update(cx, |l, cx| l.reload(cx));
         self.upcoming.update(cx, |u, cx| u.load(cx));
+        self.series.update(cx, |s, cx| s.load(cx));
         cx.notify();
     }
 
@@ -532,6 +552,7 @@ impl Workspace {
         self.goals.update(cx, |g, cx| g.load(cx));
         self.lists.update(cx, |l, cx| l.reload(cx));
         self.upcoming.update(cx, |u, cx| u.load(cx));
+        self.series.update(cx, |s, cx| s.load(cx));
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -640,7 +661,7 @@ impl Workspace {
         };
         let nav_row = |id: &'static str,
                        label: &'static str,
-                       icon: IconName,
+                       icon: Icon,
                        destination: Destination,
                        action: &dyn Action| {
             let view = view.clone();
@@ -657,7 +678,7 @@ impl Workspace {
             nav_row(
                 shelf_row_id(status),
                 status_label(status),
-                crate::chip::status_icon(status),
+                crate::chip::status_icon(status).into(),
                 Destination::Shelf(status),
                 action.as_ref(),
             )
@@ -684,6 +705,29 @@ impl Workspace {
             }),
             cx,
         );
+        // Hidden without the catalogue, which the page reads.
+        let series_row = Services::global(cx).has_scope(READ_CATALOG).then(|| {
+            let today = chrono::Local::now().date_naive();
+            let count = self.series.update(cx, |s, cx| {
+                s.is_loaded().then(|| {
+                    s.summaries(today, cx)
+                        .iter()
+                        .filter(|s| !s.group.is_finished())
+                        .count()
+                })
+            });
+            nav_row(
+                "nav-series",
+                "Series",
+                crate::icons::library().into(),
+                Destination::Series,
+                &ShowSeries,
+            )
+            // Nothing to count shows no count, as the empty page has nothing.
+            .when_some(count.filter(|n| *n > 0), |row, n| {
+                row.count(count_text(n as u32))
+            })
+        });
         let colors = colors(cx);
 
         // The brand and the foot stay put; the destinations between them
@@ -711,28 +755,29 @@ impl Workspace {
                             .child(nav_row(
                                 "nav-home",
                                 "Home",
-                                IconName::LayoutDashboard,
+                                IconName::LayoutDashboard.into(),
                                 Destination::Home,
                                 &ShowHome,
                             ))
                             .child(nav_row(
                                 "nav-search",
                                 "Search",
-                                IconName::Search,
+                                IconName::Search.into(),
                                 Destination::Search,
                                 &FocusSearch,
                             ))
                             .child(nav_row(
                                 "nav-discover",
                                 "Discover",
-                                IconName::Globe,
+                                IconName::Globe.into(),
                                 Destination::Discover,
                                 &ShowDiscover,
                             ))
+                            .children(series_row)
                             .child(nav_row(
                                 "nav-stats",
                                 "Stats",
-                                IconName::ChartPie,
+                                IconName::ChartPie.into(),
                                 Destination::Stats,
                                 &ShowStats,
                             ))
@@ -1070,6 +1115,11 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ShowDiscover, window, cx| {
                 this.show(Destination::Discover, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &ShowSeries, window, cx| {
+                if Services::global(cx).has_scope(READ_CATALOG) {
+                    this.show(Destination::Series, window, cx)
+                }
+            }))
             .on_action(cx.listener(|this, _: &ShowStats, window, cx| {
                 this.show(Destination::Stats, window, cx)
             }))
@@ -1083,6 +1133,7 @@ impl Render for Workspace {
                     (None, Destination::Home) => this.child(self.home.clone()),
                     (None, Destination::Search) => this.child(self.search.clone()),
                     (None, Destination::Discover) => this.child(self.discover.clone()),
+                    (None, Destination::Series) => this.child(self.series_view.clone()),
                     (None, Destination::Stats) => this.child(self.stats.clone()),
                     (None, Destination::Shelf(_)) => this.child(self.library.clone()),
                     (None, Destination::List(_)) => this.child(self.list_page.clone()),

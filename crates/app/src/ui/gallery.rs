@@ -103,6 +103,7 @@ impl Render for Gallery {
             .child(headers())
             .child(meters(cx))
             .child(sequence(cx))
+            .child(series_strips(cx))
             .child(list_rows(cx))
             .child(blocks_and_properties(cx))
             .child(skeletons())
@@ -277,6 +278,101 @@ fn sequence(cx: &App) -> AnyElement {
             ))
             .child(upcoming_row(2, "ملت عشق", "رمان‌های ترجمه‌شده", "2028", cx))
             .child(upcoming_row(3, long, "A series", "Feb 3", cx)),
+    )
+}
+
+/// The series strip in every state, a long one with "+N", and a series row's
+/// main column with a right-to-left name and author.
+fn series_strips(cx: &App) -> AnyElement {
+    use crate::series::progress::{Activity, Group, SeriesBook, SeriesSummary};
+    use hardcover_core::{BookId, BookSummary, SeriesId};
+
+    let cover = |title: &'static str| Cover::new(CoverSize::Sm, title);
+    let legend = SeriesStrip::new()
+        .item(
+            StripItem::cover("g-s1", cover("Dune"))
+                .icon(IconName::CircleCheck)
+                .position("1"),
+        )
+        .item(
+            StripItem::cover("g-s2", cover("Dune Messiah"))
+                .icon(IconName::BookOpen)
+                .position("2")
+                .progress(Some(42.))
+                .next(true),
+        )
+        .item(
+            StripItem::cover("g-s3", cover("Children of Dune"))
+                .icon(IconName::Inbox)
+                .position("3"),
+        )
+        .item(
+            StripItem::cover("g-s4", cover("God Emperor of Dune"))
+                .icon(IconName::Pause)
+                .position("4"),
+        )
+        .item(
+            StripItem::cover("g-s5", cover("Heretics of Dune"))
+                .icon(IconName::Ban)
+                .position("5"),
+        )
+        .item(StripItem::missing("g-s6").position("6"))
+        .item(StripItem::unreleased("g-s7", crate::icons::clock()).position("6.5"));
+
+    // A Persian series of ten: two read, the third paused, the rest not in
+    // the library, cut to six slots with "+N".
+    let today: hardcover_core::Date = "2026-11-20".parse().unwrap_or_default();
+    let books = (1..=10)
+        .map(|n| {
+            let digits: String = n
+                .to_string()
+                .chars()
+                .map(|d| char::from_u32(0x06F0 + d.to_digit(10).unwrap_or(0)).unwrap_or(d))
+                .collect();
+            let status = match n {
+                1 | 2 => Some(ReadingStatus::Read),
+                3 => Some(ReadingStatus::Paused),
+                _ => None,
+            };
+            SeriesBook {
+                book: BookSummary::new(BookId::new(90_000 + n), format!("کلیدر {digits}")),
+                position: n as f32,
+                entry: None,
+                status,
+                out: true,
+                release_date: None,
+                progress: None,
+            }
+        })
+        .collect();
+    let persian = SeriesSummary {
+        id: SeriesId::new(9_000),
+        name: "کلیدر".to_owned(),
+        author: Some("محمود دولت‌آبادی".to_owned()),
+        books,
+        next: Some(2),
+        group: Group::Untouched,
+        activity: Activity::PausedSince("2024-06-02".parse().unwrap_or(today)),
+        last_activity: None,
+    };
+    specimen(
+        "Series strips and cover slots",
+        v_flex()
+            .gap_6()
+            .child(legend)
+            .child(
+                h_flex()
+                    .gap_4()
+                    .child(CoverSlot::new(CoverSize::Sm))
+                    .child(CoverSlot::new(CoverSize::Sm).icon(crate::icons::clock()))
+                    .child(CoverSlot::new(CoverSize::Md))
+                    .child(CoverSlot::new(CoverSize::Md).icon(crate::icons::clock())),
+            )
+            .child(
+                div()
+                    .max_w(rems(30.))
+                    .child(crate::series::row::series_body(&persian, today, 6, cx)),
+            ),
     )
 }
 

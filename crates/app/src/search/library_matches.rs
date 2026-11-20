@@ -88,7 +88,7 @@ fn rank(entry: &LibraryEntry, query: &[String]) -> Option<u8> {
 
 /// Lowercase words: runs of letters and digits. An apostrophe inside a word
 /// is dropped, so "ender's" and "enders" match.
-fn words(text: &str) -> Vec<String> {
+pub fn words(text: &str) -> Vec<String> {
     text.to_lowercase()
         .replace(['\'', '’'], "")
         .split(|c: char| !c.is_alphanumeric())
