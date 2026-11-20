@@ -4201,6 +4201,7 @@ input contributions_variance_order_by {
 }
 
 type contributor_role_categories {
+  contributor_roles(distinct_on: [contributor_roles_select_column!], limit: Int, offset: Int, order_by: [contributor_roles_order_by!], where: contributor_roles_bool_exp): [contributor_roles!]!
   group: Int!
   id: Int!
   name: String!
@@ -4210,12 +4211,14 @@ input contributor_role_categories_bool_exp {
   _and: [contributor_role_categories_bool_exp!]
   _not: contributor_role_categories_bool_exp
   _or: [contributor_role_categories_bool_exp!]
+  contributor_roles: contributor_roles_bool_exp
   group: Int_comparison_exp
   id: Int_comparison_exp
   name: String_comparison_exp
 }
 
 input contributor_role_categories_order_by {
+  contributor_roles_aggregate: contributor_roles_aggregate_order_by
   group: order_by
   id: order_by
   name: order_by
@@ -4236,7 +4239,9 @@ input contributor_role_categories_stream_cursor_value_input {
 
 type contributor_role_specializations {
   blurb: String
+  contributor_role: contributor_roles
   contributor_role_id: Int!
+  contributor_specialization: contributor_specializations
   contributor_specialization_id: Int!
   description: String
   id: Int!
@@ -4245,12 +4250,34 @@ type contributor_role_specializations {
   quick_list(path: String): jsonb!
 }
 
+input contributor_role_specializations_aggregate_order_by {
+  avg: contributor_role_specializations_avg_order_by
+  count: order_by
+  max: contributor_role_specializations_max_order_by
+  min: contributor_role_specializations_min_order_by
+  stddev: contributor_role_specializations_stddev_order_by
+  stddev_pop: contributor_role_specializations_stddev_pop_order_by
+  stddev_samp: contributor_role_specializations_stddev_samp_order_by
+  sum: contributor_role_specializations_sum_order_by
+  var_pop: contributor_role_specializations_var_pop_order_by
+  var_samp: contributor_role_specializations_var_samp_order_by
+  variance: contributor_role_specializations_variance_order_by
+}
+
+input contributor_role_specializations_avg_order_by {
+  contributor_role_id: order_by
+  contributor_specialization_id: order_by
+  id: order_by
+}
+
 input contributor_role_specializations_bool_exp {
   _and: [contributor_role_specializations_bool_exp!]
   _not: contributor_role_specializations_bool_exp
   _or: [contributor_role_specializations_bool_exp!]
   blurb: String_comparison_exp
+  contributor_role: contributor_roles_bool_exp
   contributor_role_id: Int_comparison_exp
+  contributor_specialization: contributor_specializations_bool_exp
   contributor_specialization_id: Int_comparison_exp
   description: String_comparison_exp
   id: Int_comparison_exp
@@ -4259,9 +4286,29 @@ input contributor_role_specializations_bool_exp {
   quick_list: jsonb_comparison_exp
 }
 
-input contributor_role_specializations_order_by {
+input contributor_role_specializations_max_order_by {
   blurb: order_by
   contributor_role_id: order_by
+  contributor_specialization_id: order_by
+  description: order_by
+  id: order_by
+  librarian_instructions: order_by
+}
+
+input contributor_role_specializations_min_order_by {
+  blurb: order_by
+  contributor_role_id: order_by
+  contributor_specialization_id: order_by
+  description: order_by
+  id: order_by
+  librarian_instructions: order_by
+}
+
+input contributor_role_specializations_order_by {
+  blurb: order_by
+  contributor_role: contributor_roles_order_by
+  contributor_role_id: order_by
+  contributor_specialization: contributor_specializations_order_by
   contributor_specialization_id: order_by
   description: order_by
   id: order_by
@@ -4271,6 +4318,24 @@ input contributor_role_specializations_order_by {
 }
 
 enum contributor_role_specializations_select_column { blurb contributor_role_id contributor_specialization_id description id librarian_instructions primary quick_list }
+
+input contributor_role_specializations_stddev_order_by {
+  contributor_role_id: order_by
+  contributor_specialization_id: order_by
+  id: order_by
+}
+
+input contributor_role_specializations_stddev_pop_order_by {
+  contributor_role_id: order_by
+  contributor_specialization_id: order_by
+  id: order_by
+}
+
+input contributor_role_specializations_stddev_samp_order_by {
+  contributor_role_id: order_by
+  contributor_specialization_id: order_by
+  id: order_by
+}
 
 input contributor_role_specializations_stream_cursor_input {
   initial_value: contributor_role_specializations_stream_cursor_value_input!
@@ -4288,9 +4353,35 @@ input contributor_role_specializations_stream_cursor_value_input {
   quick_list: jsonb
 }
 
+input contributor_role_specializations_sum_order_by {
+  contributor_role_id: order_by
+  contributor_specialization_id: order_by
+  id: order_by
+}
+
+input contributor_role_specializations_var_pop_order_by {
+  contributor_role_id: order_by
+  contributor_specialization_id: order_by
+  id: order_by
+}
+
+input contributor_role_specializations_var_samp_order_by {
+  contributor_role_id: order_by
+  contributor_specialization_id: order_by
+  id: order_by
+}
+
+input contributor_role_specializations_variance_order_by {
+  contributor_role_id: order_by
+  contributor_specialization_id: order_by
+  id: order_by
+}
+
 type contributor_roles {
   blurb: String
+  contributor_role_category: contributor_role_categories
   contributor_role_category_id: Int!
+  contributor_role_specializations(distinct_on: [contributor_role_specializations_select_column!], limit: Int, offset: Int, order_by: [contributor_role_specializations_order_by!], where: contributor_role_specializations_bool_exp): [contributor_role_specializations!]!
   description: String
   id: Int!
   librarian_instructions: String
@@ -4300,12 +4391,33 @@ type contributor_roles {
   slug: String
 }
 
+input contributor_roles_aggregate_order_by {
+  avg: contributor_roles_avg_order_by
+  count: order_by
+  max: contributor_roles_max_order_by
+  min: contributor_roles_min_order_by
+  stddev: contributor_roles_stddev_order_by
+  stddev_pop: contributor_roles_stddev_pop_order_by
+  stddev_samp: contributor_roles_stddev_samp_order_by
+  sum: contributor_roles_sum_order_by
+  var_pop: contributor_roles_var_pop_order_by
+  var_samp: contributor_roles_var_samp_order_by
+  variance: contributor_roles_variance_order_by
+}
+
+input contributor_roles_avg_order_by {
+  contributor_role_category_id: order_by
+  id: order_by
+}
+
 input contributor_roles_bool_exp {
   _and: [contributor_roles_bool_exp!]
   _not: contributor_roles_bool_exp
   _or: [contributor_roles_bool_exp!]
   blurb: String_comparison_exp
+  contributor_role_category: contributor_role_categories_bool_exp
   contributor_role_category_id: Int_comparison_exp
+  contributor_role_specializations: contributor_role_specializations_bool_exp
   description: String_comparison_exp
   id: Int_comparison_exp
   librarian_instructions: String_comparison_exp
@@ -4315,9 +4427,31 @@ input contributor_roles_bool_exp {
   slug: String_comparison_exp
 }
 
-input contributor_roles_order_by {
+input contributor_roles_max_order_by {
   blurb: order_by
   contributor_role_category_id: order_by
+  description: order_by
+  id: order_by
+  librarian_instructions: order_by
+  name: order_by
+  slug: order_by
+}
+
+input contributor_roles_min_order_by {
+  blurb: order_by
+  contributor_role_category_id: order_by
+  description: order_by
+  id: order_by
+  librarian_instructions: order_by
+  name: order_by
+  slug: order_by
+}
+
+input contributor_roles_order_by {
+  blurb: order_by
+  contributor_role_category: contributor_role_categories_order_by
+  contributor_role_category_id: order_by
+  contributor_role_specializations_aggregate: contributor_role_specializations_aggregate_order_by
   description: order_by
   id: order_by
   librarian_instructions: order_by
@@ -4328,6 +4462,21 @@ input contributor_roles_order_by {
 }
 
 enum contributor_roles_select_column { blurb contributor_role_category_id description id librarian_instructions name primary quick_list slug }
+
+input contributor_roles_stddev_order_by {
+  contributor_role_category_id: order_by
+  id: order_by
+}
+
+input contributor_roles_stddev_pop_order_by {
+  contributor_role_category_id: order_by
+  id: order_by
+}
+
+input contributor_roles_stddev_samp_order_by {
+  contributor_role_category_id: order_by
+  id: order_by
+}
 
 input contributor_roles_stream_cursor_input {
   initial_value: contributor_roles_stream_cursor_value_input!
@@ -4346,8 +4495,29 @@ input contributor_roles_stream_cursor_value_input {
   slug: String
 }
 
+input contributor_roles_sum_order_by {
+  contributor_role_category_id: order_by
+  id: order_by
+}
+
+input contributor_roles_var_pop_order_by {
+  contributor_role_category_id: order_by
+  id: order_by
+}
+
+input contributor_roles_var_samp_order_by {
+  contributor_role_category_id: order_by
+  id: order_by
+}
+
+input contributor_roles_variance_order_by {
+  contributor_role_category_id: order_by
+  id: order_by
+}
+
 type contributor_specializations {
   blurb: String
+  contributor_role_specializations(distinct_on: [contributor_role_specializations_select_column!], limit: Int, offset: Int, order_by: [contributor_role_specializations_order_by!], where: contributor_role_specializations_bool_exp): [contributor_role_specializations!]!
   description: String
   id: Int!
   librarian_instructions: String
@@ -4359,6 +4529,7 @@ input contributor_specializations_bool_exp {
   _not: contributor_specializations_bool_exp
   _or: [contributor_specializations_bool_exp!]
   blurb: String_comparison_exp
+  contributor_role_specializations: contributor_role_specializations_bool_exp
   description: String_comparison_exp
   id: Int_comparison_exp
   librarian_instructions: String_comparison_exp
@@ -4367,6 +4538,7 @@ input contributor_specializations_bool_exp {
 
 input contributor_specializations_order_by {
   blurb: order_by
+  contributor_role_specializations_aggregate: contributor_role_specializations_aggregate_order_by
   description: order_by
   id: order_by
   librarian_instructions: order_by
