@@ -22,6 +22,8 @@
 //! - [`on_keyboard_entry`]: when the keyboard brings focus to a list with no
 //!   row selected, the view selects the first, so the focus shows where it
 //!   landed. A click selects its own row, so it doesn't run then.
+//! - [`enter_list`]: where a view focuses its list itself (a page opening,
+//!   a shortcut), it lands on a row the same way.
 //!
 //! ```ignore
 //! // In the delegate:
@@ -122,15 +124,16 @@ pub fn on_keyboard_entry<V: 'static, D: ListDelegate>(
     })
 }
 
-/// Selects the first row of `list`, if it has one, and shows it: what
-/// [`on_keyboard_entry`] does for a list whose selection only highlights.
+/// Selects the first row of `list` if none is and it has one, and shows
+/// it: what [`on_keyboard_entry`] does for a list whose selection only
+/// highlights.
 pub fn select_first_row<D: ListDelegate>(
     list: &Entity<ListState<D>>,
     window: &mut Window,
     cx: &mut App,
 ) {
     list.update(cx, |list, cx| {
-        if list.delegate().items_count(0, cx) > 0 {
+        if list.selected_index().is_none() && list.delegate().items_count(0, cx) > 0 {
             list.set_selected_index(Some(IndexPath::default()), window, cx);
             list.scroll_to_selected_item(window, cx);
             cx.notify();
@@ -139,6 +142,14 @@ pub fn select_first_row<D: ListDelegate>(
     // Focus listeners run as a frame finishes; draw the selection now, not
     // at the next input.
     window.refresh();
+}
+
+/// Focuses `list` on a row: the selected one, else the first. For a view
+/// that moves focus to its list itself (opening a page, a shortcut), where
+/// [`on_keyboard_entry`] can't tell how focus arrived.
+pub fn enter_list<D: ListDelegate>(list: &Entity<ListState<D>>, window: &mut Window, cx: &mut App) {
+    select_first_row(list, window, cx);
+    list.update(cx, |list, cx| list.focus(window, cx));
 }
 
 #[cfg(test)]

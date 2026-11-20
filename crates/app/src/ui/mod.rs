@@ -23,7 +23,7 @@
 //! | [`SectionHeader`], [`see_all`] | A section's title on Home or a page, with "See all 5" |
 //! | [`Sequence`], [`RowSpacing`] | Read-only rows between hairlines: Continue reading, Coming soon, reviews |
 //! | [`ListRow`] | The list row treatment on a collection's `ListItem`: padding, fills, focus edge |
-//! | [`RowFocus`], [`on_keyboard_entry`], [`select_first_row`] | A collection delegate's copy of its list's focus and selection, for `ListRow`'s focus edge; the list as a tab stop that lands on a row |
+//! | [`RowFocus`], [`on_keyboard_entry`], [`select_first_row`], [`enter_list`] | A collection delegate's copy of its list's focus and selection, for `ListRow`'s focus edge; the list as a tab stop that lands on a row |
 //! | [`Lane`] | A fixed, right-aligned lane for trailing figures or actions, kept when empty |
 //! | [`SeriesStrip`], [`StripItem`] | A series as a row of sm covers, each with its shelf's icon and position under it; the next one in ink; "+N" for the rest |
 //! | [`CoverSlot`] | A dashed place the size of a cover, for a book not in the library (empty) or not out yet (a clock) |
@@ -88,7 +88,7 @@ pub use self::{
     month_bars::MonthBars,
     nav_row::NavRow,
     object_bar::{BackTo, ObjectBar, ObjectTools, back_label, tools_of},
-    row_focus::{RowFocus, on_keyboard_entry, select_first_row},
+    row_focus::{RowFocus, enter_list, on_keyboard_entry, select_first_row},
     rows::{Lane, ListRow, PropertyList, RowSpacing, Sequence},
     series_strip::{CoverSlot, SeriesStrip, StripItem},
     sidebar::{AccountRow, GoalRow, brand_row, sidebar_label},

@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::list::ListState;
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
@@ -27,7 +28,7 @@ use hardcover_core::{AuthorBook, AuthorDetails, AuthorId};
 
 use super::book_list::{
     CatalogBooks, CatalogRow, follow_list, load_failed, new_list, page_body, page_header,
-    page_header_scrolling, page_list, read_summary, row_details,
+    page_header_scrolling, page_list, read_summary, reset_scroll, row_details,
 };
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
@@ -119,6 +120,8 @@ pub struct AuthorView {
     list: Entity<ListState<CatalogBooks>>,
     /// The author and order the list holds.
     listed: Option<(AuthorId, BookOrder)>,
+    /// The header's scroll, when it gives way in a short window.
+    header_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -159,6 +162,7 @@ impl AuthorView {
             bio_expanded: false,
             list,
             listed: None,
+            header_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -166,6 +170,9 @@ impl AuthorView {
     pub fn show(&mut self, id: AuthorId, window: &mut Window, cx: &mut Context<Self>) {
         if self.current != Some(id) {
             self.bio_expanded = false;
+        }
+        if self.current != Some(id) {
+            reset_scroll(&self.header_scroll);
         }
         self.current = Some(id);
         self.load(window, cx);
@@ -179,7 +186,7 @@ impl AuthorView {
     pub fn focus(&mut self, fallback: &FocusHandle, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_ready() {
             self.focus_when_ready = None;
-            self.list.update(cx, |list, cx| list.focus(window, cx));
+            crate::ui::enter_list(&self.list, window, cx);
         } else {
             self.focus_when_ready = Some(fallback.clone());
             window.focus(fallback, cx);
@@ -218,7 +225,7 @@ impl AuthorView {
                     && let Some(fallback) = this.focus_when_ready.take()
                     && fallback.is_focused(window)
                 {
-                    this.list.update(cx, |list, cx| list.focus(window, cx));
+                    crate::ui::enter_list(&this.list, window, cx);
                 }
                 cx.notify();
             });
@@ -419,9 +426,13 @@ impl Render for AuthorView {
             if ready {
                 // The header scrolls on its own when the window is short;
                 // "Books" and the list keep their room.
-                this.child(page_header_scrolling("author-header", header))
-                    .child(self.render_books_bar(cx))
-                    .child(page_body().child(page_list(&self.list)))
+                this.child(page_header_scrolling(
+                    "author-header",
+                    &self.header_scroll,
+                    header,
+                ))
+                .child(self.render_books_bar(cx))
+                .child(page_body().child(page_list(&self.list)))
             } else {
                 this.child(page_header().child(header))
             }

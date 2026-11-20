@@ -19,8 +19,8 @@ use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListSta
 use gpui_kit::component::{IconName, IndexPath};
 use gpui_kit::{
     App, AppContext as _, Context, Div, ElementId, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    Window, div,
+    ParentElement as _, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Window, div,
 };
 use hardcover_core::{BookSummary, ReadingStatus};
 
@@ -44,10 +44,13 @@ pub fn page_header() -> Div {
 }
 
 /// A [`page_header`] that gives way in a short window: it shrinks, down to
-/// nothing if it must, and scrolls its content, so the list under it keeps
-/// `size::PAGE_LIST_MIN`. `id` names its scroll position.
+/// nothing if it must, and scrolls its content in `scroll` (the page's own
+/// handle, for focus reveal and [`reset_scroll`]), so the list under it
+/// keeps `size::PAGE_LIST_MIN`. GPUI's own scroll, not the kit's scrollbar
+/// wrapper, which measures a clamped bio at its full height.
 pub fn page_header_scrolling(
     id: impl Into<ElementId>,
+    scroll: &ScrollHandle,
     content: impl IntoElement,
 ) -> impl IntoElement {
     page_header()
@@ -55,7 +58,13 @@ pub fn page_header_scrolling(
         .flex_shrink_1()
         .min_h_0()
         .overflow_y_scroll()
+        .track_scroll(scroll)
         .child(content)
+}
+
+/// Back to the top of a [`page_header_scrolling`], for another page.
+pub fn reset_scroll(scroll: &ScrollHandle) {
+    scroll.set_offset(gpui_kit::Point::default());
 }
 
 /// The region a page's list fills, under its header. It keeps

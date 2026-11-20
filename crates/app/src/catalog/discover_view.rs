@@ -122,7 +122,7 @@ impl DiscoverView {
     /// Focuses the book list once it has books, or the view until then.
     pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_ready() {
-            self.list.update(cx, |list, cx| list.focus(window, cx));
+            crate::ui::enter_list(&self.list, window, cx);
         } else {
             window.focus(&self.focus_handle, cx);
         }
@@ -195,7 +195,7 @@ impl DiscoverView {
                 let had_focus = this.focus_handle.is_focused(window);
                 this.fill_list(window, cx);
                 if had_focus && this.is_ready() {
-                    this.list.update(cx, |list, cx| list.focus(window, cx));
+                    crate::ui::enter_list(&this.list, window, cx);
                 }
                 cx.notify();
             });

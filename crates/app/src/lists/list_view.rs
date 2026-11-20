@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 
+use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::notification::Notification;
@@ -30,7 +31,8 @@ use crate::RemoveFromList;
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::catalog::book_list::{
-    load_failed, page_body, page_header_scrolling, page_list, page_loading, row_details,
+    load_failed, page_body, page_header_scrolling, page_list, page_loading, reset_scroll,
+    row_details,
 };
 use crate::catalog::navigation::{self, Page};
 use crate::design::{TypeRoles as _, colors, size};
@@ -346,6 +348,8 @@ pub struct ListView {
     lists: Entity<ListsModel>,
     library: Entity<LibraryModel>,
     list: Entity<ListState<ListBooks>>,
+    /// The header's scroll, when it gives way in a short window.
+    header_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -414,6 +418,7 @@ impl ListView {
             lists,
             library,
             list,
+            header_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -424,10 +429,12 @@ impl ListView {
     }
 
     pub fn show(&mut self, id: ListId, window: &mut Window, cx: &mut Context<Self>) {
+        let header_scroll = self.header_scroll.clone();
         self.list.update(cx, |state, cx| {
             let changed = state.delegate().current != Some(id);
             state.delegate_mut().show(id, window, cx);
             if changed {
+                reset_scroll(&header_scroll);
                 state.set_selected_index(None, window, cx);
                 state.scroll_to_item(IndexPath::new(0), gpui_kit::ScrollStrategy::Top, window, cx);
             }
@@ -437,7 +444,7 @@ impl ListView {
     }
 
     pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.list.update(cx, |list, cx| list.focus(window, cx));
+        crate::ui::enter_list(&self.list, window, cx);
     }
 
     fn retry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -624,6 +631,7 @@ impl Render for ListView {
             .when_some(list, |this, list| {
                 this.child(page_header_scrolling(
                     "list-page-header",
+                    &self.header_scroll,
                     self.render_header(&list, cx),
                 ))
                 .child(page_body().child(page_list(&self.list)))

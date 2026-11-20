@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::list::ListState;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -21,7 +22,7 @@ use hardcover_core::{SeriesDetails, SeriesId};
 
 use super::book_list::{
     CatalogBooks, CatalogRow, follow_list, load_failed, new_list, page_body, page_header_scrolling,
-    page_list, read_summary, row_details,
+    page_list, read_summary, reset_scroll, row_details,
 };
 use super::navigation::Page;
 use crate::app_state::Services;
@@ -48,6 +49,8 @@ pub struct SeriesView {
     list: Entity<ListState<CatalogBooks>>,
     /// The series whose books the list holds.
     listed: Option<SeriesId>,
+    /// The header's scroll, when it gives way in a short window.
+    header_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -69,11 +72,15 @@ impl SeriesView {
             focus_when_ready: None,
             list,
             listed: None,
+            header_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
 
     pub fn show(&mut self, id: SeriesId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.current != Some(id) {
+            reset_scroll(&self.header_scroll);
+        }
         self.current = Some(id);
         self.load(window, cx);
         self.fill_list(window, cx);
@@ -86,7 +93,7 @@ impl SeriesView {
     pub fn focus(&mut self, fallback: &FocusHandle, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_ready() {
             self.focus_when_ready = None;
-            self.list.update(cx, |list, cx| list.focus(window, cx));
+            crate::ui::enter_list(&self.list, window, cx);
         } else {
             self.focus_when_ready = Some(fallback.clone());
             window.focus(fallback, cx);
@@ -125,7 +132,7 @@ impl SeriesView {
                     && let Some(fallback) = this.focus_when_ready.take()
                     && fallback.is_focused(window)
                 {
-                    this.list.update(cx, |list, cx| list.focus(window, cx));
+                    crate::ui::enter_list(&this.list, window, cx);
                 }
                 cx.notify();
             });
@@ -285,7 +292,11 @@ impl Render for SeriesView {
         v_flex()
             .size_full()
             .min_w_0()
-            .child(page_header_scrolling("series-header", header))
+            .child(page_header_scrolling(
+                "series-header",
+                &self.header_scroll,
+                header,
+            ))
             .when(ready, |this| {
                 this.child(page_body().child(page_list(&self.list)))
             })
