@@ -21,7 +21,8 @@ pub const BACKUP_VERSION: u32 = 1;
 
 /// The backup, pretty-printed, ending in a newline. Library entries go by
 /// entry id; lists by id, each with its books in the list's order; goals as
-/// Hardcover lists them (the latest end first).
+/// [`crate::api::Client::goals`] reads them: not archived, the latest end
+/// first.
 pub fn backup_json(backup: &Backup) -> String {
     let mut entries: Vec<&LibraryEntry> = backup.entries.iter().collect();
     entries.sort_by_key(|e| e.user_book_id);

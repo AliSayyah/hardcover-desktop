@@ -19,7 +19,7 @@ use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
     Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _, rems,
 };
-use hardcover_core::auth::scopes::{READ_GOALS, READ_LISTS};
+use hardcover_core::auth::scopes::{READ_GOALS, READ_LIBRARY, READ_LISTS};
 use hardcover_core::export::{self, Backup, Format, Parts, Progress};
 use hardcover_core::{Error, LibraryEntry, User};
 
@@ -143,7 +143,8 @@ impl ExportDialog {
                 Err(Error::Cancelled) => return,
                 Err(e) => {
                     let _ = this.update(cx, |this, cx| {
-                        let message = Services::error_message(&e, None, cx);
+                        let scope = this.stage.and_then(stage_scope);
+                        let message = Services::error_message(&e, scope, cx);
                         this.fail(format!("Couldn't export the library: {message}"), cx);
                     });
                     return;
@@ -217,6 +218,17 @@ fn display_path(path: &Path) -> String {
         Some(rest) if rest.as_os_str().is_empty() => "~".into(),
         Some(rest) => format!("~/{}", rest.display()),
         None => path.display().to_string(),
+    }
+}
+
+/// The scope a request at `stage` needs: what an `insufficient_scope` that
+/// names none was about.
+fn stage_scope(stage: Stage) -> Option<&'static str> {
+    match stage {
+        Stage::Fetching(Progress::Reviews(_)) => Some(READ_LIBRARY),
+        Stage::Fetching(Progress::Lists { .. }) => Some(READ_LISTS),
+        Stage::Fetching(Progress::Goals) => Some(READ_GOALS),
+        Stage::Choosing | Stage::Saving => None,
     }
 }
 
@@ -357,5 +369,37 @@ impl Render for ExportDialog {
                             .on_click(cx.listener(|this, _, window, cx| this.start(window, cx))),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_reads_as_it_goes() {
+        let text = |p| progress_text(Stage::Fetching(p));
+        assert_eq!(text(Progress::Reviews(0)), "Fetching reviews…");
+        assert_eq!(text(Progress::Reviews(120)), "Fetching reviews… 120");
+        assert_eq!(
+            text(Progress::Lists { done: 2, total: 7 }),
+            "Fetching lists… 2 of 7"
+        );
+        assert_eq!(text(Progress::Goals), "Fetching goals…");
+        assert_eq!(
+            stage_scope(Stage::Fetching(Progress::Lists { done: 0, total: 1 })),
+            Some(READ_LISTS)
+        );
+        assert_eq!(stage_scope(Stage::Saving), None);
+    }
+
+    #[test]
+    fn paths_under_home_start_with_a_tilde() {
+        let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+            return;
+        };
+        assert_eq!(display_path(&home.join("Documents")), "~/Documents");
+        assert_eq!(display_path(&home), "~");
+        assert_eq!(display_path(Path::new("/srv/x.csv")), "/srv/x.csv");
     }
 }
