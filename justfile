@@ -25,6 +25,11 @@ run *args:
 demo theme="":
     if [[ -n "$1" ]]; then export HARDCOVER_THEME="$1"; fi; cargo run -p {{ app }} --features demo
 
+# The shared components' gallery (demo build). Theme: light or dark (default: Settings)
+[group('run')]
+gallery theme="":
+    if [[ -n "$1" ]]; then export HARDCOVER_THEME="$1"; fi; HARDCOVER_GALLERY=1 cargo run -p {{ app }} --features demo
+
 # Debug build of the app
 [group('build')]
 build:

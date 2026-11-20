@@ -748,8 +748,21 @@ The foundation is in place: the palette on the kit's theme
 `design::TypeRoles`), the bundled fonts (`fonts.rs`), one cover component
 (`cover.rs`) with the cloth cover, and chips at 20 on the chip overlay.
 
+The shared components are built, in `crates/app/src/ui/` (its module doc
+lists each with what to use it for): the object bar, panel, rail, blocks,
+headers and the greeting, sequences, list rows, lanes, the property list,
+the meter, empty states, skeletons, text buttons, byline links, nav rows,
+avatars and the kit fixes. The demo build shows them all on one page with
+`HARDCOVER_GALLERY=1`. Only drop-in swaps are done: every empty state,
+meter and skeleton, the book titles on Home and in Coming soon, the
+reviewers' avatars and bylines, and the full page's Back bar. The account
+and author avatars are still the kit's. The screens below still need
+their layouts moved onto the rest.
+
 1. **Book pane and page.**
-   - The tools sit at the header's top right.
+   - The full page has its object bar (`ui::ObjectBar`, Back plus the
+     book's tools), but the pane has none: its tools still sit at the
+     header's top right.
    - "Your book" is a form grid, and "Open on Hardcover" sits in the header.
    - The full page has no rail. The order and the progress and Not started
      panels are not in place.
@@ -757,32 +770,37 @@ The foundation is in place: the palette on the kit's theme
      (page). The full page's header uses the xl cover, not xxl.
    - Similar books use md covers (64), not lg (80), and their titles are a
      text button's.
-2. **Home.** There is no greeting, lead book or rail. Coming soon is a
-   full-width card under the others, with a semibold title and an xsmall
-   "See all", instead of a section closing the main column. The covers are
-   on system sizes (reading rows and Up next md, the paused and rating rows
-   sm, the Want to read rows xs), but the layout around them is the old one.
-3. **Sidebar.** The selected treatment (accent icon), the goal row and the
-   brand row are still to do. The kit's sidebar menu hovers at
-   `sidebar_accent` × 0.8 (8%, not 5%), so the nav rows need the app's own
-   row to get the system's hover.
+2. **Home.** There is no greeting, lead book or rail (`ui::Greeting` and
+   `ui::Rail` exist, unused). Coming soon is a full-width card under the
+   others, with a semibold title and an xsmall "See all", instead of a
+   section closing the main column (`ui::SectionHeader`, `ui::see_all`).
+   The covers are on system sizes (reading rows and Up next md, the paused
+   and rating rows sm, the Want to read rows xs), but the layout around them
+   is the old one.
+3. **Sidebar.** It still uses the kit's sidebar menu, which hovers at
+   `sidebar_accent` × 0.8 (8%, not 5%) and has no accent icon when
+   selected. `ui::NavRow` is the system's row; the sidebar moves onto it,
+   with the goal row and the brand row.
 4. **States and the kit.** The theme gives the kit's controls the ink
    overlays, solid where a control paints its own fill, and the focus ring
-   (3 px accent at 50% plus a 1 px accent edge). What the theme can't reach:
-   - inputs are paper in light mode and a tint of the input border in dark,
-     not `raised` (`Theme::input_background()` ignores the config);
-   - popovers and menus round at 6, not 8, and use the kit's own shadow,
-     not `shadow-popover`;
-   - dialogs paint `background` (paper), not `raised`;
+   (3 px accent at 50% plus a 1 px accent edge). `ui::kit` fixes inputs,
+   selects and text areas (`RaisedField`) and dialogs
+   (`open_dialog`, `open_alert_dialog`) onto `raised`, and skeletons pulse
+   (`ui::Skeleton`). What neither the theme nor the app can reach without
+   patching the kit:
+   - menus (`PopupMenu`) and the Select dropdown round at 6, not 8, and use
+     the kit's own shadow, not `shadow-popover` (the app's own popovers take
+     `ui::kit::PopoverSurface`);
    - menu items hover at 10% in dark mode: the kit's `accent` serves both
      menu items and ghost buttons, and ghost buttons take half of it there;
-   - skeletons don't pulse.
+   - the `DatePicker`'s field stays paper;
+   - a dialog keeps the kit's shadow.
 5. **Type.** The roles exist as helpers (`design::TypeRoles`: `.page_title()`,
    `.body_strong()`, `.caption(cx)`, `.display_24()`, `.tabular()`, ...), but
    the screens still set sizes with `text_sm`/`text_lg`/`text_2xl` at GPUI's
    default line height and without tabular figures. Move each screen to the
    roles as it is redesigned.
-6. **Reviews.** The reviewer's name uses the kit's `Link` (accent,
-   underlined) instead of the byline link; reviews sit 20 apart without
-   hairlines; the review text is `text_sm` at the default line height
-   rather than `reader`. Upcoming rows use `py_1p5` instead of 12.
+6. **Reviews.** Reviews sit 20 apart without hairlines (`ui::Sequence`
+   with `RowSpacing::Reviews` is the system's); the review text is
+   `text_sm` at the default line height rather than `reader`. Upcoming rows
+   use `py_1p5` instead of 12.
