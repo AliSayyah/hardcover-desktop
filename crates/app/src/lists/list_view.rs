@@ -29,8 +29,9 @@ use crate::catalog::book_list::row_details;
 use crate::catalog::navigation::{self, Page};
 use crate::format::{authors_text, needs_permission};
 use crate::library::book_row::BookRow;
-use crate::library::library_view::{empty_state, empty_state_with_action};
 use crate::library::model::LibraryModel;
+use crate::ui::kit::open_alert_dialog;
+use crate::ui::{empty_state, empty_state_with_action};
 
 /// Key context of a list's page, where Delete takes the selected book off.
 pub const KEY_CONTEXT: &str = "ListPage";
@@ -428,7 +429,7 @@ impl ListView {
         let title: SharedString = format!("Delete “{}”?", list.name).into();
         let lists = self.lists.clone();
         let id = list.id;
-        window.open_alert_dialog(cx, move |alert, _, _| {
+        open_alert_dialog(window, cx, move |alert, _, _| {
             let lists = lists.clone();
             alert
                 .title(title.clone())

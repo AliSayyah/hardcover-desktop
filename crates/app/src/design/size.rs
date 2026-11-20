@@ -59,3 +59,12 @@ pub const DIALOG_FORM: Rems = rems(30.);
 
 /// The 1 px hairline.
 pub const HAIRLINE: Pixels = px(1.);
+/// The focus ring drawn outside a focused control (3; `ring`).
+pub const FOCUS_RING: Pixels = px(3.);
+/// The 1 px accent edge of a focused control or row.
+pub const FOCUS_EDGE: Pixels = px(1.);
+
+/// An avatar beside a review or in the sidebar (32; `size_8`).
+pub const AVATAR: Rems = rems(2.);
+/// A person's avatar where a book has its cover (an author's page; 128).
+pub const AVATAR_LARGE: Rems = rems(8.);

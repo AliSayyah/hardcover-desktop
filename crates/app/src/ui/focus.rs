@@ -1,0 +1,90 @@
+//! The focus treatment (`hardcover-design`, States → Focus-visible): a 3 px
+//! `ring` outside, plus a 1 px accent edge. Controls take both
+//! ([`FocusTreatment::focus_ring`]); rows take the edge alone
+//! ([`FocusTreatment::focus_edge`]), because they sit in lists that clip
+//! whatever is drawn outside them.
+//!
+//! The kit's own controls draw this themselves from the theme. Use these for
+//! the app's components that track their own focus.
+//!
+//! ```ignore
+//! let focus = keyed_focus(id.clone(), window, cx);
+//! div()
+//!     .track_focus(&focus)
+//!     .rounded(cx.theme().radius)
+//!     .when(focus_visible(&focus, window), |this| this.focus_ring(cx.theme().radius, cx))
+//! ```
+
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::{
+    App, BoxShadow, ElementId, FocusHandle, ParentElement, Pixels, Styled, Window, div, px,
+};
+
+use crate::design::{colors, size};
+
+/// Whether `handle` shows its focus: it is focused and the last input came
+/// from the keyboard, so a click doesn't leave a ring behind.
+pub fn focus_visible(handle: &FocusHandle, window: &Window) -> bool {
+    handle.is_focused(window) && window.last_input_was_keyboard()
+}
+
+/// A focus handle kept for the element `id` across frames, for a component
+/// that is rebuilt every render (`RenderOnce`).
+pub fn keyed_focus(id: impl Into<ElementId>, window: &mut Window, cx: &mut App) -> FocusHandle {
+    window
+        .use_keyed_state(id.into(), cx, |_, cx| cx.focus_handle())
+        .read(cx)
+        .clone()
+}
+
+/// The 1 px accent edge, drawn inside the element's bounds.
+fn edge(cx: &App) -> BoxShadow {
+    BoxShadow::new(px(0.), px(0.), colors(cx).accent)
+        .blur_radius(px(0.))
+        .spread_radius(size::FOCUS_EDGE)
+        .inset()
+}
+
+/// The focus treatment, on any styled parent.
+pub trait FocusTreatment: Styled + ParentElement + Sized {
+    /// A control's focus: the 3 px ring outside and the 1 px accent edge.
+    /// `radius` is the element's own corner radius, so the ring follows it.
+    /// The element must be positioned (`relative`, the default for the
+    /// app's components), and nothing around it may clip.
+    ///
+    /// Replaces the element's box shadow.
+    fn focus_ring(self, radius: Pixels, cx: &App) -> Self {
+        let ring = size::FOCUS_RING;
+        // A band drawn only outside the element, so a translucent fill
+        // (a hovered ghost control) doesn't show a shadow through it.
+        self.shadow(vec![edge(cx)]).child(
+            div()
+                .absolute()
+                .top(-ring)
+                .left(-ring)
+                .right(-ring)
+                .bottom(-ring)
+                .rounded(radius + ring)
+                .border(ring)
+                .border_color(colors(cx).ring),
+        )
+    }
+
+    /// A row's focus: the 1 px accent edge alone, inside the row. Replaces
+    /// the element's box shadow.
+    fn focus_edge(self, cx: &App) -> Self {
+        self.shadow(vec![edge(cx)])
+    }
+}
+
+impl<T: Styled + ParentElement + Sized> FocusTreatment for T {}
+
+/// The corner radius of controls (`r-control`).
+pub fn control_radius(cx: &App) -> Pixels {
+    cx.theme().radius
+}
+
+/// The corner radius of rows, panels, popovers and dialogs (`r-box`).
+pub fn box_radius(cx: &App) -> Pixels {
+    cx.theme().radius_lg
+}

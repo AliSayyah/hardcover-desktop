@@ -1,9 +1,8 @@
 //! The sidebar's "Reading goal" section: each current goal with its progress,
 //! or a way to set one.
 
-use gpui_kit::component::progress::Progress;
+use gpui_kit::component::IconName;
 use gpui_kit::component::sidebar::{SidebarGroup, SidebarItem as _, SidebarMenu, SidebarMenuItem};
-use gpui_kit::component::{IconName, Sizable as _};
 use gpui_kit::{
     Context, Entity, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
     Subscription, Window, div, rems,
@@ -15,6 +14,7 @@ use super::model::{GoalsModel, GoalsStatus};
 use crate::app_state::Services;
 use crate::format::{goal_pace, goal_period, goal_progress};
 use crate::library::model::LibraryModel;
+use crate::ui::Meter;
 
 pub struct GoalsSection {
     goals: Entity<GoalsModel>,
@@ -75,9 +75,8 @@ impl Render for GoalsSection {
                     .accessibility_label(accessible)
                     .suffix(move |_, _| {
                         div().w(rems(2.5)).child(
-                            Progress::new(SharedString::from(format!("goal-bar-{id}")))
-                                .xsmall()
-                                .value(percent),
+                            Meter::new(SharedString::from(format!("goal-bar-{id}")), percent)
+                                .thin(),
                         )
                     })
                     .on_click(move |_, window, cx| {

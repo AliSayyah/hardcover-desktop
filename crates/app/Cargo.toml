@@ -22,4 +22,10 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 unicode-bidi = "0.3"
 
 [dev-dependencies]
+# GPUI's test support, for the shared components' tests (`ui/`). Turned on in
+# the crates themselves: gpui-kit's own `test-support` feature names the
+# optional GPUI Fast backend, which then can't be resolved beside this one.
+gpui-base = { version = "0.10", features = ["test-support"] }
+gpui-component = { version = "0.10", features = ["test-support"] }
+gpui-pre = { version = "=0.3.12", features = ["test-support"] }
 tempfile = "3"

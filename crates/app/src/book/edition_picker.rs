@@ -4,10 +4,10 @@
 //! One picker exists per book, so a response can never land on another book.
 //! Choosing an edition emits [`EditionChosen`]; the detail view makes the write.
 
+use crate::ui::Skeleton;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex,
     v_flex,
@@ -22,6 +22,7 @@ use hardcover_core::{BookId, EDITIONS_PER_PAGE, EditionId, EditionSummary};
 
 use crate::app_state::Services;
 use crate::format::edition_text;
+use crate::ui::kit::open_dialog;
 
 /// The user picked `0`.
 pub struct EditionChosen(pub EditionSummary);
@@ -103,7 +104,7 @@ impl EditionPicker {
 
     /// Opens `view` in a dialog.
     pub fn open(view: Entity<Self>, window: &mut Window, cx: &mut App) {
-        window.open_dialog(cx, move |dialog: Dialog, window, _| {
+        open_dialog(window, cx, move |dialog: Dialog, window, _| {
             dialog
                 .title("Choose an edition")
                 .w(rems(32.).to_pixels(window.rem_size()))
@@ -188,8 +189,8 @@ impl Render for EditionPicker {
                             v_flex()
                                 .gap_1()
                                 .py_2()
-                                .child(Skeleton::new().h_4().w_2_3())
-                                .child(Skeleton::new().h_3().w_1_3())
+                                .child(Skeleton::line().h_4().w_2_3())
+                                .child(Skeleton::line().h_3().w_1_3())
                         }))
                     }),
             )

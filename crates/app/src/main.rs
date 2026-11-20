@@ -23,6 +23,7 @@ mod shell;
 mod sign_in;
 mod star;
 mod stats;
+mod ui;
 mod upcoming;
 mod update;
 

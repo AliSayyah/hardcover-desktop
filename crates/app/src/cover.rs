@@ -88,7 +88,7 @@ impl CoverSize {
     }
 
     /// `r-cover-s` for xs and sm, `r-cover` from md.
-    fn radius(self) -> Pixels {
+    pub(crate) fn radius(self) -> Pixels {
         if self.is_small() { px(2.) } else { px(3.) }
     }
 

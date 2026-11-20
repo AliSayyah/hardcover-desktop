@@ -9,7 +9,6 @@ use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
@@ -20,7 +19,7 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
-    prelude::FluentBuilder as _, px, relative, rems,
+    prelude::FluentBuilder as _, px, rems,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_LIBRARY};
 use hardcover_core::{
@@ -34,7 +33,7 @@ use super::digest::{
 use super::progress_dialog::open_progress;
 use crate::app_state::Services;
 use crate::book::star_rating::StarRating;
-use crate::catalog::navigation::{self, Page};
+use crate::catalog::navigation::Page;
 use crate::cover::{Cover, CoverSize};
 use crate::design::colors;
 use crate::format::{
@@ -43,8 +42,9 @@ use crate::format::{
 };
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
-use crate::library::library_view::empty_state;
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::ui::kit::open_alert_dialog;
+use crate::ui::{Meter, TextButton, empty_state};
 use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
 
@@ -346,16 +346,24 @@ impl HomeView {
                     .flex_1()
                     .min_w_0()
                     .gap_0p5()
-                    .child(title_button("home-title", entry, FontWeight::SEMIBOLD))
+                    .child(
+                        TextButton::book(
+                            SharedString::from(format!("home-title-{}", entry.user_book_id)),
+                            &entry.book,
+                        )
+                        .font_weight(FontWeight::SEMIBOLD),
+                    )
                     .when(!byline.is_empty(), |this| {
                         this.child(div().text_sm().text_color(muted).truncate().child(byline))
                     })
                     .child(
                         div().pt_1().child(
-                            Progress::new(SharedString::from(format!("home-progress-{id}")))
-                                .small()
-                                .value(progress.percent.unwrap_or(0.0))
-                                .accessibility_label("Reading progress"),
+                            Meter::new(
+                                SharedString::from(format!("home-progress-{id}")),
+                                progress.percent.unwrap_or(0.0),
+                            )
+                            .thin()
+                            .accessibility_label("Reading progress"),
                         ),
                     )
                     .child(
@@ -409,7 +417,7 @@ impl HomeView {
             return;
         };
         let view = cx.entity().downgrade();
-        window.open_alert_dialog(cx, move |alert, _, _| {
+        open_alert_dialog(window, cx, move |alert, _, _| {
             let view = view.clone();
             alert
                 .title(format!("Mark “{title}” as read?"))
@@ -457,7 +465,13 @@ impl HomeView {
                     .flex_1()
                     .min_w_0()
                     .gap_2()
-                    .child(title_button("home-paused", entry, FontWeight::MEDIUM))
+                    .child(
+                        TextButton::book(
+                            SharedString::from(format!("home-paused-{}", entry.user_book_id)),
+                            &entry.book,
+                        )
+                        .font_weight(FontWeight::MEDIUM),
+                    )
                     .child(
                         div()
                             .flex_shrink_0()
@@ -539,7 +553,13 @@ impl HomeView {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .child(title_button("home-rate-title", entry, FontWeight::MEDIUM))
+                    .child(
+                        TextButton::book(
+                            SharedString::from(format!("home-rate-title-{}", entry.user_book_id)),
+                            &entry.book,
+                        )
+                        .font_weight(FontWeight::MEDIUM),
+                    )
                     .child(div().text_sm().text_color(muted).truncate().child(byline)),
             )
             .child(
@@ -662,7 +682,6 @@ impl HomeView {
             .child(goal_bar(
                 fraction,
                 (!reached && goal.is_current(today)).then_some(expected),
-                cx,
             ))
             .child(
                 v_flex()
@@ -752,11 +771,13 @@ impl HomeView {
                     .min_w_0()
                     .gap_0p5()
                     .child(div().text_xs().text_color(muted).child("Next in a series"))
-                    .child(title_button(
-                        "home-series-next",
-                        entry,
-                        FontWeight::SEMIBOLD,
-                    ))
+                    .child(
+                        TextButton::book(
+                            SharedString::from(format!("home-series-next-{}", entry.user_book_id)),
+                            &entry.book,
+                        )
+                        .font_weight(FontWeight::SEMIBOLD),
+                    )
                     .child(div().text_xs().text_color(muted).truncate().child(details)),
             )
             .child(
@@ -929,33 +950,6 @@ fn cover(entry: &LibraryEntry, size: CoverSize, shadow: bool) -> Cover {
         )
 }
 
-/// The book's title as a quiet button that opens its page: reachable by
-/// keyboard, unlike the cover.
-fn title_button(prefix: &str, entry: &LibraryEntry, weight: FontWeight) -> AnyElement {
-    let page = Page::Book(entry.book.clone());
-    // A row, so the button keeps its content's width instead of stretching
-    // (and centring the title); it may still shrink, and the title truncates.
-    h_flex()
-        .min_w_0()
-        .child(
-            Button::new(SharedString::from(format!(
-                "{prefix}-{}",
-                entry.user_book_id
-            )))
-            .text()
-            .min_w_0()
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .font_weight(weight)
-                    .child(entry.book.title.clone()),
-            )
-            .on_click(move |_, _, cx| navigation::open(page.clone(), cx)),
-        )
-        .into_any_element()
-}
-
 /// One line for a book: small cover, title, and something about it.
 fn compact_row(
     prefix: &str,
@@ -981,10 +975,13 @@ fn compact_row(
                 ),
         )
         .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(title_button(prefix, entry, FontWeight::NORMAL)),
+            div().flex_1().min_w_0().child(
+                TextButton::book(
+                    SharedString::from(format!("{prefix}-{}", entry.user_book_id)),
+                    &entry.book,
+                )
+                .font_weight(FontWeight::NORMAL),
+            ),
         )
         .when_some(trailing, |this, t| {
             this.child(div().flex_shrink_0().text_sm().text_color(muted).child(t))
@@ -993,35 +990,10 @@ fn compact_row(
 }
 
 /// The goal's progress, with a tick where steady progress would be today.
-fn goal_bar(fraction: f32, expected: Option<f32>, cx: &App) -> impl IntoElement {
-    let height = px(8.);
-    div()
-        .relative()
-        .w_full()
-        .h(height)
-        .rounded_full()
-        .bg(colors(cx).track)
-        .child(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .h_full()
-                .w(relative(fraction))
-                .rounded_full()
-                .bg(cx.theme().progress_bar),
-        )
-        .when_some(expected, |this, expected| {
-            this.child(
-                div()
-                    .absolute()
-                    .top(px(-3.))
-                    .h(height + px(6.))
-                    .w(px(2.))
-                    .left(relative(expected))
-                    .bg(cx.theme().muted_foreground),
-            )
-        })
+fn goal_bar(fraction: f32, expected: Option<f32>) -> impl IntoElement {
+    Meter::new("home-goal-bar", fraction * 100.)
+        .pace(expected.map(|e| e * 100.))
+        .accessibility_label("Progress toward the goal")
 }
 
 /// Books finished each month of the goal's year; months still to come are

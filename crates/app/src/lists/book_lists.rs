@@ -18,6 +18,7 @@ use super::list_dialog::open_new_list;
 use super::model::ListsModel;
 use crate::app_state::Services;
 use crate::format::needs_permission;
+use crate::ui::kit::open_alert_dialog;
 
 /// The model, when the session can read lists.
 fn readable(cx: &App) -> Option<Entity<ListsModel>> {
@@ -165,7 +166,7 @@ pub fn confirm_owned(entry: &LibraryEntry, window: &mut Window, cx: &mut App) {
     let one_way = offers_one_way_owned(cx);
     let title: SharedString = format!("Add “{}” to your Owned list?", entry.book.title).into();
     let description: SharedString = owned_description(&edition, one_way).into();
-    window.open_alert_dialog(cx, move |alert, _, _| {
+    open_alert_dialog(window, cx, move |alert, _, _| {
         let lists = lists.clone();
         let edition = edition.id;
         alert

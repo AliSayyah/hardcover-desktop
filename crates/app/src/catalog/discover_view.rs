@@ -5,10 +5,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::ui::Skeleton;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::list::{List, ListState};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
@@ -301,12 +301,12 @@ impl DiscoverView {
                     h_flex()
                         .id(("trending-skeleton", i as u64))
                         .gap_3()
-                        .child(Skeleton::new().w_8().h_12())
+                        .child(Skeleton::cover(crate::cover::CoverSize::Sm))
                         .child(
                             v_flex()
                                 .gap_1()
-                                .child(Skeleton::new().h_4().w_48())
-                                .child(Skeleton::new().h_3().w_32()),
+                                .child(Skeleton::line().h_4().w_48())
+                                .child(Skeleton::line().h_3().w_32()),
                         )
                 }))
                 .into_any_element(),

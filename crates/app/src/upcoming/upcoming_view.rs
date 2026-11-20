@@ -15,8 +15,8 @@ use gpui_kit::{
 use super::model::{UpcomingModel, UpcomingStatus};
 use super::row::UpcomingRow;
 use super::schedule::{grouped, shown};
-use crate::library::library_view::empty_state;
 use crate::library::model::LibraryModel;
+use crate::ui::empty_state;
 
 pub struct UpcomingView {
     upcoming: Entity<UpcomingModel>,

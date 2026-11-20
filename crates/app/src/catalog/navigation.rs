@@ -43,6 +43,12 @@ impl PageStack {
         self.pages.last()
     }
 
+    /// The page under the current one: where Back goes. `None` when Back
+    /// returns to the destination.
+    pub fn previous(&self) -> Option<&Page> {
+        self.pages.len().checked_sub(2).map(|ix| &self.pages[ix])
+    }
+
     /// Opens `page`. Opening the page already shown does nothing; returns
     /// whether the current page changed.
     pub fn push(&mut self, page: Page) -> bool {
@@ -111,6 +117,7 @@ mod tests {
         let mut stack = PageStack::default();
         assert!(stack.current().is_none());
         assert!(stack.push(Page::Series(SeriesId::new(1))));
+        assert!(stack.previous().is_none(), "Back goes to the destination");
         assert!(!stack.push(Page::Series(SeriesId::new(1))));
         assert!(stack.push(Page::Author(AuthorId::new(2))));
         let book = BookSummary::new(BookId::new(3), "A Book");
@@ -123,6 +130,7 @@ mod tests {
             "may recur deeper"
         );
 
+        assert_eq!(stack.previous(), Some(&Page::Book(book.clone())));
         assert!(stack.pop());
         assert_eq!(stack.current(), Some(&Page::Book(book)));
         assert!(stack.pop());

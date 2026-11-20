@@ -2,8 +2,9 @@
 
 use std::sync::{Arc, LazyLock};
 
+use crate::ui::kit::open_dialog;
 use gpui_kit::component::link::Link;
-use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
     App, FontWeight, Image, ImageFormat, ParentElement as _, Styled as _, Window, div, img, rems,
 };
@@ -18,7 +19,7 @@ static ICON: LazyLock<Arc<Image>> = LazyLock::new(|| {
 });
 
 pub fn open_about(window: &mut Window, cx: &mut App) {
-    window.open_dialog(cx, |dialog, window, cx| {
+    open_dialog(window, cx, |dialog, window, cx| {
         let muted = cx.theme().muted_foreground;
         let repository = format!("https://github.com/{REPOSITORY}");
         dialog.w(rems(24.).to_pixels(window.rem_size())).child(

@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::ui::Skeleton;
 use gpui_kit::component::avatar::Avatar;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::link::Link;
 use gpui_kit::component::list::{List, ListState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
-use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::{ActiveTheme as _, IndexPath, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, FontWeight, IntoElement,
@@ -24,6 +24,7 @@ use super::book_list::{
 use crate::app_state::{Services, cover_thumbnail};
 use crate::bidi::WrappingText;
 use crate::library::model::LibraryModel;
+use crate::ui::kit::RaisedField as _;
 
 /// How an author's books are ordered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -359,13 +360,24 @@ impl AuthorView {
                             .child("Books"),
                     )
                     .child(
-                        div()
-                            .flex_shrink_0()
-                            .w_40()
-                            .child(Select::new(&self.order_select).small()),
+                        div().flex_shrink_0().w_40().child(
+                            Select::new(&self.order_select)
+                                .small()
+                                .raised_field(false, cx),
+                        ),
                     ),
             )
             .into_any_element()
+    }
+}
+
+impl AuthorView {
+    /// The name of a page already loaded this session, for Back's label.
+    pub fn name(&self, id: AuthorId) -> Option<&str> {
+        match self.pages.get(&id)? {
+            Loaded::Ready(details) => Some(&details.name),
+            Loaded::Failed(_) => None,
+        }
     }
 }
 
@@ -392,12 +404,12 @@ impl Render for AuthorView {
                 .into_any_element(),
             None => h_flex()
                 .gap_4()
-                .child(Skeleton::new().size_12().rounded_full())
+                .child(Skeleton::circle().size_12())
                 .child(
                     v_flex()
                         .gap_2()
-                        .child(Skeleton::new().h_8().w_64())
-                        .child(Skeleton::new().h_4().w_48()),
+                        .child(Skeleton::line().h_8().w_64())
+                        .child(Skeleton::line().h_4().w_48()),
                 )
                 .into_any_element(),
         };

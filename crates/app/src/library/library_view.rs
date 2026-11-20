@@ -2,9 +2,6 @@
 
 use std::collections::HashMap;
 
-use gpui_kit::component::empty::{
-    Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle,
-};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
@@ -23,6 +20,8 @@ use super::collection::{SortOrder, shelf_rows};
 use super::model::{LibraryModel, SyncStatus};
 use crate::book::detail_view::{BookDetailView, Subject};
 use crate::format::status_label;
+use crate::ui::empty_state;
+use crate::ui::kit::RaisedField as _;
 
 #[derive(Clone)]
 pub struct SortOption(SortOrder, SharedString);
@@ -104,52 +103,6 @@ impl ListDelegate for ShelfDelegate {
     fn loading(&self, _: &App) -> bool {
         self.loading
     }
-}
-
-/// A centred empty state for a region.
-pub fn empty_state(
-    icon: IconName,
-    title: SharedString,
-    description: SharedString,
-) -> impl IntoElement {
-    div()
-        .size_full()
-        .p_6()
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(Empty::new().header(empty_header(icon, title, description)))
-}
-
-/// [`empty_state`] with an action below, such as "Try again".
-pub fn empty_state_with_action(
-    icon: IconName,
-    title: SharedString,
-    description: SharedString,
-    action: impl IntoElement,
-) -> impl IntoElement {
-    div()
-        .size_full()
-        .p_6()
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(
-            Empty::new()
-                .header(empty_header(icon, title, description))
-                .content(EmptyContent::new().child(action)),
-        )
-}
-
-fn empty_header(icon: IconName, title: SharedString, description: SharedString) -> EmptyHeader {
-    EmptyHeader::new()
-        .media(
-            EmptyMedia::new()
-                .with_variant(EmptyMediaVariant::Icon)
-                .child(Icon::new(icon)),
-        )
-        .title(EmptyTitle::new().child(title))
-        .description(EmptyDescription::new().child(description))
 }
 
 pub struct LibraryView {
@@ -433,18 +386,22 @@ impl Render for ShelfPane {
                             .gap_2()
                             .child(
                                 div().flex_1().min_w_0().child(
-                                    Input::new(&self.filter).small().cleanable(true).prefix(
-                                        Icon::new(IconName::Search)
-                                            .small()
-                                            .text_color(cx.theme().muted_foreground),
-                                    ),
+                                    Input::new(&self.filter)
+                                        .small()
+                                        .raised_field(false, cx)
+                                        .cleanable(true)
+                                        .prefix(
+                                            Icon::new(IconName::Search)
+                                                .small()
+                                                .text_color(cx.theme().muted_foreground),
+                                        ),
                                 ),
                             )
                             .child(
                                 div()
                                     .flex_shrink_0()
                                     .w_40()
-                                    .child(Select::new(&self.sort).small()),
+                                    .child(Select::new(&self.sort).small().raised_field(false, cx)),
                             ),
                     ),
             )
