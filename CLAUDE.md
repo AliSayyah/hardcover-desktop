@@ -184,6 +184,7 @@ The workspace has two crates, in `crates/*`.
 - The demo downloads its covers, so it needs the network. Wait until every visible cover has loaded before capturing.
 - Resizing the window after launch squeezes the library's list toward its minimum width. Drag the divider back to its default of 24rem before capturing.
 - Strip metadata from the PNGs (`magick … -strip`).
+- The README's first image, `home.png`, shows both themes: Home in light and dark, taken in the same state, joined along a diagonal (`magick -size 1800x1200 xc:black -fill white -draw "polygon 0,0 1100,0 700,1200 0,1200" mask.png`, then `magick dark.png light.png mask.png -composite home.png`). The other shots switch with the reader's theme (`<picture>`).
 
 ## Design system and gpui-kit
 

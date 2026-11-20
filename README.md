@@ -19,10 +19,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 > [!NOTE]
 > This is a community project. It is not made by, affiliated with, or endorsed by Hardcover.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png">
-  <img src="docs/screenshots/home-light.png" alt="Home: the books being read with their progress and pace, the reading goal and whether it is on track, the next book in a series, the newest books on Want to read, and the books coming soon">
-</picture>
+<img src="docs/screenshots/home.png" alt="Home in the light and dark themes, split diagonally: the books being read with their progress and pace, the reading goal and whether it is on track, the next book in a series, the newest books on Want to read, and the books coming soon">
 
 ## Features
 
