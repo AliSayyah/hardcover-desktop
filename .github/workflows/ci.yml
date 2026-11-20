@@ -114,6 +114,8 @@ jobs:
       # signed; this tests the download path, against the latest release.
       - name: Install the latest release
         run: |
+          # The one library the binary links that the runner image lacks.
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-0
           home="$RUNNER_TEMP/home"
           HOME="$home" bash install.sh
           test -f "$home/.local/share/applications/io.github.alisayyah.HardcoverDesktop.desktop"

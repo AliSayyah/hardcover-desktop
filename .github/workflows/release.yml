@@ -131,12 +131,15 @@ jobs:
             minisign -V -p packaging/minisign.pub -m "$asset"
           done
 
+      # Files only: the bare runner lacks libraries the app links. The build
+      # and Flatpak jobs have already run it.
       - name: Test the signed tarball installer
         run: |
           archive=(dist/*.tar.gz)
           test_home="$RUNNER_TEMP/install-test"
           env HOME="$test_home" bash dist/install.sh "${archive[0]}"
-          "$test_home/.local/bin/hardcover-desktop" --version
+          test -x "$test_home/.local/bin/hardcover-desktop"
+          test -f "$test_home/.local/share/applications/io.github.alisayyah.HardcoverDesktop.desktop"
           mkdir "$RUNNER_TEMP/tampered"
           cp "${archive[0]}" "${archive[0]}.minisig" "$RUNNER_TEMP/tampered/"
           printf x >> "$RUNNER_TEMP/tampered/${archive[0]##*/}"
