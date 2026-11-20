@@ -493,11 +493,8 @@ pub fn goal_amount(metric: &GoalMetric, n: f64) -> String {
 
 /// `2026` for a calendar year, otherwise the dates: `Mar 1 – Jun 30, 2026`.
 pub fn goal_period(start: Date, end: Date) -> String {
-    let whole_year = start.year() == end.year()
-        && (start.month(), start.day()) == (1, 1)
-        && (end.month(), end.day()) == (12, 31);
-    if whole_year {
-        start.year().to_string()
+    if let Some(year) = goal_year(start, end) {
+        year.to_string()
     } else if start.year() == end.year() {
         format!("{} – {}", start.format("%b %-d"), end.format("%b %-d, %Y"))
     } else {
@@ -507,6 +504,17 @@ pub fn goal_period(start: Date, end: Date) -> String {
             end.format("%b %-d, %Y")
         )
     }
+}
+
+/// The year a goal covers, when it covers one calendar year: from Jan 1 to
+/// Dec 31, or to Jan 1 of the next year, which is how Hardcover dates its
+/// own year goals ("2026 Reading Goal": Jan 1, 2026 – Jan 1, 2027).
+pub fn goal_year(start: Date, end: Date) -> Option<i32> {
+    let year = start.year();
+    let from_new_year = (start.month(), start.day()) == (1, 1);
+    let to_year_end = (end.year(), end.month(), end.day()) == (year, 12, 31)
+        || (end.year(), end.month(), end.day()) == (year + 1, 1, 1);
+    (from_new_year && to_year_end).then_some(year)
 }
 
 /// `9 of 12 books`.
@@ -519,7 +527,7 @@ pub fn goal_progress(goal: &Goal) -> String {
     )
 }
 
-/// How the goal stands on `today`: `2 books behind schedule`, `On schedule`,
+/// How the goal stands on `today`: `2 books behind pace`, `On pace`,
 /// `Goal reached`. `None` for a metric this version does not know.
 pub fn goal_pace(goal: &Goal, today: Date) -> Option<String> {
     if matches!(goal.metric, GoalMetric::Other(_)) {
@@ -541,12 +549,12 @@ pub fn goal_pace(goal: &Goal, today: Date) -> Option<String> {
     }
     let pace = goal.pace(today).round();
     Some(if pace == 0.0 {
-        "On schedule".to_owned()
+        "On pace".to_owned()
     } else {
         let n = pace.abs();
         let side = if pace > 0.0 { "ahead of" } else { "behind" };
         format!(
-            "{} {} {side} schedule",
+            "{} {} {side} pace",
             goal_amount(&goal.metric, n),
             goal_unit(&goal.metric, n)
         )
@@ -724,6 +732,13 @@ mod tests {
         let books = goal(GoalMetric::Books, 12, 9.0);
         assert_eq!(goal_progress(&books), "9 of 12 books");
         assert_eq!(goal_period(books.start, books.end), "2026");
+        // Hardcover's own year goals end on the next New Year's Day.
+        assert_eq!(goal_period(d(2026, 1, 1), d(2027, 1, 1)), "2026");
+        assert_eq!(goal_year(d(2026, 1, 1), d(2027, 1, 1)), Some(2026));
+        assert_eq!(goal_year(d(2026, 1, 1), d(2026, 12, 31)), Some(2026));
+        assert_eq!(goal_year(d(2026, 1, 2), d(2027, 1, 1)), None);
+        assert_eq!(goal_year(d(2026, 1, 1), d(2027, 1, 2)), None);
+        assert_eq!(goal_year(d(2026, 1, 1), d(2027, 12, 31)), None);
         assert_eq!(
             goal_period(d(2026, 3, 1), d(2026, 6, 30)),
             "Mar 1 – Jun 30, 2026"
@@ -735,13 +750,13 @@ mod tests {
         // 12 a year: 10.6 expected by Nov 19.
         assert_eq!(
             goal_pace(&books, d(2026, 11, 19)).unwrap(),
-            "2 books behind schedule"
+            "2 books behind pace"
         );
         assert_eq!(
             goal_pace(&books, d(2026, 9, 1)).unwrap(),
-            "1 book ahead of schedule"
+            "1 book ahead of pace"
         );
-        assert_eq!(goal_pace(&books, d(2026, 10, 10)).unwrap(), "On schedule");
+        assert_eq!(goal_pace(&books, d(2026, 10, 10)).unwrap(), "On pace");
         assert_eq!(
             goal_pace(&books, d(2027, 1, 5)).unwrap(),
             "Ended 3 books short"
