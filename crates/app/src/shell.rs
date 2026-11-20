@@ -349,7 +349,10 @@ impl Workspace {
         self.pages.clear();
         self.destination = destination;
         match destination {
-            Destination::Home => self.home.update(cx, |h, cx| h.focus(window, cx)),
+            Destination::Home => self.home.update(cx, |h, cx| {
+                h.opened(cx);
+                h.focus(window, cx);
+            }),
             Destination::Search => self.search.update(cx, |s, cx| s.focus_input(window, cx)),
             Destination::Discover => self.discover.update(cx, |d, cx| {
                 d.show(window, cx);

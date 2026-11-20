@@ -1,8 +1,11 @@
 //! What Home shows, worked out from the library on this computer: the books
-//! being read with their pace, a paused book, the next book of a series the
-//! reader has started, and the top of the Want to Read shelf. Plain functions
+//! being read with their pace, a paused book, books finished lately with no
+//! rating, the next book of a series the reader has started, and the top of
+//! the Want to Read shelf. Plain functions
 //! of the entries and the date, so they can be tested; nothing here asks
 //! Hardcover for anything.
+
+use std::collections::HashSet;
 
 use chrono::Duration;
 use hardcover_core::{
@@ -18,6 +21,11 @@ const MAX_ESTIMATE_DAYS: i64 = 365;
 pub const IDLE_DAYS: i64 = 7;
 /// Want to Read books listed under Up next, besides the series pick.
 const UP_NEXT_ROWS: usize = 3;
+/// Read books finished at most this many days ago are offered for rating.
+/// Older ones were likely left unrated on purpose.
+pub const RATE_DAYS: i64 = 60;
+/// Rows of "Rate what you finished".
+const RATE_ROWS: usize = 4;
 
 #[derive(Debug, Default)]
 pub struct Digest {
@@ -214,6 +222,51 @@ fn series_next(entries: &[LibraryEntry]) -> Option<SeriesNext> {
         }
     }
     best.map(|(_, next)| next)
+}
+
+/// A Read book finished lately, offered for rating.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToRate {
+    pub id: UserBookId,
+    pub finished: Date,
+}
+
+/// The rows of "Rate what you finished" and how many books still need a
+/// rating: Read books finished in the last [`RATE_DAYS`] days with no rating,
+/// the most recently finished first.
+///
+/// The books in `keep` (rated on Home since it was opened) stay among the
+/// rows, so a row doesn't vanish under the pointer and a slip can be undone.
+/// The cap applies to both together, so rating a book never pulls another
+/// one up into its place.
+pub fn to_rate(
+    entries: &[LibraryEntry],
+    today: Date,
+    keep: &HashSet<UserBookId>,
+) -> (Vec<ToRate>, usize) {
+    let mut unrated = 0;
+    let mut rows: Vec<ToRate> = Vec::new();
+    for e in entries.iter().filter(|e| e.status == ReadingStatus::Read) {
+        if e.rating.is_some() && !keep.contains(&e.user_book_id) {
+            continue;
+        }
+        let Some(finished) = e.reads.iter().filter_map(|r| r.finished_at).max() else {
+            continue;
+        };
+        if !(0..=RATE_DAYS).contains(&(today - finished).num_days()) {
+            continue;
+        }
+        if e.rating.is_none() {
+            unrated += 1;
+        }
+        rows.push(ToRate {
+            id: e.user_book_id,
+            finished,
+        });
+    }
+    rows.sort_by(|a, b| b.finished.cmp(&a.finished).then(b.id.cmp(&a.id)));
+    rows.truncate(RATE_ROWS);
+    (rows, unrated)
 }
 
 /// What the goal can expect from the books being read: how many of them
@@ -482,6 +535,71 @@ mod tests {
         assert_eq!(d.paused_count, 2);
         assert!(!d.is_empty());
         assert!(compute(&[], day("2026-11-20")).is_empty());
+    }
+
+    fn rated(mut e: LibraryEntry, stars: f32) -> LibraryEntry {
+        e.rating = hardcover_core::Rating::new(stars);
+        e
+    }
+
+    #[test]
+    fn books_finished_lately_without_a_rating_are_offered() {
+        let today = day("2026-11-20");
+        let read = |id, on| finished(entry(id, ReadingStatus::Read, None), on);
+        let books = [
+            read(1, "2026-11-12"),
+            read(2, "2026-09-21"), // 60 days ago: still in
+            read(3, "2026-09-20"), // 61 days ago: out
+            rated(read(4, "2026-11-01"), 4.0),
+            finished(entry(5, ReadingStatus::DidNotFinish, None), "2026-11-10"),
+            entry(6, ReadingStatus::Read, None), // no finish date
+            read(7, "2026-11-25"),               // in the future
+            read(8, "2026-10-30"),
+        ];
+        let (rows, unrated) = to_rate(&books, today, &HashSet::new());
+        let ids: Vec<i64> = rows.iter().map(|r| r.id.get()).collect();
+        assert_eq!(ids, [1, 8, 2]);
+        assert_eq!(rows[0].finished, day("2026-11-12"));
+        assert_eq!(unrated, 3);
+
+        // A later read's finish counts, not the first one's.
+        let reread = finished(read(9, "2019-02-10"), "2026-11-15");
+        let (rows, _) = to_rate(&[reread], today, &HashSet::new());
+        assert_eq!(rows[0].finished, day("2026-11-15"));
+    }
+
+    #[test]
+    fn a_book_rated_on_home_keeps_its_row() {
+        let today = day("2026-11-20");
+        let read = |id, on| finished(entry(id, ReadingStatus::Read, None), on);
+        let mut books = vec![
+            read(1, "2026-11-15"),
+            read(2, "2026-11-10"),
+            read(3, "2026-11-05"),
+            read(4, "2026-11-01"),
+            read(5, "2026-10-28"),
+        ];
+        let ids = |rows: &[ToRate]| rows.iter().map(|r| r.id.get()).collect::<Vec<_>>();
+        let (rows, unrated) = to_rate(&books, today, &HashSet::new());
+        assert_eq!(ids(&rows), [1, 2, 3, 4]);
+        assert_eq!(unrated, 5);
+
+        // Rating book 2 keeps it in place, and book 5 doesn't move up.
+        books[1] = rated(books[1].clone(), 3.5);
+        let keep = HashSet::from([UserBookId::new(2)]);
+        let (rows, unrated) = to_rate(&books, today, &keep);
+        assert_eq!(ids(&rows), [1, 2, 3, 4]);
+        assert_eq!(unrated, 4);
+
+        // Next time Home opens, it's gone.
+        let (rows, _) = to_rate(&books, today, &HashSet::new());
+        assert_eq!(ids(&rows), [1, 3, 4, 5]);
+
+        // Cleared again on Home: still kept, and counted as unrated.
+        books[1].rating = None;
+        let (rows, unrated) = to_rate(&books, today, &keep);
+        assert_eq!(ids(&rows), [1, 2, 3, 4]);
+        assert_eq!(unrated, 5);
     }
 
     fn goal(metric: GoalMetric, start: &str, end: &str) -> Goal {
