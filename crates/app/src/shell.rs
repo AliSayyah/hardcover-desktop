@@ -1000,17 +1000,7 @@ impl Workspace {
             .unwrap_or_else(|| "Account".into());
         // Initials from the name when there is one ("Jane Quill"), else the
         // username.
-        let avatar = Avatar::new(
-            user.as_ref()
-                .and_then(|u| u.name.clone())
-                .filter(|name| !name.trim().is_empty())
-                .map_or_else(|| username.clone(), SharedString::from),
-        )
-        .image(
-            user.as_ref()
-                .and_then(|u| u.avatar.as_ref())
-                .map(|a| a.url.clone()),
-        );
+        let avatar = Avatar::for_user(user.as_ref(), username.clone());
         let profile_url = user
             .as_ref()
             .map(|u| format!("https://hardcover.app/@{}", u.username));
