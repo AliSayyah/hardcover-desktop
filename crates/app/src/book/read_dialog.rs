@@ -9,14 +9,14 @@ use gpui_kit::component::calendar::Date as CalendarDate;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
 use gpui_kit::component::dialog::{Dialog, DialogFooter};
 use gpui_kit::component::form::{Field, Form};
-use gpui_kit::component::{ActiveTheme as _, WindowExt as _, v_flex};
+use gpui_kit::component::{WindowExt as _, v_flex};
 use gpui_kit::{
     App, AppContext as _, Axis, Context, Entity, EventEmitter, IntoElement, ParentElement as _,
     Render, SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::{Date, ReadId, ReadSession};
 
-use crate::design::{TypeRoles as _, size};
+use crate::design::{TypeRoles as _, colors, size};
 
 /// What the dialog is for.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -177,7 +177,7 @@ impl Render for ReadDialog {
                     ),
             )
             .when_some(self.error.clone(), |this, error| {
-                this.child(div().body().text_color(cx.theme().danger).child(error))
+                this.child(div().body().text_color(colors(cx).danger).child(error))
             })
     }
 }

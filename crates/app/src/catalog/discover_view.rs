@@ -27,6 +27,7 @@ use crate::app_state::Services;
 use crate::format::authors_text;
 use crate::library::model::LibraryModel;
 use crate::ui::PageHeader;
+use crate::ui::kit::SmallControl as _;
 
 /// The periods offered, in order.
 const PERIODS: [TrendingPeriod; 5] = [
@@ -251,7 +252,7 @@ impl DiscoverView {
                     .child(
                         Button::new("refresh-trending")
                             .ghost()
-                            .small()
+                            .small_control()
                             .icon(IconName::RefreshCw)
                             .label("Refresh")
                             .loading(refreshing)
@@ -269,7 +270,7 @@ impl DiscoverView {
                 .child(load_failed(
                     message.clone(),
                     Button::new("retry-trending")
-                        .small()
+                        .small_control()
                         .label("Try again")
                         .on_click(cx.listener(|this, _, window, cx| this.refresh(window, cx))),
                     cx,

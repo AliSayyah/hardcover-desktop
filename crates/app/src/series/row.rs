@@ -18,7 +18,7 @@
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
 use gpui_kit::{
     App, AppContext as _, Entity, FocusHandle, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, RenderOnce, ScrollHandle, SharedString, Styled as _, Window, div,
@@ -41,6 +41,7 @@ use crate::format::{count_text, needs_permission, progress_summary};
 use crate::home::home_view::paused_text;
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::ui::focus::{keyed_focus, reveal_when};
+use crate::ui::kit::SmallControl as _;
 use crate::ui::{SeriesStrip, StripItem, TextButton};
 use crate::upcoming::row::add_to_want_to_read;
 use crate::upcoming::schedule::{release_text, soon_text};
@@ -304,7 +305,7 @@ fn next_lane(
         NextKind::Reading | NextKind::Paused => entry.map(|entry| {
             let library = library.clone();
             Button::new(SharedString::from(format!("series-update-{id}")))
-                .small()
+                .small_control()
                 .label("Update progress…")
                 .loading(pending == Some(WriteKind::Progress))
                 .disabled(pending.is_some() || !can_write)
@@ -315,7 +316,7 @@ fn next_lane(
         NextKind::Start => book.entry.map(|entry| {
             let library = library.clone();
             Button::new(SharedString::from(format!("series-start-{id}")))
-                .small()
+                .small_control()
                 .label("Start reading")
                 .loading(pending == Some(WriteKind::Status))
                 .disabled(pending.is_some() || !can_write)
@@ -372,7 +373,7 @@ fn want_to_read(
     let summary = book.book.clone();
     Button::new(SharedString::from(format!("series-add-{}", series.id)))
         .ghost()
-        .small()
+        .small_control()
         .icon(IconName::Plus)
         .label("Want to read")
         .ml(rems(-0.5))

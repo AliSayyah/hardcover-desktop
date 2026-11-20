@@ -10,14 +10,14 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::{Disableable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     App, AppContext as _, Axis, Context, Entity, IntoElement, ParentElement as _, Pixels, Render,
-    SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
+    SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::auth::scopes::WRITE_LISTS;
 use hardcover_core::{BookSummary, ListDraft, ListId, Privacy};
 
 use super::model::ListsModel;
 use crate::app_state::Services;
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::needs_permission;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::open_dialog;
@@ -254,11 +254,23 @@ impl Render for ListDialog {
                         ),
                     )
                     .child(
-                        Field::new().label("Description").child(
-                            Textarea::new(&self.description)
-                                .disabled(writing)
-                                .raised_field(writing, cx),
-                        ),
+                        // The label sits on the field's first line, as it
+                        // does beside a one-line input, not centred on the
+                        // three.
+                        Field::new()
+                            .items_start()
+                            .label_fn(|_, _| {
+                                div()
+                                    .pt(rems(
+                                        (size::CONTROL.0 - TypeRole::Body.scale().1 / 16.) / 2.,
+                                    ))
+                                    .child("Description")
+                            })
+                            .child(
+                                Textarea::new(&self.description)
+                                    .disabled(writing)
+                                    .raised_field(writing, cx),
+                            ),
                     )
                     .child(Field::new().label("Visible to").child(privacy))
                     .child(
@@ -302,6 +314,9 @@ impl Render for ListDialog {
                             .label(commit)
                             .loading(writing)
                             .disabled(writing || !can_write)
+                            .when(!can_write, |this| {
+                                this.tooltip(needs_permission(WRITE_LISTS))
+                            })
                             .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                     ),
             )

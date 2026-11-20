@@ -83,12 +83,6 @@ impl ObjectBar {
         self
     }
 
-    /// One tool, after any already given.
-    pub fn tool(mut self, tool: impl IntoElement) -> Self {
-        self.tools.push(tool.into_any_element());
-        self
-    }
-
     /// The hairline under the bar, and the page's insets: for a page over a
     /// destination. Without it the bar has the pane's insets.
     pub fn hairline(mut self, hairline: bool) -> Self {
@@ -123,7 +117,7 @@ impl RenderOnce for ObjectBar {
                         // Its padding hangs into the inset, so the arrow sits
                         // on the content's spine.
                         .ml(rems(-0.75))
-                        .max_w(rems(20.))
+                        .max_w(size::BACK_LABEL_MAX)
                         .tooltip_with_action("Back", &GoBack, Some("Workspace"))
                         .on_click(move |event, window, cx| on_click(event, window, cx)),
                 )

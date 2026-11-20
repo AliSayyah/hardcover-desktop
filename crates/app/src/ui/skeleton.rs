@@ -192,12 +192,6 @@ impl SkeletonRow {
             cover: CoverSize::Sm,
         }
     }
-
-    /// The cover's size, for rows that lead with another one.
-    pub fn cover(mut self, size: CoverSize) -> Self {
-        self.cover = size;
-        self
-    }
 }
 
 impl RenderOnce for SkeletonRow {

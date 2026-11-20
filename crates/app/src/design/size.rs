@@ -67,12 +67,29 @@ pub const PACE_TICK_WIDTH: Pixels = px(2.);
 pub const PACE_TICK_OVERHANG: Pixels = px(3.);
 
 /// The widest a page's content gets (768): Coming soon, Discover, Stats,
-/// list, series and author pages. The page inset is outside it.
+/// list, series and author pages, and the book pane's content. The page
+/// inset is outside it.
 pub const PAGE_MAX: Rems = rems(48.);
 /// A page's inset (32; `p_8`).
 pub const PAGE_INSET: Rems = rems(2.);
 /// A page's frame at its widest: [`PAGE_MAX`] and the inset on both sides.
 pub const PAGE_FRAME_MAX: Rems = rems(PAGE_MAX.0 + 2. * PAGE_INSET.0);
+/// The widest Home's content gets (1024), its inset included: beyond it the
+/// rows' actions drift away from their books.
+pub const HOME_MAX: Rems = rems(64.);
+/// The narrowest a page's main column gets beside its rail (400): a lead
+/// book's xl cover with its title and buttons, or a row's cover, text and
+/// actions. Narrower, the rail folds under it.
+pub const MAIN_MIN: Rems = rems(25.);
+/// The narrowest a book header's info column gets beside the cover (192).
+pub const HEADER_INFO_MIN: Rems = rems(12.);
+/// The widest Back's label gets in the object bar (320).
+pub const BACK_LABEL_MAX: Rems = rems(20.);
+/// The book pane's inset (24; `px_6`).
+pub const PANE_INSET: Rems = rems(1.5);
+/// The book pane at its widest: [`PAGE_MAX`] and the pane's inset on both
+/// sides. Its object bar keeps to it, so the tools stay over the content.
+pub const PANE_FRAME_MAX: Rems = rems(PAGE_MAX.0 + 2. * PANE_INSET.0);
 /// The least room a page keeps for its list under a header that scrolls
 /// (224): three rows and the list's foot.
 pub const PAGE_LIST_MIN: Rems = rems(14.);
@@ -93,6 +110,16 @@ pub const EMPTY_TEXT: Rems = rems(18.);
 /// A menu's reason row (288): why its items are disabled ("… no
 /// permission …"), wrapped at this width. The kit's menu labels don't wrap.
 pub const MENU_REASON: Rems = rems(18.);
+
+/// A short number field: a reading goal's target (112).
+pub const NUMBER_FIELD: Rems = rems(7.);
+/// The tallest a list inside a dialog gets: the edition picker's (384).
+pub const DIALOG_LIST_MAX: Rems = rems(24.);
+/// The tallest the goal dialog's finished books get (132): five and a half
+/// rows of 24, so the half row says the list scrolls.
+pub const DIALOG_PEEK_LIST_MAX: Rems = rems(8.25);
+/// The tallest the release notes get in the update dialog (288).
+pub const DIALOG_NOTES_MAX: Rems = rems(18.);
 
 /// A dialog that confirms (24 rem).
 pub const DIALOG_CONFIRM: Rems = rems(24.);

@@ -13,12 +13,13 @@
 
 use chrono::{Datelike as _, NaiveDate};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{Sizable as _, h_flex};
+use gpui_kit::component::h_flex;
 use gpui_kit::{
     AnyElement, App, ClickEvent, ElementId, IntoElement, ParentElement as _, RenderOnce,
     SharedString, Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 
+use super::kit::SmallControl as _;
 use super::reveal::probe;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
@@ -205,7 +206,7 @@ pub fn see_all(
 ) -> Button {
     Button::new(id)
         .ghost()
-        .small()
+        .small_control()
         .label(see_all_label(count))
         .on_click(on_click)
 }

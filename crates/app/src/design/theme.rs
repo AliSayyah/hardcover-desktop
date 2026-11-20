@@ -32,16 +32,20 @@
 //!   press.
 //! - `ring` is the solid accent: the kit draws the 3 px ring at 50% of it,
 //!   plus a 1 px accent edge, as the system's focus treatment asks.
+//! - `switch_thumb` is its own role: `raised` in light mode, `fg` in dark.
 //!
-//! **Where the kit doesn't follow the theme** (left for the screen waves):
+//! **Where the kit doesn't follow the theme:**
 //! - `Theme::input_background()` ignores the config: inputs are paper in
-//!   light mode and a tint of the input border in dark, not `raised`.
+//!   light mode and a tint of the input border in dark. `ui::kit`'s
+//!   `RaisedField` puts them on `raised`.
+//! - Dialogs paint `background` (paper); `ui::kit::open_dialog` and
+//!   `open_alert_dialog` put them on `raised`.
 //! - The sidebar's menu hover is `sidebar_accent` at 80%, so it is 8%, not
 //!   5%, two steps from the 10% selected fill.
-//! - Popovers and menus round at `radius` (6), not `radius_lg` (8), and use
-//!   the kit's own shadow, not `shadow-popover`.
 //! - The segmented tab bar's sliding indicator is always `background`.
-//! - Dialogs paint `background` (paper), not `raised`.
+//! - The rest (menus, the Select dropdown, switches, radios, the
+//!   `DatePicker`, dialog shadows) is listed in `ui::kit`'s module doc and
+//!   the system's "Kit limits".
 
 use std::rc::Rc;
 
@@ -202,7 +206,7 @@ pub fn config(mode: ThemeMode, bundled_fonts: bool) -> ThemeConfig {
     // Loading, switches, scrollbars.
     c.skeleton = css(p.skeleton);
     c.switch = css(p.track);
-    c.switch_thumb = css(p.raised);
+    c.switch_thumb = css(p.switch_thumb);
     c.scrollbar = css(clear);
     c.scrollbar_thumb = css(p.border_strong);
     c.scrollbar_thumb_hover = css(p.fg_faint);
@@ -283,6 +287,7 @@ mod tests {
                 ),
                 ("skeleton", theme.skeleton, p.skeleton),
                 ("switch", theme.switch, p.track),
+                ("switch_thumb", theme.switch_thumb, p.switch_thumb),
                 ("danger", theme.danger, p.danger),
                 ("warning", theme.warning, p.warning),
             ] {

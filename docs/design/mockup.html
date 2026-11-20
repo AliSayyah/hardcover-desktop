@@ -29,6 +29,7 @@
   --border: #E4DED3;
   --border-strong: #D0C8BA; /* control outlines */
   --track: #E0D9CC;         /* empty part of a progress bar */
+  --switch-thumb: #FFFFFF;  /* raised */
   --chip: rgba(31, 28, 23, .07);
   --skeleton: #E9E4DA;      /* something still loading */
   --fg: #1F1C17;            /* ink */
@@ -59,8 +60,9 @@
   --border: #292623;
   --border-strong: #3D3934;
   --track: #35312C;
+  --switch-thumb: #EEEAE3;  /* fg: a raised thumb on track is 1.2:1 here */
   --chip: rgba(238, 234, 227, .08);
-  --skeleton: #23211E;
+  --skeleton: #2B2825;
   --fg: #EEEAE3;
   --fg-muted: #ABA498;
   --fg-faint: #807A6F;
@@ -225,7 +227,7 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .select svg { margin-left: auto; color: var(--fg-muted); }
 .select.sm { height: var(--h-control-s); padding: 0 var(--s-4) 0 var(--s-8); font-size: var(--t-12); width: var(--w-select-s); }
 .switch { width: 28px; height: 16px; border-radius: var(--r-pill); background: var(--track); position: relative; flex: none; }
-.switch i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: var(--r-pill); background: var(--raised); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.switch i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: var(--r-pill); background: var(--switch-thumb); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
 .switch.on { background: var(--accent); }
 .switch.on i { left: 14px; }
 .link { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
@@ -451,10 +453,12 @@ const REVIEWS = [
     text: ["کتابی پرکشش و پر از امید. دوستی دو شخصیت اصلی را خیلی دوست داشتم و تا صفحهٔ آخر نتوانستم کتاب را زمین بگذارم."] },
 ];
 
-// ---------- Icons (Lucide paths; the star is the app's own) ----------
+// ---------- Icons (Lucide paths, the app's own set; the star is the app's own) ----------
+// home is layout-dashboard, target is calendar (the reading goal), list and layers are
+// gallery-vertical-end (a list, and the Lists menu): the icons the app uses.
 const P = {
   book: '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
-  home: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  home: '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
   search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
   globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
   pie: '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>',
@@ -464,17 +468,17 @@ const P = {
   ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
   eyeoff: '<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>',
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
-  list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+  list: '<path d="M7 2h10"/><path d="M5 6h14"/><rect width="18" height="12" x="3" y="10" rx="2"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
   updown: '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>',
-  target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  target: '<path d="M8 2v3"/><path d="M16 2v3"/><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/>',
   sort: '<path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/>',
   pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
   left: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
   ext: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
-  layers: '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>',
+  layers: '<path d="M7 2h10"/><path d="M5 6h14"/><rect width="18" height="12" x="3" y="10" rx="2"/>',
   warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
 };

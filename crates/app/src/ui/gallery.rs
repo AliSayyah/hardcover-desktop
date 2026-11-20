@@ -11,25 +11,28 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::DropdownMenu as _;
-use gpui_kit::component::popover::Popover;
+use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::switch::Switch;
+use gpui_kit::component::{Disableable as _, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, Styled as _, Window, div, rems,
+    ParentElement as _, Render, SharedString, Styled as _, Window, div, rems,
 };
 use gpui_kit::{
     FocusHandle, KeyDownEvent, ScrollHandle, StatefulInteractiveElement as _, point, px,
 };
 
-use super::kit::{PopoverSurface as _, RaisedField as _, open_alert_dialog, open_dialog};
+use super::kit::{
+    RaisedField as _, SmallControl as _, SmallIconButton as _, open_alert_dialog, open_dialog,
+};
 use super::reveal::RevealScroll as _;
 use super::*;
 use crate::bidi::WrappingText;
 use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverSize};
 use crate::design::type_roles::Family;
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use hardcover_core::ReadingStatus;
 
 pub struct Gallery {
@@ -235,7 +238,7 @@ fn upcoming_row(
     } else {
         Button::new(("g-want", ix))
             .ghost()
-            .small()
+            .small_control()
             .icon(IconName::Plus)
             .label("Want to read")
             .into_any_element()
@@ -456,10 +459,16 @@ fn stars_and_links() -> AnyElement {
             .gap_3()
             .child(
                 h_flex()
-                    .items_baseline()
                     .gap_2()
                     .child(div().display_30().child("4.63"))
-                    .child(Stars::new(4.63).accessibility_label("g-average", "4.63 average")),
+                    .child(
+                        div()
+                            .body()
+                            .baseline_on(TypeRole::Body, TypeRole::Display30)
+                            .child(
+                                Stars::new(4.63).accessibility_label("g-average", "4.63 average"),
+                            ),
+                    ),
             )
             .child(
                 h_flex()
@@ -481,7 +490,7 @@ fn blocks_and_properties(cx: &App) -> AnyElement {
     let edition = h_flex()
         .gap_2()
         .child(div().text_color(muted).child("Not chosen"))
-        .child(Button::new("g-choose").small().label("Choose…"));
+        .child(Button::new("g-choose").small_control().label("Choose…"));
     let reviews = Sequence::new()
         .spacing(RowSpacing::Reviews)
         .flush_top()
@@ -512,7 +521,7 @@ fn blocks_and_properties(cx: &App) -> AnyElement {
             .max_w(size::PROSE)
             .child(
                 Block::new("Notes")
-                    .action(Button::new("g-edit").ghost().small().label("Edit"))
+                    .action(Button::new("g-edit").ghost().small_control().label("Edit"))
                     .child(
                         div()
                             .body()
@@ -575,23 +584,64 @@ fn kit_fixes(input: &Entity<InputState>, cx: &App) -> AnyElement {
                     .ok_text("Delete")
             })
         });
-    let popover = Popover::new("g-popover")
-        .trigger(Button::new("g-popover-trigger").label("Popover…"))
-        .content(|_, _, _| {
-            div()
-                .body()
-                .max_w(size::EMPTY_TEXT)
-                .child("A popover on raised, at r-box, with shadow-popover.")
-        })
-        .popover_surface(cx);
+    let small = h_flex()
+        .gap_2()
+        .child(
+            Button::new("g-small")
+                .label("Update progress…")
+                .small_control(),
+        )
+        .child(
+            Button::new("g-small-ghost")
+                .ghost()
+                .icon(IconName::Plus)
+                .label("Want to read")
+                .small_control(),
+        )
+        .child(
+            Button::new("g-small-icon")
+                .ghost()
+                .icon(IconName::Ellipsis)
+                .tooltip("Read actions")
+                .small_icon_button(),
+        );
+    let switches = h_flex()
+        .gap_4()
+        .children(
+            [(false, false), (true, false), (false, true), (true, true)].map(
+                |(checked, disabled)| {
+                    Switch::new(SharedString::from(format!("g-switch-{checked}-{disabled}")))
+                        .small()
+                        .checked(checked)
+                        .disabled(disabled)
+                        .accessibility_label("Owned")
+                },
+            ),
+        )
+        .child(
+            RadioGroup::horizontal("g-radios")
+                .children(["System", "Light"].map(|l| Radio::new(l).label(l)))
+                .selected_index(Some(1)),
+        )
+        .child(
+            RadioGroup::horizontal("g-radios-disabled")
+                .children(["System", "Light"].map(|l| Radio::new(l).label(l)))
+                .selected_index(Some(1))
+                .disabled(true),
+        );
     specimen(
-        "Kit fixes: raised field, dialogs, popover",
-        h_flex()
-            .gap_2()
-            .child(Input::new(input).raised_field(false, cx).w(size::SELECT))
-            .child(dialog)
-            .child(alert)
-            .child(popover),
+        "Kit fixes: raised field, small controls, switches, dialogs",
+        v_flex()
+            .gap_3()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(Input::new(input).raised_field(false, cx).w(size::SELECT))
+                    .child(dialog)
+                    .child(alert),
+            )
+            .child(small)
+            .child(switches),
     )
 }
 
@@ -666,7 +716,7 @@ fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
                 .action(
                     Button::new("g-add-read")
                         .ghost()
-                        .small()
+                        .small_control()
                         .icon(IconName::Plus)
                         .label("Add a past read…"),
                 )
@@ -774,6 +824,7 @@ fn wrapping_text(cx: &App) -> AnyElement {
                 h_flex()
                     .items_start()
                     .gap_4()
+                    .child(Cover::new(CoverSize::Xs, "The Way of Kings"))
                     .child(Cover::new(
                         CoverSize::Md,
                         "Tomorrow, and Tomorrow, and Tomorrow",

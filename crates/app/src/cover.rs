@@ -59,9 +59,10 @@ const CLOTH_MIN_SCALE: f32 = 0.75;
 /// The six cover sizes. Use the one the system names for the place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoverSize {
-    /// 20 × 30: compact rows, menus. In the system, but no screen uses it
-    /// yet.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 20 × 30: compact rows, menus.
+    // The system's size for a compact row or a menu; no screen has one yet.
+    // The gallery and the tests draw it.
+    #[cfg_attr(not(any(test, feature = "demo")), allow(dead_code))]
     Xs,
     /// 32 × 48: list rows (shelves, search, Discover, lists, series and
     /// author pages), upcoming rows.

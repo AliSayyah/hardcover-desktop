@@ -10,9 +10,7 @@ use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{
-    Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{Disableable as _, Icon, IconName, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     AppContext as _, ClipboardItem, Context, Entity, EventEmitter, IntoElement, ParentElement as _,
     Render, SharedString, Styled as _, Task, Window, div, prelude::FluentBuilder as _,
@@ -27,6 +25,7 @@ use crate::app_state::Services;
 use crate::design::{TypeRoles as _, colors};
 use crate::format::{error_message, permissions_message};
 use crate::library::model::LibraryModel;
+use crate::ui::kit::SmallControl as _;
 
 /// Emitted once the session holds the new grant.
 pub struct Reauthorized {
@@ -270,7 +269,7 @@ impl Render for Reauthorize {
             permissions_message(&Services::global(cx).missing_scopes()).into();
         let sign_in = |loading: bool| {
             Button::new("reauthorize")
-                .small()
+                .small_control()
                 .label("Sign in again…")
                 .loading(loading)
                 .disabled(loading)
@@ -292,7 +291,7 @@ impl Render for Reauthorize {
                     .child(
                         Button::new("reauthorize-later")
                             .ghost()
-                            .small()
+                            .small_control()
                             .label("Later")
                             .tooltip(
                                 "Hide this until the next start; the account menu brings it back",
@@ -307,7 +306,7 @@ impl Render for Reauthorize {
                     .gap_2()
                     .child(
                         Button::new("reauthorize-copy-link")
-                            .small()
+                            .small_control()
                             .label("Copy link")
                             .tooltip("If the browser didn't open, paste this link into it")
                             .on_click(
@@ -317,7 +316,7 @@ impl Render for Reauthorize {
                     .child(
                         Button::new("reauthorize-cancel")
                             .ghost()
-                            .small()
+                            .small_control()
                             .label("Cancel")
                             .on_click(cx.listener(|this, _, _, cx| this.cancel(cx))),
                     ),

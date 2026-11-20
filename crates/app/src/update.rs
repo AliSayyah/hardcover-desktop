@@ -252,7 +252,10 @@ fn failure_message(error: &Error) -> String {
             "Couldn't reach GitHub to check for updates. Check your connection and try again."
                 .to_owned()
         }
-        Error::Update(msg) => format!("Couldn't update: {msg}."),
+        Error::Update(msg) => format!(
+            "Couldn't update: {}. Try again, or download the release from GitHub.",
+            msg.trim_end_matches('.')
+        ),
         other => error_message(other),
     }
 }

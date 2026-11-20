@@ -49,6 +49,9 @@ pub fn lists_section(
         )
         .selected(active == Some(id))
         .count(count_text(count))
+        // A name that may be cut short shows whole in its tooltip (the row
+        // fits about 20 characters beside its count).
+        .tooltip((list.name.chars().count() > LONG_NAME).then(|| list.name.clone()))
         .on_click(move |_, window, cx| select(id, window, cx))
     });
     let failed = match model.status() {
@@ -79,3 +82,6 @@ pub fn lists_section(
             .child(create),
     )
 }
+
+/// The longest list name that surely fits its sidebar row, in characters.
+const LONG_NAME: usize = 18;

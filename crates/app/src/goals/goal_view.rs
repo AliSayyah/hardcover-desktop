@@ -12,7 +12,7 @@ use gpui_kit::component::{Disableable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     App, AppContext as _, Axis, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, Render, SharedString, Styled as _, Subscription, Window, div,
-    prelude::FluentBuilder as _, rems,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::WRITE_GOALS;
 use hardcover_core::{Date, Goal, GoalId, GoalMetric, NewGoal};
@@ -312,7 +312,7 @@ impl GoalView {
                     h_flex()
                         .gap_2()
                         .child(
-                            div().w(rems(7.)).child(
+                            div().w(size::NUMBER_FIELD).child(
                                 Input::new(&self.target)
                                     .disabled(reason.is_some() || writing)
                                     .raised_field(reason.is_some() || writing, cx),
@@ -378,7 +378,7 @@ impl GoalView {
                         v_flex()
                             .id("goal-finished-books")
                             .gap_1()
-                            .max_h(rems(8.25))
+                            .max_h(size::DIALOG_PEEK_LIST_MAX)
                             .scroll_y_revealing_focus()
                             .children(rows),
                     )
@@ -579,7 +579,7 @@ impl Render for NewGoalView {
                             h_flex()
                                 .gap_2()
                                 .child(
-                                    div().w(rems(7.)).child(
+                                    div().w(size::NUMBER_FIELD).child(
                                         Input::new(&self.target)
                                             .disabled(writing)
                                             .raised_field(writing, cx),
@@ -632,6 +632,9 @@ impl Render for NewGoalView {
                             .label("Create")
                             .loading(writing)
                             .disabled(writing || !can_write)
+                            .when(!can_write, |this| {
+                                this.tooltip(needs_permission(WRITE_GOALS))
+                            })
                             .on_click(cx.listener(|this, _, window, cx| this.create(window, cx))),
                     ),
             )

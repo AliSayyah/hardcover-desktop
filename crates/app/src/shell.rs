@@ -10,6 +10,7 @@ use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{
     Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
@@ -18,7 +19,7 @@ use gpui_kit::{
     Action, Anchor, AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, Modifiers, ModifiersChangedEvent,
     ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _, rems,
+    Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::store::LibraryCache;
@@ -50,10 +51,12 @@ use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::stats::stats_view::StatsView;
 use crate::ui::focus::{remember_focus, return_focus};
+use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::{open_alert_dialog, open_alert_dialog_on_result, open_dialog};
 use crate::ui::reveal::RevealScroll as _;
 use crate::ui::{
-    AccountRow, Avatar, BackTo, NavRow, ObjectBar, back_label, brand_row, sidebar_label, tools_of,
+    AccountRow, Avatar, BackTo, ExternalLink, NavRow, ObjectBar, back_label, brand_row,
+    sidebar_label, tools_of,
 };
 use crate::upcoming::model::UpcomingModel;
 use crate::upcoming::upcoming_view::UpcomingView;
@@ -800,6 +803,8 @@ impl Workspace {
                     )
                     .reveals_focus(&self.sidebar_scroll),
             )
+            // When the destinations don't all fit (a short window), a
+            // hairline over the account says the list goes on under it.
             .child(
                 v_flex()
                     .flex_none()
@@ -807,6 +812,10 @@ impl Workspace {
                     .pt_2()
                     .pb_2()
                     .gap_2()
+                    .when(
+                        self.sidebar_scroll.max_offset().y > gpui_kit::Pixels::ZERO,
+                        |this| this.border_t(size::HAIRLINE).border_color(colors.border),
+                    )
                     .when(
                         self.reauthorize.read(cx).is_needed(Services::global(cx)),
                         |this| this.child(self.reauthorize.clone()),
@@ -840,7 +849,7 @@ impl Workspace {
                 .tooltip(format!("Version {version} is installed"))
                 .on_click(|_, _, cx| cx.restart()),
         };
-        Some(button.small().w_full().into_any_element())
+        Some(button.small_control().w_full().into_any_element())
     }
 
     fn check_for_updates(&mut self, cx: &mut Context<Self>) {
@@ -886,7 +895,7 @@ impl Workspace {
         };
         let title: SharedString = format!("Hardcover Desktop {}", release.version).into();
         let notes: SharedString = crate::update::release_notes(&release.notes).into();
-        let page_url = release.page_url.clone();
+        let page_url: SharedString = release.page_url.clone().into();
         let installable = model.can_install() && model.has_download(release);
         let description: SharedString = if installable {
             format!(
@@ -905,38 +914,52 @@ impl Workspace {
             )
         }
         .into();
-        open_alert_dialog_on_result(window, cx, move |alert, _, _| {
-            let updates = updates.clone();
-            let page_url = page_url.clone();
-            let notes = notes.clone();
-            let alert = alert
-                .title(title.clone())
-                .description(description.clone())
-                .content(move |content, _, _| {
-                    content.when(!notes.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .id("release-notes")
-                                .max_h(rems(18.))
-                                .scroll_y_revealing_focus()
-                                .child(TextView::markdown("release-notes-text", notes.clone())),
-                        )
+        let notes_view = move |notes: &SharedString| {
+            (!notes.is_empty()).then(|| {
+                div()
+                    .id("release-notes")
+                    .max_h(size::DIALOG_NOTES_MAX)
+                    .scroll_y_revealing_focus()
+                    .child(TextView::markdown("release-notes-text", notes.clone()))
+            })
+        };
+        if installable {
+            open_alert_dialog_on_result(window, cx, move |alert, _, _| {
+                let updates = updates.clone();
+                let notes = notes.clone();
+                alert
+                    .title(title.clone())
+                    .description(description.clone())
+                    .content(move |content, _, _| content.children(notes_view(&notes)))
+                    .confirm()
+                    .cancel_text("Later")
+                    .ok_text("Install")
+                    .on_ok(move |_, _, cx| {
+                        updates.update(cx, |u: &mut UpdateModel, cx| u.install(cx));
+                        true
                     })
-                })
-                .confirm()
-                .cancel_text("Later");
-            if installable {
-                alert.ok_text("Install").on_ok(move |_, _, cx| {
-                    updates.update(cx, |u: &mut UpdateModel, cx| u.install(cx));
-                    true
-                })
-            } else {
-                alert.ok_text("Open release page").on_ok(move |_, _, cx| {
-                    cx.open_url(&page_url);
-                    true
-                })
-            }
-        });
+            });
+        } else {
+            // Nothing to install here: the release page is a link (it opens
+            // the browser), and the dialog's one button closes it.
+            open_alert_dialog(window, cx, move |alert, _, _| {
+                let notes = notes.clone();
+                let page_url = page_url.clone();
+                alert
+                    .title(title.clone())
+                    .description(description.clone())
+                    .content(move |content, _, _| {
+                        content
+                            .child(ExternalLink::new(
+                                "release-page",
+                                "Open the release page",
+                                page_url.clone(),
+                            ))
+                            .children(notes_view(&notes))
+                    })
+                    .ok_text("Close")
+            });
+        }
     }
 
     fn render_account(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1002,9 +1025,15 @@ impl Workspace {
                 services.session().is_some() && !services.missing_scopes().is_empty()
             }
         };
+        // While syncing, a 12 px spinner where the other states have their
+        // icon, so the line shows the work moving, not only its count.
+        let syncing = matches!(model.sync_status(), SyncStatus::Syncing);
         let status = h_flex()
             .min_w_0()
             .gap_1()
+            .when(syncing, |this| {
+                this.child(Spinner::new().xsmall().color(colors(cx).fg_muted))
+            })
             .children(status_icon.map(|icon| Icon::new(icon).size_3().flex_none()))
             .child(div().min_w_0().truncate().tabular().child(status_text));
 

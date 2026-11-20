@@ -12,7 +12,7 @@
 
 use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::Button;
-use gpui_kit::component::{IconName, Sizable as _, h_flex};
+use gpui_kit::component::{IconName, h_flex};
 use gpui_kit::{
     AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, SharedString, Styled as _, Subscription, Window, div,
@@ -25,6 +25,7 @@ use crate::cover::CoverSize;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::count_text;
 use crate::library::model::LibraryModel;
+use crate::ui::kit::SmallControl as _;
 use crate::ui::{Lane, PageHeader, Sequence, Skeleton, empty_state};
 
 /// Skeleton rows while the list loads.
@@ -61,7 +62,7 @@ impl UpcomingView {
             .child(div().body().text_color(colors(cx).fg_muted).child(message))
             .child(
                 Button::new("upcoming-retry")
-                    .small()
+                    .small_control()
                     .label("Try again")
                     .on_click(
                         cx.listener(|this, _, _, cx| this.upcoming.update(cx, |u, cx| u.load(cx))),

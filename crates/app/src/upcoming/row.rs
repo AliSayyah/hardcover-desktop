@@ -14,7 +14,7 @@
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
 use gpui_kit::{
     App, AppContext as _, Entity, IntoElement, ParentElement as _, RenderOnce, SharedString,
     Styled as _, Window, div, prelude::FluentBuilder as _,
@@ -30,6 +30,7 @@ use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRoles as _, colors};
 use crate::format::needs_permission;
 use crate::library::model::LibraryModel;
+use crate::ui::kit::SmallControl as _;
 use crate::ui::{Lane, TextButton};
 
 #[derive(IntoElement)]
@@ -77,7 +78,7 @@ impl RenderOnce for UpcomingRow {
                 let book = self.book.book.clone();
                 Button::new(SharedString::from(format!("{prefix}-add-{id}")))
                     .ghost()
-                    .small()
+                    .small_control()
                     .icon(IconName::Plus)
                     .label("Want to read")
                     .loading(adding)

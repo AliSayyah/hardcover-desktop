@@ -6,7 +6,7 @@
 //! - [`color`]: the paper-and-ink palette for both themes, including the
 //!   app-only roles the kit's theme has no field for (gold, star-empty,
 //!   fg-faint, track, surface, the overlays, the cloth colours, the cover's
-//!   edge, hinge and shadow, the popover shadow). Read it with [`colors`].
+//!   edge, hinge and shadow). Read it with [`colors`].
 //! - [`theme`]: maps the palette onto gpui-component's theme, so the kit's
 //!   own components (buttons, inputs, lists, menus, switches, tabs, dialogs)
 //!   draw in it.
@@ -18,10 +18,6 @@
 //! Nothing else in the app holds a raw colour. Data colours (a cover image,
 //! a reviewer's Hardcover colour) are not UI colours and stay where they are
 //! read.
-
-// The foundation for the screens still migrating to the system: some tokens
-// have no user yet, and the screen waves will use them.
-#![allow(dead_code)]
 
 pub mod color;
 pub mod size;

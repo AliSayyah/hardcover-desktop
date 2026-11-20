@@ -105,6 +105,7 @@ fn r(px: f32) -> gpui_kit::Rems {
 pub enum TypeRole {
     PageTitle,
     Section,
+    Byline,
     Heading,
     Body,
     BodyStrong,
@@ -129,7 +130,7 @@ impl TypeRole {
     pub fn weight(self) -> FontWeight {
         match self {
             Self::Body | Self::Caption | Self::Prose | Self::Reader => FontWeight::NORMAL,
-            Self::BodyStrong | Self::Label => FontWeight::MEDIUM,
+            Self::BodyStrong | Self::Label | Self::Byline => FontWeight::MEDIUM,
             _ => FontWeight::SEMIBOLD,
         }
     }
@@ -138,7 +139,7 @@ impl TypeRole {
     pub fn scale(self) -> (f32, f32) {
         match self {
             Self::PageTitle => scale::XL,
-            Self::Section => scale::BASE,
+            Self::Section | Self::Byline => scale::BASE,
             Self::Heading | Self::Body | Self::BodyStrong => scale::SM,
             Self::Label | Self::Caption => scale::XS,
             Self::Display30 => scale::XXXL,
@@ -210,6 +211,12 @@ pub trait TypeRoles: Styled + Sized {
     /// A section on a page: Inter 600, 16/24.
     fn section(self) -> Self {
         self.type_role_of(TypeRole::Section)
+    }
+
+    /// A book's author or series under its title in the header: Inter 500,
+    /// 16/24.
+    fn byline(self) -> Self {
+        self.type_role_of(TypeRole::Byline)
     }
 
     /// A block in a pane: Inter 600, 14/20.
