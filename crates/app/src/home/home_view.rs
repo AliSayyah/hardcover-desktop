@@ -10,6 +10,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex,
     v_flex,
@@ -553,7 +554,13 @@ impl HomeView {
                             .w(rems(1.75))
                             .text_sm()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .children(rating.map(rating_text)),
+                            .map(|this| {
+                                if pending == Some(WriteKind::Rating) {
+                                    this.child(Spinner::new().small())
+                                } else {
+                                    this.children(rating.map(rating_text))
+                                }
+                            }),
                     ),
             )
             .into_any_element()
