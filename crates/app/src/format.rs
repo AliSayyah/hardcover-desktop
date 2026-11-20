@@ -340,6 +340,13 @@ where
 
 /// What to tell the user when a request fails, with a recovery hint.
 pub fn error_message(error: &Error) -> String {
+    // The demo refuses every write; trying again can't help.
+    #[cfg(feature = "demo")]
+    if let Error::Api(msg) = error
+        && msg == hardcover_core::demo::READ_ONLY
+    {
+        return msg.clone();
+    }
     match error {
         Error::RateLimited { .. } => {
             "Hardcover's rate limit was reached. Try again in a minute.".to_owned()
@@ -896,12 +903,19 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "demo")]
+    #[test]
+    fn the_demo_says_only_that_it_is_read_only() {
+        let refused = Error::Api(hardcover_core::demo::READ_ONLY.into());
+        assert_eq!(error_message(&refused), hardcover_core::demo::READ_ONLY);
+    }
+
     #[test]
     fn error_copy() {
         // One full stop, whether or not Hardcover's message ends with one.
         assert_eq!(
-            error_message(&Error::Api("The demo library is read-only.".into())),
-            "Hardcover reported an error: The demo library is read-only. Try again later."
+            error_message(&Error::Api("The list is full.".into())),
+            "Hardcover reported an error: The list is full. Try again later."
         );
         assert_eq!(
             error_message(&Error::Api("not found".into())),
