@@ -123,7 +123,7 @@ impl RenderOnce for ObjectBar {
                         // Its padding hangs into the inset, so the arrow sits
                         // on the content's spine.
                         .ml(rems(-0.75))
-                        .max_w(rems(20.))
+                        .max_w(size::BACK_LABEL_MAX)
                         .tooltip_with_action("Back", &GoBack, Some("Workspace"))
                         .on_click(move |event, window, cx| on_click(event, window, cx)),
                 )

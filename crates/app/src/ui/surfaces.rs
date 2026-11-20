@@ -13,12 +13,12 @@
 use gpui_kit::component::h_flex;
 use gpui_kit::{
     AnyElement, App, Div, IntoElement, ParentElement, RenderOnce, SharedString, Styled as _,
-    Window, div, prelude::FluentBuilder as _,
+    Window, div, prelude::FluentBuilder as _, rems,
 };
 
 use super::focus::box_radius;
 use super::reveal::probe;
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
 /// A panel: `surface` fill, `r-box` corners, 16 inset, no border or shadow.
 /// A pane has at most one: the progress block for a book you have started,
@@ -93,15 +93,17 @@ impl RenderOnce for Rail {
 }
 
 /// A section's title row: the title, with an optional small action on the
-/// trailing edge. With an action it is a small control high, so the
-/// content under it starts at the same place either way.
-fn title_row(title: Div, action: Option<AnyElement>) -> Div {
+/// trailing edge. The row is the title's own line high, so the title sits
+/// the same distance under a hairline or the block above with or without an
+/// action: the 24-high action is centred on the title's line and hangs
+/// above and below it.
+fn title_row(title: Div, role: TypeRole, action: Option<AnyElement>) -> Div {
+    let overhang = (size::CONTROL_SMALL.0 - role.scale().1 / 16.) / 2.;
     h_flex()
         .w_full()
-        .min_h(size::CONTROL_SMALL)
         .gap_2()
         .child(title.flex_1().min_w_0())
-        .children(action.map(|action| probe(div().flex_none().child(action))))
+        .children(action.map(|action| probe(div().flex_none().my(rems(-overhang)).child(action))))
 }
 
 /// One section of a [`Rail`]: a `label` title, an optional small trailing
@@ -142,7 +144,11 @@ impl RenderOnce for RailSection {
             .flex()
             .flex_col()
             .gap_2()
-            .child(title_row(div().label(cx).child(self.title), self.action))
+            .child(title_row(
+                div().label(cx).child(self.title),
+                TypeRole::Label,
+                self.action,
+            ))
             .children(self.children.into_iter().map(probe))
     }
 }
@@ -193,7 +199,11 @@ impl RenderOnce for Block {
             .flex_col()
             .w_full()
             .gap_2()
-            .child(title_row(div().heading().child(self.heading), self.action))
+            .child(title_row(
+                div().heading().child(self.heading),
+                TypeRole::Heading,
+                self.action,
+            ))
             .children(self.children.into_iter().map(probe))
     }
 }

@@ -23,7 +23,7 @@ use crate::bidi::WrappingText;
 use crate::catalog::navigation::Page;
 use crate::chip::TagChip;
 use crate::cover::{Cover, CoverSize};
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{average_rating_text, count_text};
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{
@@ -300,13 +300,19 @@ impl BookDetailView {
         if in_rail {
             let figure = average.map(|average| {
                 let text = average_rating_text(average);
+                // The stars sit on the figure's baseline, as a run of body
+                // text beside it would.
                 h_flex()
-                    .items_baseline()
                     .gap_2()
                     .child(div().display_30().child(text.clone()))
                     .child(
-                        Stars::new(average)
-                            .accessibility_label("rail-average", format!("{text} average")),
+                        div()
+                            .body()
+                            .baseline_on(TypeRole::Body, TypeRole::Display30)
+                            .child(
+                                Stars::new(average)
+                                    .accessibility_label("rail-average", format!("{text} average")),
+                            ),
                     )
             });
             if figure.is_none() && breakdown.is_none() && link.is_none() {

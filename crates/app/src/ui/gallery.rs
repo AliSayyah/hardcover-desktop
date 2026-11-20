@@ -32,7 +32,7 @@ use crate::bidi::WrappingText;
 use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverSize};
 use crate::design::type_roles::Family;
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use hardcover_core::ReadingStatus;
 
 pub struct Gallery {
@@ -459,10 +459,16 @@ fn stars_and_links() -> AnyElement {
             .gap_3()
             .child(
                 h_flex()
-                    .items_baseline()
                     .gap_2()
                     .child(div().display_30().child("4.63"))
-                    .child(Stars::new(4.63).accessibility_label("g-average", "4.63 average")),
+                    .child(
+                        div()
+                            .body()
+                            .baseline_on(TypeRole::Body, TypeRole::Display30)
+                            .child(
+                                Stars::new(4.63).accessibility_label("g-average", "4.63 average"),
+                            ),
+                    ),
             )
             .child(
                 h_flex()

@@ -81,7 +81,7 @@ mod text_button;
 pub use self::{
     avatar::{Avatar, AvatarSize, initials},
     byline_link::BylineLink,
-    columns::{Columns, MAIN_MIN, folds},
+    columns::{Columns, folds},
     cover_shelf::CoverShelf,
     empty_state::{EmptyState, empty_state, empty_state_with_action},
     external_link::ExternalLink,

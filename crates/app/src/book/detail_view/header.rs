@@ -13,12 +13,10 @@
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Side, h_flex, v_flex,
-};
+use gpui_kit::component::{Disableable as _, Icon, IconName, Side, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, Context, FontWeight, IntoElement, ParentElement as _, SharedString,
-    Styled as _, Window, div, prelude::FluentBuilder as _, relative,
+    AnyElement, App, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Window,
+    div, prelude::FluentBuilder as _, relative,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{
@@ -186,14 +184,16 @@ impl BookDetailView {
         // when that runs longer.
         let info = v_flex()
             .flex_1()
-            .min_w(INFO_MIN)
+            .min_w(size::HEADER_INFO_MIN)
             .justify_between()
             .gap_4()
             .child(text)
-            .child(match entry {
+            // In a row, so a lone button keeps its own width rather than
+            // stretching across the column.
+            .child(h_flex().child(match entry {
                 Some(entry) => self.render_actions(entry, cx),
                 None => self.render_add(book, cx),
-            });
+            }));
 
         h_flex()
             .w_full()
@@ -221,8 +221,7 @@ impl BookDetailView {
         let contributors = details.map(|d| d.contributors.as_slice()).unwrap_or(&[]);
         let authors: Vec<&Contributor> = contributors.iter().filter(|c| c.is_author()).collect();
         let others: Vec<&Contributor> = contributors.iter().filter(|c| !c.is_author()).collect();
-        // The byline: Inter 500 at 16.
-        let byline = |this: gpui_kit::Div| this.section().font_weight(FontWeight::MEDIUM);
+        let byline = |this: gpui_kit::Div| this.byline();
         let authors_line = if authors.is_empty() && !others.is_empty() {
             // Only non-author credits: the roles line below names everyone, and
             // `book.authors` would repeat the same people without their roles.
@@ -260,7 +259,7 @@ impl BookDetailView {
                         .flex_wrap()
                         .gap_x_1()
                         .body()
-                        .text_color(cx.theme().muted_foreground)
+                        .text_color(colors(cx).fg_muted)
                         .children(others.iter().enumerate().map(|(i, c)| {
                             let role = c.role.clone().unwrap_or_default();
                             h_flex()
@@ -492,11 +491,7 @@ fn series_line(details: Option<&BookDetails>) -> Option<AnyElement> {
 /// known. In the byline (Inter 500 at 16) or in the muted roles line (body).
 fn contributor_name(c: &Contributor, id: (&'static str, usize), byline: bool) -> AnyElement {
     fn style<S: gpui_kit::Styled>(this: S, byline: bool) -> S {
-        if byline {
-            this.section().font_weight(FontWeight::MEDIUM)
-        } else {
-            this.body()
-        }
+        if byline { this.byline() } else { this.body() }
     }
     match c.author_id {
         Some(author) => style(
@@ -520,7 +515,3 @@ fn reason_row(reason: impl Into<SharedString>) -> PopupMenuItem {
 pub(super) fn saving(cx: &App) -> impl IntoElement {
     div().caption(cx).child(SharedString::new_static("Saving…"))
 }
-
-/// The info column's narrowest beside the cover, before it wraps under it
-/// (192).
-const INFO_MIN: gpui_kit::Rems = gpui_kit::rems(12.);

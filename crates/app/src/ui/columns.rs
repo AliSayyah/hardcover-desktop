@@ -10,7 +10,7 @@
 //!   hairlines like the rail's (24 above and below). Nothing is hidden.
 //! - The caller decides with [`folds`], from the width the columns get: GPUI
 //!   has no container queries. Fold when the main column would get less than
-//!   [`MAIN_MIN`].
+//!   [`size::MAIN_MIN`].
 //!
 //! ```ignore
 //! let width = window.viewport_size().width - size::SIDEBAR.to_pixels(window.rem_size());
@@ -29,9 +29,6 @@ use super::Rail;
 use super::reveal::probe;
 use crate::design::{colors, size};
 
-/// The narrowest the main column gets beside the rail (400): a lead book's
-/// xl cover with its title and buttons, or a row's cover, text and actions.
-pub const MAIN_MIN: Rems = rems(25.);
 /// Between the columns on the book page (24).
 const GAP: Rems = rems(1.5);
 /// Between the columns on Home (32).
@@ -78,11 +75,12 @@ impl Columns {
 }
 
 /// Whether columns `width` wide fold their rail: the main column would get
-/// less than [`MAIN_MIN`] beside it.
+/// less than [`size::MAIN_MIN`] beside it.
 pub fn folds(width: Pixels, rem_size: Pixels, wide_gap: bool) -> bool {
     let gap = if wide_gap { WIDE_GAP } else { GAP };
-    let needed =
-        MAIN_MIN.to_pixels(rem_size) + gap.to_pixels(rem_size) + size::RAIL.to_pixels(rem_size);
+    let needed = size::MAIN_MIN.to_pixels(rem_size)
+        + gap.to_pixels(rem_size)
+        + size::RAIL.to_pixels(rem_size);
     width < needed
 }
 
@@ -94,10 +92,13 @@ impl RenderOnce for Columns {
             return div().flex().w_full().child(main).into_any_element();
         }
         if !self.folded {
-            // Stretched, so the rail's hairline runs the columns' height.
+            // Stretched, so the rail's hairline runs the columns' height;
+            // growing, so in a page that fills the window (a flex column
+            // at least the window high) it runs to the page's foot.
             return div()
                 .flex()
                 .flex_row()
+                .flex_grow(1.)
                 .w_full()
                 .gap(gap)
                 .child(main)
