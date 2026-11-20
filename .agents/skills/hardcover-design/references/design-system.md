@@ -202,10 +202,13 @@ selection fill or a nested surface its own radius.
 | Sidebar | 240 wide | `w(rems(15.))` |
 | Shelf list | 384 wide by default (resizable) | `w_96` |
 | Rail (Home, full book page) | 272 wide | `w(rems(17.))` |
+| Next lane (a series row) | 240 wide | `size::NEXT_LANE` |
+| Strip item (a series row) | 40 wide | `size::STRIP_ITEM` |
 | Key column in a property list | 96; 72 in a rail | `w_24`, `w(rems(4.5))` |
 | Select | 168; small 128 | `w(rems(10.5))`, `w_32` |
 | Meter | 6 high beside words, 2 high inside a row; 400 wide max (160 in a row) | |
 | Prose | 640 wide max | `max_w(rems(40.))` |
+| Series page | 896 wide max | `size::SERIES_COLUMN` |
 | Empty-state text | 288 wide max | `w_72` |
 | Window | 1200 × 800 by default, 800 × 560 minimum | |
 
@@ -384,6 +387,30 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   - an action lane 136 wide: a small ghost "Want to read" with a plus icon,
     or the StatusChip when the book is already on the shelf. The lane is
     kept either way, so the dates line up.
+- **Series row** (`series/row.rs`), a sequence row with 16 above and below,
+  top-aligned:
+  - the series name in `title-18`, a text button that opens the series page;
+  - a muted line: the author, "2 of 6 read", "#6 not out yet" when a later
+    book is still to come, and the activity ("Reading now", "Last finished
+    Sep 28", "Caught up since Feb 2", "Paused since Jun 2, 2024", "Finished
+    Jan 12, 2025");
+  - the strip, 12 below;
+  - the next lane, 240 wide and kept on every row so the lanes line up: an
+    sm cover, a caption ("Reading · #1", "Next · #3", "Paused · #3"), the
+    title as a text button, a line ("Page 418 of 1,007 · 42%", "Paused at
+    page 140 of 412", or the date in `body-strong` with "· In 6 days"
+    muted), then one small command: "Update progress…", "Start reading", a
+    ghost "Want to read" with a plus, or the StatusChip. A finished series
+    leaves the lane empty.
+- **Strip** (`ui::SeriesStrip`): the books of a series in order, 4 apart,
+  each 40 wide: the sm cover, a 2 px line under it (a meter for the book
+  being read, else empty, so the positions sit on one line), then the
+  shelf's 12 px icon and the position in a caption. The next book's position
+  is ink at weight 600. A book not in the library is an empty **slot**
+  (`ui::CoverSlot`: a dashed `border-strong` outline in the cover's shape,
+  no fill); one not out yet is a slot with a 12 px clock. A strip that can't
+  show every book keeps the next one in view and ends with a "+N" caption.
+  State never relies on colour: the icon, the slot and the clock carry it.
 - **Property list** (Details): rows at least 24 high, 8 apart. The key
   column (96, or 72 in a rail) is `fg-muted`; the value is ink, with small
   controls inline.
@@ -486,6 +513,7 @@ Every screen starts from its task:
 | Shelf | Find a book on it | The list |
 | Book | Know the book and update it | Cover, title, status, progress |
 | Coming soon | See what's next in your series, and want it | The dates |
+| Series | See where you are in each series and what's next | The next step in each series |
 
 ### Window shell
 
@@ -612,6 +640,36 @@ Every screen starts from its task:
   and 4 below. Under each, upcoming rows.
 - **States:** a failed load says so in one muted sentence with "Try again";
   an empty list uses the empty state.
+
+### Series (a destination)
+
+- **Sidebar:** "Series" after Discover, with the `library` icon and the
+  count of series not finished. It hides, with the page, without
+  `read:catalog`.
+- **Content:** inset 32, at most 896 wide.
+- **Header:** the `page-title` "Series" with the count shown beside it,
+  then the muted line "The series you've started, and what's next in each."
+  On the trailing edge, 8 apart: the filter input (168, "Filter series":
+  every word must begin a word of the name or the author) and the select
+  (168): Not finished (the default), Finished and All series, each with its
+  count. The choice is kept for the session. In a narrow window the
+  controls wrap under the title.
+- **Which series:** those in which the reader has read, is reading, paused
+  or gave up on a book. A series shows its whole-numbered books, and a
+  fractional one (a novella) only when it is in the library or not out yet.
+- **Groups:** a `label` with its count, 24 above and 4 below. In progress (a
+  book is being read, or the next is out and the series was touched within a
+  year), Waiting for the next book (by release date), Not touched in a year,
+  and Finished. Within a group, the latest activity first. Under each,
+  series rows.
+- **Foot:** with Not finished, one muted line ("1 finished series isn't
+  shown.") and a small ghost "Show finished", which switches the select to
+  All series.
+- **States:** skeleton rows while loading; a failed load says so in one
+  muted sentence with "Try again"; with nothing started, the empty state
+  (the `library` icon, "No series yet", "When you read a book that belongs
+  to a series, the series shows here with what comes next."). A filter with
+  no match says so in one muted line under the header.
 
 ### Screens not in the mockup
 

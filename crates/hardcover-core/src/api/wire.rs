@@ -1330,6 +1330,85 @@ pub(crate) fn upcoming_books(rows: Vec<RawUpcomingRow>) -> Vec<UpcomingBook> {
     books
 }
 
+// ---------- tracked series ----------
+
+/// One `series` row of `SeriesOverview`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawTrackedSeries {
+    pub id: i64,
+    pub name: Option<String>,
+    pub slug: Option<String>,
+    pub primary_books_count: Option<i64>,
+    pub is_completed: Option<bool>,
+    pub author: Option<RawAuthorRef>,
+    #[serde(default)]
+    pub book_series: Vec<RawTrackedRow>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawTrackedRow {
+    pub position: Option<f64>,
+    #[serde(default)]
+    pub compilation: bool,
+    pub book: Option<RawTrackedBook>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawTrackedBook {
+    #[serde(flatten)]
+    pub book: RawBook,
+    pub canonical_id: Option<i64>,
+    pub release_date: Option<String>,
+    pub is_partial_book: Option<bool>,
+}
+
+impl RawTrackedSeries {
+    /// The series and its books by position, then the most-read first.
+    /// Compilations, merged duplicates (a `canonical_id`), books without a
+    /// usable position and repeats of one book are left out, whatever the
+    /// query already filtered.
+    pub fn into_tracked(self) -> TrackedSeries {
+        let mut s = TrackedSeries::new(
+            SeriesId::new(self.id),
+            non_empty(self.name).unwrap_or_else(|| "Untitled series".to_owned()),
+        );
+        s.slug = non_empty(self.slug);
+        s.primary_books_count = opt_u32(self.primary_books_count);
+        s.is_completed = self.is_completed;
+        s.author = self
+            .author
+            .and_then(|a| Some(AuthorRef::new(AuthorId::new(a.id), non_empty(a.name)?)));
+        for row in self.book_series {
+            let Some(raw) = row.book else { continue };
+            if row.compilation || raw.canonical_id.is_some() {
+                continue;
+            }
+            let Some(position) = row.position.filter(|p| p.is_finite() && *p >= 0.0) else {
+                continue;
+            };
+            let release_date = raw.release_date.as_deref().and_then(parse_date);
+            let partial = raw.is_partial_book == Some(true);
+            let book = raw.book.into_summary();
+            if s.books.iter().any(|b| b.book.id == book.id) {
+                continue;
+            }
+            let mut b = TrackedBook::new(book, position as f32);
+            b.release_date = release_date;
+            b.partial = partial;
+            s.books.push(b);
+        }
+        s.books.sort_by(|a, b| {
+            a.position.total_cmp(&b.position).then_with(|| {
+                b.book
+                    .users_count
+                    .unwrap_or(0)
+                    .cmp(&a.book.users_count.unwrap_or(0))
+            })
+        });
+        s
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -30,8 +30,8 @@
 use std::rc::Rc;
 
 use gpui_kit::base::Button as BaseButton;
+use gpui_kit::component::Icon;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{Icon, IconName};
 use gpui_kit::{
     AnyElement, App, ClickEvent, ElementId, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, RenderOnce, ScrollHandle, SharedString, StatefulInteractiveElement as _,
@@ -49,7 +49,7 @@ type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 #[derive(IntoElement)]
 pub struct NavRow {
     id: ElementId,
-    icon: IconName,
+    icon: Icon,
     label: SharedString,
     count: Option<SharedString>,
     hint: Option<AnyElement>,
@@ -62,10 +62,14 @@ pub struct NavRow {
 }
 
 impl NavRow {
-    pub fn new(id: impl Into<ElementId>, icon: IconName, label: impl Into<SharedString>) -> Self {
+    pub fn new(
+        id: impl Into<ElementId>,
+        icon: impl Into<Icon>,
+        label: impl Into<SharedString>,
+    ) -> Self {
         Self {
             id: id.into(),
-            icon,
+            icon: icon.into(),
             label: label.into(),
             count: None,
             hint: None,
@@ -189,16 +193,11 @@ impl RenderOnce for NavRow {
             })
             .when(focused, |this| this.focus_ring(radius, cx))
             .children(reveal)
-            .child(
-                Icon::new(self.icon)
-                    .size_4()
-                    .flex_none()
-                    .text_color(if selected {
-                        colors.accent
-                    } else {
-                        colors.fg_muted
-                    }),
-            )
+            .child(self.icon.size_4().flex_none().text_color(if selected {
+                colors.accent
+            } else {
+                colors.fg_muted
+            }))
             .child(div().flex_1().min_w_0().truncate().child(self.label))
             .children(trailing.map(|t| div().flex_none().pl_2().child(t)))
     }
@@ -212,6 +211,7 @@ mod tests {
     use super::*;
     use crate::ui::test_support::{host, press, tab};
     use gpui_kit::TestAppContext;
+    use gpui_kit::component::IconName;
 
     #[gpui_kit::test]
     fn each_row_reports_its_own_press(cx: &mut TestAppContext) {

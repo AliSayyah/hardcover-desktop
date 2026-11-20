@@ -2269,3 +2269,89 @@ fn upcoming_in_series_merges_books_and_names_every_series() {
         ]
     );
 }
+
+#[test]
+fn tracked_series_batches_ids_and_keeps_every_candidate() {
+    let (c, http) = client(TestTokens::new(false));
+    assert!(c.tracked_series(&[]).unwrap().is_empty());
+    assert_eq!(http.requests().len(), 0, "no ids, no request");
+
+    let row = |position: Option<f64>, compilation: bool, book: Value| json!({ "position": position, "compilation": compilation, "book": book });
+    let tracked = |id: i64, users: i64, date: Option<&str>, canonical: Option<i64>, partial| {
+        let mut b = book(id, &format!("Book {id}"));
+        b["users_count"] = json!(users);
+        b["release_date"] = json!(date);
+        b["canonical_id"] = json!(canonical);
+        b["is_partial_book"] = json!(partial);
+        b
+    };
+    // 26 ids: two requests, 25 and 1.
+    http.push(
+        200,
+        &data(json!({ "series": [{
+            "id": 41, "name": " Lantern Cycle ", "slug": "lantern-cycle",
+            "primary_books_count": 3, "is_completed": false,
+            "author": { "id": 7, "name": "Ada Quill" },
+            "book_series": [
+                row(Some(2.0), false, tracked(102, 40, Some("2024-03-01"), None, false)),
+                row(Some(1.0), false, tracked(101, 90, Some("2022-01-10"), None, false)),
+                // Another book at the same position: kept, most-read first.
+                row(Some(1.0), false, tracked(111, 10, None, None, false)),
+                row(Some(1.0), false, tracked(112, 500, None, Some(101), false)),
+                row(Some(1.5), false, tracked(115, 5, Some("2027-02-01"), None, true)),
+                row(Some(1.0), true, tracked(190, 900, None, None, false)),
+                row(None, false, tracked(191, 900, None, None, false)),
+                row(Some(-1.0), false, tracked(192, 900, None, None, false)),
+                row(Some(3.0), false, Value::Null),
+                row(Some(2.0), false, tracked(102, 40, Some("2024-03-01"), None, false)),
+            ],
+        }]})),
+    );
+    http.push(
+        200,
+        &data(json!({ "series": [{ "id": 77, "name": null, "slug": null,
+            "primary_books_count": null, "is_completed": null, "author": null,
+            "book_series": [] }]})),
+    );
+    let ids: Vec<SeriesId> = (1..=26).rev().map(|i| SeriesId::new(i * 3)).collect();
+    let series = c.tracked_series(&ids).unwrap();
+
+    let reqs = http.requests();
+    assert_eq!(reqs.len(), 2);
+    let first = &reqs[0].json.as_ref().unwrap()["variables"];
+    assert_eq!(
+        reqs[0].json.as_ref().unwrap()["operationName"],
+        "SeriesOverview"
+    );
+    assert_eq!(first["ids"].as_array().unwrap().len(), 25);
+    assert_eq!(first["ids"][0], 3, "sorted");
+    assert_eq!(first["limit"], 25);
+    assert_eq!(first["rows"], 200);
+    let second = &reqs[1].json.as_ref().unwrap()["variables"];
+    assert_eq!(second["ids"], json!([78]));
+    assert_eq!(second["limit"], 1);
+
+    assert_eq!(series.len(), 2);
+    let s = &series[0];
+    assert_eq!(s.id, SeriesId::new(41));
+    assert_eq!(s.name, "Lantern Cycle");
+    assert_eq!(s.slug.as_deref(), Some("lantern-cycle"));
+    assert_eq!(
+        s.author.as_ref().map(|a| a.name.as_str()),
+        Some("Ada Quill")
+    );
+    assert_eq!(s.primary_books_count, Some(3));
+    assert_eq!(s.is_completed, Some(false));
+    let books: Vec<(i64, f32)> = s
+        .books
+        .iter()
+        .map(|b| (b.book.id.get(), b.position))
+        .collect();
+    assert_eq!(books, [(101, 1.0), (111, 1.0), (115, 1.5), (102, 2.0)]);
+    assert_eq!(s.books[0].release_date, Some("2022-01-10".parse().unwrap()));
+    assert_eq!(s.books[1].release_date, None);
+    assert!(s.books[2].partial);
+    assert!(!s.books[0].partial);
+    assert_eq!(series[1].name, "Untitled series");
+    assert!(series[1].books.is_empty());
+}

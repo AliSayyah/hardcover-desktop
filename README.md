@@ -57,6 +57,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
   | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search |
   | <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>6</kbd> | Go to a shelf |
   | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> | Discover |
+  | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> | Series |
   | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Stats |
   | <kbd>Ctrl</kbd>+<kbd>R</kbd> | Refresh the library |
   | <kbd>Esc</kbd> or <kbd>Alt</kbd>+<kbd>←</kbd> | Back from a series, author or book page |

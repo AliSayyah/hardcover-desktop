@@ -1709,3 +1709,61 @@ impl UpcomingBook {
         }
     }
 }
+
+/// A series the reader has started, with every book Hardcover lists for it
+/// ([`crate::api::Client::tracked_series`]): what the Series destination
+/// works from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct TrackedSeries {
+    pub id: SeriesId,
+    pub name: String,
+    pub slug: Option<String>,
+    pub author: Option<AuthorRef>,
+    /// Hardcover's count of the main books (without companions).
+    pub primary_books_count: Option<u32>,
+    pub is_completed: Option<bool>,
+    /// By position, then the most-read first. Several books may share a
+    /// position (unmerged duplicates, translations); none is dropped here,
+    /// because which one counts depends on the reader's library. Merged
+    /// duplicates, compilations and books without a position are left out.
+    pub books: Vec<TrackedBook>,
+}
+
+impl TrackedSeries {
+    pub fn new(id: SeriesId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            slug: None,
+            author: None,
+            primary_books_count: None,
+            is_completed: None,
+            books: Vec::new(),
+        }
+    }
+}
+
+/// One book of a [`TrackedSeries`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct TrackedBook {
+    pub book: BookSummary,
+    /// Fractional for a novella between the main books (3.5).
+    pub position: f32,
+    /// `None` when Hardcover has no date for it.
+    pub release_date: Option<Date>,
+    /// One part of a book split in several (`is_partial_book`).
+    pub partial: bool,
+}
+
+impl TrackedBook {
+    pub fn new(book: BookSummary, position: f32) -> Self {
+        Self {
+            book,
+            position,
+            release_date: None,
+            partial: false,
+        }
+    }
+}

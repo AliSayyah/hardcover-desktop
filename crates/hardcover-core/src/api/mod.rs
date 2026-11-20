@@ -61,6 +61,12 @@ pub const REVIEWS_PER_PAGE: u32 = 10;
 /// Rows [`Client::upcoming_in_series`] asks for. A library of 210 series had
 /// 27 in 2026.
 const UPCOMING_ROWS_LIMIT: u32 = 200;
+/// Series per [`Client::tracked_series`] request: a reader with 200 started
+/// series costs 8 requests, within the rate limit's burst.
+pub const TRACKED_SERIES_BATCH: usize = 25;
+/// Books each series in [`Client::tracked_series`] lists at most, duplicates
+/// included. Ordered by position, so a longer series loses only its tail.
+const TRACKED_SERIES_ROWS: u32 = 200;
 
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
@@ -476,6 +482,30 @@ impl Client {
             QUERY_TIMEOUT,
         )?;
         Ok(upcoming_books(data.book_series))
+    }
+
+    /// The series with these ids and every book of each, [`TRACKED_SERIES_BATCH`]
+    /// series per request, in the order Hardcover returns them. Ids Hardcover
+    /// doesn't know are left out. No ids, no request.
+    pub fn tracked_series(&self, ids: &[SeriesId]) -> Result<Vec<TrackedSeries>> {
+        let mut ids: Vec<i64> = ids.iter().map(|s| s.get()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        #[derive(Deserialize)]
+        struct Data {
+            series: Vec<RawTrackedSeries>,
+        }
+        let mut out = Vec::with_capacity(ids.len());
+        for batch in ids.chunks(TRACKED_SERIES_BATCH) {
+            let data: Data = self.query(
+                "SeriesOverview",
+                queries::SERIES_OVERVIEW,
+                json!({ "ids": batch, "limit": batch.len(), "rows": TRACKED_SERIES_ROWS }),
+                QUERY_TIMEOUT,
+            )?;
+            out.extend(data.series.into_iter().map(RawTrackedSeries::into_tracked));
+        }
+        Ok(out)
     }
 
     // ----- writes -----

@@ -135,17 +135,33 @@ pub fn reveal_on_focus(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    let focused = focus.is_focused(window);
+    reveal_when(id, focused, scroll, size::FOCUS_RING + px(1.), window, cx)
+}
+
+/// [`reveal_on_focus`] for a region that holds several controls, such as a
+/// row in a virtual list: when `active` becomes true (focus moved into the
+/// region), the scroller moves just enough to show the parent with `margin`
+/// to spare above and below. In a virtual list a margin keeps a sliver of the
+/// neighbouring rows on screen, so they are drawn and Tab and Shift+Tab can
+/// reach them.
+pub fn reveal_when(
+    id: impl Into<ElementId>,
+    active: bool,
+    scroll: &ScrollHandle,
+    margin: Pixels,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let id = ElementId::NamedChild(std::sync::Arc::new(id.into()), "reveal".into());
     let revealed = window.use_keyed_state(id, cx, |_, _| false);
-    let focused = focus.is_focused(window);
-    if !focused {
+    if !active {
         revealed.update(cx, |r, _| *r = false);
     }
     let scroll = scroll.clone();
-    let margin = size::FOCUS_RING + px(1.);
     canvas(
         move |bounds, window, cx| {
-            if !focused || *revealed.read(cx) {
+            if !active || *revealed.read(cx) {
                 return;
             }
             revealed.update(cx, |r, _| *r = true);

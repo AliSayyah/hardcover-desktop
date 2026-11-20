@@ -34,6 +34,13 @@ pub const SELECT_SMALL: Rems = rems(8.);
 pub const TRAILING_LANE: Rems = rems(3.);
 /// An upcoming row's action lane, kept either way (136).
 pub const ACTION_LANE: Rems = rems(8.5);
+/// A series row's next-step lane, kept on every row so the lanes line up
+/// (240).
+pub const NEXT_LANE: Rems = rems(15.);
+/// One book in a series strip: an sm cover with its marks under it (40).
+pub const STRIP_ITEM: Rems = rems(2.5);
+/// The widest the Series destination's column gets (896).
+pub const SERIES_COLUMN: Rems = rems(56.);
 
 /// A meter with words beside it (6).
 pub const METER: Rems = rems(0.375);

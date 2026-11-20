@@ -25,6 +25,8 @@
 //! | [`ListRow`] | The list row treatment on a collection's `ListItem`: padding, fills, focus edge |
 //! | [`RowFocus`] | A collection delegate's copy of its list's focus and selection, for `ListRow`'s focus edge |
 //! | [`Lane`] | A fixed, right-aligned lane for trailing figures or actions, kept when empty |
+//! | [`SeriesStrip`], [`StripItem`] | A series as a row of sm covers, each with its shelf's icon and position under it; the next one in ink; "+N" for the rest |
+//! | [`CoverSlot`] | A dashed place the size of a cover, for a book not in the library (empty) or not out yet (a clock) |
 //! | [`PropertyList`] | Key and value rows: Edition, Owned, Privacy, Added |
 //! | [`Meter`] | Progress: 6 px beside words, 2 px in a row, with an optional pace tick |
 //! | [`MonthBars`] | Books finished in each month of a year, the counts over the bars: Home's reading goal |
@@ -63,6 +65,7 @@ mod nav_row;
 mod object_bar;
 mod row_focus;
 mod rows;
+mod series_strip;
 mod sidebar;
 mod skeleton;
 mod stars;
@@ -87,6 +90,7 @@ pub use self::{
     object_bar::{BackTo, ObjectBar, ObjectTools, back_label, tools_of},
     row_focus::RowFocus,
     rows::{Lane, ListRow, PropertyList, RowSpacing, Sequence},
+    series_strip::{CoverSlot, SeriesStrip, StripItem},
     sidebar::{AccountRow, GoalRow, brand_row, sidebar_label},
     skeleton::{Skeleton, SkeletonRow, SkeletonText},
     stars::Stars,

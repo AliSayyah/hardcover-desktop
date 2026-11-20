@@ -18,7 +18,7 @@
 //! The system asks for a 1.5 stroke on the icon; the kit's Lucide icons are
 //! fixed SVGs drawn at 2, so they keep it.
 
-use gpui_kit::component::{Icon, IconName};
+use gpui_kit::component::Icon;
 use gpui_kit::{
     AnyElement, App, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _,
     Window, div, prelude::FluentBuilder as _,
@@ -29,16 +29,16 @@ use crate::design::{TypeRoles as _, colors, size};
 /// A region's empty state. See the module doc.
 #[derive(IntoElement)]
 pub struct EmptyState {
-    icon: IconName,
+    icon: Icon,
     title: SharedString,
     description: Option<SharedString>,
     action: Option<AnyElement>,
 }
 
 impl EmptyState {
-    pub fn new(icon: IconName, title: impl Into<SharedString>) -> Self {
+    pub fn new(icon: impl Into<Icon>, title: impl Into<SharedString>) -> Self {
         Self {
-            icon,
+            icon: icon.into(),
             title: title.into(),
             description: None,
             action: None,
@@ -71,12 +71,7 @@ impl RenderOnce for EmptyState {
             .text_center()
             .gap_1()
             .p_8()
-            .child(
-                Icon::new(self.icon)
-                    .size_6()
-                    .mb_2()
-                    .text_color(colors.fg_faint),
-            )
+            .child(self.icon.size_6().mb_2().text_color(colors.fg_faint))
             .child(div().body_strong().text_color(colors.fg).child(self.title))
             .when_some(self.description, |this, description| {
                 this.child(
@@ -94,13 +89,17 @@ impl RenderOnce for EmptyState {
 }
 
 /// An empty state with a title and one sentence.
-pub fn empty_state(icon: IconName, title: SharedString, description: SharedString) -> EmptyState {
+pub fn empty_state(
+    icon: impl Into<Icon>,
+    title: SharedString,
+    description: SharedString,
+) -> EmptyState {
     EmptyState::new(icon, title).description(description)
 }
 
 /// [`empty_state`] with a button below, such as "Try again".
 pub fn empty_state_with_action(
-    icon: IconName,
+    icon: impl Into<Icon>,
     title: SharedString,
     description: SharedString,
     action: impl IntoElement,
