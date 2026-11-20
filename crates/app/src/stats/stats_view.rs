@@ -2,11 +2,15 @@
 //! computed from the library on this computer. Recomputed only when the
 //! library or the date changes.
 //!
-//! A page (inset 32, at most 768 wide): the page title, the headline figures
-//! in `display-30` over muted words, then sections ("Finished per year",
-//! "Your ratings", "Shelves") 32 apart. Charts draw their bars in `accent`
-//! on a `track` grid with muted labels (the theme's chart colours); counts
-//! are tabular.
+//! A page (inset 32, content at most 768 wide): the page title, the
+//! headline figures in `display-30` over muted words, then sections
+//! ("Finished per year", "Your ratings", "Shelves") 32 apart. Charts draw
+//! their bars in `accent` on a `track` grid with muted labels (the theme's
+//! chart colours); each bar carries its count, so no figure is only in the
+//! hover tooltip. Counts are tabular.
+//!
+//! The figures sit in equal columns that wrap together: in a narrow window
+//! two per row, each on the same spine as the one above.
 
 use std::rc::Rc;
 
@@ -16,12 +20,10 @@ use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, InteractiveElement as _,
     IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Window, div,
-    rems,
 };
 use hardcover_core::Date;
 
 use super::reading_stats::{ReadingStats, YearTotals, compute};
-use crate::catalog::book_list::PAGE_WIDTH;
 use crate::chip::status_icon;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{books_count_text, count_text, status_label};
@@ -97,7 +99,7 @@ impl Render for StatsView {
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(PAGE_WIDTH)
+                    .max_w(size::PAGE_FRAME_MAX)
                     .p_8()
                     .gap_8()
                     .child(PageHeader::new("Stats").line("From your library on this computer."))
@@ -110,10 +112,15 @@ impl Render for StatsView {
     }
 }
 
-/// A headline figure in `display-30` over what it counts, muted.
+/// A headline figure in `display-30` over what it counts, muted. Each takes
+/// an equal share of its row, at least `size::FIGURE` wide, so figures that
+/// wrap keep their columns.
 fn figure(value: impl Into<SharedString>, label: impl Into<SharedString>, cx: &App) -> AnyElement {
     v_flex()
-        .child(div().display_30().child(value.into()))
+        .flex_1()
+        .flex_basis(size::FIGURE)
+        .min_w_0()
+        .child(div().display_30().tabular().child(value.into()))
         .child(
             div()
                 .body()
@@ -150,7 +157,12 @@ fn render_figures(stats: &ReadingStats, cx: &App) -> impl IntoElement {
     if let Some(avg) = stats.average_rating {
         figures.push(figure(format!("{avg:.1}"), "average rating", cx));
     }
-    h_flex().flex_wrap().gap_x_12().gap_y_6().children(figures)
+    h_flex()
+        .flex_wrap()
+        .items_start()
+        .gap_x_6()
+        .gap_y_6()
+        .children(figures)
 }
 
 /// A section: its `section` title, then its content 12 below.
@@ -180,7 +192,7 @@ fn year_chart(
 ) -> AnyElement {
     div()
         .w_full()
-        .h(rems(12.))
+        .h(size::CHART)
         .child(
             BarChart::new(years.to_vec())
                 .id(ElementId::Name(id.into()))
@@ -265,7 +277,7 @@ fn render_ratings(stats: &ReadingStats, cx: &App) -> impl IntoElement {
         n => format!("{avg:.1} on average from {n} ratings"),
     };
     section.child(note(summary, cx)).child(
-        div().w_full().h(rems(10.)).child(
+        div().w_full().h(size::CHART_SHORT).child(
             BarChart::new(buckets)
                 .id("rating-spread")
                 .band(|(ix, _): &(usize, u32)| half_stars(*ix))

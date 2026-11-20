@@ -10,8 +10,8 @@
 //! - the trailing lane: on a shelf, 48 wide and kept when empty, with
 //!   tabular caption figures (progress over a 2 px meter, the reader's own
 //!   rating with its gold star, a release year); in a catalogue, the
-//!   StatusChip. The figures turn from `fg-muted` to `fg` on the selected
-//!   row.
+//!   StatusChip (its icon alone in a narrow list, [`BookRow::compact`]).
+//!   The figures turn from `fg-muted` to `fg` on the selected row.
 
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
@@ -20,7 +20,7 @@ use gpui_kit::{
 };
 use hardcover_core::{BookSummary, LibraryEntry, ReadingStatus};
 
-use crate::chip::StatusChip;
+use crate::chip::{StatusChip, StatusIconChip};
 use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRoles as _, colors};
 use crate::format::{authors_text, progress_summary, rating_text};
@@ -66,6 +66,7 @@ pub struct BookRow {
     lead: Lead,
     trailing: Trailing,
     selected: bool,
+    compact: bool,
 }
 
 impl BookRow {
@@ -98,6 +99,7 @@ impl BookRow {
             lead: Lead::Book,
             trailing,
             selected: false,
+            compact: false,
         }
     }
 
@@ -124,6 +126,7 @@ impl BookRow {
             lead: Lead::Book,
             trailing: status.map_or(Trailing::None, Trailing::Status),
             selected: false,
+            compact: false,
         }
     }
 
@@ -140,6 +143,7 @@ impl BookRow {
             lead: Lead::Person,
             trailing: Trailing::None,
             selected: false,
+            compact: false,
         }
     }
 
@@ -152,12 +156,20 @@ impl BookRow {
             lead: Lead::Series,
             trailing: Trailing::None,
             selected: false,
+            compact: false,
         }
     }
 
     /// Whether the row is the selected one: its figures turn to ink.
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// In a narrow list the StatusChip shrinks to its icon, so the title
+    /// keeps its room ("As the window narrows": collapse secondary labels).
+    pub fn compact(mut self, compact: bool) -> Self {
+        self.compact = compact;
         self
     }
 }
@@ -219,6 +231,9 @@ impl RenderOnce for BookRow {
                     .child(figure().child(year.to_string()))
                     .into_any_element(),
             ),
+            Trailing::Status(status) if self.compact => {
+                Some(Lane::fit().child(StatusIconChip(status)).into_any_element())
+            }
             Trailing::Status(status) => {
                 Some(Lane::fit().child(StatusChip(status)).into_any_element())
             }

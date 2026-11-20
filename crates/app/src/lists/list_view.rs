@@ -5,10 +5,12 @@
 //! The header has the list's name as the page title with Edit… and Delete…
 //! on its trailing edge, the facts, the description (the reader's own words,
 //! in `reader`) and "Open on Hardcover"; the books are catalogue rows in the
-//! catalogue pages' frame (`catalog::book_list`).
+//! catalogue pages' frame (`catalog::book_list`). The list is a tab stop
+//! after the header's controls; each row's remove button follows it.
 
 use std::collections::HashMap;
 
+use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::notification::Notification;
@@ -29,7 +31,8 @@ use crate::RemoveFromList;
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::catalog::book_list::{
-    load_failed, page_body, page_header, page_list, page_loading, row_details,
+    load_failed, page_body, page_header_scrolling, page_list, page_loading, reset_scroll,
+    row_details,
 };
 use crate::catalog::navigation::{self, Page};
 use crate::design::{TypeRoles as _, colors, size};
@@ -37,7 +40,10 @@ use crate::format::{authors_text, needs_permission};
 use crate::library::book_row::BookRow;
 use crate::library::model::LibraryModel;
 use crate::ui::kit::open_alert_dialog;
-use crate::ui::{ExternalLink, ListRow as _, RowFocus, empty_state, empty_state_with_action};
+use crate::ui::{
+    ExternalLink, ListRow as _, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
+    select_first_row,
+};
 
 /// Key context of a list's page, where Delete takes the selected book off.
 pub const KEY_CONTEXT: &str = "ListPage";
@@ -222,7 +228,9 @@ impl ListDelegate for ListBooks {
     type Item = ListItem;
 
     fn items_count(&self, _: usize, _: &App) -> usize {
-        self.page().map_or(0, |p| p.books.len())
+        let rows = self.page().map_or(0, |p| p.books.len());
+        self.focus.stop_when_rows(rows);
+        rows
     }
 
     fn render_item(
@@ -340,6 +348,8 @@ pub struct ListView {
     lists: Entity<ListsModel>,
     library: Entity<LibraryModel>,
     list: Entity<ListState<ListBooks>>,
+    /// The header's scroll, when it gives way in a short window.
+    header_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -391,6 +401,9 @@ impl ListView {
                     cx.notify();
                 });
             }),
+            on_keyboard_entry(&list, window, cx, |this, window, cx| {
+                select_first_row(&this.list, window, cx)
+            }),
             cx.subscribe(&list, |_, list, event: &ListEvent, cx| match event {
                 ListEvent::Confirm(ix) => {
                     let book = list.read(cx).delegate().book(ix.row).cloned();
@@ -405,6 +418,7 @@ impl ListView {
             lists,
             library,
             list,
+            header_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -415,10 +429,12 @@ impl ListView {
     }
 
     pub fn show(&mut self, id: ListId, window: &mut Window, cx: &mut Context<Self>) {
+        let header_scroll = self.header_scroll.clone();
         self.list.update(cx, |state, cx| {
             let changed = state.delegate().current != Some(id);
             state.delegate_mut().show(id, window, cx);
             if changed {
+                reset_scroll(&header_scroll);
                 state.set_selected_index(None, window, cx);
                 state.scroll_to_item(IndexPath::new(0), gpui_kit::ScrollStrategy::Top, window, cx);
             }
@@ -428,7 +444,7 @@ impl ListView {
     }
 
     pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.list.update(cx, |list, cx| list.focus(window, cx));
+        crate::ui::enter_list(&self.list, window, cx);
     }
 
     fn retry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -613,8 +629,12 @@ impl Render for ListView {
             .size_full()
             .min_w_0()
             .when_some(list, |this, list| {
-                this.child(page_header().child(self.render_header(&list, cx)))
-                    .child(page_body().child(page_list(&self.list)))
+                this.child(page_header_scrolling(
+                    "list-page-header",
+                    &self.header_scroll,
+                    self.render_header(&list, cx),
+                ))
+                .child(page_body().child(page_list(&self.list)))
             })
     }
 }

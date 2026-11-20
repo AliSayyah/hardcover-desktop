@@ -15,20 +15,18 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{IconName, Sizable as _, h_flex};
 use gpui_kit::{
     AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, SharedString, Styled as _, Subscription, Window, div, rems,
+    Render, SharedString, Styled as _, Subscription, Window, div,
 };
 
 use super::model::{UpcomingModel, UpcomingStatus};
 use super::row::UpcomingRow;
 use super::schedule::{grouped, shown};
 use crate::cover::CoverSize;
-use crate::design::{TypeRoles as _, colors};
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::count_text;
 use crate::library::model::LibraryModel;
 use crate::ui::{Lane, PageHeader, Sequence, Skeleton, empty_state};
 
-/// The widest the list gets (768): dates stay near their titles.
-const MAX_WIDTH: f32 = 48.;
 /// Skeleton rows while the list loads.
 const SKELETON_ROWS: usize = 4;
 
@@ -102,13 +100,14 @@ fn skeleton_row() -> AnyElement {
         .into_any_element()
 }
 
-/// The page's column: inset 32, at most 768 wide.
+/// The page's column: inset 32, its content at most 768 wide
+/// (`size::PAGE_MAX`), so dates stay near their titles.
 fn column() -> gpui_kit::Div {
     div()
         .flex()
         .flex_col()
         .w_full()
-        .max_w(rems(MAX_WIDTH))
+        .max_w(size::PAGE_FRAME_MAX)
         .p_8()
 }
 

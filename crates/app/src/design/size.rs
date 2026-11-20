@@ -20,6 +20,18 @@ pub const OBJECT_BAR: Rems = rems(3.5);
 pub const SIDEBAR: Rems = rems(15.);
 /// The shelf list, by default; it is resizable (384; `w_96`).
 pub const LIST: Rems = rems(24.);
+/// The narrowest the shelf or search list gets (272): its header's filter
+/// at [`FILTER_MIN`] beside a small select, 8 apart, inside the 16 inset.
+/// With [`PANE_MIN`] and the sidebar it fills the 800 px minimum window.
+pub const LIST_MIN: Rems = rems(17.);
+/// The widest the shelf or search list gets (640).
+pub const LIST_MAX: Rems = rems(40.);
+/// The narrowest the book pane beside a list gets (288): Details' key
+/// column beside a small select.
+pub const PANE_MIN: Rems = rems(18.);
+/// The least a filter field keeps when its row narrows (104): the sort
+/// beside it gives way first, down to [`SELECT_SMALL`].
+pub const FILTER_MIN: Rems = rems(6.5);
 /// The rail on Home and the full book page (272).
 pub const RAIL: Rems = rems(17.);
 /// The key column of a property list (96; `w_24`).
@@ -53,6 +65,25 @@ pub const METER_IN_ROW: Rems = rems(10.);
 /// The goal meter's pace tick: 2 wide, 3 proud of the meter on each side.
 pub const PACE_TICK_WIDTH: Pixels = px(2.);
 pub const PACE_TICK_OVERHANG: Pixels = px(3.);
+
+/// The widest a page's content gets (768): Coming soon, Discover, Stats,
+/// list, series and author pages. The page inset is outside it.
+pub const PAGE_MAX: Rems = rems(48.);
+/// A page's inset (32; `p_8`).
+pub const PAGE_INSET: Rems = rems(2.);
+/// A page's frame at its widest: [`PAGE_MAX`] and the inset on both sides.
+pub const PAGE_FRAME_MAX: Rems = rems(PAGE_MAX.0 + 2. * PAGE_INSET.0);
+/// The least room a page keeps for its list under a header that scrolls
+/// (224): three rows and the list's foot.
+pub const PAGE_LIST_MIN: Rems = rems(14.);
+
+/// A chart on a page (192).
+pub const CHART: Rems = rems(12.);
+/// A short chart on a page, such as a rating spread (160).
+pub const CHART_SHORT: Rems = rems(10.);
+/// A headline figure's column at its narrowest (160): Stats' figures, four
+/// to a row at the page's width and two in a narrow window.
+pub const FIGURE: Rems = rems(10.);
 
 /// The widest prose and readers' words get (640).
 pub const PROSE: Rems = rems(40.);

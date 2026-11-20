@@ -4,8 +4,9 @@
 //! - **Header:** padding 12/16 and a hairline under it: the shelf's name with
 //!   its count, then the filter (filling the width) and the sort, 8 apart.
 //! - **Rows:** list rows, inset 8 ([`BookRow`] in a `ui::ListRow`).
-//! - **Split:** the list is 384 wide by default, 256 to 640, and the pane
-//!   takes the rest.
+//! - **Split:** the list is 384 wide by default, 272 to 640, and the pane
+//!   takes the rest, at least 288. As the list narrows, the sort gives way
+//!   before the filter (`size::LIST_MIN`, `size::FILTER_MIN`).
 
 use std::collections::HashMap;
 
@@ -29,7 +30,7 @@ use crate::chip::status_icon;
 use crate::design::{colors, size};
 use crate::format::status_label;
 use crate::ui::kit::RaisedField as _;
-use crate::ui::{ListRow as _, PageHeader, RowFocus, empty_state};
+use crate::ui::{ListRow as _, PageHeader, RowFocus, empty_state, on_keyboard_entry};
 
 #[derive(Clone)]
 pub struct SortOption(SortOrder, SharedString);
@@ -72,6 +73,7 @@ impl ListDelegate for ShelfDelegate {
     type Item = ListItem;
 
     fn items_count(&self, _: usize, _: &App) -> usize {
+        self.focus.stop_when_rows(self.rows.len());
         self.rows.len()
     }
 
@@ -143,7 +145,7 @@ pub struct LibraryView {
 
 impl LibraryView {
     pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter books"));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
         let options: Vec<SortOption> = SortOrder::ALL
             .into_iter()
             .map(|o| SortOption(o, o.label().into()))
@@ -218,6 +220,9 @@ impl LibraryView {
                     }
                 },
             ),
+            on_keyboard_entry(&list, window, cx, |this, window, cx| {
+                this.select_first(window, cx)
+            }),
         ];
 
         let mut this = Self {
@@ -404,12 +409,13 @@ impl Render for ShelfPane {
                             .child(PageHeader::new(status_label(self.status)).count(count as u32)),
                     )
                     .child(
+                        // As the list narrows the sort gives way first, down
+                        // to a small select; the filter keeps a usable width,
+                        // and the list's minimum leaves room for both.
                         h_flex()
                             .gap_2()
                             .child(
-                                // At the list's narrowest the sort gives way
-                                // first, down to a small select.
-                                div().flex_1().min_w_20().child(
+                                div().flex_1().min_w(size::FILTER_MIN).child(
                                     Input::new(&self.filter)
                                         .raised_field(false, cx)
                                         .cleanable(true)
@@ -420,7 +426,8 @@ impl Render for ShelfPane {
                             )
                             .child(
                                 div()
-                                    .w(size::SELECT)
+                                    .flex_basis(size::SELECT)
+                                    .flex_shrink_1()
                                     .min_w(size::SELECT_SMALL)
                                     .child(Select::new(&self.sort).raised_field(false, cx)),
                             ),
@@ -442,7 +449,7 @@ impl Render for LibraryView {
             .child(
                 resizable_panel()
                     .size(rem * size::LIST.0)
-                    .size_range(rem * 16.0..rem * 40.)
+                    .size_range(rem * size::LIST_MIN.0..rem * size::LIST_MAX.0)
                     .child(
                         self.pane
                             .clone()
@@ -451,8 +458,7 @@ impl Render for LibraryView {
             )
             .child(
                 resizable_panel()
-                    // With the sidebar, 16rem + 18rem fits the 800px minimum window.
-                    .size_range(rem * 18.0..gpui_kit::Pixels::MAX)
+                    .size_range(rem * size::PANE_MIN.0..gpui_kit::Pixels::MAX)
                     .child(self.detail.clone()),
             )
     }

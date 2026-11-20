@@ -626,7 +626,7 @@ const emptyState = (icon, title, desc = "", action = "") => `<div class="empty">
 // ---------- Screen: Library (shelf + detail pane) ----------
 function shelf(head, n, rows, filter = "") {
   return `<div class="list"><div class="list-head"><div class="h"><span class="page-title">${head}</span><span class="muted num">${n}</span></div>
-      <div class="list-tools"><div class="input fill">${ic("search")}${filter ? `<span class="val">${filter}</span>` : "Filter books"}</div><span class="select">Recently updated${ic("down", "xs")}</span></div></div>
+      <div class="list-tools"><div class="input fill">${ic("search")}${filter ? `<span class="val">${filter}</span>` : "Filter"}</div><span class="select">Recently updated${ic("down", "xs")}</span></div></div>
       ${rows}</div>`;
 }
 function library(kind) {
@@ -784,7 +784,7 @@ function tokensTheme(theme, themeName) {
         ${st("primary: one per decision", `<span class="btn primary">Save</span>`)}${st("ghost: tools", `<span class="btn ghost">${ic("layers")}Lists${ic("down", "xs")}</span>`)}${st("danger", `<span class="btn danger">${ic("trash")}Remove from library…</span>`)}${st("link: opens the browser", `<span class="link row-c g-4" style="height:var(--h-control)">Open on Hardcover ${ic("ext", "xs")}</span>`)}
       </div>
       <div class="wrap mt-16" style="gap:var(--s-16)">
-        ${st("input", `<div class="input" style="width:152px">${ic("search")}Filter books</div>`)}${st("input, focus", `<div class="input focus" style="width:152px">${ic("search")}<span class="val">dune</span></div>`)}${st("switch off, on, disabled", `<span class="row-c g-8" style="height:var(--h-control)"><span class="switch"><i></i></span><span class="switch on"><i></i></span><span class="switch dis"><i></i></span></span>`)}
+        ${st("input", `<div class="input" style="width:152px">${ic("search")}Filter</div>`)}${st("input, focus", `<div class="input focus" style="width:152px">${ic("search")}<span class="val">dune</span></div>`)}${st("switch off, on, disabled", `<span class="row-c g-8" style="height:var(--h-control)"><span class="switch"><i></i></span><span class="switch on"><i></i></span><span class="switch dis"><i></i></span></span>`)}
       </div>
     </div>
     <div><h4>Row states, progress, loading and empty</h4><div class="wrap" style="gap:var(--s-24);align-items:flex-start">
