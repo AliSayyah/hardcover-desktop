@@ -1,6 +1,6 @@
 ---
 name: gpui-kit
-description: 'How to build desktop applications with GPUI Kit, the Rust framework published as the gpui-kit crate (GPUI plus gpui_kit::component, gpui_kit::base, gpui_kit::assets). Use when setting up a gpui-kit app, choosing or using a component (Button, Input, Select, Dialog, Sheet, Tabs, Sidebar, List, DataTable, Tree, Chart, etc.), handling component state, theming, or window overlays, and for GPUI mechanics: actions and keybindings, async tasks, contexts, custom elements, entities, events, focus, global state, layout and styling, ElementId, and tests including UI integration testing. Holds the normative Coding Guides: read them before any architecture, state-ownership, public API, naming, or testing decision. Pairs with the gpui-kit-design-guides skill for the Design Guides.'
+description: 'How to build desktop applications with GPUI Kit, the Rust framework published as the gpui-kit crate (GPUI plus gpui_kit::component, gpui_kit::base, gpui_kit::assets). Use when setting up a gpui-kit app, choosing or using a component (Button, Input, Select, Dialog, Sheet, Tabs, Sidebar, List, DataTable, Tree, Chart, etc.), handling component state, theming, or window overlays, and for GPUI mechanics: actions and keybindings, async tasks, contexts, custom elements, entities, events, focus, global state, layout and styling, ElementId, and tests including UI integration testing. Holds the normative Coding Guides: read them before any architecture, state-ownership, public API, naming, or testing decision. In this repository, design rules come from the hardcover-design skill, not from GPUI Kit.'
 ---
 
 # GPUI Kit
@@ -18,20 +18,20 @@ layers, read [the tested application recipe](references/recipes.md).
 ## Read the Guides First
 
 Two guides hold the rules this skill assumes. They are requirements, not
-inspiration. Read the guide file itself; do not answer from this page, from a
-similar file in the codebase, or from training data.
+inspiration. Read the guide file itself; do not answer from this page or from
+training data.
 
 | Guide                                                  | Read before                                                                                                                   |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| Design Guides, skill `gpui-kit-design-guides`          | Choosing components, layout, spacing, hierarchy, color, density, interaction states, overlays, motion, interface copy          |
+| Design system, skill `hardcover-design`                | Choosing components, layout, spacing, hierarchy, color, type, covers, interaction states, overlays, motion, interface copy     |
 | [Coding Guides](references/coding-guides.md)           | Crate layering, `RenderOnce` vs `Entity<T>`, state ownership, `ElementId`, events, focus, async, public API, naming, testing |
 
-Read the Design Guides first when the change has a visible surface: code
-structure preserves product intent, it does not replace it. If the design
-skill is not installed, fetch `https://gpui-kit.com/docs/design-guides.md`.
-The coding guide is a verbatim copy of `https://gpui-kit.com/docs/coding-guides.md`,
-so its links to `./design-guides.md` and `./getting-started.md` mean the design
-skill and `https://gpui-kit.com/docs/getting-started.md`.
+Read the `hardcover-design` skill first when the change has a visible
+surface: code structure preserves product intent, it does not replace it. This
+repository deliberately does not use GPUI Kit's generic Design Guides; do not
+fetch them. The coding guide is a copy of `https://gpui-kit.com/docs/coding-guides.md`
+with its design links pointed at `hardcover-design`; its link to
+`./getting-started.md` means `https://gpui-kit.com/docs/getting-started.md`.
 
 ### Coding Guides section map
 
