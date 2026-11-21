@@ -213,11 +213,12 @@ pub struct Opening {
 ///
 /// Wayland doesn't say where a new window will go, so the guess is the
 /// largest output: a laptop docked to a monitor usually works on the
-/// monitor. Should the window land elsewhere, it is resized once (see the
-/// parent module). GPUI sets the minimum only when the window opens, so it
-/// is the design minimum at the largest factor of any output, within the
-/// smallest output: the layouts then have their design minimum on every
-/// monitor the window can move to.
+/// monitor. The window can't be resized once it has landed (see the parent
+/// module), so the size stays within the smallest output, wherever it goes.
+/// GPUI sets the minimum only when the window opens, so it is the design
+/// minimum at the largest factor of any output, also within the smallest
+/// output: the layouts then have their design minimum on every monitor the
+/// window can move to.
 pub fn opening(outputs: &[Output], forced: Option<f64>) -> Opening {
     let known: Vec<(f64, Dimensions)> = outputs
         .iter()
@@ -229,7 +230,7 @@ pub fn opening(outputs: &[Output], forced: Option<f64>) -> Opening {
         })
         .collect();
     let forced_k = forced.unwrap_or(1.);
-    let Some(&(k, fit)) = known
+    let Some(&(k, _)) = known
         .iter()
         .max_by(|a, b| (a.1.0 * a.1.1).total_cmp(&(b.1.0 * b.1.1)))
     else {
@@ -244,7 +245,7 @@ pub fn opening(outputs: &[Output], forced: Option<f64>) -> Opening {
         .iter()
         .map(|(_, fit)| *fit)
         .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1)));
-    let size = scaled(DEFAULT_SIZE, k, Some(fit));
+    let size = scaled(DEFAULT_SIZE, k, smallest);
     let min = scaled(MIN_SIZE, largest_k, smallest);
     Opening {
         k,
@@ -453,7 +454,9 @@ mod tests {
         let monitor = named("DP-1", (597, 336), (2560, 1440), 1.);
         let laptop = named("eDP-1", (344, 194), (1366, 768), 1.);
         let open = opening(&[laptop, monitor], None);
-        assert_eq!(open.size, (1500., 1000.));
+        assert_eq!(open.k, 1.25);
+        // The window may open on the laptop: no larger than it.
+        assert_eq!(open.size, (1366., 768.));
         assert_eq!(open.min, (1000., 700.));
         let tiny = named("eDP-1", (256, 144), (1024, 600), 1.);
         let open = opening(&[tiny, named("DP-1", (597, 336), (2560, 1440), 1.)], None);

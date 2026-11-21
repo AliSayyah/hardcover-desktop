@@ -28,14 +28,17 @@
 //! desktop scale shows; the work is done only when the (output, scale) pair
 //! changes. The factor stays put until the window lands on another monitor.
 //!
-//! **Window size.** The window opens at the default size at the factor of the
-//! largest output (Wayland doesn't say where a window will go; a docked
-//! laptop usually works on its monitor), with a minimum at the largest factor
-//! of any output ([`policy::opening`]): GPUI sets the minimum only when the
-//! window opens. Should the window land on a monitor with another factor
-//! while it still has the size it opened at, it is resized once to the
-//! default there. On X11 the window opens at the design size, as the factor
-//! is known only once the window has a place.
+//! **Window size.** The sizes are worked out before the window exists, from
+//! the first read ([`policy::opening`]): the default size at the factor of
+//! the largest output (Wayland doesn't say where a window will go; a docked
+//! laptop usually works on its monitor), and a minimum at the largest factor
+//! of any output, as GPUI sets the minimum only when the window opens. Both
+//! stay within the smallest output. Resizing the window once it has landed
+//! doesn't work: Hyprland keeps a floating window's size when GPUI resizes
+//! its surface (GPUI then draws the new size inside the old frame), and a
+//! tiling compositor decides the size anyway. So a window that lands on a
+//! monitor with another factor keeps the size it opened at. On X11 the window
+//! opens at the design size, as no output has a logical size there.
 //!
 //! **Failure.** No socket, a missing protocol or sizes that can't be trusted
 //! give a factor of 1, silently (a debug build logs one line).
@@ -231,9 +234,6 @@ struct UiScale {
     evaluated: Option<(usize, u32, u64)>,
     /// The factor applied.
     applied: f64,
-    opening: Opening,
-    /// Whether the window has landed on a known output yet.
-    landed: bool,
     reading: bool,
     read_again: bool,
     /// A window scale no output had, read again for already.
@@ -270,8 +270,6 @@ pub fn follow(start: Start, window: &mut Window, cx: &mut App) {
         generation: 0,
         evaluated: None,
         applied: opening.k,
-        opening,
-        landed: false,
         reading: false,
         read_again: false,
         reread_for: None,
@@ -394,36 +392,10 @@ impl UiScale {
             "{:?} ({:?} mm, mode {:?}, logical {:?}) at scale {scale}: factor {k}",
             output.name, output.mm, output.mode, output.logical
         );
-        let fit = output
-            .logical
-            .map(|(w, h)| (w as f32, h as f32))
-            .or_else(|| {
-                let (w, h) = output.mode;
-                Some((w as f32 / scale as f32, h as f32 / scale as f32))
-            });
         if k != self.applied {
             self.applied = k;
             apply(k, window, cx);
         }
-        if !std::mem::replace(&mut self.landed, true) && k != self.opening.k {
-            self.resize_once(k, fit, window);
-        }
-    }
-
-    /// The window landed on a monitor with another factor than the one it
-    /// opened for: it takes the default size there, unless it no longer has
-    /// the size it opened at (the user or a tiling compositor sized it).
-    fn resize_once(&self, k: f64, fit: Option<policy::Dimensions>, window: &mut Window) {
-        let size = window.bounds().size;
-        let (w, h) = self.opening.size;
-        let untouched =
-            (f32::from(size.width) - w).abs() < 1. && (f32::from(size.height) - h).abs() < 1.;
-        if !untouched || window.is_maximized() || window.is_fullscreen() {
-            return;
-        }
-        let (w, h) = policy::scaled(policy::DEFAULT_SIZE, k, fit);
-        debug!("resizing to {w}×{h} for factor {k}");
-        window.resize(Size::new(px(w), px(h)));
     }
 }
 
