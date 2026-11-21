@@ -12,7 +12,8 @@
 //!
 //! Images go through the cover pipeline (`app_state`): a list cover asks for
 //! the thumbnail itself ([`Cover::thumbnail`]), decoded and scaled on the
-//! cover-decoder thread. The book pane loads and releases its own detail
+//! cover-decoder thread, 144 px high for xs and sm and 288 px from md
+//! ([`CoverSize::image_height`]), so each stays sharp on a 2x or 3x screen. The book pane loads and releases its own detail
 //! cover and passes it in ([`Cover::art`], [`detail_art`]).
 //!
 //! ```ignore
@@ -42,7 +43,9 @@ use gpui_kit::{
     linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px, rems,
 };
 
-use crate::app_state::{CoverImage, CoverThumbnail};
+use crate::app_state::{
+    CoverImage, CoverMedium, CoverThumbnail, MEDIUM_COVER_HEIGHT, THUMBNAIL_HEIGHT,
+};
 use crate::bidi::{WrappingText, is_rtl};
 use crate::catalog::navigation::{self, Page};
 use crate::design::type_roles::Family;
@@ -96,6 +99,16 @@ impl CoverSize {
 
     pub fn height(self) -> gpui_kit::Rems {
         rems(self.width_px() * 1.5 / 16.)
+    }
+
+    /// The height [`Cover::thumbnail`] decodes this size at, in image pixels:
+    /// at least 2.4 times the cover's own height up to lg.
+    pub(crate) fn image_height(self) -> u32 {
+        if self.is_small() {
+            THUMBNAIL_HEIGHT
+        } else {
+            MEDIUM_COVER_HEIGHT
+        }
     }
 
     /// xs and sm: no hinge, no shadow, and an initial for the cloth.
@@ -161,11 +174,14 @@ pub fn detail_art(url: &str, window: &mut Window, cx: &mut App) -> CoverArt {
         .map_or(CoverArt::Loading, CoverArt::loaded)
 }
 
-/// The list thumbnail for `url`.
-fn thumbnail_art(url: &str, window: &mut Window, cx: &mut App) -> CoverArt {
-    window
-        .use_asset::<CoverThumbnail>(&url.to_owned(), cx)
-        .map_or(CoverArt::Loading, CoverArt::loaded)
+/// The thumbnail for `url` at `size`'s [`CoverSize::image_height`].
+fn thumbnail_art(url: &str, size: CoverSize, window: &mut Window, cx: &mut App) -> CoverArt {
+    let url = url.to_owned();
+    let image = match size.image_height() {
+        THUMBNAIL_HEIGHT => window.use_asset::<CoverThumbnail>(&url, cx),
+        _ => window.use_asset::<CoverMedium>(&url, cx),
+    };
+    image.map_or(CoverArt::Loading, CoverArt::loaded)
 }
 
 enum Source {
@@ -208,8 +224,10 @@ impl Cover {
         self
     }
 
-    /// Loads the image at `url` as a list thumbnail (144 px high, decoded on
-    /// the cover-decoder thread). `None` is a book without an image.
+    /// Loads the image at `url`, decoded on the cover-decoder thread at the
+    /// size's [`CoverSize::image_height`]. `None` is a book without an image.
+    /// md and lg images stay loaded for the run unless released
+    /// (`app_state::release_cover_medium`), as similar books are.
     pub fn thumbnail(mut self, url: Option<impl Into<SharedString>>) -> Self {
         self.source = Source::Thumbnail(url.map(Into::into));
         self
@@ -252,7 +270,7 @@ impl RenderOnce for Cover {
         let size = self.size;
         let radius = size.radius();
         let art = match self.source {
-            Source::Thumbnail(Some(url)) => thumbnail_art(&url, window, cx),
+            Source::Thumbnail(Some(url)) => thumbnail_art(&url, size, window, cx),
             Source::Thumbnail(None) => CoverArt::None,
             Source::Art(art) => art,
         };
@@ -465,6 +483,21 @@ mod tests {
         }
         assert_eq!(CoverSize::Sm.width_px(), 32.);
         assert_eq!(CoverSize::Xl.height().0 * 16., 192.);
+    }
+
+    #[test]
+    fn thumbnails_are_sharp_at_two_and_a_half_times_up_to_lg() {
+        for size in [CoverSize::Xs, CoverSize::Sm, CoverSize::Md, CoverSize::Lg] {
+            let shown = size.height().0 * 16.;
+            assert!(
+                size.image_height() as f32 >= shown * 2.4,
+                "{size:?}: {} for {shown}",
+                size.image_height(),
+            );
+        }
+        // The row thumbnail stays small: rows are many and kept for the run.
+        assert_eq!(CoverSize::Sm.image_height(), 144);
+        assert_eq!(CoverSize::Md.image_height(), 288);
     }
 
     #[test]
