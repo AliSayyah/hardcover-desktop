@@ -2518,7 +2518,7 @@ fn add_to_list_returns_the_row() {
         &data(json!({"insert_list_book": {"id": 9, "list_book": membership(9, 40, 1003, None)}})),
     );
     let row = c
-        .add_to_list(ListId::new(40), BookId::new(1003), None)
+        .add_to_list(ListId::new(40), BookId::new(1003), None, None)
         .unwrap();
     assert_eq!(row.id, ListBookId::new(9));
     assert_eq!(
@@ -2535,17 +2535,20 @@ fn add_to_list_returns_the_row() {
             ListId::new(40),
             BookId::new(1003),
             Some(EditionId::new(5003)),
+            Some(3),
         )
         .unwrap();
     assert_eq!(row.id, ListBookId::new(10));
     assert_eq!(row.edition_id, Some(EditionId::new(5003)));
     assert_eq!(vars(&http, 1)["object"]["edition_id"], 5003);
+    // Undo on a ranked list sends the place the book had.
+    assert_eq!(vars(&http, 1)["object"]["position"], 3);
     http.push(
         200,
         &data(json!({"insert_list_book": {"id": null, "list_book": null}})),
     );
     assert!(matches!(
-        c.add_to_list(ListId::new(40), BookId::new(1003), None),
+        c.add_to_list(ListId::new(40), BookId::new(1003), None, None),
         Err(Error::Api(_))
     ));
 }

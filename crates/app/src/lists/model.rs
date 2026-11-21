@@ -588,7 +588,7 @@ impl ListsModel {
             move |client| {
                 let list = client.create_list(&draft)?;
                 // The list stands even if adding the book fails; say so.
-                let added = then_add.map(|book| client.add_to_list(list.id, book, None));
+                let added = then_add.map(|book| client.add_to_list(list.id, book, None, None));
                 Ok((list, added))
             },
             |this, (mut list, added), cx| {
@@ -704,19 +704,21 @@ impl ListsModel {
         })
     }
 
-    /// Puts `book` on `list`, as `edition` if given (Undo puts a removed
-    /// book back as the edition it was).
+    /// Puts `book` on `list`, as `edition` and at `position` if given (Undo
+    /// puts a removed book back as the edition it was, at its place on a
+    /// ranked list).
     pub fn add(
         &mut self,
         list: ListId,
         book: BookId,
         edition: Option<EditionId>,
+        position: Option<i32>,
         cx: &mut Context<Self>,
     ) -> Task<Option<Result<(), SharedString>>> {
         self.write_book(
             book,
             WRITE_LISTS,
-            move |client| client.add_to_list(list, book, edition),
+            move |client| client.add_to_list(list, book, edition, position),
             move |this, row, cx| {
                 this.insert_row(row);
                 cx.emit(ListsEvent::BookAdded(row.list_id));

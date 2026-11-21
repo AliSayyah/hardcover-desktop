@@ -15,8 +15,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Subscription,
-    Window, div,
-    prelude::FluentBuilder as _,
+    Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_SOCIAL;
 use hardcover_core::{BookId, CommunityReview, UserBookId};
@@ -102,13 +101,12 @@ impl BookDetailView {
             None => (None, None, None, false),
         };
         let retry = |id: &'static str, message: SharedString, cx: &mut Context<Self>| {
-            LoadFailed::new(id, message).on_retry(cx.listener(|this, _, _, cx| this.more_reviews(cx)))
+            LoadFailed::new(id, message)
+                .on_retry(cx.listener(|this, _, _, cx| this.more_reviews(cx)))
         };
         let body: AnyElement = match &state {
             None => match first_error {
-                Some(message) if !loading => {
-                    retry("retry-reviews", message, cx).into_any_element()
-                }
+                Some(message) if !loading => retry("retry-reviews", message, cx).into_any_element(),
                 // Waiting out the delay or loading: the shape of two reviews.
                 _ => placeholder(loading).into_any_element(),
             },

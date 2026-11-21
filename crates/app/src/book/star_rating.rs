@@ -31,10 +31,9 @@ use std::time::Duration;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
-    AnyWindowHandle, App, Context, ElementId, Entity, FocusHandle,
-    InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, actions, div,
-    prelude::FluentBuilder as _,
+    AnyWindowHandle, App, Context, ElementId, Entity, FocusHandle, InteractiveElement as _,
+    IntoElement, ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Task, Window, actions, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::Rating;
 
@@ -452,7 +451,10 @@ mod tests {
     }
 
     /// The value a test owns, and the changes passed on to it.
-    type Owned = (Rc<std::cell::Cell<Option<Rating>>>, Rc<std::cell::Cell<usize>>);
+    type Owned = (
+        Rc<std::cell::Cell<Option<Rating>>>,
+        Rc<std::cell::Cell<usize>>,
+    );
 
     /// A host for one control over a value the test owns, counting every
     /// change passed on.

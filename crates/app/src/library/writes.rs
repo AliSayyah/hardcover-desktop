@@ -124,7 +124,11 @@ pub(crate) fn change_status(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let Some(change) = library.read(cx).entry(id).and_then(|e| status_change(e, to)) else {
+    let Some(change) = library
+        .read(cx)
+        .entry(id)
+        .and_then(|e| status_change(e, to))
+    else {
         return;
     };
     match change {

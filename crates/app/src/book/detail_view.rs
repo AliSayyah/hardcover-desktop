@@ -53,9 +53,8 @@ use gpui_kit::component::select::{SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{ElementExt as _, IconName, WindowExt as _, v_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _,
-    IntoElement,
-    ParentElement as _, Pixels, Render, RenderImage, SharedString, Styled as _, Subscription, Task,
-    Window, div,
+    IntoElement, ParentElement as _, Pixels, Render, RenderImage, SharedString, Styled as _,
+    Subscription, Task, Window, div,
 };
 use hardcover_core::auth::scopes::READ_SOCIAL;
 use hardcover_core::{
@@ -1307,7 +1306,11 @@ mod tests {
     /// library, synced.
     pub(super) fn rooted_view(
         cx: &mut TestAppContext,
-    ) -> (Entity<BookDetailView>, Entity<LibraryModel>, &mut VisualTestContext) {
+    ) -> (
+        Entity<BookDetailView>,
+        Entity<LibraryModel>,
+        &mut VisualTestContext,
+    ) {
         let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
         let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
         cx.update(|cx| {

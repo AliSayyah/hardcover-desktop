@@ -6,8 +6,8 @@
 //! entry's. Choosing an edition emits [`EditionChosen`]; the view that opened
 //! it makes the write.
 
-use crate::ui::{LoadFailed, Skeleton};
 use crate::ui::reveal::RevealScroll as _;
+use crate::ui::{LoadFailed, Skeleton};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::{Disableable as _, Icon, IconName, WindowExt as _, h_flex, v_flex};

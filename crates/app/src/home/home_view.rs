@@ -32,9 +32,10 @@ use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Disableable as _, IconName, h_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight, HighlightStyle,
-    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, RenderImage,
-    SharedString, Styled as _, StyledText, Subscription, Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
+    HighlightStyle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render,
+    RenderImage, SharedString, Styled as _, StyledText, Subscription, Window, div,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_LIBRARY};
 use hardcover_core::{
