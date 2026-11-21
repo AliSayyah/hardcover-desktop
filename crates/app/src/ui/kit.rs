@@ -80,7 +80,10 @@
 //!   a dialog closing onto the button that opened it, Back returning to the
 //!   control that opened the page. A button that takes its focus from a
 //!   handle the app keeps follows the rule ([`KeyboardRing`]: the alert
-//!   footers); a switch can't be given one.
+//!   footers, and the book view's buttons focus is handed to: the status,
+//!   "more" and read menus' triggers, the panel's button, "Add to library",
+//!   "Add a past read…" and the Notes and review openers); a switch can't
+//!   be given one.
 //! - **Empty-state icons** are Lucide's fixed SVGs, drawn at stroke 2, not
 //!   the system's 1.5.
 

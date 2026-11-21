@@ -1077,6 +1077,7 @@ commit that fixes it.
   not only after keyboard input. A press never focuses one, so this shows
   only where focus is handed to it after a pointer action: a menu closing
   onto its trigger, a dialog closing onto its opener, Back. Buttons whose
-  focus the app keeps (the alert footers, `ui::kit::KeyboardRing`) follow
-  the rule.
+  focus the app keeps (`ui::kit::KeyboardRing`: the alert footers, and the
+  book view's buttons focus is handed to after an in-place change) follow
+  the rule; a switch can't be given a handle.
 - Empty-state icons are Lucide's, at stroke 2, not 1.5.
