@@ -57,11 +57,13 @@ A floor, not a substitute for the reference.
   layout. The exceptions are covered in the reference: hairlines, cover
   geometry, and the window size.
 - **One accent, ink blue, spent scarcely.** It goes on progress, the default
-  commit, focus, the selected sidebar icon, and links that open the browser.
+  commit, focus, the selected sidebar icon, links that open the browser, and
+  a genre chip's icon.
 - **Gold is the user's own rating, and nothing else.** Catalogue figures draw
   the same star in muted ink.
 - **Chips are neutral pills.** Statuses differ by their icon, never by colour.
-  The only colour on a chip is a content warning's warning icon.
+  The only colours on a chip are its icon's: a genre's in accent, a content
+  warning's in warning.
 - **Covers are books.** They are always 2:3 and come in six sizes. They have a
   hairline edge, a shadow only where the cover leads its row, and the cloth
   cover when there is no image.
