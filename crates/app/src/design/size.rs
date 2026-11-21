@@ -51,10 +51,6 @@ pub const ACTION_LANE: Rems = rems(8.5);
 pub const NEXT_LANE: Rems = rems(15.);
 /// One book in a series strip: an sm cover with its marks under it (40).
 pub const STRIP_ITEM: Rems = rems(2.5);
-/// The Series destination's column (896): its width up to the default
-/// window, and the least it keeps when the region is wider (see
-/// [`SERIES_COLUMN_MAX`]).
-pub const SERIES_COLUMN: Rems = rems(56.);
 
 /// A meter with words beside it (6).
 pub const METER: Rems = rems(0.375);
@@ -68,13 +64,8 @@ pub const METER_IN_ROW: Rems = rems(10.);
 pub const PACE_TICK_WIDTH: Pixels = px(2.);
 pub const PACE_TICK_OVERHANG: Pixels = px(3.);
 
-/// The widest a page's content gets (768): Coming soon, Discover, Stats (in
-/// one column), list, series and author pages. The page inset is outside it.
-pub const PAGE_MAX: Rems = rems(48.);
 /// A page's inset (32; `p_8`).
 pub const PAGE_INSET: Rems = rems(2.);
-/// A page's frame at its widest: [`PAGE_MAX`] and the inset on both sides.
-pub const PAGE_FRAME_MAX: Rems = rems(PAGE_MAX.0 + 2. * PAGE_INSET.0);
 /// The narrowest a page's main column gets beside its rail (400): a lead
 /// book's xl cover with its title and buttons, or a row's cover, text and
 /// actions. Narrower, the rail folds under it.
@@ -85,6 +76,10 @@ pub const HEADER_INFO_MIN: Rems = rems(12.);
 pub const BACK_LABEL_MAX: Rems = rems(20.);
 /// The book pane's inset (24; `px_6`).
 pub const PANE_INSET: Rems = rems(1.5);
+/// A catalogue page's list beside the book pane (704): the [`PROSE`]
+/// measure and the page's inset on both sides, so a series' or an author's
+/// description keeps its measure while the pane takes the rest.
+pub const PAGE_BESIDE_PANE: Rems = rems(PROSE.0 + 2. * PAGE_INSET.0);
 /// The narrowest book pane beside a catalogue page's list (392): its header
 /// keeps the xl cover beside the info column at [`HEADER_INFO_MIN`], 24
 /// apart, inside the pane's inset (24 + 128 + 24 + 192 + 24). Narrower, the
@@ -99,6 +94,12 @@ pub const PAGE_LIST_MIN: Rems = rems(14.);
 pub const CHART: Rems = rems(12.);
 /// A short chart on a page, such as a rating spread (160).
 pub const CHART_SHORT: Rems = rems(10.);
+/// The widest a chart's bar gets (48): a chart fills its column, and past
+/// this its bars stay bars, with more paper between them.
+pub const CHART_BAR_MAX: Rems = rems(3.);
+/// The least room a year gets in Stats' Finished per year (64): a wider
+/// chart shows more years, when the library has them.
+pub const CHART_YEAR_MIN: Rems = rems(4.);
 /// A headline figure's column at its narrowest (160): Stats' figures, four
 /// to a row at the page's width and two in a narrow window.
 pub const FIGURE: Rems = rems(10.);
@@ -110,17 +111,10 @@ pub const FIGURE: Rems = rems(10.);
 /// columns. [`MAIN_MIN`] is too tight here: the lead book's buttons overrun
 /// it, and an upcoming row's title has little room beside its date and lane.
 pub const WIDE_COLUMN_MIN: Rems = rems(28.);
-/// The widest the Series destination's column gets (1280): room for a
-/// strip of 23 books beside the [`NEXT_LANE`]. It grows past
-/// [`SERIES_COLUMN`] only as far as the longest series needs.
-pub const SERIES_COLUMN_MAX: Rems = rems(80.);
 /// The narrowest a column of Stats' sections gets beside another (544):
 /// Stats splits into two columns only when both get this, which a 1200
-/// window (896 of content) never does.
+/// window (896 of content) never does. Each column fills its half.
 pub const CHART_COLUMN_MIN: Rems = rems(34.);
-/// Stats' frame at its widest in two columns (1632): two [`PAGE_MAX`]
-/// columns 32 apart, and the inset on both sides.
-pub const STATS_WIDE_FRAME_MAX: Rems = rems(2. * PAGE_MAX.0 + 2. + 2. * PAGE_INSET.0);
 
 /// The widest prose and readers' words get (640).
 pub const PROSE: Rems = rems(40.);

@@ -71,29 +71,11 @@ pub fn strip_width(column: Pixels, rem: Pixels) -> Pixels {
     column - size::NEXT_LANE.to_pixels(rem) - rems(1.5).to_pixels(rem)
 }
 
-/// The column's width in `available` (the region less the page's insets)
-/// when the longest series has `longest` books: [`size::SERIES_COLUMN`]
-/// (896) where it fits, wider only as far as that series' whole strip
-/// needs, at most [`size::SERIES_COLUMN_MAX`]. Surplus width shows more of
-/// a long strip; it never just pushes the lane away from the name.
-pub fn column_width(available: Pixels, longest: usize, rem: Pixels) -> Pixels {
-    let item = size::STRIP_ITEM.to_pixels(rem);
-    let gap = rems(0.25).to_pixels(rem);
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "a series has far fewer books than f32 counts exactly"
-    )]
-    let strip = (item + gap) * longest as f32 - gap;
-    let needed = column_needed(strip, rem);
-    let column = needed
-        .max(size::SERIES_COLUMN.to_pixels(rem))
-        .min(size::SERIES_COLUMN_MAX.to_pixels(rem));
-    available.min(column)
-}
-
-/// The column a strip `strip` wide needs: the strip, the gap and the lane.
-fn column_needed(strip: Pixels, rem: Pixels) -> Pixels {
-    strip + rems(1.5).to_pixels(rem) + size::NEXT_LANE.to_pixels(rem)
+/// How many books a row's strip shows in a column `column` wide: as many as
+/// fit beside the lane, before [`super::progress::strip_window`] picks
+/// which.
+pub fn strip_capacity(column: Pixels, rem: Pixels) -> usize {
+    SeriesStrip::capacity(strip_width(column, rem), rem)
 }
 
 #[derive(IntoElement)]
@@ -452,42 +434,37 @@ pub fn skeleton_row() -> impl IntoElement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::SeriesStrip;
     use gpui_kit::px;
 
     const REM: Pixels = px(16.);
 
-    /// The width of the region less the sidebar and the insets.
-    fn available(window: f32) -> Pixels {
+    /// The column in a window `window` wide: the region (less the sidebar)
+    /// less the page's insets. It fills it.
+    fn column(window: f32) -> Pixels {
         px(window - 240. - 64.)
     }
 
     #[test]
-    fn the_column_keeps_its_width_at_the_readme_windows() {
-        for longest in [0, 3, 14, 40] {
-            assert_eq!(column_width(available(800.), longest, REM), px(496.));
-            assert_eq!(column_width(available(1200.), longest, REM), px(896.));
+    fn the_strip_shows_as_many_books_as_fit_beside_the_lane() {
+        // The minimum window: 496 − 264 = 232, five books (5 × 44 − 4).
+        assert_eq!(strip_capacity(column(800.), REM), 5);
+        // The default window: 896 − 264 = 632, fourteen, as before.
+        assert_eq!(strip_capacity(column(1200.), REM), 14);
+        // Wider, the strip takes the width: 1032 at 1600, 1992 at 2560.
+        assert_eq!(strip_capacity(column(1600.), REM), 23);
+        assert_eq!(strip_capacity(column(2560.), REM), 45);
+        // At the edge: n books need n × 44 − 4.
+        assert_eq!(strip_capacity(px(20. * 44. - 4. + 264.), REM), 20);
+        assert_eq!(strip_capacity(px(20. * 44. - 5. + 264.), REM), 19);
+    }
+
+    #[test]
+    fn the_lane_keeps_its_width_and_the_strip_takes_the_rest() {
+        for window in [800., 1200., 1600., 2560.] {
+            assert_eq!(
+                column(window) - strip_width(column(window), REM),
+                px(240. + 24.)
+            );
         }
-    }
-
-    #[test]
-    fn short_series_keep_the_896_column_however_wide_the_window() {
-        // 14 books fill the 896 column's strip (632).
-        assert_eq!(column_width(available(2560.), 14, REM), px(896.));
-        assert_eq!(column_width(available(2560.), 4, REM), px(896.));
-        assert_eq!(column_width(available(1600.), 0, REM), px(896.));
-    }
-
-    #[test]
-    fn a_long_series_widens_the_column_as_far_as_its_strip_needs() {
-        // 20 books: 20 × 44 − 4 = 876, + 24 + 240 = 1140.
-        assert_eq!(column_width(available(2560.), 20, REM), px(1140.));
-        assert_eq!(SeriesStrip::capacity(strip_width(px(1140.), REM), REM), 20);
-        // Bounded by the region: a 1600 window has 1296.
-        assert_eq!(column_width(available(1600.), 40, REM), px(1280.));
-        assert_eq!(column_width(available(1440.), 40, REM), px(1136.));
-        // And by the maximum, room for 23 books.
-        assert_eq!(column_width(available(2560.), 40, REM), px(1280.));
-        assert_eq!(SeriesStrip::capacity(strip_width(px(1280.), REM), REM), 23);
     }
 }

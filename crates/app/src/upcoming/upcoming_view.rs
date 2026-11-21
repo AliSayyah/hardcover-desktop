@@ -3,7 +3,7 @@
 //! series, under a `label` per month for the coming 12 months, then per year.
 //! The workspace draws the object bar with Back above it.
 //!
-//! - **Content:** inset 32, at most 768 wide: the page title, a muted line
+//! - **Content:** inset 32, filling the page: the page title, a muted line
 //!   with the count, then the groups (24 above each label, 4 below), each a
 //!   sequence of upcoming rows.
 //! - **Loading:** skeleton rows where the rows will be.
@@ -22,7 +22,7 @@ use super::model::{UpcomingModel, UpcomingStatus};
 use super::row::UpcomingRow;
 use super::schedule::{grouped, shown};
 use crate::cover::CoverSize;
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRoles as _, colors};
 use crate::format::count_text;
 use crate::library::model::LibraryModel;
 use crate::ui::kit::SmallControl as _;
@@ -101,15 +101,10 @@ fn skeleton_row() -> AnyElement {
         .into_any_element()
 }
 
-/// The page's column: inset 32, its content at most 768 wide
-/// (`size::PAGE_MAX`), so dates stay near their titles.
+/// The page's column: inset 32, filling the page; the rows' date and action
+/// lanes keep the trailing edge, lined up down the list.
 fn column() -> gpui_kit::Div {
-    div()
-        .flex()
-        .flex_col()
-        .w_full()
-        .max_w(size::PAGE_FRAME_MAX)
-        .p_8()
+    div().flex().flex_col().w_full().p_8()
 }
 
 fn group_label(label: impl Into<SharedString>, cx: &App) -> impl IntoElement {

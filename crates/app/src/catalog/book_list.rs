@@ -5,8 +5,8 @@
 //! it through.
 //!
 //! **Beside a book pane:** when the page's region (the window less the
-//! sidebar) fits the list's frame and a book pane of at least
-//! `size::PANE_BESIDE_PAGE_MIN` ([`pane_beside_list`]), the page shows the
+//! sidebar) fits the list at `size::PAGE_BESIDE_PANE` and a book pane of at
+//! least `size::PANE_BESIDE_PAGE_MIN` ([`pane_beside_list`]), the page shows the
 //! selected book in a [`ListPane`] beside the list, as a shelf or search
 //! does. Selecting a row (a click, the arrow keys, the keyboard landing on
 //! the list) shows its book there; Enter or a double click still opens the
@@ -14,9 +14,11 @@
 //! pane is the shared book view (`book::detail_view`), so on a wide region
 //! it takes its rail too.
 //!
-//! The pages share one frame: content at most `size::PAGE_MAX` (768) wide
-//! inside the 32 inset ([`page_header`]), with the list's rows on the same
-//! spine ([`page_list`]: a row's own 8 of padding inside a 24 inset).
+//! The pages share one frame: content filling the region inside the 32
+//! inset ([`page_header`]; a description keeps the `size::PROSE` measure),
+//! with the list's rows on the same spine ([`page_list`]: a row's own 8 of
+//! padding inside a 24 inset). Beside the pane, the frame is
+//! `size::PAGE_BESIDE_PANE` wide and the pane takes the rest ([`list_width`]).
 //!
 //! The list is a tab stop after the header's controls, and lands on the
 //! first row when none is selected ([`follow_list`]).
@@ -48,15 +50,9 @@ use crate::ui::reveal::RevealScroll as _;
 use crate::ui::{ListRow as _, RowFocus, empty_state, on_keyboard_entry, select_first_row};
 
 /// The top of a page: inset 32 on three sides, 16 above the list (whose
-/// rows add their own 8), its content at most `size::PAGE_MAX` wide.
+/// rows add their own 8), filling the page's width.
 pub fn page_header() -> Div {
-    div()
-        .flex_none()
-        .w_full()
-        .max_w(size::PAGE_FRAME_MAX)
-        .px_8()
-        .pt_8()
-        .pb_4()
+    div().flex_none().w_full().px_8().pt_8().pb_4()
 }
 
 /// A [`page_header`] that gives way in a short window: it shrinks, down to
@@ -87,11 +83,7 @@ pub fn reset_scroll(scroll: &ScrollHandle) {
 /// The region a page's list fills, under its header. It keeps
 /// `size::PAGE_LIST_MIN` when a [`page_header_scrolling`] gives way.
 pub fn page_body() -> Div {
-    div()
-        .flex_1()
-        .min_h(size::PAGE_LIST_MIN)
-        .w_full()
-        .max_w(size::PAGE_FRAME_MAX)
+    div().flex_1().min_h(size::PAGE_LIST_MIN).w_full()
 }
 
 /// A page's list, its rows' text on the header's spine.
@@ -132,15 +124,27 @@ pub fn page_loading() -> Div {
 }
 
 /// Whether a catalogue page whose region is `region` wide shows the book
-/// pane beside its list: the list keeps its whole frame
-/// (`size::PAGE_FRAME_MAX`, as without the pane) and the pane, past the
-/// hairline between them, gets at least `size::PANE_BESIDE_PAGE_MIN`. Pure,
-/// from the width the page's region gets (the window less the sidebar).
+/// pane beside its list: the list gets `size::PAGE_BESIDE_PANE` (a
+/// description at its full measure) and the pane, past the hairline between
+/// them, at least `size::PANE_BESIDE_PAGE_MIN`. Pure, from the width the
+/// page's region gets (the window less the sidebar).
 pub fn pane_beside_list(region: Pixels, rem_size: Pixels) -> bool {
     region
-        >= size::PAGE_FRAME_MAX.to_pixels(rem_size)
+        >= size::PAGE_BESIDE_PANE.to_pixels(rem_size)
             + size::HAIRLINE
             + size::PANE_BESIDE_PAGE_MIN.to_pixels(rem_size)
+}
+
+/// How wide a catalogue page's list (its header and rows, insets included)
+/// is in a region `region` wide: the whole region, or
+/// `size::PAGE_BESIDE_PANE` when the pane sits beside it
+/// ([`pane_beside_list`]), which takes the rest.
+pub fn list_width(region: Pixels, rem_size: Pixels) -> Pixels {
+    if pane_beside_list(region, rem_size) {
+        size::PAGE_BESIDE_PANE.to_pixels(rem_size)
+    } else {
+        region
+    }
 }
 
 /// Finds the book in a list's row, for [`ListPane`].
@@ -203,8 +207,8 @@ impl ListPane {
         }
     }
 
-    /// The page: `column` (its header and list, as without the pane) alone,
-    /// or at its frame's width beside the pane when the region is wide.
+    /// The page: `column` (its header and list) alone, filling the region,
+    /// or at [`list_width`] beside the pane when the region is wide.
     pub fn layout<D: ListDelegate>(
         &self,
         list: &Entity<ListState<D>>,
@@ -240,7 +244,7 @@ impl ListPane {
             .child(
                 div()
                     .flex_none()
-                    .w(size::PAGE_FRAME_MAX)
+                    .w(list_width(region, rem))
                     .h_full()
                     .child(column),
             )
@@ -512,15 +516,36 @@ mod tests {
     fn the_pane_shows_beside_the_list_only_when_both_fit() {
         let rem = gpui_kit::px(16.);
         let region = |window: f32| gpui_kit::px(window - 240.);
-        // 832 + 1 + 392 = 1225, a 1465 window.
-        assert!(pane_beside_list(gpui_kit::px(1225.), rem));
-        assert!(!pane_beside_list(gpui_kit::px(1224.), rem));
+        // 704 + 1 + 392 = 1097, a 1337 window.
+        assert!(pane_beside_list(gpui_kit::px(1097.), rem));
+        assert!(!pane_beside_list(gpui_kit::px(1096.), rem));
+        assert!(pane_beside_list(region(1337.), rem));
+        assert!(!pane_beside_list(region(1336.), rem));
         // The minimum and default windows: the page opens books, as before.
         assert!(!pane_beside_list(region(800.), rem));
         assert!(!pane_beside_list(region(1200.), rem));
         // A 1600 laptop panel and a 4K monitor at 1.5.
         assert!(pane_beside_list(region(1600.), rem));
         assert!(pane_beside_list(region(2560.), rem));
+    }
+
+    #[test]
+    fn the_list_fills_the_region_unless_the_pane_is_beside_it() {
+        let rem = gpui_kit::px(16.);
+        let region = |window: f32| gpui_kit::px(window - 240.);
+        // Alone, the list (and its header) fills the region.
+        assert_eq!(list_width(region(800.), rem), gpui_kit::px(560.));
+        assert_eq!(list_width(region(1200.), rem), gpui_kit::px(960.));
+        assert_eq!(list_width(region(1336.), rem), gpui_kit::px(1096.));
+        // Beside the pane it keeps the prose measure and its insets; the
+        // pane, past the hairline, takes the rest.
+        for window in [1337., 1600., 2560.] {
+            assert_eq!(list_width(region(window), rem), gpui_kit::px(704.));
+        }
+        let pane = |window: f32| region(window) - list_width(region(window), rem) - size::HAIRLINE;
+        assert_eq!(pane(1337.), gpui_kit::px(392.));
+        assert_eq!(pane(1600.), gpui_kit::px(655.));
+        assert_eq!(pane(2560.), gpui_kit::px(1615.));
     }
 }
 

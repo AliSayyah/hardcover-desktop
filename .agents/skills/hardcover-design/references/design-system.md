@@ -218,12 +218,14 @@ selection fill or a nested surface its own radius.
 | Select | 168; small 128 | `size::SELECT`, `size::SELECT_SMALL` |
 | Meter | 6 high beside words, 2 high inside a row; 400 wide max (160 in a row) | |
 | Prose | 640 wide max | `size::PROSE` |
-| Page content | 768 wide max (`size::PAGE_MAX`), inside the 32 inset (`PAGE_FRAME_MAX` is both) | |
+| Page content (Discover, Coming soon, Stats, Series, list, series and author pages) | fills the region inside the 32 inset; only reading text keeps the prose measure | `size::PAGE_INSET` |
+| A catalogue page's list beside the book pane | 704: the prose measure and the inset; the pane takes the rest | `size::PAGE_BESIDE_PANE` |
+| Book pane and full book page | fill their region | |
+| Side column beside a book's text | at least 320 wide; the text keeps 640, 32 apart | `size::SIDE_MIN`, `size::PROSE` |
 | Home | fills the region | |
 | Content column beside another (Home, wide) | at least 448 wide; the two share the width beside the rail | `size::WIDE_COLUMN_MIN` |
-| Side column beside a book's text | at least 320 wide; the text keeps 640, 32 apart | `size::SIDE_MIN`, `size::PROSE` |
-| Series page | 896 wide; up to 1280 when a long series' strip needs it | `size::SERIES_COLUMN`, `SERIES_COLUMN_MAX` |
-| Stats, two columns | each column at least 544, at most 768; 1632 with the inset | `size::CHART_COLUMN_MIN`, `STATS_WIDE_FRAME_MAX` |
+| Stats, two columns | each column at least 544, filling its half | `size::CHART_COLUMN_MIN` |
+| Chart | bars at most 48 wide; a year in Finished per year at least 64 | `size::CHART_BAR_MAX`, `CHART_YEAR_MIN` |
 | Empty-state text | 288 wide max | `w_72` |
 | Window | 1200 × 800 by default, 800 × 560 minimum | |
 
@@ -608,22 +610,30 @@ before this rule.
     Want to read; the rail. The two content columns share the width beside
     the rail equally. With nothing for the second column, Home keeps two
     columns.
-  - **Series:** the column stays 896, and grows past it only as far as the
-    longest series' strip needs, at most 1280 (23 books). The strip takes
-    the width; the next lanes stay 240 and lined up on the trailing edge.
-  - **Stats:** two columns of at least 544, 32 apart (a 1424 window), each
-    at most 768: Finished per year; Your ratings, then Shelves. The figures
-    stay one row across both, 32 apart, so the third starts on the second
-    column's spine.
+  - **Series:** the column fills the region. The strip takes the width,
+    showing as many books as fit (45 at 2560) before it windows; the next
+    lanes stay 240 and lined up on the trailing edge.
+  - **Stats:** one column filling the region; two columns of at least 544,
+    32 apart (a 1424 window), each filling its half: Finished per year;
+    Your ratings, then Shelves. The figures fill one row across both, 32
+    apart, so the third starts on the second column's spine. A chart fills
+    its column, its bars widening up to 48; Finished per year gives a year
+    at least 64, so a wider chart reaches further back when the library has
+    the years (never fewer than 12). Shelves keeps the shelf list's 384,
+    so its counts stay by their names.
   - **The book pane and the full book page:** fill their region. When the
     main column holds the 640 text and a side column of at least 320, 32
     apart (`book::detail_view::side_width`; the full page in a 1592
     window), the blocks under the panel split: About this book, Your
     review and Reviews at 640; tags, other titles and Similar books in the
-    side column, filling the rest.
-  - **List, series and author pages:** keep the 768 column for now; their
-    wide tiers are added here.
-  - **Coming soon, Discover and search** keep the 768 page column.
+    side column, filling the rest, in whole rows.
+  - **Discover, list, series and author pages:** the list fills the region,
+    and the page's intro line and any description keep the 640 measure.
+    When the region also fits a book pane of 392 beside a 704 list (a 1337
+    window), the selected book shows in the pane, which takes the rest.
+  - **Coming soon** fills the region; its date and action lanes keep the
+    trailing edge. **Search** is a shelf: its list keeps its resizable
+    width and the pane takes the rest.
 
 ### Shelf: list plus book pane
 
@@ -765,8 +775,9 @@ before this rule.
 ### Coming soon (the full list, over Home)
 
 - **Object bar:** 56 high with a hairline; Back ("Home") on the leading edge.
-- **Content:** inset 32, at most 768 wide. The `page-title` "Coming soon",
-  then a muted line ("5 books still to come in the series on your shelves").
+- **Content:** inset 32, filling the region. The `page-title` "Coming
+  soon", then a muted line ("5 books still to come in the series on your
+  shelves").
 - **Groups:** a `label` per month for the coming 12 months ("November",
   "February 2027"), then per year ("Later in 2027", "2028"), with 24 above
   and 4 below. Under each, upcoming rows.
@@ -778,8 +789,7 @@ before this rule.
 - **Sidebar:** "Series" after Discover, with the `library` icon and the
   count of series not finished. It hides, with the page, without
   `read:catalog`.
-- **Content:** inset 32, 896 wide; on a wide region, up to 1280 as far as
-  the longest series' strip needs (see "Wide windows").
+- **Content:** inset 32, filling the region (see "Wide windows").
 - **Header:** the `page-title` "Series" with the count shown beside it,
   then the muted line "The series you've started, and what's next in each."
   On the trailing edge, 8 apart: the filter input (168, "Filter series":
@@ -815,8 +825,8 @@ About, sign-in and the dialogs use the same parts:
 
 An author page's header puts the photo where a book has its cover (a large
 avatar), with the name in `display-24`. Stats charts use `accent` for the
-series, `track` for the grid and muted labels. Stats is one 768 column, and
-two on a wide region (see "Wide windows").
+series, `track` for the grid and muted labels. Stats is one column, and two
+on a wide region, filling it (see "Wide windows").
 
 ## Right-to-left text
 

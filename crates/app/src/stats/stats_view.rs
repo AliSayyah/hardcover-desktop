@@ -2,22 +2,28 @@
 //! computed from the library on this computer. Recomputed only when the
 //! library or the date changes.
 //!
-//! A page (inset 32, content at most 768 wide): the page title, the
-//! headline figures in `display-30` over muted words, then sections
-//! ("Finished per year", "Your ratings", "Shelves") 32 apart. Charts draw
-//! their bars in `accent` on a `track` grid with muted labels (the theme's
-//! chart colours); each bar carries its count, so no figure is only in the
-//! hover tooltip. Counts are tabular.
+//! A page (inset 32, filling the region): the page title, the headline
+//! figures in `display-30` over muted words, then sections ("Finished per
+//! year", "Your ratings", "Shelves") 32 apart. Charts draw their bars in
+//! `accent` on a `track` grid with muted labels (the theme's chart colours);
+//! each bar carries its count, so no figure is only in the hover tooltip.
+//! Counts are tabular.
+//!
+//! A chart fills its column, its axis and grid across it; its bars widen
+//! with it up to `size::CHART_BAR_MAX`, then the paper between them grows.
+//! Finished per year gives each year at least `size::CHART_YEAR_MIN`, so a
+//! wider chart reaches further back when the library has the years
+//! ([`years_shown`]), never fewer than [`YEARS_AT_LEAST`].
 //!
 //! The figures sit in equal columns that wrap together: in a narrow window
 //! two per row, each on the same spine as the one above.
 //!
 //! **Wide region** ([`two_columns`], from the window less the sidebar and
 //! the insets): when two columns of at least 544 fit (a 1424 window), the
-//! sections sit in two columns 32 apart, each at most 768: "Finished per
-//! year" on the leading one, "Your ratings" and "Shelves" on the other. The
-//! figures stay one row across both, 32 apart, so the third starts on the
-//! second column's spine.
+//! sections sit in two columns 32 apart, each filling its half: "Finished
+//! per year" on the leading one, "Your ratings" and "Shelves" on the other.
+//! The figures stay one row across both, 32 apart, so the third starts on
+//! the second column's spine.
 
 use std::rc::Rc;
 
@@ -108,13 +114,10 @@ impl Render for StatsView {
             - size::SIDEBAR.to_pixels(rem)
             - size::PAGE_INSET.to_pixels(rem) * 2.;
         let wide = two_columns(width, rem);
+        let years = years_shown(chart_column(width, rem), rem);
+        let bar = size::CHART_BAR_MAX.to_pixels(rem);
         let page = v_flex()
             .w_full()
-            .max_w(if wide {
-                size::STATS_WIDE_FRAME_MAX
-            } else {
-                size::PAGE_FRAME_MAX
-            })
             .p_8()
             .gap_8()
             .child(PageHeader::new("Stats").line("From your library on this computer."))
@@ -125,16 +128,16 @@ impl Render for StatsView {
                 h_flex()
                     .items_start()
                     .gap_8()
-                    .child(column().child(render_years(&stats, cx)))
+                    .child(column().child(render_years(&stats, years, bar, cx)))
                     .child(
                         column()
-                            .child(render_ratings(&stats, cx))
+                            .child(render_ratings(&stats, bar, cx))
                             .child(render_shelves(&stats, cx)),
                     ),
             )
         } else {
-            page.child(render_years(&stats, cx))
-                .child(render_ratings(&stats, cx))
+            page.child(render_years(&stats, years, bar, cx))
+                .child(render_ratings(&stats, bar, cx))
                 .child(render_shelves(&stats, cx))
         };
         root.scroll_y_revealing_focus()
@@ -148,6 +151,37 @@ impl Render for StatsView {
 /// [`size::CHART_COLUMN_MIN`], 32 apart.
 fn two_columns(width: Pixels, rem: Pixels) -> bool {
     width >= size::CHART_COLUMN_MIN.to_pixels(rem) * 2. + rems(2.).to_pixels(rem)
+}
+
+/// How wide a chart's column is in content `width` wide: the whole width,
+/// or half of it less the gap in [`two_columns`].
+fn chart_column(width: Pixels, rem: Pixels) -> Pixels {
+    if two_columns(width, rem) {
+        (width - rems(2.).to_pixels(rem)) / 2.
+    } else {
+        width
+    }
+}
+
+/// The fewest years Finished per year shows, when the library has them.
+const YEARS_AT_LEAST: usize = 12;
+
+/// How many years Finished per year shows in a column `column` wide: one
+/// per `size::CHART_YEAR_MIN`, at least [`YEARS_AT_LEAST`]. Fewer when the
+/// library has fewer ([`ReadingStats::recent_years`]).
+fn years_shown(column: Pixels, rem: Pixels) -> usize {
+    let fits = (column / size::CHART_YEAR_MIN.to_pixels(rem)).floor();
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a floored width ratio; the saturating cast bounds it"
+    )]
+    let fits = if fits.is_finite() && fits > 0. {
+        fits as usize
+    } else {
+        0
+    };
+    fits.max(YEARS_AT_LEAST)
 }
 
 /// A headline figure in `display-30` over what it counts, muted. Each takes
@@ -227,6 +261,7 @@ fn note(text: impl Into<SharedString>, cx: &App) -> AnyElement {
 fn year_chart(
     id: &'static str,
     years: &[YearTotals],
+    bar: Pixels,
     value: fn(&YearTotals) -> u32,
     tooltip: fn(&YearTotals) -> String,
 ) -> AnyElement {
@@ -236,6 +271,7 @@ fn year_chart(
         .child(
             BarChart::new(years.to_vec())
                 .id(ElementId::Name(id.into()))
+                .max_band_width(bar)
                 .band(|y: &YearTotals| SharedString::from(y.year.to_string()))
                 .value(move |y| f64::from(value(y)))
                 .label(move |y| match value(y) {
@@ -256,13 +292,16 @@ fn year_tooltip(y: &YearTotals) -> String {
     format!("{} · {pages}", books_count_text(y.books))
 }
 
-fn render_years(stats: &ReadingStats, cx: &App) -> impl IntoElement {
+/// Finished per year: the latest `count` years (as many as the library
+/// has, if fewer), bars at most `bar` wide.
+fn render_years(stats: &ReadingStats, count: usize, bar: Pixels, cx: &App) -> impl IntoElement {
+    let (years, earlier) = stats.recent_years(count);
     let mut notes = Vec::new();
-    if let Some(first) = stats.years.first().filter(|_| stats.earlier_books > 0) {
+    if let Some(first) = years.first().filter(|_| earlier > 0) {
         notes.push(note(
             format!(
                 "Plus {} finished before {}.",
-                books_count_text(stats.earlier_books),
+                books_count_text(earlier),
                 first.year
             ),
             cx,
@@ -277,7 +316,7 @@ fn render_years(stats: &ReadingStats, cx: &App) -> impl IntoElement {
         };
         notes.push(note(books, cx));
     }
-    let body: Vec<AnyElement> = if stats.years.is_empty() {
+    let body: Vec<AnyElement> = if years.is_empty() {
         vec![note(
             "Set a finish date on a book you've read and it's counted here.",
             cx,
@@ -285,12 +324,12 @@ fn render_years(stats: &ReadingStats, cx: &App) -> impl IntoElement {
     } else {
         vec![
             chart_label("Books", cx),
-            year_chart("books-per-year", &stats.years, |y| y.books, year_tooltip),
+            year_chart("books-per-year", years, bar, |y| y.books, year_tooltip),
             div()
                 .pt_3()
                 .child(chart_label("Pages", cx))
                 .into_any_element(),
-            year_chart("pages-per-year", &stats.years, |y| y.pages, year_tooltip),
+            year_chart("pages-per-year", years, bar, |y| y.pages, year_tooltip),
         ]
     };
     section("Finished per year").children(body).children(notes)
@@ -306,7 +345,7 @@ fn half_stars(index: usize) -> SharedString {
     }
 }
 
-fn render_ratings(stats: &ReadingStats, cx: &App) -> impl IntoElement {
+fn render_ratings(stats: &ReadingStats, bar: Pixels, cx: &App) -> impl IntoElement {
     let section = section("Your ratings");
     let Some(avg) = stats.average_rating else {
         return section.child(note("Rate a book and it's counted here.", cx));
@@ -320,6 +359,7 @@ fn render_ratings(stats: &ReadingStats, cx: &App) -> impl IntoElement {
         div().w_full().h(size::CHART_SHORT).child(
             BarChart::new(buckets)
                 .id("rating-spread")
+                .max_band_width(bar)
                 .band(|(ix, _): &(usize, u32)| half_stars(*ix))
                 .value(|(_, n)| f64::from(*n))
                 .label(|(_, n)| match n {
@@ -341,7 +381,9 @@ fn render_ratings(stats: &ReadingStats, cx: &App) -> impl IntoElement {
 }
 
 /// Each shelf as the sidebar draws it: its icon, its name and its count on
-/// a trailing lane, tabular, so the counts line up.
+/// a trailing lane, tabular, so the counts line up. Unlike other rows, they
+/// keep the shelf list's width (`size::LIST`), not their column's: six short
+/// names whose counts would otherwise sit a column's width away from them.
 fn render_shelves(stats: &ReadingStats, cx: &App) -> impl IntoElement {
     let muted = colors(cx).fg_muted;
     let rows = stats.shelves.iter().map(|(status, count)| {
@@ -390,10 +432,35 @@ mod tests {
         assert!(at(1424.));
         assert!(at(1600.));
         assert!(at(2560.));
-        // At its widest, two full page columns and the gap.
-        assert_eq!(
-            size::STATS_WIDE_FRAME_MAX.to_pixels(rem),
-            size::PAGE_MAX.to_pixels(rem) * 2. + gpui_kit::px(32. + 64.)
-        );
+    }
+
+    #[test]
+    fn each_column_fills_its_share_of_the_page() {
+        let rem = gpui_kit::px(16.);
+        let content = |window: f32| gpui_kit::px(window - 240. - 64.);
+        // One column: the whole content.
+        assert_eq!(chart_column(content(800.), rem), gpui_kit::px(496.));
+        assert_eq!(chart_column(content(1200.), rem), gpui_kit::px(896.));
+        assert_eq!(chart_column(content(1423.), rem), gpui_kit::px(1119.));
+        // Two: each half, less half the 32 gap.
+        assert_eq!(chart_column(content(1424.), rem), gpui_kit::px(544.));
+        assert_eq!(chart_column(content(1600.), rem), gpui_kit::px(632.));
+        assert_eq!(chart_column(content(2560.), rem), gpui_kit::px(1112.));
+    }
+
+    #[test]
+    fn a_wider_chart_shows_more_years() {
+        let rem = gpui_kit::px(16.);
+        let years =
+            |window: f32| years_shown(chart_column(gpui_kit::px(window - 240. - 64.), rem), rem);
+        // Never fewer than twelve, as before.
+        assert_eq!(years(800.), 12);
+        assert_eq!(years(1600.), 12);
+        // One per 64: 896 at the default window, 1112 per column at 2560.
+        assert_eq!(years(1200.), 14);
+        assert_eq!(years(2560.), 17);
+        assert_eq!(years_shown(gpui_kit::px(64. * 20.), rem), 20);
+        assert_eq!(years_shown(gpui_kit::px(64. * 20. - 1.), rem), 19);
+        assert_eq!(years_shown(gpui_kit::px(0.), rem), 12);
     }
 }

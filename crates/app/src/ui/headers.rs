@@ -51,7 +51,8 @@ impl PageHeader {
         self
     }
 
-    /// One muted line under the title.
+    /// One muted line under the title. A page that fills a wide window
+    /// keeps it at the reading measure (`size::PROSE`).
     pub fn line(mut self, line: impl Into<SharedString>) -> Self {
         self.line = Some(line.into());
         self
@@ -84,7 +85,13 @@ impl RenderOnce for PageHeader {
                     }),
             )
             .when_some(self.line, |this, line| {
-                this.child(div().body().text_color(muted).child(line))
+                this.child(
+                    div()
+                        .max_w(size::PROSE)
+                        .body()
+                        .text_color(muted)
+                        .child(line),
+                )
             })
     }
 }
