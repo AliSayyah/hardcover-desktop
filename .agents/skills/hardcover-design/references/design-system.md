@@ -328,6 +328,12 @@ dust jacket.
   operate.
 - A field's label is visible and its help sits next to it. In property lists
   the key column holds the label.
+- A field whose unit the reader chooses ("Update progress…": Page or Time,
+  and %) has a small segmented control before it, the book's own unit
+  first. What the input means goes after the field in `fg-muted`, tabular
+  ("Page 200 of 476", "6h 25m of 16h 10m"). A unit that can't be offered is
+  left out rather than disabled (Kit limits), and a caption under the
+  field says why.
 
 ### Chips (`chip.rs`)
 
@@ -914,6 +920,9 @@ commit that fixes it.
   items and ghost buttons, and ghost buttons take half of it there.
 - The sidebar's menu hover is 8%, not 5%.
 - The segmented tab bar's sliding indicator is always paper.
+- A disabled segment of a segmented tab bar is painted paper, like the
+  selected one, so it reads as chosen. The app leaves out a segment it
+  can't offer instead.
 - A disabled switch fades its track, not its thumb.
 - A radio's circle takes no style from outside: unchecked and disabled, it
   is faint, most in dark mode. Settings shows a fixed theme as text rather
