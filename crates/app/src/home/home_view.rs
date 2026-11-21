@@ -12,6 +12,11 @@
 //! - **Rail:** the reading goal, Up next (the next book in a series) and the
 //!   newest on Want to read. A section that doesn't apply disappears; the
 //!   rail folds under the main column in a narrow window (`ui::Columns`).
+//! - **Wide region** ([`home_tier`], from the window less the sidebar and
+//!   the insets): when two content columns of at least 448 fit beside the
+//!   rail (a 1536 window), "Coming soon" and "Rate what you finished" move
+//!   to a second column, each column at most 720 and Home at most 1840.
+//!   With nothing for the second column, Home keeps its two columns.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -25,8 +30,9 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
-    HighlightStyle, InteractiveElement as _, IntoElement, ParentElement as _, Render, RenderImage,
-    SharedString, Styled as _, StyledText, Subscription, Window, div, prelude::FluentBuilder as _,
+    HighlightStyle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render,
+    RenderImage, SharedString, Styled as _, StyledText, Subscription, Window, div,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_LIBRARY};
 use hardcover_core::{
@@ -58,7 +64,7 @@ use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, CoverShelf, Greeting, Lane, Meter, MonthBars, RailSection, RowSpacing, SectionHeader,
-    Sequence, Skeleton, TextButton, date_line, empty_state, folds, greeting_at, see_all,
+    Sequence, Skeleton, TextButton, Tier, date_line, empty_state, greeting_at, see_all, tier,
 };
 use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
@@ -911,7 +917,7 @@ impl Render for HomeView {
         if !loaded {
             return root
                 .child(
-                    page()
+                    page(false)
                         .child(header)
                         .child(div().pt_6().child(lead_skeleton())),
                 )
@@ -943,13 +949,6 @@ impl Render for HomeView {
         let reading = self.render_reading(&digest, today, window, cx);
         let rate =
             (!rate_rows.is_empty()).then(|| self.render_rate(&rate_rows, unrated, today, cx));
-        let main = div()
-            .flex()
-            .flex_col()
-            .gap_6()
-            .child(reading)
-            .children(rate)
-            .children(coming_soon);
 
         let goal_section = goal.map(|g| self.goal_section(&g, &digest, today, cx));
         let series_next = digest.series_next.as_ref().and_then(|next| {
@@ -963,33 +962,59 @@ impl Render for HomeView {
             .flatten()
             .collect();
 
-        // The sidebar is fixed, so the columns get the rest of the window,
-        // up to the widest Home gets, less the page's insets.
+        // The sidebar is fixed, so the columns get the rest of the window
+        // less the page's insets.
         let rem = window.rem_size();
-        let width = (window.viewport_size().width - size::SIDEBAR.to_pixels(rem))
-            .min(size::HOME_MAX.to_pixels(rem))
+        let width = window.viewport_size().width
+            - size::SIDEBAR.to_pixels(rem)
             - size::PAGE_INSET.to_pixels(rem) * 2.;
+        let has_second = rate.is_some() || coming_soon.is_some();
+        let tier = home_tier(width, rem, has_second);
+        let column = |sections: Vec<Option<AnyElement>>| {
+            div()
+                .flex()
+                .flex_col()
+                .gap_6()
+                .children(sections.into_iter().flatten())
+        };
+        let columns = if tier == Tier::Three {
+            // Coming soon leads the second column; Rate what you finished
+            // follows it.
+            Columns::new(reading).second(column(vec![coming_soon, rate]))
+        } else {
+            Columns::new(column(vec![Some(reading), rate, coming_soon]))
+                .folded(tier == Tier::Folded)
+        };
         root.scroll_y_revealing_focus()
             .child(
-                page().child(header).child(
-                    div().pt_6().child(
-                        Columns::new(main)
-                            .wide_gap()
-                            .rail(rail)
-                            .folded(folds(width, rem, true)),
-                    ),
-                ),
+                page(tier == Tier::Three)
+                    .child(header)
+                    .child(div().pt_6().child(columns.wide_gap().rail(rail))),
             )
             .into_any_element()
     }
 }
 
+/// Home's tier for columns `width` wide: three columns only when there is
+/// something for the second (Coming soon, or Rate what you finished).
+fn home_tier(width: Pixels, rem: Pixels, has_second: bool) -> Tier {
+    match tier(width, rem, true) {
+        Tier::Three if !has_second => Tier::Rail,
+        t => t,
+    }
+}
+
 // ----- pieces -----
 
-/// Home's column: inset 32, at most [`size::HOME_MAX`]; the main column
-/// takes the surplus up to it.
-fn page() -> gpui_kit::Div {
-    div().flex().flex_col().w_full().max_w(size::HOME_MAX).p_8()
+/// Home's column: inset 32, at most [`size::HOME_MAX`] (in three columns,
+/// [`size::HOME_WIDE_MAX`]); the content columns take the surplus up to it.
+fn page(wide: bool) -> gpui_kit::Div {
+    let max = if wide {
+        size::HOME_WIDE_MAX
+    } else {
+        size::HOME_MAX
+    };
+    div().flex().flex_col().w_full().max_w(max).p_8()
 }
 
 /// The lead while the library loads.
@@ -1092,7 +1117,8 @@ fn caption_facts(facts: Vec<String>, cx: &App) -> gpui_kit::Div {
         }))
 }
 
-/// The paused row's caption: "Paused at page 230 of 1,104 · since Oct 1".
+/// The paused row's caption: "Paused at page 230 of 1,104 · since Oct 1", or
+/// for an audiobook "Paused at 2h 5m of 10h 0m".
 pub fn paused_text(progress: &ProgressSummary, since: Option<Date>, today: Date) -> String {
     let mut text = match (progress.page, progress.total_pages, progress.percent) {
         (Some(page), Some(total), _) => {
@@ -1103,6 +1129,8 @@ pub fn paused_text(progress: &ProgressSummary, since: Option<Date>, today: Date)
             )
         }
         (Some(page), None, _) => format!("Paused at page {}", count_text(page)),
+        // An audiobook: "Paused at 2h 5m of 10h 0m".
+        (None, _, _) if progress.seconds.is_some() => format!("Paused at {}", progress.text()),
         (None, _, Some(pct)) => format!("Paused at {}", percent_text(pct)),
         (None, _, None) => "Paused".to_owned(),
     };
@@ -1220,7 +1248,25 @@ mod tests {
             seconds: None,
             total_seconds: None,
             percent,
+            audio: false,
         }
+    }
+
+    #[test]
+    fn home_takes_three_columns_on_a_wide_region_with_something_for_the_second() {
+        let rem = gpui_kit::px(16.);
+        let at =
+            |window: f32, second: bool| home_tier(gpui_kit::px(window - 240. - 64.), rem, second);
+        // The README's windows keep today's layout.
+        assert_eq!(at(800., true), Tier::Folded);
+        assert_eq!(at(1200., true), Tier::Rail);
+        assert_eq!(at(1535., true), Tier::Rail);
+        assert_eq!(at(1536., true), Tier::Three);
+        assert_eq!(at(1600., true), Tier::Three);
+        assert_eq!(at(2560., true), Tier::Three);
+        // Nothing to rate and nothing coming: two columns, however wide.
+        assert_eq!(at(2560., false), Tier::Rail);
+        assert_eq!(at(800., false), Tier::Folded);
     }
 
     #[test]
@@ -1289,6 +1335,16 @@ mod tests {
         assert_eq!(
             paused_text(&progress(None, None, None), None, today),
             "Paused"
+        );
+        let audio = ProgressSummary {
+            seconds: Some(7_500),
+            total_seconds: Some(36_000),
+            audio: true,
+            ..progress(None, None, Some(20.8))
+        };
+        assert_eq!(
+            paused_text(&audio, None, today),
+            "Paused at 2h 5m of 10h 0m"
         );
     }
 

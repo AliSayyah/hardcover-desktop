@@ -580,6 +580,7 @@ mod tests {
             seconds,
             total_seconds: seconds.map(|_| 36_000),
             percent: None,
+            audio: seconds.is_some(),
         }
     }
 

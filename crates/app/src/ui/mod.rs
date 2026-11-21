@@ -15,7 +15,7 @@
 //! | [`ObjectBar`], [`ObjectTools`], [`tools_of`] | The 56 bar above a book pane or a page: Back on a page, the object's tools ("Lists", "more") |
 //! | [`panel`] | The one inset panel of a pane: progress, Not started |
 //! | [`Rail`], [`RailSection`] | The 272 column beside Home's or the book page's main column, sections between hairlines |
-//! | [`Columns`], [`folds`] | A page's main column and its rail, the rail folding under it when the region is narrow |
+//! | [`Columns`], [`folds`], [`tier`], [`Tier`] | A page's main column and its rail, the rail folding under it when the region is narrow; a second content column when it is wide (Home) |
 //! | [`CoverShelf`] | A few books in a row, each a cover over a two-line title: "Newest on Want to read", Similar books |
 //! | [`Block`], [`blocks`] | A pane's blocks ("About this book", "Details"): a heading, an optional small action, 24 apart |
 //! | [`PageHeader`] | A destination's title, with its count or a muted line |
@@ -76,7 +76,7 @@ pub(crate) use self::stars::{StarSize, render_star};
 pub use self::{
     avatar::{Avatar, AvatarSize},
     byline_link::BylineLink,
-    columns::{Columns, folds},
+    columns::{Columns, Tier, folds, tier},
     cover_shelf::CoverShelf,
     empty_state::{EmptyState, empty_state, empty_state_with_action},
     external_link::ExternalLink,

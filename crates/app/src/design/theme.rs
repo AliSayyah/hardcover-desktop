@@ -44,7 +44,7 @@
 //!   5%, two steps from the 10% selected fill.
 //! - The segmented tab bar's sliding indicator is always `background`.
 //! - The rest (menus, the Select dropdown, switches, radios, the
-//!   `DatePicker`, dialog shadows) is listed in `ui::kit`'s module doc and
+//!   `DatePicker`, dialog shadows, a disabled segment) is listed in `ui::kit`'s module doc and
 //!   the system's "Kit limits".
 
 use std::rc::Rc;

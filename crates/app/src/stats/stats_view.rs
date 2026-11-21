@@ -11,6 +11,13 @@
 //!
 //! The figures sit in equal columns that wrap together: in a narrow window
 //! two per row, each on the same spine as the one above.
+//!
+//! **Wide region** ([`two_columns`], from the window less the sidebar and
+//! the insets): when two columns of at least 544 fit (a 1424 window), the
+//! sections sit in two columns 32 apart, each at most 768: "Finished per
+//! year" on the leading one, "Your ratings" and "Shelves" on the other. The
+//! figures stay one row across both, 32 apart, so the third starts on the
+//! second column's spine.
 
 use std::rc::Rc;
 
@@ -19,7 +26,8 @@ use gpui_kit::component::chart::BarChart;
 use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Window, div,
+    IntoElement, ParentElement as _, Pixels, Render, SharedString, Styled as _, Subscription,
+    Window, div, prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::Date;
 
@@ -75,7 +83,7 @@ impl StatsView {
 }
 
 impl Render for StatsView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let loaded = self.model.read(cx).is_loaded();
         let stats = self.stats(cx);
         let root = div()
@@ -95,21 +103,51 @@ impl Render for StatsView {
                 ))
                 .into_any_element();
         }
-        root.scroll_y_revealing_focus()
-            .child(
-                v_flex()
-                    .w_full()
-                    .max_w(size::PAGE_FRAME_MAX)
-                    .p_8()
+        let rem = window.rem_size();
+        let width = window.viewport_size().width
+            - size::SIDEBAR.to_pixels(rem)
+            - size::PAGE_INSET.to_pixels(rem) * 2.;
+        let wide = two_columns(width, rem);
+        let page = v_flex()
+            .w_full()
+            .max_w(if wide {
+                size::STATS_WIDE_FRAME_MAX
+            } else {
+                size::PAGE_FRAME_MAX
+            })
+            .p_8()
+            .gap_8()
+            .child(PageHeader::new("Stats").line("From your library on this computer."))
+            .child(render_figures(&stats, wide, cx));
+        let page = if wide {
+            let column = || v_flex().flex_1().min_w_0().gap_8();
+            page.child(
+                h_flex()
+                    .items_start()
                     .gap_8()
-                    .child(PageHeader::new("Stats").line("From your library on this computer."))
-                    .child(render_figures(&stats, cx))
-                    .child(render_years(&stats, cx))
-                    .child(render_ratings(&stats, cx))
-                    .child(render_shelves(&stats, cx)),
+                    .child(column().child(render_years(&stats, cx)))
+                    .child(
+                        column()
+                            .child(render_ratings(&stats, cx))
+                            .child(render_shelves(&stats, cx)),
+                    ),
             )
+        } else {
+            page.child(render_years(&stats, cx))
+                .child(render_ratings(&stats, cx))
+                .child(render_shelves(&stats, cx))
+        };
+        root.scroll_y_revealing_focus()
+            .child(page)
             .into_any_element()
     }
+}
+
+/// Whether Stats' sections sit in two columns in content `width` wide (the
+/// window less the sidebar and the insets): both columns get at least
+/// [`size::CHART_COLUMN_MIN`], 32 apart.
+fn two_columns(width: Pixels, rem: Pixels) -> bool {
+    width >= size::CHART_COLUMN_MIN.to_pixels(rem) * 2. + rems(2.).to_pixels(rem)
 }
 
 /// A headline figure in `display-30` over what it counts, muted. Each takes
@@ -130,7 +168,9 @@ fn figure(value: impl Into<SharedString>, label: impl Into<SharedString>, cx: &A
         .into_any_element()
 }
 
-fn render_figures(stats: &ReadingStats, cx: &App) -> impl IntoElement {
+/// The headline figures; `wide`, 32 apart (the columns' gap), so they line
+/// up with the two columns under them.
+fn render_figures(stats: &ReadingStats, wide: bool, cx: &App) -> impl IntoElement {
     let year = stats.this_year.year;
     let mut figures = vec![
         figure(
@@ -160,7 +200,7 @@ fn render_figures(stats: &ReadingStats, cx: &App) -> impl IntoElement {
     h_flex()
         .flex_wrap()
         .items_start()
-        .gap_x_6()
+        .map(|this| if wide { this.gap_x_8() } else { this.gap_x_6() })
         .gap_y_6()
         .children(figures)
 }
@@ -334,6 +374,26 @@ mod tests {
         assert_eq!(
             labels,
             ["½", "1", "1½", "2", "2½", "3", "3½", "4", "4½", "5"].map(SharedString::from)
+        );
+    }
+
+    #[test]
+    fn stats_splits_into_two_columns_only_on_a_wide_region() {
+        let rem = gpui_kit::px(16.);
+        let at = |window: f32| two_columns(gpui_kit::px(window - 240. - 64.), rem);
+        // 544 + 32 + 544 = 1120 of content: a 1424 window.
+        assert!(two_columns(gpui_kit::px(1120.), rem));
+        assert!(!two_columns(gpui_kit::px(1119.), rem));
+        assert!(!at(800.));
+        assert!(!at(1200.));
+        assert!(!at(1423.));
+        assert!(at(1424.));
+        assert!(at(1600.));
+        assert!(at(2560.));
+        // At its widest, two full page columns and the gap.
+        assert_eq!(
+            size::STATS_WIDE_FRAME_MAX.to_pixels(rem),
+            size::PAGE_MAX.to_pixels(rem) * 2. + gpui_kit::px(32. + 64.)
         );
     }
 }

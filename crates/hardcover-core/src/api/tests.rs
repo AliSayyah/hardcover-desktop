@@ -887,7 +887,9 @@ fn progress_pages_on_known_read_skips_context() {
 #[test]
 fn progress_creates_a_read_when_none_is_open() {
     let (c, http) = client(TestTokens::new(false));
-    http.push(200, &data(json!({"user_books": [{"id": 3, "status_id": 2, "book": {"pages": null, "audio_seconds": 3600}, "edition": null, "user_book_reads": []}]})));
+    // The book's own audiobook length is no unit for a read without an
+    // edition: its pages are.
+    http.push(200, &data(json!({"user_books": [{"id": 3, "status_id": 2, "book": {"pages": 300, "audio_seconds": 3600}, "edition": null, "user_book_reads": []}]})));
     http.push(200, &data(json!({"insert_user_book_read": {"error": null, "id": 95, "user_book_read": {"id": 95, "user_book_id": 3}}})));
     http.push(200, &data(json!({"user_books_by_pk": user_book(3, 2)})));
     c.update_progress(UserBookId::new(3), None, ProgressUpdate::Percent(10.0))
@@ -895,7 +897,7 @@ fn progress_creates_a_read_when_none_is_open() {
     let reqs = http.requests();
     let vars = &reqs[1].json.as_ref().unwrap()["variables"];
     assert_eq!(vars["userBookId"], 3);
-    assert_eq!(vars["read"]["progress_seconds"], 360);
+    assert_eq!(vars["read"]["progress_pages"], 30);
     assert_eq!(vars["read"]["started_at"].as_str().unwrap().len(), 10);
 }
 
@@ -1344,11 +1346,95 @@ fn progress_percent_on_an_audiobook_counts_time() {
 }
 
 #[test]
+fn progress_percent_follows_the_reading_format_not_the_first_length() {
+    // An audiobook edition that also lists pages counts time, as Hardcover
+    // does by its reading format.
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"user_books": [{
+            "id": 3, "status_id": 2,
+            "book": {"pages": 300, "audio_seconds": null},
+            "edition": null,
+            "user_book_reads": [{"id": 91, "edition": {"pages": 280, "audio_seconds": 7200, "reading_format_id": 2}}]
+        }]})),
+    );
+    http.push(200, &data(json!({"update_user_book_read": {"error": null, "id": 91, "user_book_read": {"id": 91, "user_book_id": 3}}})));
+    http.push(200, &data(json!({"user_books_by_pk": user_book(3, 2)})));
+    c.update_progress(
+        UserBookId::new(3),
+        Some(ReadId::new(91)),
+        ProgressUpdate::Percent(50.0),
+    )
+    .unwrap();
+    assert_eq!(
+        vars(&http, 1),
+        json!({"id": 91, "read": {"progress_seconds": 3600}})
+    );
+
+    // An audiobook without a running time can't take a percentage, rather
+    // than counting it in the book's pages.
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"user_books": [{
+            "id": 3, "status_id": 2,
+            "book": {"pages": 300, "audio_seconds": null},
+            "edition": {"pages": null, "audio_seconds": null, "reading_format_id": 2},
+            "user_book_reads": [{"id": 91, "edition": null}]
+        }]})),
+    );
+    assert!(matches!(
+        c.update_progress(UserBookId::new(3), None, ProgressUpdate::Percent(10.0)),
+        Err(Error::InvalidInput(_))
+    ));
+    assert_eq!(http.remaining(), 0);
+}
+
+#[test]
+fn a_synced_entry_knows_its_books_audiobook_and_its_editions_format() {
+    let mut ub = user_book(3, 2);
+    ub["book"]["audio_seconds"] = json!(34_200);
+    ub["user_book_reads"] = json!([{
+        "id": 91, "started_at": "2026-11-01", "finished_at": null, "progress": null,
+        "progress_pages": null, "progress_seconds": 600, "edition_id": 6000,
+        "edition": {"id": 6000, "title": null, "pages": null, "audio_seconds": null,
+            "edition_format": "Audible", "reading_format_id": 2}
+    }]);
+    let entry: wire::RawUserBook = serde_json::from_value(ub).unwrap();
+    let entry = entry.into_entry().unwrap();
+    assert_eq!(entry.book_audio_seconds, Some(34_200));
+    let read_edition = entry.open_read().unwrap().edition.as_ref().unwrap();
+    assert!(read_edition.is_audiobook());
+    // The read's audiobook decides, though its running time is unknown.
+    assert_eq!(
+        entry.measure(),
+        Some(Measure {
+            unit: ProgressUnit::Time,
+            total: None
+        })
+    );
+    assert_eq!(entry.length(), None);
+    assert!(entry.is_audio());
+}
+
+#[test]
 fn an_unfinished_read_never_scales_to_the_last_unit() {
-    assert_eq!(super::scale(0.5, 300), 150);
-    assert_eq!(super::scale(0.997, 150), 149);
-    assert_eq!(super::scale(1.0, 150), 150);
-    assert_eq!(super::scale(0.5, 0), 0);
+    assert_eq!(
+        Length::Pages(476).position_at(42.0),
+        ProgressUpdate::Pages(200)
+    );
+    assert_eq!(Length::Pages(476).units_at(99.99), 475);
+    assert_eq!(Length::Pages(476).units_at(100.0), 476);
+    assert_eq!(
+        Length::Seconds(36_000).position_at(50.0),
+        ProgressUpdate::Seconds(18_000)
+    );
+    assert_eq!(Length::Seconds(36_000).units_at(f64::NAN), 0);
+    assert_eq!(super::model::scale(0.5, 300), 150);
+    assert_eq!(super::model::scale(0.997, 150), 149);
+    assert_eq!(super::model::scale(1.0, 150), 150);
+    assert_eq!(super::model::scale(0.5, 0), 0);
 }
 
 fn goal_row(id: i64, metric: &str, goal: i64, progress: &Value) -> Value {

@@ -45,8 +45,8 @@ use gpui_kit::{
 };
 use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY};
 use hardcover_core::{
-    BookDetails, BookId, BookSummary, Client, EditionChange, Error, LibraryEntry, Privacy, Rating,
-    ReadId, ReadSession, ReadingStatus, Review, ReviewedEntry, UserBookId,
+    BookDetails, BookId, BookSummary, Client, Error, LibraryEntry, Privacy, Rating, ReadId,
+    ReadSession, ReadingStatus, Review, ReviewedEntry, UserBookId,
 };
 
 use self::catalog_sections::Similar;
@@ -56,7 +56,7 @@ use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
 use crate::app_state::Services;
 use crate::design::size;
-use crate::format::{error_message, read_dates_text};
+use crate::format::read_dates_text;
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::library::writes;
 use crate::lists::book_lists;
@@ -720,15 +720,7 @@ impl BookDetailView {
         if entry.edition.as_ref().map(|e| e.id) == Some(edition) {
             return;
         }
-        let id = entry.user_book_id;
-        self.run_write(
-            id,
-            WriteKind::Edition,
-            "Couldn't change the edition",
-            move |client| client.set_edition(id, edition),
-            window,
-            cx,
-        );
+        writes::set_edition(self.model.clone(), entry.user_book_id, edition, window, cx);
     }
 
     /// Opens the read dialog to add a read (`None`) or change `read`'s dates.
@@ -909,24 +901,6 @@ impl From<ReviewedEntry> for Written {
             entry: written.entry,
             review: Some(written.review),
             warning: None,
-        }
-    }
-}
-
-impl From<EditionChange> for Written {
-    fn from(change: EditionChange) -> Self {
-        Self {
-            entry: Some(change.entry),
-            review: None,
-            warning: change.read_left_behind.map(|error| {
-                (
-                    "Edition changed, progress not moved",
-                    format!(
-                        "Your current read still counts progress against the old edition. {}",
-                        error_message(&error)
-                    ),
-                )
-            }),
         }
     }
 }
