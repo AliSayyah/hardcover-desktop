@@ -21,7 +21,7 @@ use gpui_kit::component::{Disableable as _, IconName, h_flex};
 use gpui_kit::{
     App, Entity, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
     Rems, RenderOnce, ScrollHandle, SharedString, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px, rems,
+    prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{Date, ReadingStatus, UserBookId};
@@ -62,9 +62,11 @@ const LABEL_BELOW: Rems = rems(0.25);
 /// How tall a row is, its group's label included when it's the first: the
 /// name, the facts and the strip, inside the row's padding.
 pub fn row_height(first_in_group: bool, rem: Pixels) -> Pixels {
-    let body = (ROW_PADDING * 2. + STRIP_ABOVE).to_pixels(rem)
-        + px(TypeRole::Title18.scale().1)
-        + px(TypeRole::Body.scale().1)
+    let body = (ROW_PADDING * 2.
+        + STRIP_ABOVE
+        + TypeRole::Title18.line_height()
+        + TypeRole::Body.line_height())
+    .to_pixels(rem)
         + SeriesStrip::height(rem);
     if first_in_group {
         body + group_label_height(rem)
@@ -76,7 +78,7 @@ pub fn row_height(first_in_group: bool, rem: Pixels) -> Pixels {
 
 /// How tall a group's label is, with the space around it.
 fn group_label_height(rem: Pixels) -> Pixels {
-    (LABEL_ABOVE + LABEL_BELOW).to_pixels(rem) + px(TypeRole::Label.scale().1)
+    (LABEL_ABOVE + LABEL_BELOW + TypeRole::Label.line_height()).to_pixels(rem)
 }
 
 /// A group's label and count, over its first row. Label and caption share
@@ -483,7 +485,7 @@ mod tests {
 
     /// A started series of three books: the first read, the second being
     /// read (so its strip book has a meter), the third not in the library.
-    fn started_series() -> SeriesSummary {
+    fn started_series(name: &str) -> SeriesSummary {
         use super::super::progress::{LibraryIndex, summarize};
         use hardcover_core::{
             AuthorId, AuthorRef, BookId, BookSummary, LibraryEntry, ReadId, ReadSession, SeriesId,
@@ -495,7 +497,7 @@ mod tests {
             b.release_year = Some(2020);
             b
         };
-        let mut series = TrackedSeries::new(SeriesId::new(1), "The Long Road");
+        let mut series = TrackedSeries::new(SeriesId::new(1), name);
         series.author = Some(AuthorRef::new(AuthorId::new(1), "Ada Quill"));
         for id in 1..=3 {
             let mut b = TrackedBook::new(book(id), id as f32);
@@ -505,7 +507,7 @@ mod tests {
         let entry = |id: i64, status| {
             let mut e =
                 LibraryEntry::new(UserBookId::new(id * 10), UserId::new(1), book(id), status);
-            let mut r = SeriesRef::new("The Long Road");
+            let mut r = SeriesRef::new(name);
             r.id = Some(SeriesId::new(1));
             r.position = Some(id as f32);
             e.series.push(r);
@@ -537,30 +539,51 @@ mod tests {
         use crate::ui::test_support::host;
         use gpui_kit::InteractiveElement as _;
 
-        let series = started_series();
-        assert!(
-            series.books.iter().any(|b| b.progress.is_some()),
-            "the strip draws a meter"
-        );
-        let cx = host(cx, move |_, cx| {
-            let today: Date = "2026-11-20".parse().unwrap();
-            div()
-                .w(px(1000.))
-                .child(group_label(Group::InProgress, 3, cx).debug_selector(|| "label".into()))
-                .child(
-                    h_flex()
-                        .py(ROW_PADDING)
-                        .items_start()
-                        .debug_selector(|| "row".into())
-                        .child(series_body(&series, today, 14, cx)),
-                )
-                .into_any_element()
-        });
-        let label = cx.debug_bounds("label").expect("the label is drawn");
-        let row = cx.debug_bounds("row").expect("the row is drawn");
-        assert_eq!(label.size.height, group_label_height(REM));
-        assert_eq!(row.size.height + size::HAIRLINE, row_height(false, REM));
-        assert_eq!(label.size.height + row.size.height, row_height(true, REM));
+        // A Latin and a Persian name (another font's line box), at the
+        // default rem and a larger one.
+        for (name, rem) in [
+            ("The Long Road", REM),
+            ("کلیدر (جلد اول)", REM),
+            ("The Long Road", px(20.)),
+        ] {
+            let series = started_series(name);
+            assert!(
+                series.books.iter().any(|b| b.progress.is_some()),
+                "the strip draws a meter"
+            );
+            let cx = host(cx, move |window, cx| {
+                window.set_rem_size(rem);
+                let today: Date = "2026-11-20".parse().unwrap();
+                div()
+                    .w(px(1000.))
+                    .child(group_label(Group::InProgress, 3, cx).debug_selector(|| "label".into()))
+                    .child(
+                        h_flex()
+                            .py(ROW_PADDING)
+                            .items_start()
+                            .debug_selector(|| "row".into())
+                            .child(series_body(&series, today, 14, cx)),
+                    )
+                    .into_any_element()
+            });
+            let label = cx.debug_bounds("label").expect("the label is drawn");
+            let row = cx.debug_bounds("row").expect("the row is drawn");
+            assert_eq!(
+                label.size.height,
+                group_label_height(rem),
+                "{name} at {rem:?}"
+            );
+            assert_eq!(
+                row.size.height + size::HAIRLINE,
+                row_height(false, rem),
+                "{name} at {rem:?}"
+            );
+            assert_eq!(
+                label.size.height + row.size.height,
+                row_height(true, rem),
+                "{name} at {rem:?}"
+            );
+        }
     }
 
     #[test]

@@ -19,7 +19,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::h_flex;
 use gpui_kit::{
     AnyElement, App, ClickEvent, ElementId, IntoElement, ParentElement as _, Pixels, Rems,
-    RenderOnce, SharedString, Styled as _, Window, div, prelude::FluentBuilder as _, px, rems,
+    RenderOnce, SharedString, Styled as _, Window, div, prelude::FluentBuilder as _, rems,
 };
 
 use super::kit::SmallControl as _;
@@ -110,11 +110,10 @@ impl PageHeader {
     /// How tall a header is whose title and `lines` lines of `body` text
     /// each take one line: what a virtual list sizes its first item from.
     pub fn height(lines: usize, rem: Pixels) -> Pixels {
-        let (_, title) = TypeRole::PageTitle.scale();
-        let (_, line) = TypeRole::Body.scale();
         #[expect(clippy::cast_precision_loss, reason = "a handful of lines")]
         let lines = lines as f32;
-        px(title) + (LINE_GAP.to_pixels(rem) + px(line)) * lines
+        (TypeRole::PageTitle.line_height() + (LINE_GAP + TypeRole::Body.line_height()) * lines)
+            .to_pixels(rem)
     }
 }
 
@@ -308,7 +307,7 @@ fn see_all_label(count: Option<u32>) -> String {
 mod tests {
     use super::*;
     use crate::ui::test_support::host;
-    use gpui_kit::{InteractiveElement as _, TestAppContext};
+    use gpui_kit::{InteractiveElement as _, TestAppContext, px};
 
     const LONG: &str = "The Exceedingly Long and Winding Chronicle of the Northern Reaches";
 

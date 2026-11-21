@@ -305,7 +305,6 @@ impl SeriesTrackerView {
             0
         };
         items.push(Item::Foot { hidden });
-        let body_line = px(TypeRole::Body.scale().1);
         let sizes: Vec<Size<Pixels>> = items
             .iter()
             .map(|item| {
@@ -313,7 +312,7 @@ impl SeriesTrackerView {
                     Item::Header => header_height(wrapped, rem),
                     // The small button is taller than the line beside it.
                     Item::Failed(_) => (FAILED_ABOVE + size::CONTROL_SMALL).to_pixels(rem),
-                    Item::Nothing => LINE_ABOVE.to_pixels(rem) + body_line,
+                    Item::Nothing => (LINE_ABOVE + TypeRole::Body.line_height()).to_pixels(rem),
                     Item::Row(_, label) => row_height(label.is_some(), rem),
                     // The page's inset under the last row.
                     Item::Foot { hidden: 0 } => size::PAGE_INSET.to_pixels(rem),

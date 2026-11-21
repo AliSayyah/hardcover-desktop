@@ -514,8 +514,9 @@ fn series_line(details: Option<&BookDetails>) -> Option<AnyElement> {
 
 /// A contributor's name: a text button to their author page when the id is
 /// known. In the byline (Inter 500 at 16) or in the muted roles line (body).
-/// The button's id comes from the author's id, `kind` telling the byline's
-/// authors from the other contributors, so it stays put as the list changes.
+/// The button's id comes from the author's id and role, `kind` telling the
+/// byline's authors from the other contributors, so it stays put as the
+/// list changes and one person in two roles gets two.
 fn contributor_name(c: &Contributor, kind: &'static str, byline: bool) -> AnyElement {
     fn style<S: gpui_kit::Styled>(this: S, byline: bool) -> S {
         if byline { this.byline() } else { this.body() }
@@ -523,7 +524,14 @@ fn contributor_name(c: &Contributor, kind: &'static str, byline: bool) -> AnyEle
     match c.author_id {
         Some(author) => style(
             TextButton::new(
-                ElementId::Name(format!("{kind}-{}", author.get()).into()),
+                ElementId::Name(
+                    format!(
+                        "{kind}-{}-{}",
+                        author.get(),
+                        c.role.as_deref().unwrap_or_default()
+                    )
+                    .into(),
+                ),
                 c.name.clone(),
             )
             .opens(Page::Author(author)),

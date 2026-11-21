@@ -35,7 +35,7 @@ use crate::design::colors;
 use crate::ui::focus::{FocusTreatment as _, control_radius, focus_visible};
 use crate::ui::{StarInk, StarSize, render_star};
 
-/// Key context of the control; its bindings live in `main`.
+/// Key context of the control; [`key_bindings`] are its keys.
 pub const KEY_CONTEXT: &str = "StarRating";
 
 actions!(star_rating, [IncreaseRating, DecreaseRating, ClearRating]);

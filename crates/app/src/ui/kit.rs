@@ -26,6 +26,8 @@
 //!   input ([`KeyboardRing`]).
 //! - [`OnTextSpine`]: a quiet button (ghost, or a danger label) that starts a
 //!   line puts its label, not its padding, on the content's leading edge.
+//! - [`danger_menu_item`]: a destructive menu command ("Delete read…") in
+//!   `danger`, its icon too; the kit's menu items take no colour.
 //! - [`gutter_list`] and [`gutter_scrollbar`]: a scrollbar that stays in the
 //!   8 inset beside a list's rows (the shelf and search lists, the sidebar).
 //!   The kit's thumb is 6 wide and 4 in from the edge, 8 wide on hover, so

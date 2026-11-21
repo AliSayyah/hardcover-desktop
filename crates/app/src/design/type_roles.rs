@@ -132,6 +132,12 @@ impl TypeRole {
         }
     }
 
+    /// The line height, as the role sets it: what layout that must know a
+    /// line's height ahead of drawing it (a virtual list) adds up.
+    pub fn line_height(self) -> gpui_kit::Rems {
+        r(self.scale().1)
+    }
+
     /// How far the baseline sits below the middle of the line box, in px.
     fn baseline_below_middle(self) -> f32 {
         self.family().baseline_below_middle() * self.scale().0

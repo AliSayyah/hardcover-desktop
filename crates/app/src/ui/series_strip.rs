@@ -292,8 +292,8 @@ impl SeriesStrip {
     /// How tall a strip is: an sm cover, the line and the caption, [`GAP`]
     /// apart. The tracker's virtual list sizes its rows from it.
     pub fn height(rem: gpui_kit::Pixels) -> gpui_kit::Pixels {
-        (CoverSize::Sm.height() + GAP * 2. + size::METER_THIN).to_pixels(rem)
-            + gpui_kit::px(TypeRole::Caption.scale().1)
+        (CoverSize::Sm.height() + GAP * 2. + size::METER_THIN + TypeRole::Caption.line_height())
+            .to_pixels(rem)
     }
 
     /// How many items fit in `width`, counting the gaps between them.

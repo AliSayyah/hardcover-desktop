@@ -891,7 +891,10 @@ interface.
   the right.
 - **Implementation:** wrapping right-to-left text goes through `WrappingText`
   (`bidi.rs`), because GPUI on Linux draws wrapped right-to-left text in the
-  wrong place. A single truncated line (rows) can use GPUI's own layout.
+  wrong place. A single truncated line keeps its place, but GPUI still lays
+  it out as if it read left to right, so a bracket or a mark at the edge of
+  a Persian run lands on the wrong side: a text button (a title in a row)
+  sets a right-to-left label through `WrappingText`, clamped to one line.
 - **Fonts:** Persian and Arabic are set in Vazirmatn (static faces)
   everywhere, under the serif roles as well as the sans ones, so the script
   reads the same across the app. Display sizes use a 1.5 line height. The

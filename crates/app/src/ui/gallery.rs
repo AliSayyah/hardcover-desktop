@@ -205,13 +205,28 @@ impl Render for Gallery {
 fn headers() -> AnyElement {
     let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 20).expect("a valid date");
     specimen(
-        "Page header, greeting, section header",
+        "Page headers (a destination's; a catalogue page's, wrapping, with tools and facts), greeting, section header",
         v_flex()
             .gap_6()
             .child(PageHeader::new("Currently reading").count(1204_u32))
             .child(
                 PageHeader::new("Coming soon")
                     .line("5 books still to come in the series on your shelves"),
+            )
+            .child(
+                div().max_w(rems(28.)).child(
+                    PageHeader::new("کلیدر (جلد اول): The Long and Winding Northern Chronicle")
+                        .wraps()
+                        .actions(
+                            Button::new("g-header-tools")
+                                .ghost()
+                                .icon(IconName::Ellipsis)
+                                .tooltip("List actions")
+                                .small_icon_button(),
+                        )
+                        .facts("12 books · 3 more in the series · Ongoing")
+                        .line("The editions you own. Mark a book owned, or not, from its page."),
+                ),
             )
             .child(Greeting::new(date_line(date), greeting(9)))
             .child(SectionHeader::new("Coming soon").action(see_all(
