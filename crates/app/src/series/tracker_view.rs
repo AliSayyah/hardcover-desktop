@@ -7,16 +7,19 @@
 //!   stay lined up on the trailing edge.
 //! - **Header:** the `page-title` "Series" with
 //!   the shown count, the line under it, and on the trailing edge the text
-//!   filter and the filter select (168 each). It stays put while the list
-//!   scrolls under it, so the filters are always at hand.
+//!   filter and the filter select (168 each). It sits above the list, not
+//!   in it: it stays put while the list scrolls under it, so the filters are
+//!   always at hand, and scrolling never takes the focused filter away.
 //! - **List:** a virtual list (about 200 series in a large library): each
 //!   group's label rides on its first row, so every item is a row and Tab
-//!   moves from one to the next (`row::SeriesRow`).
+//!   moves from one to the next (`row::SeriesRow`). A failed reload's line
+//!   sits under the header, above the list, over the series still shown.
 //! - **Foot:** with "Not finished", "1 finished series isn't shown." and a
 //!   small ghost "Show finished", which switches the select to "All series".
 //! - **States:** skeleton rows while the first load runs; a failed load is
-//!   one muted sentence with "Try again"; with no series started, the empty
-//!   state.
+//!   one muted sentence with "Try again" (`ui::LoadFailed`), and the
+//!   library's own failure fills the page when it has never loaded; with no
+//!   series started, the empty state.
 
 use std::rc::Rc;
 
@@ -39,10 +42,9 @@ use super::progress::{Counts, Filter, Group, SeriesSummary, counts, grouped, hid
 use super::row::{SeriesRow, row_height, skeleton_row, strip_capacity};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
-use crate::ui::focus::{keyed_focus, reveal_when};
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
-use crate::ui::{EmptyState, PageHeader, region_width};
+use crate::ui::{EmptyState, LoadFailed, PageHeader, region_width};
 use crate::upcoming::model::UpcomingModel;
 
 /// Skeleton rows while the first load runs.
@@ -104,33 +106,35 @@ fn options(counts: Counts) -> Vec<FilterOption> {
         .collect()
 }
 
-/// One item of the virtual list. The header scrolls with the rows, as on
-/// every page.
+/// One item of the virtual list, under the header.
 #[derive(Clone)]
 enum Item {
-    Header,
-    /// A reload failed; the series shown are the previous ones.
-    Failed(SharedString),
     /// The filters leave no series.
     Nothing,
     /// A series, with its group's label and count when it is the first.
     Row(SeriesSummary, Option<(Group, usize)>),
     /// The foot: the finished series left out, or just the page's bottom
     /// inset.
-    Foot {
-        hidden: usize,
-    },
+    Foot { hidden: usize },
 }
 
-/// What the list was built from.
-#[derive(Clone, PartialEq)]
+/// What the list was built from. The summaries are kept, not only their
+/// address, so a new list is never taken for the old one at the same place.
+#[derive(Clone)]
 struct ListKey {
-    summaries: usize,
-    failed: Option<SharedString>,
-    wrapped: bool,
+    summaries: Rc<Vec<SeriesSummary>>,
     filter: Filter,
     query: String,
     rem: Pixels,
+}
+
+impl PartialEq for ListKey {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.summaries, &other.summaries)
+            && self.filter == other.filter
+            && self.query == other.query
+            && self.rem == other.rem
+    }
 }
 
 pub struct SeriesTrackerView {
@@ -228,9 +232,8 @@ impl SeriesTrackerView {
         crate::dates::today()
     }
 
-    fn summaries(&self, cx: &mut App) -> Rc<Vec<SeriesSummary>> {
-        let today = Self::today();
-        self.model.update(cx, |m, cx| m.summaries(today, cx))
+    fn summaries(&self, cx: &App) -> Rc<Vec<SeriesSummary>> {
+        self.model.read(cx).summaries(Self::today(), cx)
     }
 
     fn query(&self, cx: &App) -> String {
@@ -267,14 +270,10 @@ impl SeriesTrackerView {
         &mut self,
         summaries: &Rc<Vec<SeriesSummary>>,
         query: &str,
-        failed: Option<SharedString>,
-        wrapped: bool,
         rem: Pixels,
     ) -> (Rc<Vec<Item>>, Rc<Vec<Size<Pixels>>>) {
         let key = ListKey {
-            summaries: Rc::as_ptr(summaries) as usize,
-            failed: failed.clone(),
-            wrapped,
+            summaries: summaries.clone(),
             filter: self.filter,
             query: query.to_owned(),
             rem,
@@ -284,8 +283,7 @@ impl SeriesTrackerView {
         {
             return (items.clone(), sizes.clone());
         }
-        let mut items = vec![Item::Header];
-        items.extend(failed.map(Item::Failed));
+        let mut items = Vec::new();
         let groups = grouped(summaries, self.filter, query);
         if groups.is_empty() {
             items.push(Item::Nothing);
@@ -309,9 +307,6 @@ impl SeriesTrackerView {
             .iter()
             .map(|item| {
                 let height = match item {
-                    Item::Header => header_height(wrapped, rem),
-                    // The small button is taller than the line beside it.
-                    Item::Failed(_) => (FAILED_ABOVE + size::CONTROL_SMALL).to_pixels(rem),
                     Item::Nothing => (LINE_ABOVE + TypeRole::Body.line_height()).to_pixels(rem),
                     Item::Row(_, label) => row_height(label.is_some(), rem),
                     // The page's inset under the last row.
@@ -334,34 +329,16 @@ impl SeriesTrackerView {
         region_width(window, size::PAGE_INSET)
     }
 
-    fn header(
-        &self,
-        shown: Option<usize>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn header(&self, shown: Option<usize>, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = colors(cx).fg_muted;
-        // Shift+Tab from the first row comes back to the filters.
-        let focus = keyed_focus("series-header", window, cx);
-        let reveal = reveal_when(
-            "series-header",
-            focus.contains_focused(window, cx),
-            self.scroll.base_handle(),
-            px(0.),
-            window,
-            cx,
-        );
         let title = match shown {
             Some(n) => PageHeader::new("Series").count(n),
             None => PageHeader::new("Series"),
         };
         column()
             .id("series-header")
-            .track_focus(&focus)
-            .relative()
             .flex_none()
             .pt(HEADER_ABOVE)
-            .child(reveal)
             .child(
                 h_flex()
                     .flex_wrap()
@@ -393,18 +370,12 @@ impl SeriesTrackerView {
             )
     }
 
-    /// "Couldn't load your series…" and "Try again", in one muted line.
+    /// "Couldn't load your series…" and "Try again", under the header.
     fn failed(message: SharedString, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .flex_wrap()
-            .gap_2()
-            .child(div().body().text_color(colors(cx).fg_muted).child(message))
-            .child(
-                Button::new("series-retry")
-                    .small_control()
-                    .label("Try again")
-                    .on_click(cx.listener(|this, _, _, cx| this.retry(cx))),
-            )
+        column().pt(FAILED_ABOVE).child(
+            LoadFailed::new("series-retry", message)
+                .on_retry(cx.listener(|this, _, _, cx| this.retry(cx))),
+        )
     }
 
     fn foot(hidden: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -452,25 +423,6 @@ impl SeriesTrackerView {
     }
 }
 
-/// Whether the filters wrap under the title in a column `column` wide.
-fn header_wraps(column: Pixels, rem: Pixels) -> bool {
-    let beside = (TITLE_MIN + FILTERS_GAP + size::SELECT * 2. + BETWEEN_FILTERS).to_pixels(rem);
-    column < beside
-}
-
-/// The header's height: the title and its line, the filters (a control)
-/// beside them, or under them when they wrap.
-fn header_height(wrapped: bool, rem: Pixels) -> Pixels {
-    let title = PageHeader::height(1, rem);
-    let filters = size::CONTROL.to_pixels(rem);
-    let below = if wrapped {
-        title + FILTERS_GAP.to_pixels(rem) + filters
-    } else {
-        title.max(filters)
-    };
-    HEADER_ABOVE.to_pixels(rem) + below
-}
-
 /// The page's column: inset on the sides, filling the page.
 fn column() -> gpui_kit::Div {
     div().flex().flex_col().w_full().px(size::PAGE_INSET)
@@ -493,12 +445,21 @@ impl Render for SeriesTrackerView {
         let rem = window.rem_size();
         let column_width = Self::column_width(window);
 
+        if let Some(message) = self.library.read(cx).load_failure().cloned() {
+            return root
+                .child(self.header(None, cx))
+                .child(div().flex_1().min_h_0().child(crate::library::load_failed(
+                    "series-library-retry",
+                    &self.library,
+                    message,
+                )))
+                .into_any_element();
+        }
         if !loaded || summaries.is_empty() {
             let body: AnyElement = match status {
-                SeriesStatus::Failed(message) if !loaded => column()
-                    .pt_4()
-                    .child(Self::failed(message, cx))
-                    .into_any_element(),
+                SeriesStatus::Failed(message) if !loaded => {
+                    Self::failed(message, cx).into_any_element()
+                }
                 _ if !loaded => column()
                     .pt_6()
                     .children((0..SKELETON_ROWS).map(|_| skeleton_row()))
@@ -510,7 +471,7 @@ impl Render for SeriesTrackerView {
                     .into_any_element(),
             };
             return root
-                .child(self.header(None, window, cx))
+                .child(self.header(None, cx))
                 .child(div().flex_1().min_h_0().flex().flex_col().child(body))
                 .into_any_element();
         }
@@ -519,13 +480,7 @@ impl Render for SeriesTrackerView {
             SeriesStatus::Failed(message) => Some(message),
             _ => None,
         };
-        let (items, sizes) = self.list(
-            &summaries,
-            &query,
-            failed,
-            header_wraps(column_width, rem),
-            rem,
-        );
+        let (items, sizes) = self.list(&summaries, &query, rem);
         let shown = items.iter().filter(|i| matches!(i, Item::Row(..))).count();
         let capacity = strip_capacity(column_width, rem);
         let library = self.library.clone();
@@ -534,14 +489,9 @@ impl Render for SeriesTrackerView {
             cx.entity(),
             "series-list",
             sizes,
-            move |this, range, window, cx| {
+            move |this, range, _, cx| {
                 range
                     .map(|ix| match &items[ix] {
-                        Item::Header => this.header(Some(shown), window, cx).into_any_element(),
-                        Item::Failed(message) => column()
-                            .pt(FAILED_ABOVE)
-                            .child(Self::failed(message.clone(), cx))
-                            .into_any_element(),
                         Item::Nothing => column()
                             .child(this.nothing_shown(&query, cx))
                             .into_any_element(),
@@ -563,14 +513,40 @@ impl Render for SeriesTrackerView {
         .track_scroll(&self.scroll)
         .size_full();
 
-        root.child(
-            div()
-                .flex_1()
-                .min_h_0()
-                .relative()
-                .vertical_scrollbar(&self.scroll)
-                .child(list),
-        )
-        .into_any_element()
+        root.child(self.header(Some(shown), cx))
+            .children(failed.map(|message| Self::failed(message, cx)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .vertical_scrollbar(&self.scroll)
+                    .child(list),
+            )
+            .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(summaries: &Rc<Vec<SeriesSummary>>) -> ListKey {
+        ListKey {
+            summaries: summaries.clone(),
+            filter: Filter::default(),
+            query: String::new(),
+            rem: px(16.),
+        }
+    }
+
+    #[test]
+    fn the_list_is_built_again_for_new_summaries_even_if_equal() {
+        let first = Rc::new(Vec::new());
+        let again = Rc::new(Vec::new());
+        assert!(key(&first) == key(&first), "the same summaries: kept");
+        // Worked out afresh (a sync, a day): built again, wherever the new
+        // summaries were allocated.
+        assert!(key(&first) != key(&again));
     }
 }

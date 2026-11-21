@@ -11,7 +11,6 @@
 //! - **Empty:** the empty state.
 
 use crate::ui::reveal::RevealScroll as _;
-use gpui_kit::component::button::Button;
 use gpui_kit::component::{IconName, h_flex};
 use gpui_kit::{
     AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -22,11 +21,10 @@ use super::model::{UpcomingModel, UpcomingStatus};
 use super::row::UpcomingRow;
 use super::schedule::{grouped, shown};
 use crate::cover::CoverSize;
-use crate::design::{TypeRoles as _, colors};
+use crate::design::TypeRoles as _;
 use crate::format::count_text;
 use crate::library::model::LibraryModel;
-use crate::ui::kit::SmallControl as _;
-use crate::ui::{Lane, PageHeader, Sequence, Skeleton, empty_state};
+use crate::ui::{Lane, LoadFailed, PageHeader, Sequence, Skeleton, empty_state};
 
 /// Skeleton rows while the list loads.
 const SKELETON_ROWS: usize = 4;
@@ -54,20 +52,10 @@ impl UpcomingView {
         }
     }
 
-    /// "Couldn't load …" and "Try again", in one muted line.
+    /// "Couldn't load …" and "Try again".
     fn failed(message: SharedString, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .flex_wrap()
-            .gap_2()
-            .child(div().body().text_color(colors(cx).fg_muted).child(message))
-            .child(
-                Button::new("upcoming-retry")
-                    .small_control()
-                    .label("Try again")
-                    .on_click(
-                        cx.listener(|this, _, _, cx| this.upcoming.update(cx, UpcomingModel::load)),
-                    ),
-            )
+        LoadFailed::new("upcoming-retry", message)
+            .on_retry(cx.listener(|this, _, _, cx| this.upcoming.update(cx, UpcomingModel::load)))
     }
 }
 

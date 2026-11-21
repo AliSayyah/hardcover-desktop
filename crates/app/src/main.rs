@@ -12,6 +12,7 @@ mod cover_pipeline;
 mod cover_quality_tests;
 mod dates;
 mod design;
+mod drafts;
 mod fonts;
 mod format;
 mod freshness;
@@ -21,12 +22,14 @@ mod icons;
 mod io;
 mod library;
 mod lists;
+mod notify;
 mod preferences;
 mod search;
 mod series;
 mod session;
 mod settings_view;
 mod shell;
+mod sidebar_keys;
 mod sign_in;
 mod star;
 mod stats;
@@ -188,6 +191,7 @@ fn main() {
             design::theme::init(bundled_fonts, cx);
             bind_keys(cx);
             ui::kit::bind_keys(cx);
+            sidebar_keys::bind_keys(cx);
             // An AppImage's restart path replaces this once the first update
             // check has worked out how the app was installed (`update`).
             if let Some(path) = &exe {

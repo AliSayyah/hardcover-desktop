@@ -18,6 +18,14 @@
 //! The figures sit in equal columns that wrap together: in a narrow window
 //! two per row, each on the same spine as the one above.
 //!
+//! **Keyboard:** the page takes focus when shown and has no controls, so it
+//! scrolls from the keys itself ([`scrolled_to`]): Page Up and Page Down
+//! (and Space) by most of a screen, Home and End to the ends, the arrows by a
+//! line.
+//!
+//! **Loading:** until the library has loaded once, the title and skeleton
+//! figures and a chart's place.
+//!
 //! **Wide region** ([`two_columns`], from the window less the sidebar and
 //! the insets): when two columns of at least 544 fit (a 1424 window), the
 //! sections sit in two columns 32 apart, each filling its half: "Finished
@@ -29,24 +37,27 @@ use std::rc::Rc;
 
 use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::chart::BarChart;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, ParentElement as _, Pixels, Render, SharedString, Styled as _, Subscription,
-    Window, div, prelude::FluentBuilder as _, rems,
+    IntoElement, KeyDownEvent, ParentElement as _, Pixels, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, point,
+    prelude::FluentBuilder as _, px, rems,
 };
 use hardcover_core::Date;
 
 use super::reading_stats::{ReadingStats, YearTotals, compute};
 use crate::chip::status_icon;
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{books_count_text, count_text, status_label};
 use crate::library::model::LibraryModel;
-use crate::ui::{Lane, PageHeader, SectionHeader, empty_state, region_width};
+use crate::ui::{Lane, PageHeader, SectionHeader, Skeleton, empty_state, region_width};
 
 pub struct StatsView {
     model: Entity<LibraryModel>,
     focus_handle: FocusHandle,
+    scroll: ScrollHandle,
     /// The stats and the library revision and date they were computed for.
     computed: Option<(u64, Date, Rc<ReadingStats>)>,
     _subscriptions: Vec<Subscription>,
@@ -64,6 +75,7 @@ impl StatsView {
         Self {
             model,
             focus_handle: cx.focus_handle(),
+            scroll: ScrollHandle::new(),
             computed: None,
             _subscriptions: subscriptions,
         }
@@ -71,6 +83,35 @@ impl StatsView {
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         window.focus(&self.focus_handle, cx);
+    }
+
+    /// Scrolls the page from the keyboard while it has focus itself.
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus_handle.is_focused(window) {
+            return;
+        }
+        let keystroke = &event.keystroke;
+        let mods = keystroke.modifiers;
+        if mods.control || mods.alt || mods.platform || mods.function {
+            return;
+        }
+        let rem = window.rem_size();
+        let offset = self.scroll.offset();
+        let Some(y) = scrolled_to(
+            &keystroke.key,
+            mods.shift,
+            offset.y,
+            self.scroll.bounds().size.height,
+            rems(SCROLL_LINE).to_pixels(rem),
+            self.scroll.max_offset().y,
+        ) else {
+            return;
+        };
+        if y != offset.y {
+            self.scroll.set_offset(point(offset.x, y));
+            cx.notify();
+        }
+        cx.stop_propagation();
     }
 
     fn stats(&mut self, cx: &App) -> Rc<ReadingStats> {
@@ -90,15 +131,25 @@ impl StatsView {
 
 impl Render for StatsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let loaded = self.model.read(cx).is_loaded();
-        let stats = self.stats(cx);
+        let model = self.model.read(cx);
+        let (loaded, failure) = (model.is_loaded(), model.load_failure().cloned());
         let root = div()
             .id("stats")
             .track_focus(&self.focus_handle)
             .size_full();
-        if !loaded {
-            return root.into_any_element();
+        if let Some(message) = failure {
+            return root
+                .child(crate::library::load_failed(
+                    "stats-retry",
+                    &self.model,
+                    message,
+                ))
+                .into_any_element();
         }
+        if !loaded {
+            return root.child(loading_page()).into_any_element();
+        }
+        let stats = self.stats(cx);
         if stats.is_empty() {
             return root
                 .child(empty_state(
@@ -138,10 +189,77 @@ impl Render for StatsView {
                 .child(render_ratings(&stats, bar, cx))
                 .child(render_shelves(&stats, cx))
         };
-        root.scroll_y_revealing_focus()
+        root.on_key_down(cx.listener(Self::on_key_down))
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
+            .vertical_scrollbar(&self.scroll)
             .child(page)
+            .reveals_focus(&self.scroll)
             .into_any_element()
     }
+}
+
+/// An arrow key's step, in rem: a few lines of body text.
+const SCROLL_LINE: f32 = 3.;
+
+/// Where a page scrolled to `offset` (0 at the top, down to `-max` at the
+/// bottom, as GPUI counts) goes for `key`: Page Down, Page Up and Space
+/// (Shift+Space up) by 90% of the `viewport`, Home and End to the ends, Down
+/// and Up by `line`. `None` for any other key.
+fn scrolled_to(
+    key: &str,
+    shift: bool,
+    offset: Pixels,
+    viewport: Pixels,
+    line: Pixels,
+    max: Pixels,
+) -> Option<Pixels> {
+    let page = viewport * 0.9;
+    let y = match key {
+        "pagedown" => offset - page,
+        "space" if !shift => offset - page,
+        "pageup" => offset + page,
+        "space" => offset + page,
+        "down" if !shift => offset - line,
+        "up" if !shift => offset + line,
+        "home" if !shift => px(0.),
+        "end" if !shift => -max,
+        _ => return None,
+    };
+    Some(y.clamp(-max.max(px(0.)), px(0.)))
+}
+
+/// The page while the library loads: its title, skeleton figures and the
+/// first chart's place.
+fn loading_page() -> impl IntoElement {
+    let figure = || {
+        v_flex()
+            .flex_1()
+            .flex_basis(size::FIGURE)
+            .min_w_0()
+            .gap_1()
+            .child(Skeleton::line_in(TypeRole::Display30).w_16())
+            .child(Skeleton::line_in(TypeRole::Body).w_32())
+    };
+    v_flex()
+        .w_full()
+        .p_8()
+        .gap_8()
+        .child(PageHeader::new("Stats").line("From your library on this computer."))
+        .child(
+            h_flex()
+                .flex_wrap()
+                .items_start()
+                .gap_x_6()
+                .gap_y_6()
+                .children((0..4).map(|_| figure())),
+        )
+        .child(
+            v_flex()
+                .gap_3()
+                .child(Skeleton::line_in(TypeRole::Section).w_40())
+                .child(Skeleton::line().h(size::CHART)),
+        )
 }
 
 /// Whether Stats' sections sit in two columns in content `width` wide (the
@@ -409,7 +527,66 @@ fn render_shelves(stats: &ReadingStats, cx: &App) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::session::SessionScope;
+    use crate::ui::test_support::{press, redraw};
+    use gpui_kit::{AppContext as _, TestAppContext, size as gsize};
+    use hardcover_core::store::LibraryCache;
+
+    #[test]
+    fn keys_scroll_the_page_within_its_ends() {
+        let (viewport, line, max) = (px(500.), px(48.), px(1000.));
+        let at = |key: &str, shift: bool, offset: f32| {
+            scrolled_to(key, shift, px(offset), viewport, line, max)
+        };
+        assert_eq!(at("pagedown", false, 0.), Some(px(-450.)));
+        assert_eq!(at("space", false, 0.), Some(px(-450.)));
+        assert_eq!(at("space", true, -450.), Some(px(0.)));
+        assert_eq!(at("pageup", false, -900.), Some(px(-450.)));
+        assert_eq!(at("down", false, 0.), Some(px(-48.)));
+        assert_eq!(at("up", false, -48.), Some(px(0.)));
+        assert_eq!(at("end", false, 0.), Some(px(-1000.)));
+        assert_eq!(at("home", false, -700.), Some(px(0.)));
+        // Clamped at both ends.
+        assert_eq!(at("pagedown", false, -900.), Some(px(-1000.)));
+        assert_eq!(at("up", false, 0.), Some(px(0.)));
+        // Other keys are left alone.
+        assert_eq!(at("left", false, 0.), None);
+        assert_eq!(at("a", false, 0.), None);
+        // Nothing to scroll: stays at the top.
+        assert_eq!(
+            scrolled_to("end", false, px(0.), viewport, line, px(0.)),
+            Some(px(0.))
+        );
+    }
+
+    #[gpui_kit::test]
+    fn page_down_scrolls_stats_while_it_has_focus(cx: &mut TestAppContext) {
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            session.install(cx);
+        });
+        let model = cx.new(|_| LibraryModel::new(session));
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let (view, cx) = cx.add_window_view(|_, cx| StatsView::new(model, cx));
+        cx.simulate_resize(gsize(px(900.), px(400.)));
+        cx.update(|window, cx| view.update(cx, |v, cx| v.focus(window, cx)));
+        redraw(cx);
+        let offset =
+            |cx: &mut gpui_kit::VisualTestContext| view.read_with(cx, |v, _| v.scroll.offset().y);
+        assert_eq!(offset(cx), px(0.));
+        press(cx, "pagedown");
+        redraw(cx);
+        assert!(offset(cx) < px(0.), "scrolled down");
+        press(cx, "home");
+        redraw(cx);
+        assert_eq!(offset(cx), px(0.));
+    }
 
     #[test]
     fn half_star_labels() {

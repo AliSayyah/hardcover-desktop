@@ -12,8 +12,9 @@
 //!   under it (Similar books beside the book's text).
 //! - Each book is as wide as its cover; the title under it, 8 below, is a
 //!   [`TextButton`] at 12/500 in ink, at most two lines broken between
-//!   words (the second ends in "…" when the title is longer), so the cover
-//!   is never the only keyboard path to the book.
+//!   words (the second ends in "…" when the title is longer; a word too
+//!   long for the line ends in "…" too, never split across lines), so the
+//!   cover is never the only keyboard path to the book.
 //! - The covers take a shadow only where they lead their block (Similar
 //!   books), never in a rail; that is the [`Cover`]'s own `shadow`.
 //!

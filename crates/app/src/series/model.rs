@@ -8,6 +8,7 @@
 //! (`progress::summaries`), worked out once per change of the series, the
 //! library, the upcoming books or the day.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
@@ -49,7 +50,9 @@ pub struct SeriesModel {
     requested: Option<Vec<SeriesId>>,
     /// Bumped whenever the series change.
     revision: u64,
-    summaries: Option<(SummaryKey, Rc<Vec<SeriesSummary>>)>,
+    /// The last summaries worked out, and from what. A cache, filled on
+    /// read, so the views can ask from `render` without updating the model.
+    summaries: RefCell<Option<(SummaryKey, Rc<Vec<SeriesSummary>>)>>,
     load_task: Option<Task<()>>,
     reload_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -92,7 +95,7 @@ impl SeriesModel {
             status: SeriesStatus::Idle,
             requested: None,
             revision: 0,
-            summaries: None,
+            summaries: RefCell::new(None),
             load_task: None,
             reload_task: None,
             _subscriptions: subscriptions,
@@ -110,8 +113,10 @@ impl SeriesModel {
         self.revision > 0
     }
 
-    /// Every started series, in group order, each group sorted.
-    pub fn summaries(&mut self, today: Date, cx: &App) -> Rc<Vec<SeriesSummary>> {
+    /// Every started series, in group order, each group sorted. Worked out
+    /// again only when the series, the library, the upcoming books or the
+    /// day changed.
+    pub fn summaries(&self, today: Date, cx: &App) -> Rc<Vec<SeriesSummary>> {
         let library = self.library.read(cx);
         let upcoming = self.upcoming.read(cx);
         let key = (
@@ -120,7 +125,7 @@ impl SeriesModel {
             upcoming.revision(),
             today,
         );
-        if let Some((k, summaries)) = &self.summaries
+        if let Some((k, summaries)) = &*self.summaries.borrow()
             && *k == key
         {
             return summaries.clone();
@@ -132,7 +137,7 @@ impl SeriesModel {
             .map(|b| (b.book.id, b.release_date))
             .collect();
         let computed = Rc::new(summaries(&self.series, library.entries(), &dates, today));
-        self.summaries = Some((key, computed.clone()));
+        *self.summaries.borrow_mut() = Some((key, computed.clone()));
         computed
     }
 

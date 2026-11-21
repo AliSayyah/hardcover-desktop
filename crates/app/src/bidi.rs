@@ -27,7 +27,8 @@
 //! Left-to-right text takes GPUI's own path, unless the width is known
 //! ([`WrappingText::width`]): then both directions are broken into lines here
 //! ([`break_lines`]), between words only, the last line ending in "…" when a
-//! clamp cuts the rest. GPUI's own wrapping in a narrow box starts the next
+//! clamp cuts the rest, and a word too wide for a line cut short with "…"
+//! rather than split. GPUI's own wrapping in a narrow box starts the next
 //! line with the space it broke at, cuts a word that doesn't fit between
 //! letters, and lets a clamped last line run past its box.
 //!
@@ -91,7 +92,8 @@ impl WrappingText {
     /// Breaks the lines here, for a box this wide (a cover's title): between
     /// words only, so a line never starts with a space or with the
     /// punctuation that follows a word. A word wider than the line on its own
-    /// is the one thing cut between letters; see [`Self::fit_words`].
+    /// is cut short with "…", never split across lines; see
+    /// [`Self::fit_words`].
     pub fn width(mut self, width: Pixels) -> Self {
         self.width = Some(width);
         self
@@ -375,8 +377,9 @@ fn ltr_units(text: &str) -> Vec<String> {
 }
 
 /// The lines `units` (words, joined by a space) take in `width`, as
-/// `measure` sets a line. A line breaks between units only, except that a
-/// unit wider than a line on its own is cut between characters. With
+/// `measure` sets a line. A line breaks between units only: a unit wider
+/// than a line on its own takes that line, cut short with "…" (Chinese and
+/// Japanese, which break anywhere, go on over the next line instead). With
 /// `max_lines`, the text beyond them is dropped and the last line ends in
 /// "…", at a unit when one fits with it.
 pub fn break_lines(
@@ -398,10 +401,17 @@ pub fn break_lines(
             continue;
         }
         if line.is_empty() {
-            let (head, tail) = cut_to_fit(&unit, width, measure);
-            lines.push(vec![head]);
-            if !tail.is_empty() {
-                queue.push_front(tail);
+            // A word too wide for a line on its own. Chinese and Japanese
+            // break between any characters, so theirs goes on over the next
+            // line; any other word ends here in "…" rather than be split.
+            if breaks_anywhere(&unit) {
+                let (head, tail) = cut_to_fit(&unit, width, measure);
+                lines.push(vec![head]);
+                if !tail.is_empty() {
+                    queue.push_front(tail);
+                }
+            } else {
+                lines.push(vec![truncate_to_fit(&unit, &fits, measure)]);
             }
         } else {
             lines.push(std::mem::take(&mut line));
@@ -428,20 +438,41 @@ pub fn break_lines(
             last.pop();
             continue;
         }
-        // One unit too wide even alone with the ellipsis: cut it, a
-        // grapheme cluster at a time.
-        let mut clusters: Vec<&str> = text.graphemes(true).collect();
-        break loop {
-            clusters.pop();
-            let ended = format!("{}{ELLIPSIS}", trim_for_ellipsis(&clusters.concat()));
-            if clusters.is_empty() || fits(&ended, measure) {
-                break ended;
-            }
-        };
+        // One unit too wide even alone with the ellipsis: cut it.
+        break truncate_to_fit(text, &fits, measure);
     };
     let mut lines: Vec<String> = lines.into_iter().map(|l| l.join(" ")).collect();
     lines.push(ended);
     lines
+}
+
+/// Whether a piece of text fits the line, measured with the given measure.
+type Fits<'a> = &'a dyn Fn(&str, &mut dyn FnMut(&str) -> f32) -> bool;
+
+/// `unit` cut short to fit a line with "…" after it, a grapheme cluster at a
+/// time, so a letter keeps its marks and an emoji its modifiers. Text that
+/// already ends in "…" (a word cut on an earlier line) is cut again.
+fn truncate_to_fit(unit: &str, fits: Fits<'_>, measure: &mut dyn FnMut(&str) -> f32) -> String {
+    let mut clusters: Vec<&str> = unit.graphemes(true).collect();
+    loop {
+        clusters.pop();
+        let ended = format!("{}{ELLIPSIS}", trim_for_ellipsis(&clusters.concat()));
+        if clusters.is_empty() || fits(&ended, measure) {
+            return ended;
+        }
+    }
+}
+
+/// Whether a line may break between any two characters of `unit`, as in
+/// Chinese and Japanese, which put no spaces between words.
+fn breaks_anywhere(unit: &str) -> bool {
+    unit.chars().any(|c| {
+        matches!(c,
+            '\u{3040}'..='\u{30FF}' // hiragana, katakana
+            | '\u{3400}'..='\u{4DBF}' // CJK extension A
+            | '\u{4E00}'..='\u{9FFF}' // CJK unified ideographs
+            | '\u{F900}'..='\u{FAFF}') // CJK compatibility ideographs
+    })
 }
 
 /// The text before an ellipsis, without the spaces and punctuation that
@@ -671,23 +702,33 @@ mod tests {
     }
 
     #[test]
-    fn a_word_wider_than_the_line_is_the_only_cut() {
-        assert_eq!(
-            lines("Hitchhiker's Guide", 8., None),
-            ["Hitchhik", "er's", "Guide"]
-        );
+    fn a_word_wider_than_the_line_is_cut_short_never_split() {
+        // "Edgedancer" under an md cover: its own line, ending in "…", and
+        // no "er" starting the next.
+        assert_eq!(lines("Hitchhiker's Guide", 8., None), ["Hitchhi…", "Guide"]);
+        assert_eq!(lines("Edgedancer", 8., Some(2)), ["Edgedan…"]);
         // With a clamp, the cut word still ends in an ellipsis.
         assert_eq!(lines("Supercalifragilistic", 6., Some(1)), ["Super…"]);
     }
 
     #[test]
+    fn chinese_and_japanese_break_between_any_characters() {
+        let units = ltr_units("三体问题的故事");
+        assert_eq!(
+            break_lines(&units, 4., None, &mut chars),
+            ["三体问题", "的故事"]
+        );
+    }
+
+    #[test]
     fn a_cut_never_splits_a_grapheme_cluster() {
         let thumbs = "👍🏽";
-        // Two clusters a line: the skin tone stays with its hand.
-        let lines = break_lines(&[format!("{thumbs}{thumbs}{thumbs}")], 2., None, &mut |t| {
+        // Two clusters and the ellipsis a line: the skin tone stays with its
+        // hand.
+        let lines = break_lines(&[thumbs.repeat(4)], 3., None, &mut |t| {
             t.graphemes(true).fold(0., |w, _| w + 1.)
         });
-        assert_eq!(lines, [format!("{thumbs}{thumbs}"), thumbs.to_owned()]);
+        assert_eq!(lines, [format!("{thumbs}{thumbs}…")]);
         // The ellipsis cut, too.
         let lines = break_lines(&[format!("ab{thumbs}{thumbs}cd")], 4., Some(1), &mut |t| {
             t.graphemes(true).fold(0., |w, _| w + 1.)

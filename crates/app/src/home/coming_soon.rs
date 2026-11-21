@@ -8,7 +8,7 @@ use gpui_kit::{
     AnyElement, App, Entity, IntoElement, ParentElement as _, Styled as _, div,
     prelude::FluentBuilder as _,
 };
-use hardcover_core::Date;
+use hardcover_core::{Date, UpcomingBook};
 
 use crate::catalog::navigation::{self, Page};
 use crate::design::{TypeRoles as _, colors};
@@ -19,51 +19,69 @@ use crate::upcoming::model::UpcomingModel;
 use crate::upcoming::row::UpcomingRow;
 use crate::upcoming::schedule::{next_releases, shown};
 
-/// The section, or `None` when nothing is coming in the reader's series.
-pub fn coming_soon_section(
-    upcoming: &Entity<UpcomingModel>,
-    library: &Entity<LibraryModel>,
+/// What the section shows, worked out with Home's digest.
+#[derive(Debug, Clone)]
+pub struct ComingSoon {
+    /// The next releases within the coming 12 months.
+    next: Vec<UpcomingBook>,
+    /// How many are coming in all.
+    total: usize,
+}
+
+/// What is coming in the reader's series, or `None` when nothing is.
+pub fn coming_soon(
+    upcoming: &UpcomingModel,
+    library: &LibraryModel,
     today: Date,
-    cx: &App,
-) -> Option<AnyElement> {
-    let model = library.read(cx);
+) -> Option<ComingSoon> {
     let books = shown(
-        upcoming.read(cx).books(),
-        |id| model.entry_for_book(id).map(|e| e.status),
+        upcoming.books(),
+        |id| library.entry_for_book(id).map(|e| e.status),
         today,
     );
     if books.is_empty() {
         return None;
     }
-    let next = next_releases(&books, today);
-    let later = books.len() - next.len();
-    let rows = next
+    Some(ComingSoon {
+        next: next_releases(&books, today).into_iter().cloned().collect(),
+        total: books.len(),
+    })
+}
+
+/// The section for `soon`.
+pub fn coming_soon_section(
+    soon: &ComingSoon,
+    library: &Entity<LibraryModel>,
+    today: Date,
+    cx: &App,
+) -> AnyElement {
+    let later = soon.total - soon.next.len();
+    let rows = soon
+        .next
         .iter()
         .map(|book| UpcomingRow::new("home-upcoming", book, today, library.clone()));
-    let total = u32::try_from(books.len()).unwrap_or(u32::MAX);
-    Some(
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(SectionHeader::new("Coming soon").action(see_all(
-                "home-upcoming-all",
-                (total > 1).then_some(total),
-                |_, _, cx| navigation::open(Page::Upcoming, cx),
-            )))
-            .when(next.is_empty(), |this| {
-                this.child(
-                    div()
-                        .body()
-                        .text_color(colors(cx).fg_muted)
-                        .child(further_off_text(later)),
-                )
-            })
-            .when(!next.is_empty(), |this| {
-                this.child(Sequence::new().children(rows))
-            })
-            .into_any_element(),
-    )
+    let total = u32::try_from(soon.total).unwrap_or(u32::MAX);
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(SectionHeader::new("Coming soon").action(see_all(
+            "home-upcoming-all",
+            (total > 1).then_some(total),
+            |_, _, cx| navigation::open(Page::Upcoming, cx),
+        )))
+        .when(soon.next.is_empty(), |this| {
+            this.child(
+                div()
+                    .body()
+                    .text_color(colors(cx).fg_muted)
+                    .child(further_off_text(later)),
+            )
+        })
+        .when(!soon.next.is_empty(), |this| {
+            this.child(Sequence::new().children(rows))
+        })
+        .into_any_element()
 }
 
 /// What Home says when nothing is due within 12 months but `later` books are

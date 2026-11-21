@@ -7,7 +7,8 @@
 //! - Selected: the `selected` fill, the label at weight 500, the icon in
 //!   `accent`, the count in `fg`. Pressed takes the `selected` fill too.
 //! - A real button: Tab reaches it, Enter and Space press it, and it shows
-//!   the focus ring.
+//!   the focus ring. In the sidebar the rows are one Tab stop, with the
+//!   arrows between them (`crate::sidebar_keys`).
 //! - While Ctrl is held, the destination's shortcut ([`NavRow::hint`],
 //!   usually a `Kbd`) takes the place of its count.
 //! - A command row in the sidebar ("New list…", "Set a reading goal…") is

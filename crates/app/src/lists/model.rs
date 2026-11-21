@@ -640,17 +640,19 @@ impl ListsModel {
         })
     }
 
-    /// Puts `book` on `list`.
+    /// Puts `book` on `list`, as `edition` if given (Undo puts a removed
+    /// book back as the edition it was).
     pub fn add(
         &mut self,
         list: ListId,
         book: BookId,
+        edition: Option<EditionId>,
         cx: &mut Context<Self>,
     ) -> Task<Option<Result<(), SharedString>>> {
         self.write_book(
             book,
             WRITE_LISTS,
-            move |client| client.add_to_list(list, book, None),
+            move |client| client.add_to_list(list, book, edition),
             move |this, row, cx| {
                 this.insert_row(row);
                 cx.emit(ListsEvent::BookAdded(row.list_id));

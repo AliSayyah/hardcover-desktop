@@ -17,7 +17,7 @@ use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{Disableable as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, ElementId, Entity, IntoElement, ParentElement as _,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, IntoElement, ParentElement as _,
     SharedString, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::WRITE_REVIEWS;
@@ -230,7 +230,7 @@ impl BookDetailView {
         model.review(id).is_some_and(|s| s.fetching) || model.wants_review(id)
     }
 
-    fn review_draft(&self, cx: &Context<Self>) -> Draft {
+    fn review_draft(&self, cx: &App) -> Draft {
         Draft {
             text: self.review.text.read(cx).value().to_string(),
             spoilers: self.review.spoilers,
@@ -239,8 +239,13 @@ impl BookDetailView {
     }
 
     /// Unsaved changes in the editor.
-    fn review_dirty(&self, cx: &Context<Self>) -> bool {
+    fn review_dirty(&self, cx: &App) -> bool {
         self.draft_dirty(&self.review_draft(cx))
+    }
+
+    /// A review not saved: in the editor, or set aside for another book.
+    pub(super) fn review_unsaved(&self, cx: &App) -> bool {
+        self.review_dirty(cx) || !self.review.drafts.is_empty()
     }
 
     fn draft_dirty(&self, draft: &Draft) -> bool {

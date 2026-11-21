@@ -27,9 +27,9 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{AuthorBook, AuthorDetails, AuthorId};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, ListPane, focus_list_if_fallback_is_focused, follow_list,
-    load_failed, new_list, page_body, page_header, page_header_scrolling, page_list, read_summary,
-    replace_rows, reset_scroll, row_details,
+    CatalogBooks, CatalogRow, ListPane, focus_list_if_fallback_is_focused, follow_list, new_list,
+    page_body, page_header, page_header_scrolling, page_list, read_summary, replace_rows,
+    reset_scroll, row_details,
 };
 use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
@@ -39,7 +39,7 @@ use crate::session::{self, SessionScope};
 use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
-use crate::ui::{Avatar, AvatarSize, ExternalLink, SectionHeader, Skeleton};
+use crate::ui::{Avatar, AvatarSize, ExternalLink, LoadFailed, SectionHeader, Skeleton};
 
 /// How an author's books are ordered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -465,15 +465,9 @@ impl Render for AuthorView {
         let ready = matches!(current, Some(Ok(_)));
         let header = match current {
             Some(Ok(author)) => self.render_header(&author, cx),
-            Some(Err(message)) => load_failed(
-                message,
-                Button::new("retry-author")
-                    .small_control()
-                    .label("Try again")
-                    .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
-                cx,
-            )
-            .into_any_element(),
+            Some(Err(message)) => LoadFailed::new("retry-author", message)
+                .on_retry(cx.listener(|this, _, window, cx| this.retry(window, cx)))
+                .into_any_element(),
             None => h_flex()
                 .gap_6()
                 .items_start()

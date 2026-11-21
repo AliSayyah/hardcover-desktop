@@ -37,12 +37,14 @@ use gpui_kit::{
     SharedString, Styled as _, StyledText, Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_LIBRARY};
-use hardcover_core::{Date, Goal, GoalMetric, LibraryEntry, Rating, ReadingStatus, UserBookId};
+use hardcover_core::{
+    Date, Goal, GoalId, GoalMetric, LibraryEntry, Rating, ReadingStatus, UserBookId,
+};
 
-use super::coming_soon::coming_soon_section;
+use super::coming_soon::{ComingSoon, coming_soon, coming_soon_section};
 use super::digest::{
-    Digest, Reading, SeriesNext, ToRate, UP_NEXT_IN_RAIL, compute, finished_per_month,
-    finishing_by, to_rate,
+    Digest, Reading, SeriesNext, UP_NEXT_IN_RAIL, compute, finished_per_month, finishing_by, lead,
+    to_rate,
 };
 use crate::app_state::release_cover_image;
 use crate::bidi::is_rtl;
@@ -72,17 +74,88 @@ use crate::ui::{
 use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
 
+/// What the goal's books per month are worked out from: the library
+/// revision and the goal's id and dates.
+type MonthsKey = (u64, GoalId, Date, Date);
+
+/// What Home shows, worked out once per change of the library, the
+/// upcoming books, the day, the books rated here or the write scope, so a
+/// frame only reads it: the digest, and the entries and upcoming books its
+/// sections draw.
+struct HomeData {
+    digest: Digest,
+    /// Continue reading, the lead first.
+    reading: Vec<(Reading, LibraryEntry)>,
+    paused: Option<LibraryEntry>,
+    /// Rate what you finished: when each was finished, and the entry.
+    to_rate: Vec<(Date, LibraryEntry)>,
+    /// How many books finished lately still need a rating.
+    unrated: usize,
+    series_next: Option<(SeriesNext, LibraryEntry)>,
+    /// The newest on Want to read.
+    want: Vec<LibraryEntry>,
+    coming_soon: Option<ComingSoon>,
+}
+
+/// What [`HomeData`] was worked out from: the library's and the upcoming
+/// books' revisions, the day, the generation of the books rated here, and
+/// whether the session can write the library.
+type HomeKey = (u64, u64, Date, u64, bool);
+
+impl HomeData {
+    fn new(
+        library: &LibraryModel,
+        upcoming: &UpcomingModel,
+        today: Date,
+        rated_here: &HashSet<UserBookId>,
+        can_write: bool,
+    ) -> Self {
+        let entry = |id: UserBookId| library.entry(id).cloned();
+        let unreleased = upcoming.unreleased(today);
+        let digest = compute(library.entries(), today, &unreleased);
+        let (to_rate, unrated) = if can_write {
+            to_rate(library.entries(), today, rated_here)
+        } else {
+            (Vec::new(), 0)
+        };
+        Self {
+            reading: digest
+                .reading
+                .iter()
+                .filter_map(|r| Some((r.clone(), entry(r.id)?)))
+                .collect(),
+            paused: digest.paused.and_then(entry),
+            to_rate: to_rate
+                .iter()
+                .filter_map(|r| Some((r.finished, entry(r.id)?)))
+                .collect(),
+            unrated,
+            series_next: digest
+                .series_next
+                .as_ref()
+                .and_then(|next| Some((next.clone(), entry(next.id)?))),
+            want: digest.up_next.iter().filter_map(|id| entry(*id)).collect(),
+            coming_soon: coming_soon(upcoming, library, today),
+            digest,
+        }
+    }
+}
+
 pub struct HomeView {
     model: Entity<LibraryModel>,
     goals: Entity<GoalsModel>,
     upcoming: Entity<UpcomingModel>,
     focus_handle: FocusHandle,
-    /// The digest and the library revision, upcoming books' revision and
-    /// date it was computed for.
-    computed: Option<((u64, u64, Date), Rc<Digest>)>,
+    /// What Home shows, and what it was worked out from.
+    computed: Option<(HomeKey, Rc<HomeData>)>,
+    /// Books finished in each month of the goal shown, by library revision
+    /// and the goal's id and dates.
+    months: Option<(MonthsKey, Option<[u32; 12]>)>,
     /// Books rated on Home since it was last opened from the sidebar: their
     /// rows stay, so the rating can still be changed.
     rated_here: HashSet<UserBookId>,
+    /// Bumped whenever [`Self::rated_here`] changes.
+    rated_generation: u64,
     /// A rating being saved, shown until the write lands.
     saving_ratings: HashMap<UserBookId, Option<Rating>>,
     /// The lead book's detail cover (the xl cover needs more than a
@@ -102,10 +175,24 @@ impl HomeView {
         model: Entity<LibraryModel>,
         goals: Entity<GoalsModel>,
         upcoming: Entity<UpcomingModel>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let subscriptions = vec![
-            cx.observe(&model, |_, _, cx| cx.notify()),
+            cx.observe_in(&model, window, |this, model, window, cx| {
+                let model = model.read(cx);
+                // A rating stays on screen only while it is being saved.
+                this.saving_ratings
+                    .retain(|id, _| model.pending_write(*id) == Some(WriteKind::Rating));
+                // The lead's detail cover goes once another book leads.
+                let lead = lead(model.entries()).and_then(|e| e.cover().map(|c| c.url.clone()));
+                if this.lead_cover.as_ref().map(|(url, _)| url) != lead.as_ref()
+                    && let Some((url, image)) = this.lead_cover.take()
+                {
+                    release_cover_image(&url, image, window, cx);
+                }
+                cx.notify();
+            }),
             cx.observe(&goals, |_, _, cx| cx.notify()),
             cx.observe(&upcoming, |_, _, cx| cx.notify()),
         ];
@@ -115,7 +202,9 @@ impl HomeView {
             upcoming,
             focus_handle: cx.focus_handle(),
             computed: None,
+            months: None,
             rated_here: HashSet::new(),
+            rated_generation: 0,
             saving_ratings: HashMap::new(),
             lead_cover: None,
             _subscriptions: subscriptions,
@@ -131,21 +220,53 @@ impl HomeView {
     pub fn opened(&mut self, cx: &mut Context<Self>) {
         if !self.rated_here.is_empty() {
             self.rated_here.clear();
+            self.rated_generation += 1;
             cx.notify();
         }
     }
 
-    fn digest(&mut self, today: Date, cx: &App) -> Rc<Digest> {
+    /// What Home shows today, worked out again only when what it comes
+    /// from changed.
+    fn data(&mut self, today: Date, cx: &App) -> Rc<HomeData> {
         let model = self.model.read(cx);
         let upcoming = self.upcoming.read(cx);
-        let key = (model.revision(), upcoming.revision(), today);
+        let can_write = session::has_scope(cx, WRITE_LIBRARY);
+        let key = (
+            model.revision(),
+            upcoming.revision(),
+            today,
+            self.rated_generation,
+            can_write,
+        );
         match &self.computed {
-            Some((k, digest)) if *k == key => digest.clone(),
+            Some((k, data)) if *k == key => data.clone(),
             _ => {
-                let unreleased = upcoming.unreleased(today);
-                let digest = Rc::new(compute(model.entries(), today, &unreleased));
-                self.computed = Some((key, digest.clone()));
-                digest
+                let data = Rc::new(HomeData::new(
+                    model,
+                    upcoming,
+                    today,
+                    &self.rated_here,
+                    can_write,
+                ));
+                self.computed = Some((key, data.clone()));
+                data
+            }
+        }
+    }
+
+    /// Books finished in each month of `goal`'s calendar year, worked out
+    /// again only when the library or the goal changed.
+    fn months(&mut self, goal: &Goal, cx: &App) -> Option<[u32; 12]> {
+        let model = self.model.read(cx);
+        let key = (model.revision(), goal.id, goal.start, goal.end);
+        match &self.months {
+            Some((k, months)) if *k == key => *months,
+            _ => {
+                let months = (goal.metric == GoalMetric::Books)
+                    .then(|| finished_per_month(goal, model.entries()))
+                    .flatten();
+                self.months = Some((key, months));
+                months
             }
         }
     }
@@ -164,14 +285,9 @@ impl HomeView {
             .cloned()
     }
 
-    /// The lead's detail cover, releasing the previous one if the lead
-    /// changed.
+    /// The lead's detail cover, kept so it can be released once another
+    /// book leads (the model's observer in [`Self::new`] does that).
     fn lead_art(&mut self, url: Option<String>, window: &mut Window, cx: &mut App) -> CoverArt {
-        if self.lead_cover.as_ref().map(|(u, _)| u) != url.as_ref()
-            && let Some((old, image)) = self.lead_cover.take()
-        {
-            release_cover_image(&old, image, window, cx);
-        }
         let Some(url) = url else {
             return CoverArt::None;
         };
@@ -206,7 +322,9 @@ impl HomeView {
         let Some(keep) = model.entry(id).map(|e| e.status) else {
             return;
         };
-        self.rated_here.insert(id);
+        if self.rated_here.insert(id) {
+            self.rated_generation += 1;
+        }
         self.saving_ratings.insert(id, rating);
         // Sending the status keeps Hardcover from starting a new read.
         let write = LibraryWrite::entry(
@@ -245,33 +363,28 @@ impl HomeView {
 
     fn render_reading(
         &mut self,
-        digest: &Digest,
+        data: &HomeData,
         today: Date,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let model = self.model.read(cx);
-        let books: Vec<(Reading, LibraryEntry)> = digest
-            .reading
-            .iter()
-            .filter_map(|r| Some((r.clone(), model.entry(r.id)?.clone())))
-            .collect();
-        let paused = digest
+        let paused = data
             .paused
-            .and_then(|id| model.entry(id).cloned())
-            .map(|entry| Self::paused_row(&entry, digest.paused_count, today, cx));
+            .as_ref()
+            .map(|entry| Self::paused_row(entry, data.digest.paused_count, today, cx));
 
-        let lead_url = books
+        let lead_url = data
+            .reading
             .first()
             .and_then(|(_, entry)| entry.cover())
             .map(|c| c.url.clone());
         let lead_art = self.lead_art(lead_url, window, cx);
         let mut rows: Vec<AnyElement> = Vec::new();
-        let mut books = books.into_iter();
+        let mut books = data.reading.iter();
         if let Some((reading, entry)) = books.next() {
-            rows.push(self.lead(&reading, &entry, lead_art, today, cx));
+            rows.push(self.lead(reading, entry, lead_art, today, cx));
         }
-        rows.extend(books.map(|(reading, entry)| self.reading_row(&reading, &entry, today, cx)));
+        rows.extend(books.map(|(reading, entry)| self.reading_row(reading, entry, today, cx)));
         let reading_nothing = rows.is_empty();
         rows.extend(paused);
 
@@ -580,16 +693,11 @@ impl HomeView {
     /// without `write:library`, as there is nothing to do in it then.
     fn render_rate(
         &self,
-        rows: &[ToRate],
+        books: &[(Date, LibraryEntry)],
         unrated: usize,
         today: Date,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let library = self.model.read(cx);
-        let books: Vec<(Date, LibraryEntry)> = rows
-            .iter()
-            .filter_map(|r| Some((r.finished, library.entry(r.id)?.clone())))
-            .collect();
         let rows = books
             .iter()
             .map(|(finished, entry)| self.rate_row(entry, *finished, today, cx))
@@ -679,7 +787,8 @@ impl HomeView {
     fn goal_section(
         &self,
         goal: &Goal,
-        digest: &Digest,
+        months: Option<[u32; 12]>,
+        data: &HomeData,
         today: Date,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -689,16 +798,15 @@ impl HomeView {
             None => "Reading goal".to_owned(),
         };
         let reached = goal.progress >= f64::from(goal.target);
-        let library = self.model.read(cx);
-        let months = (goal.metric == GoalMetric::Books)
-            .then(|| finished_per_month(goal, library.entries()))
-            .flatten();
         let finishing: Vec<String> = if reached {
             Vec::new()
         } else {
-            finishing_by(goal, digest, today)
+            finishing_by(goal, &data.digest, today)
                 .into_iter()
-                .filter_map(|id| library.entry(id).map(|e| e.book.title.clone()))
+                .filter_map(|id| {
+                    let (_, entry) = data.reading.iter().find(|(r, _)| r.id == id)?;
+                    Some(entry.book.title.clone())
+                })
                 .collect()
         };
         let sentence = goal_sentence(goal, today, &finishing);
@@ -846,29 +954,17 @@ impl HomeView {
     /// The newest books on Want to read, as a shelf of covers: in the rail,
     /// or (`in_column`) as a section of the second content column, one row
     /// of `shown` books.
-    fn want_to_read_section(
-        &self,
-        digest: &Digest,
-        shown: usize,
-        in_column: bool,
-        cx: &App,
-    ) -> AnyElement {
-        let library = self.model.read(cx);
-        let books = digest
-            .up_next
-            .iter()
-            .take(shown)
-            .filter_map(|id| library.entry(*id))
-            .map(|e| {
-                (
-                    cover(e, CoverSize::Md, false),
-                    TextButton::book(
-                        SharedString::from(format!("home-want-{}", e.user_book_id)),
-                        &e.book,
-                    ),
-                )
-            });
-        let count = u32::try_from(digest.want_to_read).unwrap_or(u32::MAX);
+    fn want_to_read_section(&self, data: &HomeData, shown: usize, in_column: bool) -> AnyElement {
+        let books = data.want.iter().take(shown).map(|e| {
+            (
+                cover(e, CoverSize::Md, false),
+                TextButton::book(
+                    SharedString::from(format!("home-want-{}", e.user_book_id)),
+                    &e.book,
+                ),
+            )
+        });
+        let count = u32::try_from(data.digest.want_to_read).unwrap_or(u32::MAX);
         let all = see_all(
             "home-all-want",
             (count > 1).then_some(count),
@@ -896,8 +992,18 @@ impl Render for HomeView {
         let now = crate::dates::now();
         let today = now.date_naive();
         let header = Greeting::new(date_line(today), greeting_at(&now));
-        let loaded = self.model.read(cx).is_loaded();
+        let model = self.model.read(cx);
+        let (loaded, failure) = (model.is_loaded(), model.load_failure().cloned());
         let root = div().id("home").track_focus(&self.focus_handle).size_full();
+        if let Some(message) = failure {
+            return root
+                .child(crate::library::load_failed(
+                    "home-retry",
+                    &self.model,
+                    message,
+                ))
+                .into_any_element();
+        }
         if !loaded {
             return root
                 .child(
@@ -907,19 +1013,17 @@ impl Render for HomeView {
                 )
                 .into_any_element();
         }
-        let digest = self.digest(today, cx);
+        let data = self.data(today, cx);
         let goal = self.goal(today, cx);
-        let model = self.model.read(cx);
-        let (rate_rows, unrated) = if session::has_scope(cx, WRITE_LIBRARY) {
-            to_rate(model.entries(), today, &self.rated_here)
-        } else {
-            (Vec::new(), 0)
-        };
-        // A rating stays on screen only while it is being saved.
-        self.saving_ratings
-            .retain(|id, _| model.pending_write(*id) == Some(WriteKind::Rating));
-        let coming_soon = coming_soon_section(&self.upcoming, &self.model, today, cx);
-        if digest.is_empty() && rate_rows.is_empty() && goal.is_none() && coming_soon.is_none() {
+        let coming_soon = data
+            .coming_soon
+            .as_ref()
+            .map(|soon| coming_soon_section(soon, &self.model, today, cx));
+        if data.digest.is_empty()
+            && data.to_rate.is_empty()
+            && goal.is_none()
+            && coming_soon.is_none()
+        {
             return root
                 .child(empty_state(
                     IconName::LayoutDashboard,
@@ -930,15 +1034,18 @@ impl Render for HomeView {
                 .into_any_element();
         }
 
-        let reading = self.render_reading(&digest, today, window, cx);
-        let rate =
-            (!rate_rows.is_empty()).then(|| self.render_rate(&rate_rows, unrated, today, cx));
+        let reading = self.render_reading(&data, today, window, cx);
+        let rate = (!data.to_rate.is_empty())
+            .then(|| self.render_rate(&data.to_rate, data.unrated, today, cx));
 
-        let goal_section = goal.map(|g| self.goal_section(&g, &digest, today, cx));
-        let series_next = digest.series_next.as_ref().and_then(|next| {
-            let entry = self.model.read(cx).entry(next.id)?.clone();
-            Some(self.up_next_section(next, &entry, cx))
+        let goal_section = goal.map(|g| {
+            let months = self.months(&g, cx);
+            self.goal_section(&g, months, &data, today, cx)
         });
+        let series_next = data
+            .series_next
+            .as_ref()
+            .map(|(next, entry)| self.up_next_section(next, entry, cx));
         // The sidebar is fixed, so the columns get the rest of the window
         // less the page's insets.
         let rem = window.rem_size();
@@ -949,16 +1056,16 @@ impl Render for HomeView {
         // Want to Read books that are all still to come leave nothing to
         // suggest. In three columns the shelf leaves the rail for the second
         // column, under Rate what you finished.
-        let has_want = !digest.up_next.is_empty();
+        let has_want = !data.want.is_empty();
         let (want_in_rail, want_in_column) = if tier == Tier::Three {
             let has_rail = goal_section.is_some() || series_next.is_some();
             let shown = want_to_read_shown(width, rem, has_rail);
-            let section = (has_want && shown > 0)
-                .then(|| self.want_to_read_section(&digest, shown, true, cx));
+            let section =
+                (has_want && shown > 0).then(|| self.want_to_read_section(&data, shown, true));
             (None, section)
         } else {
             let section =
-                has_want.then(|| self.want_to_read_section(&digest, UP_NEXT_IN_RAIL, false, cx));
+                has_want.then(|| self.want_to_read_section(&data, UP_NEXT_IN_RAIL, false));
             (section, None)
         };
         let rail: Vec<AnyElement> = [goal_section, series_next, want_in_rail]
@@ -1194,12 +1301,46 @@ fn month_bars(months: &[u32; 12], today: Date, goal: &Goal) -> MonthBars {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::home::digest::Pace;
-    use hardcover_core::GoalId;
+    use crate::session::SessionScope;
+    use gpui_kit::{AppContext as _, TestAppContext};
+    use hardcover_core::store::LibraryCache;
 
     fn day(s: &str) -> Date {
         s.parse().unwrap()
+    }
+
+    #[gpui_kit::test]
+    fn a_rating_shown_while_saving_goes_when_the_write_ends_without_a_frame(
+        cx: &mut TestAppContext,
+    ) {
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            session.install(cx);
+        });
+        let model = cx.new(|_| LibraryModel::new(session.clone()));
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let goals = cx.new(|cx| GoalsModel::new(session.clone(), &model, cx));
+        let upcoming = cx.new(|cx| UpcomingModel::new(session, model.clone(), cx));
+        let id = model.read_with(cx, |m, _| m.entries()[0].user_book_id);
+        let (home, cx) = cx.add_window_view(|window, cx| {
+            HomeView::new(model.clone(), goals, upcoming, window, cx)
+        });
+        cx.update(|window, cx| {
+            home.update(cx, |home, cx| home.rate(id, Rating::new(4.0), window, cx));
+        });
+        assert!(home.read_with(cx, |h, _| h.saving_ratings.contains_key(&id)));
+        // The demo refuses the write; its end clears the rating shown, with
+        // no frame drawn in between.
+        cx.run_until_parked();
+        assert!(home.read_with(cx, |h, _| h.saving_ratings.is_empty()));
+        assert!(home.read_with(cx, |h, _| h.rated_here.contains(&id)));
     }
 
     #[test]

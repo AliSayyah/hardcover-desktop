@@ -1,12 +1,12 @@
 //! The goal dialogs: one goal's progress, pace and finished books, with its
 //! target and deletion; and the form that creates a goal.
 
+use crate::notify::notify_failure;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::calendar::Date as CalendarDate;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
 use gpui_kit::component::form::{Field, Form};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::{Disableable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
@@ -213,19 +213,7 @@ impl GoalView {
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
                     let task = goals.update(cx, |m, cx| m.delete(id, cx));
-                    window
-                        .spawn(cx, async move |cx| {
-                            if let Some(Err(message)) = task.await {
-                                let _ = cx.update(|window, cx| {
-                                    window.push_notification(
-                                        Notification::error(message)
-                                            .title("Couldn't delete the goal"),
-                                        cx,
-                                    );
-                                });
-                            }
-                        })
-                        .detach();
+                    notify_failure(task, "Couldn't delete the goal", window, cx);
                     true
                 })
         });

@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui_kit::ScrollHandle;
-use gpui_kit::component::button::Button;
 use gpui_kit::component::list::ListState;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
@@ -20,9 +19,9 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{SeriesDetails, SeriesId};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, ListPane, focus_list_if_fallback_is_focused, follow_list,
-    load_failed, new_list, page_body, page_header_scrolling, page_list, read_summary, replace_rows,
-    reset_scroll, row_details,
+    CatalogBooks, CatalogRow, ListPane, focus_list_if_fallback_is_focused, follow_list, new_list,
+    page_body, page_header_scrolling, page_list, read_summary, replace_rows, reset_scroll,
+    row_details,
 };
 use super::navigation::Page;
 use crate::bidi::WrappingText;
@@ -31,8 +30,7 @@ use crate::format::series_position_text;
 use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
 use crate::session::{self, SessionScope};
-use crate::ui::kit::SmallControl as _;
-use crate::ui::{ExternalLink, PageHeader, Skeleton, TextButton};
+use crate::ui::{ExternalLink, LoadFailed, PageHeader, Skeleton, TextButton};
 
 enum Loaded {
     /// Kept for the run, fetched again when stale ([`crate::freshness`]).
@@ -320,15 +318,9 @@ impl Render for SeriesView {
         let current = self.current.and_then(|id| self.pages.get(&id));
         let header = match current {
             Some(Loaded::Ready(series)) => self.render_header(&series.value().clone(), cx),
-            Some(Loaded::Failed(message)) => load_failed(
-                message.clone(),
-                Button::new("retry-series")
-                    .small_control()
-                    .label("Try again")
-                    .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
-                cx,
-            )
-            .into_any_element(),
+            Some(Loaded::Failed(message)) => LoadFailed::new("retry-series", message.clone())
+                .on_retry(cx.listener(|this, _, window, cx| this.retry(window, cx)))
+                .into_any_element(),
             None => v_flex()
                 .gap_2()
                 .child(Skeleton::line_in(TypeRole::PageTitle).w_64())

@@ -20,11 +20,11 @@ use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, ScrollStrategy,
     SharedString, StyleRefinement, Styled as _, Subscription, Window, div,
 };
-use hardcover_core::{LibraryEntry, ReadingStatus, UserBookId};
+use hardcover_core::{ReadingStatus, UserBookId};
 
 use super::book_row::{BookRow, loading_rows};
 use super::collection::{SortOrder, shelf_rows};
-use super::model::{LibraryModel, SyncStatus};
+use super::model::LibraryModel;
 use crate::book::detail_view::{BookDetailView, Subject};
 use crate::chip::status_icon;
 use crate::design::{colors, size};
@@ -50,23 +50,30 @@ impl SelectItem for SortOption {
 
 /// The empty state the list shows, decided by the view.
 #[derive(Clone)]
-struct EmptyCopy {
-    icon: IconName,
-    title: SharedString,
-    description: SharedString,
+enum Empty {
+    /// Nothing on the shelf, or nothing matching the filter.
+    Copy {
+        icon: IconName,
+        title: SharedString,
+        description: SharedString,
+    },
+    /// The library has never loaded: why, with "Try again".
+    Failed(SharedString),
 }
 
-/// Rows of one shelf for the virtualized list.
+/// Rows of one shelf for the virtualized list: the entries' ids, each row
+/// drawn from the model's entry, so a new revision copies no entries.
 pub struct ShelfDelegate {
-    rows: Vec<LibraryEntry>,
+    model: Entity<LibraryModel>,
+    rows: Vec<UserBookId>,
     loading: bool,
-    empty: EmptyCopy,
+    empty: Empty,
     focus: RowFocus,
 }
 
 impl ShelfDelegate {
     fn id_at(&self, ix: IndexPath) -> Option<UserBookId> {
-        self.rows.get(ix.row).map(|e| e.user_book_id)
+        self.rows.get(ix.row).copied()
     }
 }
 
@@ -84,12 +91,15 @@ impl ListDelegate for ShelfDelegate {
         window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let entry = self.rows.get(ix.row)?;
+        let id = *self.rows.get(ix.row)?;
+        let entry = self.model.read(cx).entry(id)?;
+        let title = entry.book.title.clone();
+        let row = BookRow::for_entry(entry).selected(self.focus.is_selected(ix));
         Some(
-            ListItem::new(("library-book", entry.user_book_id.get().cast_unsigned()))
+            ListItem::new(("library-book", id.get().cast_unsigned()))
                 .list_row(self.focus.shows_focus(ix, window), cx)
-                .accessibility_label(entry.book.title.clone())
-                .child(BookRow::for_entry(entry).selected(self.focus.is_selected(ix))),
+                .accessibility_label(title)
+                .child(row),
         )
     }
 
@@ -109,11 +119,17 @@ impl ListDelegate for ShelfDelegate {
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
-        empty_state(
-            self.empty.icon.clone(),
-            self.empty.title.clone(),
-            self.empty.description.clone(),
-        )
+        match &self.empty {
+            Empty::Copy {
+                icon,
+                title,
+                description,
+            } => empty_state(icon.clone(), title.clone(), description.clone()).into_any_element(),
+            Empty::Failed(message) => {
+                crate::library::load_failed("shelf-retry", &self.model, message.clone())
+                    .into_any_element()
+            }
+        }
     }
 
     fn render_loading(
@@ -129,6 +145,17 @@ impl ListDelegate for ShelfDelegate {
     }
 }
 
+/// What the shelf's rows and empty state were built from.
+#[derive(Clone, PartialEq)]
+struct RowsKey {
+    revision: u64,
+    status: ReadingStatus,
+    query: SharedString,
+    order: SortOrder,
+    loading: bool,
+    failure: Option<SharedString>,
+}
+
 pub struct LibraryView {
     model: Entity<LibraryModel>,
     status: ReadingStatus,
@@ -140,7 +167,7 @@ pub struct LibraryView {
     /// The selected entry per shelf, so switching shelves keeps each one's place.
     selection: HashMap<ReadingStatus, UserBookId>,
     /// Inputs of the rows currently in the list, to skip needless rebuilds.
-    rows_key: Option<(u64, ReadingStatus, SharedString, SortOrder)>,
+    rows_key: Option<RowsKey>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -155,9 +182,10 @@ impl LibraryView {
         let list = cx.new(|cx| {
             ListState::new(
                 ShelfDelegate {
+                    model: model.clone(),
                     rows: Vec::new(),
                     loading: true,
-                    empty: EmptyCopy {
+                    empty: Empty::Copy {
                         icon: IconName::Inbox,
                         title: SharedString::default(),
                         description: SharedString::default(),
@@ -285,13 +313,7 @@ impl LibraryView {
     }
 
     fn select_first(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let first = self
-            .list
-            .read(cx)
-            .delegate()
-            .rows
-            .first()
-            .map(|e| e.user_book_id);
+        let first = self.list.read(cx).delegate().rows.first().copied();
         match first {
             Some(id) => self.select(id, window, cx),
             None => self
@@ -304,33 +326,36 @@ impl LibraryView {
     fn refresh_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.filter.read(cx).value();
         let model = self.model.read(cx);
-        let key = (model.revision(), self.status, query.clone(), self.order);
-        let loading = !model.is_loaded();
-        if self.rows_key.as_ref() == Some(&key) && !loading {
+        let failure = model.load_failure().cloned();
+        // Loading until the library loads, unless its first sync failed.
+        let loading = !model.is_loaded() && failure.is_none();
+        let key = RowsKey {
+            revision: model.revision(),
+            status: self.status,
+            query: query.clone(),
+            order: self.order,
+            loading,
+            failure: failure.clone(),
+        };
+        if self.rows_key.as_ref() == Some(&key) {
             return;
         }
         let entries = model.entries();
-        let rows: Vec<LibraryEntry> = shelf_rows(entries, self.status, &query, self.order)
+        let rows: Vec<UserBookId> = shelf_rows(entries, self.status, &query, self.order)
             .into_iter()
-            .map(|ix| entries[ix].clone())
+            .map(|ix| entries[ix].user_book_id)
             .collect();
         let shelf_name = status_label(self.status);
-        let empty = if !query.trim().is_empty() {
-            EmptyCopy {
+        let empty = if let Some(message) = failure {
+            Empty::Failed(message)
+        } else if !query.trim().is_empty() {
+            Empty::Copy {
                 icon: IconName::Search,
                 title: "No matches".into(),
                 description: format!("No books in {shelf_name} match “{}”.", query.trim()).into(),
             }
-        } else if let SyncStatus::Failed { message, .. } = model.sync_status()
-            && entries.is_empty()
-        {
-            EmptyCopy {
-                icon: IconName::CircleAlert,
-                title: "Couldn't load your library".into(),
-                description: message.clone(),
-            }
         } else {
-            EmptyCopy {
+            Empty::Copy {
                 icon: status_icon(self.status),
                 title: format!("No books in {shelf_name}").into(),
                 description: match self.status {
@@ -357,12 +382,7 @@ impl LibraryView {
     fn sync_list_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.selection.get(&self.status).copied();
         self.list.update(cx, |list, cx| {
-            let pos = id.and_then(|id| {
-                list.delegate()
-                    .rows
-                    .iter()
-                    .position(|e| e.user_book_id == id)
-            });
+            let pos = id.and_then(|id| list.delegate().rows.iter().position(|row| *row == id));
             let ix = pos.map(IndexPath::new);
             if list.selected_index() != ix {
                 list.set_selected_index(ix, window, cx);
@@ -397,7 +417,9 @@ struct ShelfPane {
 
 impl Render for ShelfPane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let count = self.model.read(cx).count(self.status);
+        let model = self.model.read(cx);
+        // No count until the library has loaded: 0 would say it's empty.
+        let count = model.is_loaded().then(|| model.count(self.status));
         let colors = colors(cx);
         v_flex()
             .size_full()
@@ -410,11 +432,10 @@ impl Render for ShelfPane {
                     .py_3()
                     .border_b_1()
                     .border_color(colors.border)
-                    .child(
-                        h_flex()
-                            .h(size::CONTROL)
-                            .child(PageHeader::new(status_label(self.status)).count(count)),
-                    )
+                    .child(h_flex().h(size::CONTROL).child(match count {
+                        Some(count) => PageHeader::new(status_label(self.status)).count(count),
+                        None => PageHeader::new(status_label(self.status)),
+                    }))
                     .child(
                         // As the list narrows the sort gives way first, down
                         // to a small select; the filter keeps a usable width,

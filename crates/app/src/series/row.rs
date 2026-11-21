@@ -171,8 +171,8 @@ impl RenderOnce for SeriesRow {
             .child(series_body(&self.series, self.today, self.capacity, cx))
             .child(next_lane(&self.series, &self.library, self.today, cx));
 
-        // The label rides along: revealing the first row of the list shows
-        // a sliver of the header above it, so Shift+Tab reaches the filters.
+        // The label rides along, so revealing a group's first row shows its
+        // label too.
         div()
             .id(key)
             .track_focus(&focus)

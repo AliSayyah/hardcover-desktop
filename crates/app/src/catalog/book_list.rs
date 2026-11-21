@@ -42,7 +42,7 @@ use hardcover_core::{BookSummary, ReadingStatus};
 
 use super::navigation::{self, Page};
 use crate::book::detail_view::{BookDetailView, Subject};
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{colors, size};
 use crate::format::average_rating_text;
 use crate::library::book_row::{BookRow, loading_rows};
 use crate::library::model::LibraryModel;
@@ -106,18 +106,6 @@ pub(super) fn focus_list_if_fallback_is_focused(
     {
         crate::ui::enter_list(list, window, cx);
     }
-}
-
-/// A page that failed to load: what happened, in one muted sentence, and
-/// `retry` ("Try again") beside it.
-pub fn load_failed(message: SharedString, retry: impl IntoElement, cx: &App) -> Div {
-    div()
-        .flex()
-        .flex_wrap()
-        .items_center()
-        .gap_3()
-        .child(div().body().text_color(colors(cx).fg_muted).child(message))
-        .child(retry)
 }
 
 /// A page's rows while they load, on the list's spine.

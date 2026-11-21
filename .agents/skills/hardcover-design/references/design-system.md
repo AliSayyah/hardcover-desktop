@@ -535,6 +535,13 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   row does the same with why a sync failed, under the sync line. A
   disabled row can't take focus; a missing permission is also the
   sidebar's "Sign in again" notice, which can.
+- **Keyboard:** the destinations, from Home to "New list…", are one stop in
+  the Tab order however many lists the reader has, so the page is never
+  dozens of presses away. Tab enters on the row the sidebar was left from
+  (Home until then); Up and Down move between rows, stopping at the ends,
+  Home and End go to the first and the last, Enter and Space press the
+  row, and Tab or Shift+Tab leaves. The account row at the foot is a stop
+  of its own.
 
 ### Popovers, menus and dialogs
 
@@ -596,7 +603,7 @@ Each state has one treatment, on every control. Hover is never the only cue.
 | Focus-visible | A 2 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
 | Disabled | 50% opacity, with no hover or pressed response. When the reason isn't obvious, say it beside the control or in its tooltip (`format::needs_permission`) |
 | Loading | `skeleton` shapes where the content will be, pulsing between 100% and 50% opacity. Covers show a skeleton until the image lands. A button running its action keeps its label, shows its loading state and refuses repeat clicks. No spinner in a list |
-| Error | Say what happened and how to recover, next to the thing that failed (`session::error_message`) |
+| Error | Say what happened and how to recover, next to the thing that failed (`session::error_message`): one muted sentence with a small "Try again" (`ui::LoadFailed`); where the whole region has nothing else to show (the library never loaded), the same in the empty state's place, titled ("Couldn't load your library"), and counts that would read 0 read "—" |
 
 Switching between content that is already loaded is immediate: no skeleton,
 no transition.
@@ -747,7 +754,8 @@ every width below (the tiers' thresholds included) is in design px too.
   - Your review;
   - Reviews (other readers');
   - Similar books: lg covers with shadow, 16 apart, with titles at 12/500 in
-    at most two lines. Eight, wrapping.
+    at most two lines, broken between words; a word too long for the
+    line ends in "…", never split. Eight, wrapping.
 - **Wide main column:** when it holds the 640 text and a 320 side column,
   32 apart, the blocks under the panel split. The text column, exactly 640:
   About this book, Your review, Reviews. The side column, filling the rest:
@@ -847,7 +855,8 @@ every width below (the tiers' thresholds included) is in design px too.
   every word must begin a word of the name or the author) and the select
   (168): Not finished (the default), Finished and All series, each with its
   count. The choice is kept for the session. In a narrow window the
-  controls wrap under the title.
+  controls wrap under the title. The header stays put while the series
+  scroll under it, so the filters are always at hand.
 - **Which series:** those in which the reader has read, is reading, paused
   or gave up on a book. A series shows its whole-numbered books, and a
   fractional one (a novella) only when it is in the library or not out yet.
@@ -1050,6 +1059,8 @@ commit that fixes it.
   than disabled radios; a form's radios are disabled only while it saves.
 - The `DatePicker`'s field stays paper.
 - A dialog keeps the kit's shadow.
+- A notification's action button ("Undo" after a book comes off a list)
+  is the kit's small size, so its label is 14 px, not 12.
 - The kit's controls (buttons, inputs, selects, switches) draw a 3 px focus
   ring, not 2: the width is a private constant of the kit. The app's own
   rows, text buttons and components draw 2.

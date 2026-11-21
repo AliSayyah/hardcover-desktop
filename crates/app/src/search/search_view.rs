@@ -24,7 +24,7 @@
 //! ([`BookRow::compact`]), so the title keeps its room.
 
 use std::cell::Cell;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -222,11 +222,54 @@ impl SearchHit for SeriesHit {
     }
 }
 
+/// Where each row of a results list comes from, worked out when the
+/// results or the library's matches change, so a row is found in constant
+/// time while the list draws.
+struct Rows<K> {
+    /// Hardcover's results without the library's matches: indexes into the
+    /// results, in order.
+    remote: Vec<usize>,
+    /// Each hit's row.
+    at: HashMap<K, IndexPath>,
+}
+
+impl<K> Default for Rows<K> {
+    fn default() -> Self {
+        Self {
+            remote: Vec::new(),
+            at: HashMap::new(),
+        }
+    }
+}
+
+impl<K: Copy + Eq + std::hash::Hash> Rows<K> {
+    /// The rows of `library` (the first section, when there are any) and of
+    /// `hits` without those.
+    fn build<T: Hit<Key = K>>(library: &[T], hits: &[T]) -> Self {
+        let mut at: HashMap<K, IndexPath> = library
+            .iter()
+            .enumerate()
+            .map(|(row, h)| (h.key(), IndexPath::new(row)))
+            .collect();
+        let section = usize::from(!library.is_empty());
+        let remote: Vec<usize> = hits
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| !at.contains_key(&h.key()))
+            .map(|(ix, _)| ix)
+            .collect();
+        for (row, &ix) in remote.iter().enumerate() {
+            at.insert(hits[ix].key(), IndexPath::new(row).section(section));
+        }
+        Self { remote, at }
+    }
+}
+
 pub struct ResultsDelegate<T: SearchHit> {
     results: SearchResults<T>,
     /// The library's matches, the first section when there are any.
     library: Vec<T>,
-    library_keys: HashSet<T::Key>,
+    rows: Rows<T::Key>,
     model: Entity<LibraryModel>,
     view: WeakEntity<SearchView>,
     focus: RowFocus,
@@ -236,8 +279,29 @@ pub struct ResultsDelegate<T: SearchHit> {
 
 impl<T: SearchHit> ResultsDelegate<T> {
     fn set_library(&mut self, hits: Vec<T>) {
-        self.library_keys = hits.iter().map(Hit::key).collect();
         self.library = hits;
+        self.reindex();
+    }
+
+    fn reindex(&mut self) {
+        self.rows = Rows::build(&self.library, self.results.hits());
+    }
+
+    /// Starts `query` with the library's `matches` (see
+    /// [`SearchResults::start`]).
+    fn start(&mut self, query: &str, matches: Vec<T>) -> Option<u64> {
+        let revision = self.results.start(query.into());
+        self.set_library(matches);
+        revision
+    }
+
+    /// Applies a response (see [`SearchResults::receive`]).
+    fn receive(&mut self, revision: u64, result: Result<SearchHits<T>, String>) -> bool {
+        let changed = self.results.receive(revision, result);
+        if changed {
+            self.reindex();
+        }
+        changed
     }
 
     /// With library matches the list has two sections, else one: section 0
@@ -246,30 +310,17 @@ impl<T: SearchHit> ResultsDelegate<T> {
         !self.library.is_empty()
     }
 
-    /// Hardcover's results, without the ones shown as library matches.
-    fn remote(&self) -> impl Iterator<Item = &T> {
-        self.results
-            .hits()
-            .iter()
-            .filter(|h| !self.library_keys.contains(&h.key()))
-    }
-
     fn hit_at(&self, ix: IndexPath) -> Option<&T> {
         if self.has_library() && ix.section == 0 {
             self.library.get(ix.row)
         } else {
-            self.remote().nth(ix.row)
+            let &hit = self.rows.remote.get(ix.row)?;
+            self.results.hits().get(hit)
         }
     }
 
     fn index_of(&self, key: T::Key) -> Option<IndexPath> {
-        if let Some(row) = self.library.iter().position(|h| h.key() == key) {
-            return Some(IndexPath::new(row));
-        }
-        let section = usize::from(self.has_library());
-        self.remote()
-            .position(|h| h.key() == key)
-            .map(|row| IndexPath::new(row).section(section))
+        self.rows.at.get(&key).copied()
     }
 
     fn first(&self) -> Option<&T> {
@@ -282,7 +333,7 @@ impl<T: SearchHit> ResultsDelegate<T> {
 
     /// Hardcover's results so far that are left out as library matches.
     fn hidden_duplicates(&self) -> u32 {
-        u32::try_from(self.results.hits().len() - self.remote().count()).unwrap_or(u32::MAX)
+        u32::try_from(self.results.hits().len() - self.rows.remote.len()).unwrap_or(u32::MAX)
     }
 }
 
@@ -305,11 +356,11 @@ impl<T: SearchHit> ListDelegate for ResultsDelegate<T> {
 
     fn items_count(&self, section: usize, _: &App) -> usize {
         self.focus
-            .stop_when_rows(self.library.len() + self.remote().count());
+            .stop_when_rows(self.library.len() + self.rows.remote.len());
         if self.has_library() && section == 0 {
             self.library.len()
         } else {
-            self.remote().count()
+            self.rows.remote.len()
         }
     }
 
@@ -656,10 +707,9 @@ impl SearchView {
     ) {
         let revision = T::list(self).update(cx, |list, cx| {
             let delegate = list.delegate_mut();
-            let revision = delegate.results.start(query.trim().into());
             // The library's matches show at once; Hardcover's follow.
             let library = T::library_matches(delegate.model.read(cx), query.trim());
-            delegate.set_library(library);
+            let revision = delegate.start(query.trim(), library);
             cx.notify();
             revision
         });
@@ -727,7 +777,7 @@ impl SearchView {
     ) {
         let result = result.map_err(|e| session::error_message(&e, Some(READ_CATALOG), cx));
         T::list(self).update(cx, |list, cx| {
-            if list.delegate_mut().results.receive(revision, result) {
+            if list.delegate_mut().receive(revision, result) {
                 cx.notify();
             }
         });
@@ -861,7 +911,7 @@ fn new_results_list<T: SearchHit>(
             ResultsDelegate {
                 results: SearchResults::default(),
                 library: Vec::new(),
-                library_keys: HashSet::new(),
+                rows: Rows::default(),
                 model: model.clone(),
                 view: view.clone(),
                 focus: RowFocus::default(),
@@ -955,5 +1005,34 @@ impl Render for SearchView {
                     .size_range(rem * size::PANE_MIN.0..gpui_kit::Pixels::MAX)
                     .child(self.render_detail()),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn books(ids: &[i64]) -> Vec<BookSummary> {
+        ids.iter()
+            .map(|&id| BookSummary::new(BookId::new(id), format!("Book {id}")))
+            .collect()
+    }
+
+    #[test]
+    fn rows_put_library_matches_first_and_leave_them_out_of_hardcovers() {
+        let library = books(&[3, 1]);
+        let hits = books(&[1, 2, 3, 4]);
+        let rows = Rows::build(&library, &hits);
+        // Hardcover's section: 2 and 4, as indexes into its results.
+        assert_eq!(rows.remote, [1, 3]);
+        assert_eq!(rows.at[&BookId::new(3)], IndexPath::new(0));
+        assert_eq!(rows.at[&BookId::new(1)], IndexPath::new(1));
+        assert_eq!(rows.at[&BookId::new(2)], IndexPath::new(0).section(1));
+        assert_eq!(rows.at[&BookId::new(4)], IndexPath::new(1).section(1));
+
+        // No library matches: one section, every hit in it.
+        let rows = Rows::build(&[], &hits);
+        assert_eq!(rows.remote, [0, 1, 2, 3]);
+        assert_eq!(rows.at[&BookId::new(4)], IndexPath::new(3));
     }
 }

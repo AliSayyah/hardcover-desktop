@@ -18,16 +18,16 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookSummary, TrendingPeriod};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, ListPane, follow_list, load_failed, new_list, page_body, page_header,
-    page_list, page_loading, replace_rows, row_details,
+    CatalogBooks, CatalogRow, ListPane, follow_list, new_list, page_body, page_header, page_list,
+    page_loading, replace_rows, row_details,
 };
 use crate::format::authors_text;
 use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
 use crate::session::{self, SessionScope};
-use crate::ui::PageHeader;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::small_tab;
+use crate::ui::{LoadFailed, PageHeader};
 
 /// The periods offered, in order.
 const PERIODS: [TrendingPeriod; 5] = [
@@ -323,14 +323,10 @@ impl DiscoverView {
             Some(Loaded::Ready(_)) => page_list(&self.list).into_any_element(),
             Some(Loaded::Failed(message)) => page_header()
                 .pt_0()
-                .child(load_failed(
-                    message.clone(),
-                    Button::new("retry-trending")
-                        .small_control()
-                        .label("Try again")
-                        .on_click(cx.listener(|this, _, window, cx| this.refresh(window, cx))),
-                    cx,
-                ))
+                .child(
+                    LoadFailed::new("retry-trending", message.clone())
+                        .on_retry(cx.listener(|this, _, window, cx| this.refresh(window, cx))),
+                )
                 .into_any_element(),
             None => page_loading().into_any_element(),
         }

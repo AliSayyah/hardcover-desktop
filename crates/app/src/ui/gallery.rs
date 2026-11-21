@@ -35,9 +35,9 @@ use super::kit::{
 use super::reveal::RevealScroll as _;
 use super::{
     AccountRow, Avatar, AvatarSize, Block, BylineLink, Columns, CoverShelf, CoverSlot, EmptyState,
-    ExternalLink, GoalRow, Greeting, Lane, ListRow, Meter, MonthBars, NavRow, ObjectBar,
-    PageHeader, PropertyList, Rail, RailSection, RowSpacing, SectionHeader, Sequence, SeriesStrip,
-    Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton, Tier, blocks,
+    ExternalLink, GoalRow, Greeting, Lane, ListRow, LoadFailed, Meter, MonthBars, NavRow,
+    ObjectBar, PageHeader, PropertyList, Rail, RailSection, RowSpacing, SectionHeader, Sequence,
+    SeriesStrip, Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton, Tier, blocks,
     books_that_fit, brand_row, date_line, greeting, panel, see_all, sidebar_label,
 };
 use crate::app_state::CoverService;
@@ -810,17 +810,39 @@ fn kit_fixes(input: &Entity<InputState>, cx: &App) -> AnyElement {
 }
 
 fn empty(cx: &App) -> AnyElement {
-    specimen(
-        "Empty state",
+    let region = |child: AnyElement| {
         div()
             .h(size::RAIL)
             .border_1()
             .border_color(colors(cx).border)
-            .child(
+            .child(child)
+    };
+    specimen(
+        "Empty state and a failed load",
+        v_flex()
+            .gap_4()
+            .child(region(
                 EmptyState::new(IconName::Search, "No matches")
                     .description("No books in Did not finish match “dune”.")
-                    .action(Button::new("g-clear").label("Clear the filter")),
-            ),
+                    .action(Button::new("g-clear").label("Clear the filter"))
+                    .into_any_element(),
+            ))
+            .child(
+                LoadFailed::new(
+                    "g-retry",
+                    "No connection. Check your network and try again.",
+                )
+                .on_retry(|_, _, _| {}),
+            )
+            .child(region(
+                LoadFailed::new(
+                    "g-retry-region",
+                    "No connection. Check your network and try again.",
+                )
+                .region("Couldn't load your library")
+                .on_retry(|_, _, _| {})
+                .into_any_element(),
+            )),
     )
 }
 
