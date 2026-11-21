@@ -822,6 +822,12 @@ pub struct SeriesRef {
     pub position: Option<f32>,
     /// Hardcover's featured series for this book.
     pub featured: bool,
+    /// The book collects others of the series (a boxed set, an omnibus):
+    /// its position is theirs, so where the reader is in the series leaves
+    /// it out, as Hardcover's series lists do. Known for library entries
+    /// only (`UserBookFields`).
+    #[serde(default)]
+    pub compilation: bool,
 }
 
 impl SeriesRef {
@@ -832,7 +838,15 @@ impl SeriesRef {
             slug: None,
             position: None,
             featured: false,
+            compilation: false,
         }
+    }
+
+    /// A place in the series that counts towards reading it: not a
+    /// [`compilation`](Self::compilation)'s.
+    #[must_use]
+    pub fn counts_in_series(&self) -> bool {
+        !self.compilation
     }
 }
 
@@ -1251,17 +1265,33 @@ impl Goal {
         self.progress / f64::from(self.target)
     }
 
-    /// True if `day` falls within the goal's dates.
+    /// The goal's last day: `end`, except for a goal from Jan 1 to Jan 1 of
+    /// the next year, which is how Hardcover dates its own year goals ("2026
+    /// Reading Goal": Jan 1, 2026 – Jan 1, 2027). That one ends on Dec 31: on
+    /// New Year's Day the next year's goal runs.
+    #[must_use]
+    pub fn last_day(&self) -> Date {
+        use chrono::Datelike as _;
+        let new_year = |d: Date| (d.month(), d.day()) == (1, 1);
+        if new_year(self.start) && new_year(self.end) && self.end.year() == self.start.year() + 1 {
+            self.end.pred_opt().unwrap_or(self.end)
+        } else {
+            self.end
+        }
+    }
+
+    /// True if `day` falls within the goal's dates, up to its
+    /// [`last_day`](Self::last_day).
     #[must_use]
     pub fn is_current(&self, day: Date) -> bool {
-        (self.start..=self.end).contains(&day)
+        (self.start..=self.last_day()).contains(&day)
     }
 
     /// Where steady progress would be by the end of `day`, in the metric's unit.
     #[must_use]
     pub fn expected_by(&self, day: Date) -> f64 {
         use chrono::Datelike as _;
-        let total = self.end.num_days_from_ce() - self.start.num_days_from_ce() + 1;
+        let total = self.last_day().num_days_from_ce() - self.start.num_days_from_ce() + 1;
         if total <= 0 {
             return f64::from(self.target);
         }
@@ -1768,6 +1798,17 @@ mod tests {
         );
         assert!(g.is_current(d(12, 31)));
         assert!(!g.is_current(Date::from_ymd_opt(2027, 1, 1).unwrap()));
+        // Hardcover's own year goal, Jan 1 to Jan 1, ends on Dec 31 too.
+        let mut hardcover = g.clone();
+        hardcover.end = Date::from_ymd_opt(2027, 1, 1).unwrap();
+        assert_eq!(hardcover.last_day(), d(12, 31));
+        assert!(hardcover.is_current(d(12, 31)));
+        assert!(!hardcover.is_current(Date::from_ymd_opt(2027, 1, 1).unwrap()));
+        assert_eq!(hardcover.expected_by(d(4, 10)), 100.0);
+        // Any other end is the last day itself.
+        let mut spring = g.clone();
+        spring.end = d(6, 1);
+        assert_eq!(spring.last_day(), d(6, 1));
         assert_eq!(goal(12, 9.0).fraction(), 0.75);
         assert_eq!(goal(0, 9.0).fraction(), 0.0);
     }

@@ -51,17 +51,22 @@ pub struct ProgressSummary {
 }
 
 impl ProgressSummary {
-    /// "Page 120 of 350", "Page 120", "2h 5m of 10h 30m", "42%", or "Not started".
+    /// "Page 1,120 of 1,350", "Page 120", "2h 5m of 10h 30m", "42%", or
+    /// "Not started".
     pub fn text(&self) -> String {
-        match (self.page, self.total_pages, self.seconds, self.percent) {
-            (Some(page), Some(total), _, _) => format!("Page {page} of {total}"),
-            (Some(page), None, _, _) => format!("Page {page}"),
-            (None, _, Some(secs), _) => match self.total_seconds {
-                Some(total) => format!("{} of {}", duration_text(secs), duration_text(total)),
-                None => duration_text(secs),
-            },
-            (None, _, None, Some(pct)) => format!("{}%", pct.round().max(0.0)),
-            (None, _, None, None) => "Not started".to_owned(),
+        match (self.page, self.seconds, self.percent) {
+            (Some(page), _, _) => format!("Page {}", page_position(page, self.total_pages)),
+            (None, Some(secs), _) => self.time_text(secs),
+            (None, None, Some(pct)) => percent_label(pct),
+            (None, None, None) => "Not started".to_owned(),
+        }
+    }
+
+    /// "2h 5m of 10h 30m", or "2h 5m" without a running time.
+    fn time_text(&self, seconds: u32) -> String {
+        match self.total_seconds {
+            Some(total) => format!("{} of {}", duration_text(seconds), duration_text(total)),
+            None => duration_text(seconds),
         }
     }
 
@@ -69,12 +74,46 @@ impl ProgressSummary {
     /// length "p. 120" or "2h 5m".
     pub fn short_text(&self) -> Option<String> {
         match (self.percent, self.page, self.seconds) {
-            (Some(pct), _, _) => Some(format!("{}%", pct.round().max(0.0))),
-            (None, Some(page), _) => Some(format!("p. {page}")),
+            (Some(pct), _, _) => Some(percent_label(pct)),
+            (None, Some(page), _) => Some(format!("p. {}", count_text(page))),
             (None, None, Some(seconds)) => Some(duration_text(seconds)),
             (None, None, None) => None,
         }
     }
+}
+
+/// Where a read is in its pages, after "Page" or "Paused at page": "418 of
+/// 1,007", or "418" without a page count. The one place a page position is
+/// put in words, with thousands separated.
+pub fn page_position(page: u32, total: Option<u32>) -> String {
+    match total {
+        Some(total) => format!("{} of {}", count_text(page), count_text(total)),
+        None => count_text(page),
+    }
+}
+
+/// A whole percentage: "66%".
+pub fn percent_label(percent: f32) -> String {
+    format!("{}%", percent.round().max(0.0))
+}
+
+/// A paused read's caption: "Paused at page 230 of 1,104 · since Oct 1", or
+/// for an audiobook "Paused at 2h 5m of 10h 0m".
+pub fn paused_text(progress: &ProgressSummary, since: Option<Date>, today: Date) -> String {
+    let mut text = match (progress.page, progress.seconds, progress.percent) {
+        (Some(page), _, _) => format!(
+            "Paused at page {}",
+            page_position(page, progress.total_pages)
+        ),
+        (None, Some(seconds), _) => format!("Paused at {}", progress.time_text(seconds)),
+        (None, None, Some(pct)) => format!("Paused at {}", percent_label(pct)),
+        (None, None, None) => "Paused".to_owned(),
+    };
+    if let Some(since) = since {
+        text.push_str(" · since ");
+        text.push_str(&short_date(since, today));
+    }
+    text
 }
 
 /// Percentage of a progress bar filled by a fraction, in GPUI's precision.
@@ -129,6 +168,12 @@ pub fn pages_per_day_text(pages: f64, under_one: &str) -> String {
     } else if pages < 2.0 {
         "1 page a day".to_owned()
     } else {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a rounded pace of at least 2 pages a day; `as` saturates"
+        )]
+        let pages = pages as u64;
         format!("{} pages a day", count_text(pages))
     }
 }
@@ -260,9 +305,26 @@ pub fn series_position_text(position: f32) -> String {
     }
 }
 
+/// A whole number that counts something, never negative: what
+/// [`count_text`] takes, so a float or a signed number can't be given one.
+pub trait Count: Copy {
+    fn get(self) -> u64;
+}
+
+macro_rules! counts {
+    ($($t:ty),*) => {$(
+        impl Count for $t {
+            fn get(self) -> u64 {
+                u64::try_from(self).unwrap_or(u64::MAX)
+            }
+        }
+    )*};
+}
+counts!(u8, u16, u32, u64, usize);
+
 /// A count with thousands separated: "950", "12,480".
-pub fn count_text(count: impl std::fmt::Display) -> String {
-    let digits = count.to_string();
+pub fn count_text(count: impl Count) -> String {
+    let digits = count.get().to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, c) in digits.chars().enumerate() {
         if i > 0 && (digits.len() - i).is_multiple_of(3) {
@@ -274,8 +336,8 @@ pub fn count_text(count: impl std::fmt::Display) -> String {
 }
 
 /// "1 book", "1,200 books".
-pub fn books_count_text(count: u32) -> String {
-    match count {
+pub fn books_count_text(count: impl Count) -> String {
+    match count.get() {
         1 => "1 book".to_owned(),
         n => format!("{} books", count_text(n)),
     }
@@ -480,24 +542,26 @@ pub fn goal_unit(metric: &GoalMetric, n: f64) -> &str {
     }
 }
 
-/// An amount in a goal's unit, rounded down: whole books and pages, hours to
-/// one decimal (`12.5`, or `12` when whole). Down, so an amount short of the
-/// target never shows as the target.
+/// An amount in a goal's unit, rounded down, with thousands separated: whole
+/// books and pages (`1,200`), hours to one decimal (`12.5`, or `12` when
+/// whole). Down, so an amount short of the target never shows as the
+/// target. Never below zero.
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "goals are displayed as integer units or tenths after rounding down"
+    clippy::cast_sign_loss,
+    reason = "goals are displayed as whole units or tenths after rounding down; `as` saturates"
 )]
 pub fn goal_amount(metric: &GoalMetric, n: f64) -> String {
     match metric {
         GoalMetric::Hours => {
             // The epsilon keeps 2.3 (22.999… tenths in binary) from showing as 2.2.
-            let tenths = (n * 10.0 + 1e-6).floor() as i64;
+            let tenths = (n * 10.0 + 1e-6).floor().max(0.0) as u64;
             match tenths % 10 {
-                0 => format!("{}", tenths / 10),
-                t => format!("{}.{}", tenths / 10, t.abs()),
+                0 => count_text(tenths / 10),
+                t => format!("{}.{t}", count_text(tenths / 10)),
             }
         }
-        _ => format!("{}", n.floor() as i64),
+        _ => count_text(n.floor().max(0.0) as u64),
     }
 }
 
@@ -527,12 +591,12 @@ pub fn goal_year(start: Date, end: Date) -> Option<i32> {
     (from_new_year && to_year_end).then_some(year)
 }
 
-/// `9 of 12 books`.
+/// `9 of 12 books`, `1,200 of 5,000 pages`.
 pub fn goal_progress(goal: &Goal) -> String {
     format!(
         "{} of {} {}",
         goal_amount(&goal.metric, goal.progress),
-        goal.target,
+        count_text(goal.target),
         goal_unit(&goal.metric, f64::from(goal.target))
     )
 }
@@ -549,7 +613,7 @@ pub fn goal_pace(goal: &Goal, today: Date) -> Option<String> {
     if today < goal.start {
         return Some(format!("Starts {}", goal.start.format("%b %-d, %Y")));
     }
-    if today > goal.end {
+    if today > goal.last_day() {
         let short = (f64::from(goal.target) - goal.progress).ceil();
         return Some(format!(
             "Ended {} {} short",
@@ -575,11 +639,9 @@ pub fn goal_pace(goal: &Goal, today: Date) -> Option<String> {
 /// `500 pages by Jun 30, 2026` for other dates.
 pub fn goal_description(metric: &GoalMetric, target: u32, start: Date, end: Date) -> String {
     let unit = goal_unit(metric, f64::from(target));
-    let period = goal_period(start, end);
-    if period.len() == 4 {
-        format!("{target} {unit} in {period}")
-    } else {
-        format!("{target} {unit} by {}", end.format("%b %-d, %Y"))
+    match goal_year(start, end) {
+        Some(year) => format!("{target} {unit} in {year}"),
+        None => format!("{target} {unit} by {}", end.format("%b %-d, %Y")),
     }
 }
 
@@ -762,6 +824,28 @@ mod tests {
             goal_description(&GoalMetric::Pages, 1, d(2026, 1, 1), d(2026, 6, 30)),
             "1 page by Jun 30, 2026"
         );
+        // Hardcover's own year goal, Jan 1 to Jan 1, says its year too.
+        assert_eq!(
+            goal_description(&GoalMetric::Books, 12, d(2026, 1, 1), d(2027, 1, 1)),
+            "12 books in 2026"
+        );
+        assert_eq!(
+            goal_progress(&goal(GoalMetric::Pages, 5_000, 1_200.0)),
+            "1,200 of 5,000 pages"
+        );
+    }
+
+    #[test]
+    fn a_hardcover_year_goal_has_ended_on_new_years_day() {
+        let d = |y, m, d| Date::from_ymd_opt(y, m, d).unwrap();
+        let mut g = goal(GoalMetric::Books, 12, 11.0);
+        g.start = d(2026, 1, 1);
+        g.end = d(2027, 1, 1);
+        assert_eq!(
+            goal_pace(&g, d(2026, 12, 31)).unwrap(),
+            "1 book behind pace"
+        );
+        assert_eq!(goal_pace(&g, d(2027, 1, 1)).unwrap(), "Ended 1 book short");
     }
 
     #[test]
@@ -973,14 +1057,77 @@ mod tests {
         assert_eq!(series_hit_details(&series), "by Jane Quill · 6 books");
     }
 
+    fn summary(page: Option<u32>, total: Option<u32>, percent: Option<f32>) -> ProgressSummary {
+        ProgressSummary {
+            page,
+            total_pages: total,
+            seconds: None,
+            total_seconds: None,
+            percent,
+            audio: false,
+        }
+    }
+
+    #[test]
+    fn page_positions_have_thousands_separators() {
+        assert_eq!(page_position(418, Some(1007)), "418 of 1,007");
+        assert_eq!(
+            summary(Some(1418), Some(2007), Some(41.5)).text(),
+            "Page 1,418 of 2,007"
+        );
+        assert_eq!(summary(Some(1200), None, None).text(), "Page 1,200");
+        assert_eq!(
+            summary(Some(1200), None, None).short_text().unwrap(),
+            "p. 1,200"
+        );
+        assert_eq!(summary(None, None, Some(42.)).text(), "42%");
+        assert_eq!(summary(None, None, None).text(), "Not started");
+    }
+
+    #[test]
+    fn the_paused_caption_says_where_and_since_when() {
+        let today: Date = "2026-11-20".parse().unwrap();
+        assert_eq!(
+            paused_text(
+                &summary(Some(230), Some(1104), Some(20.8)),
+                Some("2026-10-01".parse().unwrap()),
+                today
+            ),
+            "Paused at page 230 of 1,104 · since Oct 1"
+        );
+        assert_eq!(
+            paused_text(
+                &summary(None, None, Some(42.4)),
+                Some("2025-12-01".parse().unwrap()),
+                today
+            ),
+            "Paused at 42% · since Dec 1, 2025"
+        );
+        assert_eq!(
+            paused_text(&summary(None, None, None), None, today),
+            "Paused"
+        );
+        let audio = ProgressSummary {
+            seconds: Some(7_500),
+            total_seconds: Some(36_000),
+            audio: true,
+            ..summary(None, None, Some(20.8))
+        };
+        assert_eq!(
+            paused_text(&audio, None, today),
+            "Paused at 2h 5m of 10h 0m"
+        );
+    }
+
     #[test]
     fn counts_group_thousands() {
-        assert_eq!(count_text(0), "0");
-        assert_eq!(count_text(950), "950");
-        assert_eq!(count_text(1000), "1,000");
-        assert_eq!(count_text(12_480), "12,480");
-        assert_eq!(count_text(1_234_567), "1,234,567");
-        assert_eq!(books_count_text(1), "1 book");
-        assert_eq!(books_count_text(2500), "2,500 books");
+        assert_eq!(count_text(0_u32), "0");
+        assert_eq!(count_text(950_u32), "950");
+        assert_eq!(count_text(1000_usize), "1,000");
+        assert_eq!(count_text(12_480_u64), "12,480");
+        assert_eq!(count_text(1_234_567_u32), "1,234,567");
+        assert_eq!(count_text(u64::MAX), "18,446,744,073,709,551,615");
+        assert_eq!(books_count_text(1_u32), "1 book");
+        assert_eq!(books_count_text(2500_usize), "2,500 books");
     }
 }

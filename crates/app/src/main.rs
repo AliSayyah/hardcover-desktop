@@ -10,6 +10,7 @@ mod cover;
 mod cover_pipeline;
 #[cfg(test)]
 mod cover_quality_tests;
+mod dates;
 mod design;
 mod fonts;
 mod format;
@@ -27,6 +28,7 @@ mod shell;
 mod sign_in;
 mod star;
 mod stats;
+mod text;
 mod ui;
 mod ui_scale;
 mod upcoming;

@@ -25,6 +25,11 @@ unicode-bidi-mirroring = "0.4"
 # Already in the tree.
 uuid = { version = "1", features = ["v5"] }
 
+# Search folds letter forms, digits and accents (`text.rs`); text is cut by
+# grapheme cluster, so an emoji sequence stays whole (`bidi.rs`).
+unicode-normalization = "0.1"
+unicode-segmentation = "1"
+
 # `ui_scale` reads the outputs' sizes in mm over a connection of its own:
 # GPUI drops them. Both already in the tree through GPUI.
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -326,6 +326,9 @@ pub(crate) struct RawBookSeries {
     pub position: Option<f64>,
     #[serde(default)]
     pub featured: bool,
+    /// Asked for by `UserBookFields` only.
+    #[serde(default)]
+    pub compilation: bool,
     pub series: Option<RawSeries>,
 }
 
@@ -375,6 +378,7 @@ fn series_refs(rows: Vec<RawBookSeries>) -> Vec<SeriesRef> {
         s.slug = non_empty(series.slug);
         s.position = bs.position.filter(|p| p.is_finite()).map(model_float);
         s.featured = bs.featured;
+        s.compilation = bs.compilation;
         refs.push(s);
     }
     refs
@@ -1346,6 +1350,7 @@ pub(crate) fn upcoming_books(rows: Vec<RawUpcomingRow>) -> Vec<UpcomingBook> {
         let series = series_refs(vec![RawBookSeries {
             position: row.position,
             featured: false,
+            compilation: false,
             series: row.series,
         }]);
         for s in series {

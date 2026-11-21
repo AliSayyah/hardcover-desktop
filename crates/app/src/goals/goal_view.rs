@@ -32,7 +32,7 @@ use crate::ui::kit::{open_alert_dialog, open_dialog};
 use crate::ui::reveal::RevealScroll as _;
 
 fn today() -> Date {
-    chrono::Local::now().date_naive()
+    crate::dates::today()
 }
 
 /// Digits only, up to a million (a page goal can be large).
@@ -234,7 +234,7 @@ impl GoalView {
         );
         let target = format!(
             "of {} {}",
-            goal.target,
+            crate::format::count_text(goal.target),
             goal_unit(&goal.metric, f64::from(goal.target))
         );
         // The figure as on Home's rail: "9" in display, "of 12 books" muted.
@@ -359,10 +359,12 @@ impl GoalView {
                 h_flex()
                     .justify_between()
                     .child(div().heading().child("Finished in this period"))
-                    .child(div().caption(cx).tabular().child(match count {
-                        1 => "1 book".to_owned(),
-                        n => format!("{n} books"),
-                    })),
+                    .child(
+                        div()
+                            .caption(cx)
+                            .tabular()
+                            .child(crate::format::books_count_text(count)),
+                    ),
             )
             .child(div().caption(cx).child(
                 "From your library: books with a read finished between these dates. \

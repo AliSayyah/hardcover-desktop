@@ -109,7 +109,7 @@ impl UpcomingModel {
         self.status = UpcomingStatus::Loading;
         cx.notify();
         let client = Services::global(cx).client().clone();
-        let today = chrono::Local::now().date_naive();
+        let today = crate::dates::today();
         // Replacing the task drops a load still running: its series are older.
         self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = cx

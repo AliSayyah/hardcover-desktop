@@ -113,7 +113,7 @@ fn group_label(label: impl Into<SharedString>, cx: &App) -> impl IntoElement {
 
 impl Render for UpcomingView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let today = chrono::Local::now().date_naive();
+        let today = crate::dates::today();
         let upcoming = self.upcoming.read(cx);
         let status = upcoming.status().clone();
         let library = self.library.read(cx);

@@ -76,7 +76,7 @@ impl StatsView {
     fn stats(&mut self, cx: &App) -> Rc<ReadingStats> {
         let model = self.model.read(cx);
         let revision = model.revision();
-        let today = chrono::Local::now().date_naive();
+        let today = crate::dates::today();
         match &self.computed {
             Some((r, d, stats)) if *r == revision && *d == today => stats.clone(),
             _ => {
@@ -311,7 +311,10 @@ fn render_years(stats: &ReadingStats, count: usize, bar: Pixels, cx: &App) -> im
         let books = match stats.read_without_date {
             1 => "1 book on your Read shelf has no finish date, so no year counts it.".to_owned(),
             n => {
-                format!("{n} books on your Read shelf have no finish date, so no year counts them.")
+                format!(
+                    "{} books on your Read shelf have no finish date, so no year counts them.",
+                    count_text(n)
+                )
             }
         };
         notes.push(note(books, cx));
