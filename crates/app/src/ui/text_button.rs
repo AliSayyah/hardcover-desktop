@@ -160,6 +160,16 @@ impl RenderOnce for TextButton {
                                     .when_some(width, WrappingText::width),
                             )
                             .into_any_element()
+                    } else if !underline {
+                        // GPUI lays a line out as if it read left to right,
+                        // so a Persian title's brackets and punctuation
+                        // land on the wrong side unless the bidirectional
+                        // layout places them: one line, cut at its end.
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .child(WrappingText::new(label).line_clamp(1))
+                            .into_any_element()
                     } else {
                         div().min_w_0().truncate().child(label).into_any_element()
                     }),

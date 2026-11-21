@@ -21,7 +21,8 @@ use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::{Disableable as _, IconName, IndexPath, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Window, div, rems,
+    ParentElement as _, Render, SharedString, Styled as _, Window, div,
+    prelude::FluentBuilder as _, rems,
 };
 use gpui_kit::{
     FocusHandle, KeyDownEvent, Keystroke, ScrollHandle, StatefulInteractiveElement as _, point, px,
@@ -156,7 +157,11 @@ impl Render for Gallery {
             .child(skeletons())
             .child(kit_fixes(&self.input, cx))
             .child(self.controls(cx))
-            .child(covers_and_avatars(cx))
+            // A cover asked for before the pipeline opens is missing for
+            // the run, so these wait for it.
+            .when(cx.has_global::<CoverService>(), |this| {
+                this.child(covers_and_avatars(cx))
+            })
             .child(empty(cx))
             .child(stars_and_links())
             .child(shelf_and_columns(window, cx))
