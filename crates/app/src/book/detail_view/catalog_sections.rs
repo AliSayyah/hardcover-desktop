@@ -12,7 +12,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, SharedString,
-    Styled as _, div, prelude::FluentBuilder as _,
+    Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookDetails, BookId, BookSummary, RatingBucket};
@@ -20,7 +20,7 @@ use hardcover_core::{BookDetails, BookId, BookSummary, RatingBucket};
 use super::header::HEADER_GENRES;
 use super::your_book::paragraphs;
 use super::{BookDetailView, Details};
-use crate::app_state::Services;
+use crate::app_state::{Services, release_cover_medium};
 use crate::bidi::WrappingText;
 use crate::catalog::navigation::Page;
 use crate::chip::{TagChip, TagGroup, tag_groups};
@@ -94,6 +94,31 @@ impl BookDetailView {
                 cx.notify();
             });
         }));
+    }
+
+    /// Releases the md/lg covers of similar books no longer shown, now that
+    /// `book` (if any) is: those of the book shown before, once it changes.
+    pub(super) fn keep_similar_covers(
+        &mut self,
+        book: Option<BookId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let shown: Vec<String> = match book.and_then(|id| self.similar.get(&id)) {
+            Some(Similar::Ready(books)) => books
+                .iter()
+                .filter_map(|b| b.cover.as_ref().map(|c| c.url.clone()))
+                .collect(),
+            _ => Vec::new(),
+        };
+        if shown == self.similar_covers {
+            return;
+        }
+        for url in std::mem::replace(&mut self.similar_covers, shown) {
+            if !self.similar_covers.contains(&url) {
+                release_cover_medium(&url, Some(window), cx);
+            }
+        }
     }
 
     fn retry_similar(&mut self, cx: &mut Context<Self>) {
