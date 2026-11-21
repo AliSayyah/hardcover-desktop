@@ -206,11 +206,20 @@ impl ListPane {
         let rem = window.rem_size();
         let region = window.viewport_size().width - size::SIDEBAR.to_pixels(rem);
         let beside = pane_beside_list(region, rem);
-        if self.beside.replace(beside) != beside && beside {
-            // The window grew past the threshold: the pane catches up with
-            // the selection, outside this frame's drawing.
+        if self.beside.replace(beside) != beside {
+            // Outside this frame's drawing: grown past the threshold, the
+            // pane catches up with the selection; shrunk below it, the
+            // hidden pane lets go of its book, so nothing it shows (a
+            // review after a sync) is fetched again.
             let (pane, list) = (self.clone(), list.clone());
-            window.defer(cx, move |window, cx| pane.sync(&list, book_at, window, cx));
+            window.defer(cx, move |window, cx| {
+                if beside {
+                    pane.sync(&list, book_at, window, cx);
+                } else {
+                    pane.detail
+                        .update(cx, |detail, cx| detail.set_subject(None, window, cx));
+                }
+            });
         }
         if !beside {
             return column.into_any_element();
