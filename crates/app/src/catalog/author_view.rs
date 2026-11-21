@@ -27,9 +27,9 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{AuthorBook, AuthorDetails, AuthorId};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, focus_list_if_fallback_is_focused, follow_list, load_failed,
-    new_list, page_body, page_header, page_header_scrolling, page_list, read_summary, reset_scroll,
-    row_details,
+    CatalogBooks, CatalogRow, ListPane, focus_list_if_fallback_is_focused, follow_list,
+    load_failed, new_list, page_body, page_header, page_header_scrolling, page_list, read_summary,
+    reset_scroll, row_details,
 };
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
@@ -120,6 +120,8 @@ pub struct AuthorView {
     order_select: Entity<SelectState<Vec<OrderOption>>>,
     bio_expanded: bool,
     list: Entity<ListState<CatalogBooks>>,
+    /// The selected book, beside the list when the window is wide.
+    pane: ListPane,
     /// The author and order the list holds.
     listed: Option<(AuthorId, BookOrder)>,
     /// The header's scroll, when it gives way in a short window.
@@ -129,9 +131,11 @@ pub struct AuthorView {
 
 impl AuthorView {
     pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let pane = ListPane::new(model.clone(), window, cx);
         let list = new_list(
             model.clone(),
             "Hardcover lists no books by this author.",
+            &pane,
             window,
             cx,
         );
@@ -141,7 +145,7 @@ impl AuthorView {
             .collect();
         let order_select =
             cx.new(|cx| SelectState::new(options, Some(IndexPath::new(0)), window, cx));
-        let mut subscriptions = follow_list(&list, &model, window, cx);
+        let mut subscriptions = follow_list(&list, &model, &pane, window, cx);
         subscriptions.push(cx.subscribe_in(
             &order_select,
             window,
@@ -163,6 +167,7 @@ impl AuthorView {
             order_select,
             bio_expanded: false,
             list,
+            pane,
             listed: None,
             header_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
@@ -395,7 +400,7 @@ impl AuthorView {
 }
 
 impl Render for AuthorView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.current.and_then(|id| match self.pages.get(&id) {
             Some(Loaded::Ready(author)) => Some(Ok(author.clone())),
             Some(Loaded::Failed(message)) => Some(Err(message.clone())),
@@ -426,7 +431,7 @@ impl Render for AuthorView {
                 )
                 .into_any_element(),
         };
-        v_flex().size_full().min_w_0().map(|this| {
+        let column = v_flex().size_full().min_w_0().map(|this| {
             if ready {
                 // The header scrolls on its own when the window is short;
                 // "Books" and the list keep their room.
@@ -440,7 +445,9 @@ impl Render for AuthorView {
             } else {
                 this.child(page_header().child(header))
             }
-        })
+        });
+        self.pane
+            .layout(&self.list, CatalogBooks::book_at, column, window, cx)
     }
 }
 

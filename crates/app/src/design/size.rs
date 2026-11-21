@@ -93,6 +93,19 @@ pub const PANE_INSET: Rems = rems(1.5);
 /// The book pane at its widest: [`PAGE_MAX`] and the pane's inset on both
 /// sides. Its object bar keeps to it, so the tools stay over the content.
 pub const PANE_FRAME_MAX: Rems = rems(PAGE_MAX.0 + 2. * PANE_INSET.0);
+/// A main column at [`PAGE_MAX`] beside the [`RAIL`], 24 apart (1064): the
+/// book pane's content when the pane is wide enough for its rail.
+pub const COLUMNS_MAX: Rems = rems(PAGE_MAX.0 + 1.5 + RAIL.0);
+/// The book pane with its rail at its widest (1112): [`COLUMNS_MAX`] and the
+/// pane's inset on both sides. Its object bar keeps to it, as to
+/// [`PANE_FRAME_MAX`] when it has no rail.
+pub const PANE_COLUMNS_FRAME_MAX: Rems = rems(COLUMNS_MAX.0 + 2. * PANE_INSET.0);
+/// The narrowest book pane beside a catalogue page's list (392): its header
+/// keeps the xl cover beside the info column at [`HEADER_INFO_MIN`], 24
+/// apart, inside the pane's inset (24 + 128 + 24 + 192 + 24). Narrower, the
+/// header would wrap under the cover, so the page keeps opening the full
+/// book page instead.
+pub const PANE_BESIDE_PAGE_MIN: Rems = rems(2. * PANE_INSET.0 + 8. + 1.5 + HEADER_INFO_MIN.0);
 /// The least room a page keeps for its list under a header that scrolls
 /// (224): three rows and the list's foot.
 pub const PAGE_LIST_MIN: Rems = rems(14.);

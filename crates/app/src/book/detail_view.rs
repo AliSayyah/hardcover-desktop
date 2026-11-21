@@ -5,7 +5,14 @@
 //!
 //! - **Pane:** its own object bar (no Back; "Lists" and "more" trailing),
 //!   then, inset 24: the header (xl cover, the title in `display-24`), the
-//!   progress or Not started panel, and the blocks.
+//!   progress or Not started panel, and the blocks, in one column at most
+//!   768 wide.
+//! - **Wide pane:** when the pane's own width fits a main column of at least
+//!   `size::MAIN_MIN` beside the rail ([`pane_has_rail`]), it takes the
+//!   page's columns (the same builder, [`BookDetailView::render_columns`])
+//!   with the pane's header and inset: at most `size::COLUMNS_MAX` wide. The
+//!   pane measures itself as it is laid out (it sits beside a resizable
+//!   list), so a change of tier shows from the next frame.
 //! - **Page:** the shell draws the bar (Back and this view's
 //!   [`ObjectTools`]). Inset 32: a main column (xxl cover, `display-30`,
 //!   the panel, About this book, Your review, Reviews, Similar books) and the
@@ -19,7 +26,9 @@
 //! and the controls are reset to the model's (unchanged) values. A notes or
 //! review draft is the exception: it is kept until saved or discarded.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,11 +37,11 @@ use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SelectEvent, SelectItem, SelectState};
-use gpui_kit::component::{IconName, WindowExt as _, v_flex};
+use gpui_kit::component::{ElementExt as _, IconName, WindowExt as _, v_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, RenderImage, SharedString, Styled as _, Subscription, Task, Window,
-    div,
+    ParentElement as _, Pixels, Render, RenderImage, SharedString, Styled as _, Subscription, Task,
+    Window, div,
 };
 use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY};
 use hardcover_core::{
@@ -125,6 +134,17 @@ enum Details {
     Failed(SharedString),
 }
 
+/// Whether a book pane `width` wide takes the page's rail: inside its inset,
+/// a main column of at least `size::MAIN_MIN` fits beside the rail (the
+/// test `ui::Columns` folds by). Pure, from the width the pane itself gets.
+pub fn pane_has_rail(width: Pixels, rem_size: Pixels) -> bool {
+    !folds(
+        width - size::PANE_INSET.to_pixels(rem_size) * 2.,
+        rem_size,
+        false,
+    )
+}
+
 /// Wait before fetching details so arrowing through a list does not spend the
 /// rate limit on every book passed over.
 const DETAILS_DELAY: Duration = Duration::from_millis(250);
@@ -166,6 +186,9 @@ pub struct BookDetailView {
     /// tools go to that bar, and the page has its own layout (xxl cover,
     /// `display-30`, a rail). Otherwise the pane, which draws its own bar.
     tools_in_bar: bool,
+    /// The pane is wide enough for the page's rail ([`pane_has_rail`]), as
+    /// measured when it was last laid out.
+    wide: Rc<Cell<bool>>,
     review: ReviewEditor,
     community_reviews: CommunityReviews,
     _subscriptions: Vec<Subscription>,
@@ -238,6 +261,7 @@ impl BookDetailView {
             similar_task: None,
             tags_expanded: false,
             tools_in_bar: false,
+            wide: Rc::new(Cell::new(false)),
             review,
             community_reviews: CommunityReviews::default(),
             _subscriptions: subscriptions,
@@ -894,8 +918,78 @@ impl BookDetailView {
     }
 
     /// The pane: its bar over one scrolling column of the header, the panel
-    /// and every block.
+    /// and every block; or, when it is wide, over the page's columns.
     fn render_pane(
+        &mut self,
+        book: &BookSummary,
+        entry: Option<&LibraryEntry>,
+        details: Option<&BookDetails>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let wide = self.wide.get();
+        let (frame, content) = if wide {
+            let columns = self.render_columns(book, entry, details, false, window, cx);
+            (
+                size::PANE_COLUMNS_FRAME_MAX,
+                // At least the pane high, so the rail's hairline runs to the
+                // foot of a short book, as on the page.
+                div()
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .max_w(size::PANE_COLUMNS_FRAME_MAX)
+                    .min_h_full()
+                    .px_6()
+                    .pb_6()
+                    .tab_group()
+                    .child(columns)
+                    .into_any_element(),
+            )
+        } else {
+            (
+                size::PANE_FRAME_MAX,
+                div()
+                    .px_6()
+                    .pb_6()
+                    .child(self.render_column(book, entry, details, window, cx))
+                    .into_any_element(),
+            )
+        };
+        let measured = self.wide.clone();
+        v_flex()
+            .size_full()
+            // GPUI has no container queries, and the pane sits beside a
+            // resizable list: measure the width the parent gives it.
+            .on_prepaint(move |bounds, window, _| {
+                let wide = pane_has_rail(bounds.size.width, window.rem_size());
+                if measured.replace(wide) != wide {
+                    window.refresh();
+                }
+            })
+            // As wide as the content and its inset, so in a wide window the
+            // tools stay at the content's trailing edge, not the window's.
+            .child(
+                div()
+                    .w_full()
+                    .max_w(frame)
+                    .child(ObjectBar::new().tools(self.render_tools(book, entry, cx))),
+            )
+            .child(
+                div()
+                    // Keyed by book, so another book (a similar one) opens at
+                    // the top.
+                    .id(("book-detail", book.id.get().cast_unsigned()))
+                    .flex_1()
+                    .min_h_0()
+                    .scroll_y_revealing_focus()
+                    .child(content),
+            )
+            .into_any_element()
+    }
+
+    /// The narrow pane's one column: the header, the panel and every block.
+    fn render_column(
         &mut self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
@@ -920,48 +1014,29 @@ impl BookDetailView {
         column.extend(self.render_community_reviews(book.id, window, cx));
         column.extend(self.render_similar(book, details, cx));
 
-        let content = v_flex()
+        v_flex()
             .w_full()
             .max_w(size::PAGE_MAX)
             .gap_6()
             .child(header)
             .children(entry.and_then(|entry| self.render_panel(entry, cx)))
-            .child(blocks().children(column));
-        v_flex()
-            .size_full()
-            // As wide as the content and its inset, so in a wide window the
-            // tools stay at the content's trailing edge, not the window's.
-            .child(
-                div()
-                    .w_full()
-                    .max_w(size::PANE_FRAME_MAX)
-                    .child(ObjectBar::new().tools(self.render_tools(book, entry, cx))),
-            )
-            .child(
-                div()
-                    // Keyed by book, so another book (a similar one) opens at
-                    // the top.
-                    .id(("book-detail", book.id.get().cast_unsigned()))
-                    .flex_1()
-                    .min_h_0()
-                    .scroll_y_revealing_focus()
-                    .px_6()
-                    .pb_6()
-                    .child(content),
-            )
+            .child(blocks().children(column))
             .into_any_element()
     }
 
-    /// The full page: a main column beside the rail, both from the top; the
-    /// rail folds under the main column when the page is too narrow.
-    fn render_page(
+    /// The page's columns, on the full page and in a wide pane: a main column
+    /// (the header, the panel, About this book, tags, Your review, Reviews,
+    /// Similar books) beside the rail (On Hardcover, Details, Reads, Notes),
+    /// both from the top. The caller wraps them in its inset as a tab group.
+    fn render_columns(
         &mut self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
+        folded: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Columns {
         let header = self.render_header(book, entry, details, true, window, cx);
         let mut main: Vec<AnyElement> = Vec::new();
         main.push(self.render_about(book, cx));
@@ -981,22 +1056,37 @@ impl BookDetailView {
             rail.push(self.render_notes(entry, true, cx));
         }
 
-        // The page is the window less the sidebar and its own insets: GPUI
-        // has no container queries.
-        let rem = window.rem_size();
-        let width = window.viewport_size().width
-            - size::SIDEBAR.to_pixels(rem)
-            - size::PAGE_INSET.to_pixels(rem) * 2.;
         // Keyboard order follows the task, not the tree: the header and
         // panel, then the rail beside them (your book), then the main
         // column's blocks. The blocks are a later tab group inside the
-        // page's own group, so the rail's stops come before them.
+        // caller's own group, so the rail's stops come before them.
         let main = v_flex()
             .w_full()
             .gap_6()
             .child(header)
             .children(entry.and_then(|entry| self.render_panel(entry, cx)))
             .child(blocks().tab_group().tab_index(1).children(main));
+        Columns::new(main).rail(rail).folded(folded)
+    }
+
+    /// The full page: the columns in the page's inset; the rail folds under
+    /// the main column when the page is too narrow.
+    fn render_page(
+        &mut self,
+        book: &BookSummary,
+        entry: Option<&LibraryEntry>,
+        details: Option<&BookDetails>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // The page is the window less the sidebar and its own insets: GPUI
+        // has no container queries.
+        let rem = window.rem_size();
+        let width = window.viewport_size().width
+            - size::SIDEBAR.to_pixels(rem)
+            - size::PAGE_INSET.to_pixels(rem) * 2.;
+        let columns =
+            self.render_columns(book, entry, details, folds(width, rem, false), window, cx);
         div()
             .id(("book-detail", book.id.get().cast_unsigned()))
             .size_full()
@@ -1011,11 +1101,7 @@ impl BookDetailView {
                     .min_h_full()
                     .p_8()
                     .tab_group()
-                    .child(
-                        Columns::new(main)
-                            .rail(rail)
-                            .folded(folds(width, rem, false)),
-                    ),
+                    .child(columns),
             )
             .into_any_element()
     }
@@ -1049,5 +1135,27 @@ impl Render for BookDetailView {
         } else {
             self.render_pane(&book, entry.as_ref(), details.as_deref(), window, cx)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::px;
+
+    #[test]
+    fn the_pane_takes_the_rail_only_when_a_main_column_fits_beside_it() {
+        let rem = px(16.);
+        // 24 + 400 + 24 + 272 + 24 = 744.
+        assert!(pane_has_rail(px(744.), rem));
+        assert!(!pane_has_rail(px(743.), rem));
+        // The minimum window, the list at its narrowest: one column.
+        assert!(!pane_has_rail(px(800. - 240. - 272.), rem));
+        // The default window, with the list at its default and narrowest.
+        assert!(!pane_has_rail(px(1200. - 240. - 384.), rem));
+        assert!(!pane_has_rail(px(1200. - 240. - 272.), rem));
+        // A 1600 laptop panel and a 4K monitor at 1.5, the list at its default.
+        assert!(pane_has_rail(px(1600. - 240. - 384.), rem));
+        assert!(pane_has_rail(px(2560. - 240. - 384.), rem));
     }
 }
