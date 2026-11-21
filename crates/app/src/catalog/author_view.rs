@@ -232,8 +232,14 @@ impl AuthorView {
                 }
                 let result = result.map(Arc::new);
                 let changed = match (this.pages.get_mut(&id), result) {
-                    // A refetch: a failure keeps the page shown.
-                    (Some(Loaded::Ready(fetched)), result) => fetched.refetched(result, cx),
+                    // A refetch: a failure keeps the page shown, and only
+                    // records a refused scope.
+                    (Some(Loaded::Ready(fetched)), result) => {
+                        if let Err(e) = &result {
+                            Services::error_message(e, Some(READ_CATALOG), cx);
+                        }
+                        fetched.refetched(result, cx)
+                    }
                     (_, Ok(page)) => {
                         this.pages.insert(id, Loaded::Ready(Fetched::new(page, cx)));
                         false
@@ -303,8 +309,14 @@ impl AuthorView {
 
     /// Fetches the page again if it is stale ([`crate::freshness`]), and
     /// the book in the pane beside the list.
+    /// A failed page is tried again only with `shown_again`.
     pub fn revalidate(&mut self, shown_again: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.load(window, cx);
+        let failed = self
+            .current
+            .is_some_and(|id| matches!(self.pages.get(&id), Some(Loaded::Failed(_))));
+        if shown_again || !failed {
+            self.load(window, cx);
+        }
         self.pane.revalidate(shown_again, cx);
     }
 

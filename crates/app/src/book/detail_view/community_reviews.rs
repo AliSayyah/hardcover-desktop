@@ -538,6 +538,29 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn the_same_book_with_newer_facts_keeps_the_pane(cx: &mut TestAppContext) {
+        let (view, cx) = demo_pane(cx);
+        view.update(cx, |view, cx| view.more_reviews(cx));
+        settle(cx);
+        assert_eq!(review_pages(&view, cx), 2);
+
+        // Its list's page was fetched again (the reviews being stale too): a
+        // new summary, same book.
+        cx.update(|window, cx| {
+            crate::freshness::refresh_all(cx);
+            view.update(cx, |view, cx| {
+                let mut book = hardcover_core::BookSummary::new(BOOK, "Project Hail Mary");
+                book.users_count = Some(12_345);
+                view.set_subject(Some(super::super::Subject::Book(book)), window, cx);
+            });
+        });
+        settle(cx);
+        assert_eq!(review_pages(&view, cx), 2, "the reviews paged through stay");
+        let count = view.read_with(cx, |view, cx| view.book(cx).and_then(|b| b.users_count));
+        assert_eq!(count, Some(12_345), "the newer facts are shown");
+    }
+
+    #[gpui_kit::test]
     fn paged_reviews_are_replaced_only_when_shown_again(cx: &mut TestAppContext) {
         let (view, cx) = demo_pane(cx);
         assert_eq!(review_pages(&view, cx), 1);

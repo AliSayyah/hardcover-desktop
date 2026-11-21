@@ -94,6 +94,9 @@ impl BookDetailView {
                 let result = result.map(Arc::new);
                 match (this.similar.get_mut(&id), result) {
                     (Some(Similar::Ready(fetched)), result) => {
+                        if let Err(e) = &result {
+                            Services::error_message(e, Some(READ_CATALOG), cx);
+                        }
                         fetched.refetched(result, cx);
                     }
                     (_, Ok(books)) => {

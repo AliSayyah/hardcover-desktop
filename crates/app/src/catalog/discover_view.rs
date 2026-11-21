@@ -196,8 +196,9 @@ impl DiscoverView {
                     // the Refresh button says so.
                     (Some(Loaded::Ready(fetched)), Err(e)) => {
                         fetched.refetched(Err(()), cx);
+                        // Records a refused scope even when nothing is said.
+                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
                         if asked {
-                            let message = Services::error_message(&e, Some(READ_CATALOG), cx);
                             window.push_notification(
                                 Notification::error(message).title("Couldn't refresh Discover"),
                                 cx,
@@ -270,8 +271,12 @@ impl DiscoverView {
 
     /// Fetches the shown period again if it is stale ([`crate::freshness`]),
     /// and the book in the pane beside the list.
+    /// A failed period is tried again only with `shown_again`.
     pub fn revalidate(&mut self, shown_again: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.load(false, window, cx);
+        let failed = matches!(self.periods.get(&self.period), Some(Loaded::Failed(_)));
+        if shown_again || !failed {
+            self.load(false, window, cx);
+        }
         self.pane.revalidate(shown_again, cx);
     }
 

@@ -12,7 +12,7 @@
 //! ones to revalidate: on Refresh, when the window becomes active, and when a
 //! page or destination is shown again (`Workspace::revalidate_visible`).
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use gpui_kit::{App, Global};
 
@@ -36,26 +36,34 @@ pub fn refresh_all(cx: &mut App) {
 }
 
 /// When a value was last fetched or tried, and in which Refresh generation.
+/// Wall-clock time, not `Instant`: on Linux that stops while the computer
+/// sleeps, so a laptop opened in the morning would find everything fresh.
 #[derive(Debug, Clone, Copy)]
 pub struct Stamp {
-    at: Instant,
+    at: SystemTime,
     generation: u64,
 }
 
 impl Stamp {
     pub fn now(cx: &App) -> Self {
         Self {
-            at: Instant::now(),
+            at: SystemTime::now(),
             generation: generation(cx),
         }
     }
 
     pub fn is_stale(self, cx: &App) -> bool {
-        self.is_stale_at(Instant::now(), generation(cx))
+        self.is_stale_at(SystemTime::now(), generation(cx))
     }
 
-    fn is_stale_at(self, now: Instant, generation: u64) -> bool {
-        self.generation != generation || now.saturating_duration_since(self.at) >= STALE_AFTER
+    /// A clock set back since the stamp counts as stale: how old the value
+    /// is can't be known.
+    fn is_stale_at(self, now: SystemTime, generation: u64) -> bool {
+        self.generation != generation
+            || now
+                .duration_since(self.at)
+                .is_ok_and(|age| age >= STALE_AFTER)
+            || now < self.at
     }
 }
 
@@ -102,14 +110,16 @@ mod tests {
 
     #[test]
     fn a_stamp_goes_stale_with_age_or_a_refresh() {
-        let at = Instant::now();
+        let at = SystemTime::now();
         let stamp = Stamp { at, generation: 3 };
         assert!(!stamp.is_stale_at(at, 3));
         assert!(!stamp.is_stale_at(at + STALE_AFTER - Duration::from_secs(1), 3));
         assert!(stamp.is_stale_at(at + STALE_AFTER, 3));
         assert!(stamp.is_stale_at(at, 4), "a Refresh since");
-        // A clock read before the stamp (another thread's) is not negative age.
-        assert!(!stamp.is_stale_at(at - Duration::from_secs(1), 3));
+        assert!(
+            stamp.is_stale_at(at - Duration::from_secs(1), 3),
+            "the clock was set back"
+        );
     }
 
     #[gpui_kit::test]

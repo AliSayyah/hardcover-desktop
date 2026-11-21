@@ -288,6 +288,15 @@ impl BookDetailView {
         if self.subject == subject {
             return;
         }
+        if let (Some(Subject::Book(shown)), Some(Subject::Book(book))) = (&self.subject, &subject)
+            && shown.id == book.id
+        {
+            // The same book with newer facts (its list's page was fetched
+            // again): everything the pane shows of it stays as it is.
+            self.subject = subject;
+            cx.notify();
+            return;
+        }
         self.subject = subject;
         self.shown = None;
         self.sync_controls(window, cx);
@@ -311,9 +320,20 @@ impl BookDetailView {
     /// the page shown again) lets reviews the reader paged through be
     /// replaced by a fresh first page; without it (the window became active)
     /// only a single page is.
+    ///
+    /// A failed fetch is tried again only with `shown_again`: offline, every
+    /// return to the window would otherwise send a request and flash the
+    /// placeholder.
     pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
-        self.load_details(cx);
-        self.load_similar(cx);
+        let Some(book) = self.book(cx).map(|b| b.id) else {
+            return;
+        };
+        if shown_again || !matches!(self.details.get(&book), Some(Details::Failed(_))) {
+            self.load_details(cx);
+        }
+        if shown_again || !matches!(self.similar.get(&book), Some(Similar::Failed(_))) {
+            self.load_similar(cx);
+        }
         self.revalidate_reviews(shown_again, cx);
     }
 
@@ -462,8 +482,12 @@ impl BookDetailView {
                 }
                 let result = result.map(Arc::new);
                 match (this.details.get_mut(&id), result) {
-                    // A refetch: a failure keeps the details shown.
+                    // A refetch: a failure keeps the details shown, and only
+                    // records a refused scope.
                     (Some(Details::Loaded(fetched)), result) => {
+                        if let Err(e) = &result {
+                            Services::error_message(e, Some(READ_CATALOG), cx);
+                        }
                         fetched.refetched(result, cx);
                     }
                     (_, Ok(details)) => {
@@ -1222,6 +1246,23 @@ mod tests {
             Details::Loaded(fetched) => Some(fetched.is_stale(cx)),
             Details::Failed(_) => None,
         })
+    }
+
+    #[gpui_kit::test]
+    fn a_failure_is_tried_again_on_refresh_not_on_activation(cx: &mut TestAppContext) {
+        let (view, cx) = demo_pane(cx);
+        let loading = |view: &Entity<BookDetailView>, cx: &mut VisualTestContext| {
+            view.read_with(cx, |view, _| view.details_loading == Some(BOOK))
+        };
+        view.update(cx, |view, _| {
+            view.details.insert(BOOK, Details::Failed("offline".into()));
+        });
+        view.update(cx, |view, cx| view.revalidate(false, cx));
+        assert!(!loading(&view, cx), "the window became active: left alone");
+        view.update(cx, |view, cx| view.revalidate(true, cx));
+        assert!(loading(&view, cx), "Refresh, or shown again: tried again");
+        settle(cx);
+        assert_eq!(details_stale(&view, cx), Some(false));
     }
 
     #[gpui_kit::test]
