@@ -822,6 +822,54 @@ function libraryWide() {
   </div>`;
 }
 
+// A catalogue page (Discover, a series, an author, a list) on a wide window: the list keeps its frame
+// (768 inside the 32 inset) and the selected book shows in the pane beside it, which takes its rail
+// once it is wide enough. A click selects; Enter or a double click opens the full page.
+function discoverWide() {
+  const r = (b, meta, chip, sel) => `<div class="row${sel ? " sel focus" : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line num">${meta}</div></div>${chip ? `<span class="chip">${ic(chip[0], "xs")}${chip[1]}</span>` : ""}</div>`;
+  const rows = [
+    r(B.wok, "Brandon Sanderson · 2010 · 4.63 average", ["book", "Currently reading"]),
+    r(B.phm, "Andy Weir · 2021 · 4.51 average", ["book", "Currently reading"]),
+    r(B.mist, "Brandon Sanderson · 2006 · 4.46 average", ["check", "Read"], true),
+    r(B.dune, "Frank Herbert · 1965 · 4.34 average", ["check", "Read"]),
+    r(B.hob, "J.R.R. Tolkien · 1937 · 4.31 average", ["check", "Read"]),
+    r(B.circe, "Madeline Miller · 2018 · 4.21 average", ["inbox", "Want to read"]),
+    r(B.fw, "Rebecca Yarros · 2023 · 4.02 average", ["inbox", "Want to read"]),
+    r(B.moby, "Herman Melville · 1851 · 3.62 average"),
+  ].join("");
+  const mist = { ...B.mist, p: 541, y: 2006, r: 4.46, rc: 5802, g: ["Fantasy", "Adventure"], s: "The Mistborn Saga #1" };
+  return sidebar("discover") + `<div class="main" style="flex-direction:row">
+    <div class="scroll page" style="width:832px;flex:none"><div class="list-page">
+      <div class="page-title">Discover</div>
+      <div class="muted mt-4">The books the most readers finished on Hardcover in the last month.</div>
+      <div class="col mt-16" style="gap:var(--s-2);margin-left:calc(-1 * var(--s-8))">${rows}</div>
+    </div></div>
+    <div class="detail" style="border-left:1px solid var(--border)">
+      <div class="objbar" style="max-width:1112px"><span class="push"></span>${bookTools}</div>
+      <div class="pane wide"><div class="cols">
+        <div class="fill">
+          ${bookHeader(mist, "xl", { noAverage: true, actions: statusBtn("check", "Read") + rate })}
+          <div class="block">${blockH("About this book")}<div class="prose">In a world of ash and mist ruled by an immortal emperor, a street thief discovers she can burn metals for power and joins a crew planning an impossible heist.</div></div>
+          <div class="block">${blockH("Your review", `<span class="btn sm">${ic("pencil", "xs")}Write a review…</span>`)}<div class="muted">No review yet.</div></div>
+          <div class="block">${blockH("Similar books")}<div class="shelf lg">${[B.wok, B.dune, B.hob, B.circe].map(b => `<div class="it">${cover(b, "lg", true)}<div class="tt strong clamp-2">${b.t}</div></div>`).join("")}</div></div>
+        </div>
+        <div class="rail">
+          <div class="label">On Hardcover</div>
+          <div class="figure"><span class="display d-30 num">4.46</span>${stars(4.46, "cat")}</div>
+          <div class="muted num mt-4">5,802 ratings · 12,691 readers</div>
+          <span class="link row-c g-4 start mt-12">Open on Hardcover ${ic("ext", "xs")}</span>
+          <div class="hair"></div>
+          <div class="label">Details</div>
+          <div class="mt-12">${details("Mar 2, 2026")}</div>
+          <div class="hair"></div>
+          <div class="row-c"><span class="label">Reads</span><span class="btn sm ghost push">${ic("plus", "xs")}Add a past read…</span></div>
+          <div class="reads mt-8"><div class="r">${ic("check")}<div class="col"><span>Read</span><span class="small muted num">Jul 8 – Jul 25, 2026</span></div></div></div>
+        </div>
+      </div></div>
+    </div>
+  </div>`;
+}
+
 // ---------- Token sheets: built from the same variables the screens use ----------
 const probes = {};
 for (const t of ["light", "dark"]) { const p = document.createElement("div"); p.className = "theme-" + t; p.style.display = "none"; document.body.append(p); probes[t] = p; }
@@ -1134,6 +1182,7 @@ const shots = [
   ["Home, wide (2560)", "dark · a 4K monitor at 1.5: Continue reading, then Coming soon and Rate what you finished in a second column, then the rail · each column at most 720, so actions stay by their books", "dark", 1000, homeWide(), 2560],
   ["Home, wide (1600)", "light · the laptop panel: the same three columns, each narrower", "light", 1000, homeWide(), 1600],
   ["Library, wide (2560)", "dark · the book pane takes the full page's rail (On Hardcover, Details, Reads, Notes) once the pane is wide enough for both", "dark", 1000, libraryWide(), 2560],
+  ["Discover, wide (2560)", "light · a catalogue page keeps its list's frame and shows the selected book in the pane beside it, with its rail; a click selects, Enter or a double click opens the full page", "light", 1000, discoverWide(), 2560],
   ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail; Coming soon closes the main column (scrolled content shown in full)", "light", 1020, home()],
   ["Home", "dark", "dark", 1020, home()],
   ["Library: Currently reading", "light · the book's tools sit in a bar above it; status and rating first, then progress", "light", 800, library("cr")],
