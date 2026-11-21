@@ -7,6 +7,7 @@ mod book;
 mod catalog;
 mod chip;
 mod cover;
+mod cover_pipeline;
 #[cfg(test)]
 mod cover_quality_tests;
 mod design;

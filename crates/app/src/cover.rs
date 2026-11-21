@@ -10,7 +10,7 @@
 //!   no image or it failed: a cloth colour picked by the title, the initial
 //!   (xs, sm), the stamped frame, the title and the author (md and up).
 //!
-//! Images go through the cover pipeline (`app_state`): a list cover asks for
+//! Images go through the cover pipeline (`cover_pipeline`): a list cover asks for
 //! the thumbnail itself ([`Cover::thumbnail`]), decoded and scaled on the
 //! cover-decoder thread, 144 px high for xs and sm and 288 px from md
 //! ([`CoverSize::image_height`]), so each stays sharp on a 2x or 3x screen. The book pane loads and releases its own detail
@@ -43,11 +43,9 @@ use gpui_kit::{
     linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px, rems,
 };
 
-use crate::app_state::{
-    CoverImage, CoverMedium, CoverThumbnail, MEDIUM_COVER_HEIGHT, THUMBNAIL_HEIGHT,
-};
 use crate::bidi::{WrappingText, is_rtl};
 use crate::catalog::navigation::{self, Page};
+use crate::cover_pipeline::{COVER_HEIGHT, MEDIUM_COVER_HEIGHT, THUMBNAIL_HEIGHT, load_cover};
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors};
 
@@ -171,22 +169,15 @@ impl CoverArt {
 }
 
 /// The detail cover for `url` (the book pane's), through the same pipeline as
-/// the other covers, scaled to `app_state::COVER_HEIGHT`. The caller releases
-/// it with `app_state::release_cover_image`.
+/// the other covers, scaled to `cover_pipeline::COVER_HEIGHT`. The caller releases
+/// it with `cover_pipeline::release_cover_image`.
 pub fn detail_art(url: &str, window: &mut Window, cx: &mut App) -> CoverArt {
-    window
-        .use_asset::<CoverImage>(&url.to_owned(), cx)
-        .map_or(CoverArt::Loading, CoverArt::loaded)
+    load_cover(url, COVER_HEIGHT, window, cx).map_or(CoverArt::Loading, CoverArt::loaded)
 }
 
 /// The thumbnail for `url` at `size`'s [`CoverSize::image_height`].
 fn thumbnail_art(url: &str, size: CoverSize, window: &mut Window, cx: &mut App) -> CoverArt {
-    let url = url.to_owned();
-    let image = match size.image_height() {
-        THUMBNAIL_HEIGHT => window.use_asset::<CoverThumbnail>(&url, cx),
-        _ => window.use_asset::<CoverMedium>(&url, cx),
-    };
-    image.map_or(CoverArt::Loading, CoverArt::loaded)
+    load_cover(url, size.image_height(), window, cx).map_or(CoverArt::Loading, CoverArt::loaded)
 }
 
 enum Source {
@@ -231,8 +222,9 @@ impl Cover {
 
     /// Loads the image at `url`, decoded on the cover-decoder thread at the
     /// size's [`CoverSize::image_height`]. `None` is a book without an image.
-    /// md and lg images stay loaded for the run unless released
-    /// (`app_state::release_cover_medium`), as similar books are.
+    /// Loaded images are released once many others have been drawn since
+    /// (`cover_pipeline`), or by the view (`release_cover_medium`), as
+    /// similar books are.
     pub fn thumbnail(mut self, url: Option<impl Into<SharedString>>) -> Self {
         self.source = Source::Thumbnail(url.map(Into::into));
         self

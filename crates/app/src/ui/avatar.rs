@@ -2,8 +2,9 @@
 //!
 //! In order of preference:
 //! 1. their picture: a raster one through the cover pipeline (decoded and
-//!    scaled on the cover-decoder thread, like a list cover), an SVG (many
-//!    Hardcover avatars) drawn from its cached file by GPUI;
+//!    scaled on the cover-decoder thread, like a cover: 144 px for md, 288 px
+//!    for xl, so the 128 px photo stays sharp at 2x), an SVG (many Hardcover
+//!    avatars) drawn from its cached file by GPUI;
 //! 2. their initials on their Hardcover colour (`cached_image.color`), in
 //!    white or ink, whichever reads ([`data_color`], [`text_on_data`]);
 //! 3. their initials in `accent` on `accent-soft`.
@@ -22,7 +23,7 @@ use gpui_kit::{
     SharedString, Styled as _, StyledImage as _, Window, div, img,
 };
 
-use crate::app_state::{cover_file, cover_thumbnail};
+use crate::cover_pipeline::{MEDIUM_COVER_HEIGHT, THUMBNAIL_HEIGHT, cover_file, load_cover};
 use crate::design::color::{data_color, text_on_data};
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors, size};
@@ -104,7 +105,13 @@ impl RenderOnce for Avatar {
             if is_svg(url) {
                 cover_file(url, window, cx).map(ImageSource::from)
             } else {
-                cover_thumbnail(url, window, cx).map(ImageSource::from)
+                let height = match self.size {
+                    AvatarSize::Md => THUMBNAIL_HEIGHT,
+                    AvatarSize::Xl => MEDIUM_COVER_HEIGHT,
+                };
+                load_cover(url, height, window, cx)
+                    .flatten()
+                    .map(ImageSource::from)
             }
         });
         let circle = div()
