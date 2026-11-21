@@ -20,7 +20,7 @@ use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, ScrollStrategy,
     SharedString, StyleRefinement, Styled as _, Subscription, Window, div,
 };
-use hardcover_core::{LibraryEntry, ReadingStatus, UserBookId};
+use hardcover_core::{ReadingStatus, UserBookId};
 
 use super::book_row::{BookRow, loading_rows};
 use super::collection::{SortOrder, shelf_rows};
@@ -56,9 +56,11 @@ struct EmptyCopy {
     description: SharedString,
 }
 
-/// Rows of one shelf for the virtualized list.
+/// Rows of one shelf for the virtualized list: the entries' ids, each row
+/// drawn from the model's entry, so a new revision copies no entries.
 pub struct ShelfDelegate {
-    rows: Vec<LibraryEntry>,
+    model: Entity<LibraryModel>,
+    rows: Vec<UserBookId>,
     loading: bool,
     empty: EmptyCopy,
     focus: RowFocus,
@@ -66,7 +68,7 @@ pub struct ShelfDelegate {
 
 impl ShelfDelegate {
     fn id_at(&self, ix: IndexPath) -> Option<UserBookId> {
-        self.rows.get(ix.row).map(|e| e.user_book_id)
+        self.rows.get(ix.row).copied()
     }
 }
 
@@ -84,12 +86,15 @@ impl ListDelegate for ShelfDelegate {
         window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let entry = self.rows.get(ix.row)?;
+        let id = *self.rows.get(ix.row)?;
+        let entry = self.model.read(cx).entry(id)?;
+        let title = entry.book.title.clone();
+        let row = BookRow::for_entry(entry).selected(self.focus.is_selected(ix));
         Some(
-            ListItem::new(("library-book", entry.user_book_id.get().cast_unsigned()))
+            ListItem::new(("library-book", id.get().cast_unsigned()))
                 .list_row(self.focus.shows_focus(ix, window), cx)
-                .accessibility_label(entry.book.title.clone())
-                .child(BookRow::for_entry(entry).selected(self.focus.is_selected(ix))),
+                .accessibility_label(title)
+                .child(row),
         )
     }
 
@@ -155,6 +160,7 @@ impl LibraryView {
         let list = cx.new(|cx| {
             ListState::new(
                 ShelfDelegate {
+                    model: model.clone(),
                     rows: Vec::new(),
                     loading: true,
                     empty: EmptyCopy {
@@ -285,13 +291,7 @@ impl LibraryView {
     }
 
     fn select_first(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let first = self
-            .list
-            .read(cx)
-            .delegate()
-            .rows
-            .first()
-            .map(|e| e.user_book_id);
+        let first = self.list.read(cx).delegate().rows.first().copied();
         match first {
             Some(id) => self.select(id, window, cx),
             None => self
@@ -310,9 +310,9 @@ impl LibraryView {
             return;
         }
         let entries = model.entries();
-        let rows: Vec<LibraryEntry> = shelf_rows(entries, self.status, &query, self.order)
+        let rows: Vec<UserBookId> = shelf_rows(entries, self.status, &query, self.order)
             .into_iter()
-            .map(|ix| entries[ix].clone())
+            .map(|ix| entries[ix].user_book_id)
             .collect();
         let shelf_name = status_label(self.status);
         let empty = if !query.trim().is_empty() {
@@ -357,12 +357,7 @@ impl LibraryView {
     fn sync_list_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.selection.get(&self.status).copied();
         self.list.update(cx, |list, cx| {
-            let pos = id.and_then(|id| {
-                list.delegate()
-                    .rows
-                    .iter()
-                    .position(|e| e.user_book_id == id)
-            });
+            let pos = id.and_then(|id| list.delegate().rows.iter().position(|row| *row == id));
             let ix = pos.map(IndexPath::new);
             if list.selected_index() != ix {
                 list.set_selected_index(ix, window, cx);
