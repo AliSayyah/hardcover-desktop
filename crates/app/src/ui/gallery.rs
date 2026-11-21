@@ -794,17 +794,19 @@ fn shelf_and_columns(cx: &App) -> AnyElement {
             }),
         )
     };
-    let main = || {
-        div()
-            .body()
-            .text_color(colors(cx).fg_muted)
-            .child("The main column")
-    };
+    let column = |text: &'static str| div().body().text_color(colors(cx).fg_muted).child(text);
+    let main = || column("The main column");
     let section = || RailSection::new("Newest on Want to read").child(shelf());
     specimen(
-        "Cover shelf; columns, wide and folded",
+        "Cover shelf; columns: three, beside the rail, folded",
         v_flex()
             .gap_8()
+            .child(
+                Columns::new(main())
+                    .second(column("The second column, each at most 720"))
+                    .wide_gap()
+                    .rail([section()]),
+            )
             .child(Columns::new(main()).wide_gap().rail([section()]))
             .child(
                 Columns::new(main())

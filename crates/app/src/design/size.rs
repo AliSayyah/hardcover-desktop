@@ -66,16 +66,17 @@ pub const METER_IN_ROW: Rems = rems(10.);
 pub const PACE_TICK_WIDTH: Pixels = px(2.);
 pub const PACE_TICK_OVERHANG: Pixels = px(3.);
 
-/// The widest a page's content gets (768): Coming soon, Discover, Stats,
-/// list, series and author pages, and the book pane's content. The page
-/// inset is outside it.
+/// The widest a page's content gets (768): Coming soon, Discover, Stats (in
+/// one column), list, series and author pages, and the book pane's content.
+/// The page inset is outside it.
 pub const PAGE_MAX: Rems = rems(48.);
 /// A page's inset (32; `p_8`).
 pub const PAGE_INSET: Rems = rems(2.);
 /// A page's frame at its widest: [`PAGE_MAX`] and the inset on both sides.
 pub const PAGE_FRAME_MAX: Rems = rems(PAGE_MAX.0 + 2. * PAGE_INSET.0);
-/// The widest Home's content gets (1024), its inset included: beyond it the
-/// rows' actions drift away from their books.
+/// The widest Home's content gets in two columns (1024), its inset
+/// included: beyond it the rows' actions drift away from their books. A
+/// wider region gives Home a third column instead ([`HOME_WIDE_MAX`]).
 pub const HOME_MAX: Rems = rems(64.);
 /// The narrowest a page's main column gets beside its rail (400): a lead
 /// book's xl cover with its title and buttons, or a row's cover, text and
@@ -101,6 +102,21 @@ pub const CHART_SHORT: Rems = rems(10.);
 /// A headline figure's column at its narrowest (160): Stats' figures, four
 /// to a row at the page's width and two in a narrow window.
 pub const FIGURE: Rems = rems(10.);
+
+// ----- Wide windows: surplus width holds more content, never wider rows -----
+
+/// The narrowest a content column gets beside another (448): two of them
+/// and the [`RAIL`] need a 1536 window, so the 1200 default keeps two
+/// columns. [`MAIN_MIN`] is too tight here: the lead book's buttons overrun
+/// it, and an upcoming row's title has little room beside its date and lane.
+pub const WIDE_COLUMN_MIN: Rems = rems(28.);
+/// The widest a content column gets beside another (720): Home's two
+/// content columns in its wide tier. Its rows' actions stay by their books.
+pub const COLUMN_MAX: Rems = rems(45.);
+/// The widest Home's content gets in three columns (1840), its inset
+/// included: two [`COLUMN_MAX`] columns and the [`RAIL`], 32 apart. Beyond
+/// it, paper.
+pub const HOME_WIDE_MAX: Rems = rems(2. * COLUMN_MAX.0 + 2. * 2. + RAIL.0 + 2. * PAGE_INSET.0);
 
 /// The widest prose and readers' words get (640).
 pub const PROSE: Rems = rems(40.);
