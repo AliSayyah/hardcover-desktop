@@ -19,7 +19,7 @@ macro_rules! user_book_fields {
   id user_id status_id rating date_added updated_at privacy_setting_id private_notes
   book {
     ...BookSummaryFields
-    audio_seconds
+    default_audio_edition_id
     book_series(order_by: [{featured: desc}, {position: asc_nulls_last}]) {
       position featured compilation series { id name slug }
     }

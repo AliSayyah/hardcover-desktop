@@ -191,7 +191,7 @@ fn audiobooks_count_time() {
         .find(|e| e.book.id == BookId::new(CRUEL_PRINCE))
         .unwrap();
     assert_eq!(cruel.book.pages, None);
-    assert!(cruel.book_audio_seconds.is_some());
+    assert!(cruel.book_audio_edition.is_some());
     assert!(!cruel.is_audio());
     assert_eq!(cruel.length(), Some(crate::api::Length::Pages(370)));
     // One of its audiobook editions lists no length.

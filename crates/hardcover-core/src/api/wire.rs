@@ -656,9 +656,10 @@ pub(crate) struct RawUserBookBook {
     pub book: RawBook,
     #[serde(default)]
     pub book_series: Vec<RawBookSeries>,
-    /// `books.audio_seconds`, the running time of the book's audiobook.
+    /// `books.default_audio_edition_id`: the book's audiobook edition, set
+    /// whenever Hardcover lists one.
     #[serde(default)]
-    pub audio_seconds: Option<i64>,
+    pub default_audio_edition_id: Option<i64>,
 }
 
 impl RawUserBook {
@@ -674,7 +675,7 @@ impl RawUserBook {
             status,
         );
         e.series = series_refs(book.book_series);
-        e.book_audio_seconds = opt_u32(book.audio_seconds).filter(|s| *s > 0);
+        e.book_audio_edition = book.default_audio_edition_id.map(EditionId::new);
         e.rating = self
             .rating
             .as_ref()

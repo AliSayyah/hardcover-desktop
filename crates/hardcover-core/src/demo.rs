@@ -666,19 +666,25 @@ fn upcoming_details(catalogue: &Catalogue, book: &Upcoming) -> Value {
     details
 }
 
-/// An entry's book: `BookSummaryFields`, its audiobook's length and its
+/// An entry's book: `BookSummaryFields`, its audiobook edition and its
 /// series. A book still to come can be on the Want to Read shelf too.
 fn entry_book(id: i64) -> Option<Value> {
     let catalogue = &*CATALOGUE;
     if let Some(book) = catalogue.book(id) {
         let mut value = book_summary(book);
-        value["audio_seconds"] = json!(book.audio_seconds);
+        // Hardcover names an audiobook edition whenever it lists one.
+        value["default_audio_edition_id"] = json!(
+            book.editions
+                .iter()
+                .find(|e| e.reading_format == Some(2))
+                .map(|e| e.id)
+        );
         value["book_series"] = Value::Array(book_series(book));
         return Some(value);
     }
     let upcoming = catalogue.upcoming(id)?;
     let mut value = upcoming_summary(catalogue, upcoming);
-    value["audio_seconds"] = Value::Null;
+    value["default_audio_edition_id"] = Value::Null;
     value["book_series"] = json!([{
         "position": upcoming.position,
         "featured": true,

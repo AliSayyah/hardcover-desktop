@@ -1699,7 +1699,7 @@ fn progress_percent_follows_the_reading_format_not_the_first_length() {
 #[test]
 fn a_synced_entry_knows_its_books_audiobook_and_its_editions_format() {
     let mut ub = user_book(3, 2);
-    ub["book"]["audio_seconds"] = json!(34_200);
+    ub["book"]["default_audio_edition_id"] = json!(6000);
     ub["user_book_reads"] = json!([{
         "id": 91, "started_at": "2026-11-01", "finished_at": null, "progress": null,
         "progress_pages": null, "progress_seconds": 600, "edition_id": 6000,
@@ -1708,7 +1708,7 @@ fn a_synced_entry_knows_its_books_audiobook_and_its_editions_format() {
     }]);
     let entry: wire::RawUserBook = serde_json::from_value(ub).unwrap();
     let entry = entry.into_entry().unwrap();
-    assert_eq!(entry.book_audio_seconds, Some(34_200));
+    assert_eq!(entry.book_audio_edition, Some(EditionId::new(6000)));
     let read_edition = entry.open_read().unwrap().edition.as_ref().unwrap();
     assert!(read_edition.is_audiobook());
     // The read's audiobook decides, though its running time is unknown.
