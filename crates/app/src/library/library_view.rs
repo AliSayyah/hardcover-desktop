@@ -452,7 +452,9 @@ impl Render for ShelfPane {
 impl Render for LibraryView {
     fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let rem = window.rem_size();
-        h_resizable("library-split")
+        // Keyed by the rem: the group keeps its panels' widths in px, so a new
+        // interface scale (`ui_scale`) starts it again at the default width.
+        h_resizable(("library-split", f32::from(rem).to_bits() as usize))
             .child(
                 resizable_panel()
                     .size(rem * size::LIST.0)

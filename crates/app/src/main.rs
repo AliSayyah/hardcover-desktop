@@ -27,11 +27,12 @@ mod sign_in;
 mod star;
 mod stats;
 mod ui;
+mod ui_scale;
 mod upcoming;
 mod update;
 
 use gpui_kit::{
-    App, AppContext as _, KeyBinding, Size, TitlebarOptions, WindowBounds, WindowOptions, actions,
+    App, AppContext as _, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, actions,
 };
 
 use hardcover_core::update::InstallKind;
@@ -145,6 +146,9 @@ fn main() {
     // Resolved before anything else: once an update replaces the binary,
     // /proc/self/exe names the deleted file, and restarting must use this path.
     let exe = std::env::current_exe().ok();
+    // The outputs' sizes, read on a thread of their own while the app starts:
+    // the window's size depends on them (`ui_scale`).
+    let scale = ui_scale::Probe::start();
     // A small file, read before the event loop starts (the one exception to
     // keeping core calls off the UI thread): the first frame needs the theme.
     let (prefs, prefs_path) = preferences::load();
@@ -168,10 +172,12 @@ fn main() {
             update::init(install, cx);
 
             // Window geometry is a platform boundary: logical pixels, not rems.
-            let size = Size::new(gpui_kit::px(1200.), gpui_kit::px(800.));
+            // The design's 1200 × 800 and 800 × 560, at the factor of the
+            // monitor the window is expected on (`ui_scale::policy::opening`).
+            let scale = scale.finish();
             let options = WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size, cx)),
-                window_min_size: Some(Size::new(gpui_kit::px(800.), gpui_kit::px(560.))),
+                window_bounds: Some(WindowBounds::centered(scale.window_size(), cx)),
+                window_min_size: Some(scale.min_window_size()),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Hardcover".into()),
                     ..Default::default()
@@ -185,6 +191,7 @@ fn main() {
             if std::env::var_os("HARDCOVER_GALLERY").is_some() {
                 gpui_kit::open_window(options, cx, |window, cx| {
                     preferences::follow_theme(window, cx);
+                    ui_scale::follow(scale, window, cx);
                     cx.new(|cx| ui::gallery::Gallery::new(window, cx))
                 })
                 .expect("failed to open window");
@@ -192,6 +199,7 @@ fn main() {
             }
             gpui_kit::open_window(options, cx, |window, cx| {
                 preferences::follow_theme(window, cx);
+                ui_scale::follow(scale, window, cx);
                 cx.new(|cx| shell::Shell::new(window, cx))
             })
             .expect("failed to open window");
