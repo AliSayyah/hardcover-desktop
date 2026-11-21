@@ -345,7 +345,7 @@ mod tests {
     fn lines_stack_under_the_title(cx: &mut TestAppContext) {
         let header = measure(cx, 800., || {
             PageHeader::new("Series")
-                .count(4)
+                .count(4_u32)
                 .line("The series you've started.")
                 .facts("4 books · Ongoing")
         });
