@@ -2,11 +2,24 @@
 //!
 //! [`client`] answers from `demo/catalogue.json` through a fake transport, so
 //! the rest of the client (queries, parsing, paging) runs exactly as it does
-//! against Hardcover. The books are real, popular ones, with facts and cover
-//! links from Hardcover and descriptions written for the demo; the reader,
-//! their shelves, reads, notes, reviews, reading goal and lists are invented.
-//! Each book has one stand-in edition for the edition picker, with only the
-//! book's title and cover; the Owned list holds that edition.
+//! against Hardcover. The books are real, popular ones, with facts, editions
+//! and cover links from Hardcover and descriptions written for the demo; the
+//! reader, their shelves, reads, notes, reviews, reading goal and lists are
+//! invented. A book the catalogue lists no editions for has one stand-in
+//! edition, with only the book's title and cover and the book's id; a few
+//! books have their real editions, audiobooks among them.
+//!
+//! Every date of the reader's is a number of days from today, resolved when
+//! the client is built, so the demo always looks current: the books being
+//! read were updated lately (one is idle on purpose), the goal is this
+//! year's, dated as Hardcover dates its own (Jan 1 to Jan 1), and a series
+//! hasn't been touched for over a year.
+//!
+//! The demo is writable: a status, rating, progress, read, review, note,
+//! privacy, edition, list, Owned list or goal change is applied to the
+//! client's own copy of the reader's data ([`state`]) and answered in the
+//! shape Hardcover answers it, following the behaviour CLAUDE.md records.
+//! Nothing is saved: every client starts from the catalogue.
 //!
 //! Series and author pages are built from the catalogue alone: a series lists
 //! the catalogue's books in it, an author their books in the catalogue. Their
@@ -26,13 +39,15 @@
 //! dates a fixed number of days from today. They are on their series pages
 //! and answer `UpcomingInSeries` and `BookDetails`.
 //!
-//! [`cover_cache`] downloads the catalogue's covers from Hardcover, the demo's
-//! only network access; any other URL is refused. Reads work; every write
-//! fails with a "read-only" error. Only built with the `demo` feature (and in
-//! tests).
+//! [`cover_cache`] downloads the catalogue's covers (books and editions) and
+//! Hardcover's default avatars from Hardcover, the demo's only network
+//! access; any other URL is refused. [`Faults`] (`HARDCOVER_DEMO_FAULTS`)
+//! makes requests slow, fail or lack a scope. Only built with the `demo`
+//! feature (and in tests).
 
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -43,32 +58,59 @@ use crate::http::{HttpRequest, HttpResponse, HttpTransport, Method, RequestBody,
 use crate::ratelimit::TokenBucket;
 use crate::{Error, Result};
 
+mod faults;
 mod reviews;
+mod state;
+#[cfg(test)]
+mod tests;
+mod writes;
 
-/// The reply to every write.
-pub const READ_ONLY: &str = "The demo library is read-only.";
+use faults::Failure;
+pub use faults::{ENV as FAULTS_ENV, Faults};
+use state::{Clock, Entry, Length, List, Read, State, read_length};
 
-/// A client for the demo library. It never touches the network.
+/// A client for the demo library, with no faults. It never touches the network.
 #[must_use]
 pub fn client() -> Client {
+    client_with(&Faults::default())
+}
+
+/// A client for the demo library that injects `faults`.
+#[must_use]
+pub fn client_with(faults: &Faults) -> Client {
+    client_at(faults, Clock::System)
+}
+
+fn client_at(faults: &Faults, clock: Clock) -> Client {
     Client::with_transport(
         Arc::new(DemoToken),
-        Arc::new(DemoTransport { covers: None }),
+        Arc::new(ApiTransport {
+            state: Mutex::new(State::new(&CATALOGUE, clock)),
+            faults: faults.clone(),
+        }),
         // No rate limit to respect.
         TokenBucket::new(1_000, 1_000.0),
     )
 }
 
-/// A cover cache in `dir` that downloads the catalogue's covers from Hardcover.
+/// The faults in `HARDCOVER_DEMO_FAULTS`, read once per run.
+pub fn env_faults() -> &'static Faults {
+    static FAULTS: LazyLock<Faults> = LazyLock::new(Faults::from_env);
+    &FAULTS
+}
+
+/// A cover cache in `dir` that downloads the catalogue's covers from
+/// Hardcover, failing as `faults` says a connection does.
 ///
 /// # Errors
 ///
 /// Returns an error if the demo cover cache directory cannot be created.
-pub fn cover_cache(dir: impl Into<PathBuf>) -> Result<CoverCache> {
+pub fn cover_cache(dir: impl Into<PathBuf>, faults: &Faults) -> Result<CoverCache> {
     CoverCache::with_transport(
         dir,
-        Arc::new(DemoTransport {
-            covers: Some(UreqTransport::new()),
+        Arc::new(CoverTransport {
+            http: Some(UreqTransport::new()),
+            faults: faults.clone(),
         }),
     )
 }
@@ -91,9 +133,9 @@ impl TokenSource for DemoToken {
 struct Catalogue {
     user: DemoUser,
     books: Vec<Book>,
-    library: Vec<Entry>,
-    goals: Vec<DemoGoal>,
-    lists: Vec<DemoList>,
+    library: Vec<SeedEntry>,
+    goals: Vec<SeedGoal>,
+    lists: Vec<SeedList>,
     #[serde(default)]
     upcoming: Vec<Upcoming>,
 }
@@ -122,36 +164,30 @@ fn today() -> chrono::NaiveDate {
     chrono::Local::now().date_naive()
 }
 
+/// One of the reader's lists.
 #[derive(Deserialize)]
-/// One of the reader's lists. The Owned list's books are on it as their one
-/// demo edition, whose id is the book's.
-struct DemoList {
+struct SeedList {
     id: i64,
     name: String,
     slug: String,
     description: Option<String>,
     privacy: i64,
     ranked: bool,
-    books: Vec<i64>,
+    books: Vec<ListItem>,
 }
 
-impl DemoList {
-    fn is_owned(&self) -> bool {
-        self.slug == crate::api::OWNED_LIST_SLUG
-    }
-
-    /// `(row id, book id, position)` for each book, in the list's order.
-    /// Row ids are the list's id times 1,000 plus the place.
-    fn rows(&self) -> impl Iterator<Item = (i64, i64, Option<i64>)> + '_ {
-        (1_i64..)
-            .zip(&self.books)
-            .map(|(place, book)| (self.id * 1_000 + place, *book, self.ranked.then_some(place)))
-    }
-}
-
+/// A book on a list, or (on the Owned list) one edition of it. A bare book
+/// on the Owned list stands for its first edition.
 #[derive(Deserialize)]
+#[serde(untagged)]
+enum ListItem {
+    Book(i64),
+    Edition { book: i64, edition: i64 },
+}
+
 /// A goal for the current calendar year, whichever year the demo runs in.
-struct DemoGoal {
+#[derive(Deserialize)]
+struct SeedGoal {
     id: i64,
     metric: String,
     goal: i64,
@@ -170,16 +206,70 @@ struct Book {
     title: String,
     subtitle: Option<String>,
     author: String,
-    pages: u32,
+    /// Hardcover leaves some books without a page count.
+    pages: Option<u32>,
+    /// The running time of the book's audiobook, which Hardcover seldom fills.
+    audio_seconds: Option<u32>,
     release_date: String,
     rating: f64,
     ratings_count: i64,
     users_count: i64,
     editions_count: i64,
     genres: Vec<String>,
-    series: Option<Series>,
+    /// The book's `book_series` rows, as Hardcover has them.
+    #[serde(default)]
+    series: Vec<SeriesRow>,
     description: String,
     cover: CoverLink,
+    /// Real editions, most read first; none means one stand-in edition.
+    #[serde(default)]
+    editions: Vec<DemoEdition>,
+}
+
+impl Book {
+    /// The edition the Owned list holds when it names none: the first.
+    fn default_edition(&self) -> i64 {
+        self.editions.first().map_or(self.id, |e| e.id)
+    }
+
+    fn in_series(&self, name: &str) -> Option<&SeriesRow> {
+        self.series.iter().find(|s| s.name == name)
+    }
+}
+
+#[derive(Deserialize)]
+struct SeriesRow {
+    name: String,
+    position: Option<f64>,
+    featured: bool,
+    #[serde(default)]
+    compilation: bool,
+}
+
+/// One of a book's editions, from Hardcover.
+#[derive(Deserialize)]
+struct DemoEdition {
+    id: i64,
+    /// The book's when absent.
+    title: Option<String>,
+    /// `edition_format`, such as "Hardcover" or "Audible".
+    format: Option<String>,
+    /// `reading_format_id`: 1 physical, 2 audiobook, 4 ebook.
+    reading_format: Option<i64>,
+    pages: Option<u32>,
+    audio_seconds: Option<u32>,
+    release_date: Option<String>,
+    isbn_13: Option<String>,
+    publisher: Option<String>,
+    language: Option<String>,
+    /// The book's when absent.
+    cover: Option<CoverLink>,
+}
+
+impl DemoEdition {
+    fn is_audiobook(&self) -> bool {
+        self.reading_format == Some(2)
+    }
 }
 
 #[derive(Deserialize)]
@@ -189,43 +279,43 @@ struct CoverLink {
     height: u32,
 }
 
+/// One of the reader's entries. Every date is a number of days from today:
+/// 0 today, -1 yesterday.
 #[derive(Deserialize)]
-struct Series {
-    name: String,
-    position: f64,
-}
-
-#[derive(Deserialize)]
-struct Entry {
+struct SeedEntry {
     id: i64,
     book: i64,
     status: i64,
     rating: Option<f64>,
-    date_added: String,
-    updated_at: String,
+    added: i64,
+    updated: i64,
+    /// An edition id from the book's `editions`.
+    edition: Option<i64>,
     #[serde(default)]
-    reads: Vec<Read>,
+    reads: Vec<SeedRead>,
     private_notes: Option<String>,
     /// `privacy_setting_id`; Public when absent.
     privacy: Option<i64>,
-    review: Option<DemoReview>,
+    review: Option<SeedReview>,
 }
 
 /// The demo reader's own review, written for the demo.
 #[derive(Deserialize)]
-struct DemoReview {
+struct SeedReview {
     markdown: String,
     #[serde(default)]
     spoilers: bool,
-    reviewed_at: String,
+    reviewed: i64,
 }
 
 #[derive(Deserialize)]
-struct Read {
+struct SeedRead {
     id: i64,
-    started_at: Option<String>,
-    finished_at: Option<String>,
+    started: Option<i64>,
+    finished: Option<i64>,
     progress_pages: Option<u32>,
+    progress_seconds: Option<u32>,
+    edition: Option<i64>,
 }
 
 static CATALOGUE: LazyLock<Catalogue> = LazyLock::new(|| {
@@ -239,6 +329,18 @@ const SERIES_IDS: i64 = 80_000;
 impl Catalogue {
     fn book(&self, id: i64) -> Option<&Book> {
         self.books.iter().find(|b| b.id == id)
+    }
+
+    /// An edition and its book; `None` for the edition is the book's
+    /// stand-in, whose id is the book's.
+    fn edition(&self, id: i64) -> Option<(&Book, Option<&DemoEdition>)> {
+        self.books.iter().find_map(|b| {
+            if let Some(e) = b.editions.iter().find(|e| e.id == id) {
+                Some((b, Some(e)))
+            } else {
+                (b.id == id && b.editions.is_empty()).then_some((b, None))
+            }
+        })
     }
 
     /// Distinct names in catalogue order, numbered from `base + 1`.
@@ -260,7 +362,7 @@ impl Catalogue {
         Self::numbered(
             self.books
                 .iter()
-                .filter_map(|b| b.series.as_ref().map(|s| s.name.as_str())),
+                .flat_map(|b| b.series.iter().map(|s| s.name.as_str())),
             SERIES_IDS,
         )
     }
@@ -300,10 +402,6 @@ impl Catalogue {
         others.into_iter().take(16).map(|(_, b)| b.id).collect()
     }
 
-    fn entry(&self, id: i64) -> Option<&Entry> {
-        self.library.iter().find(|e| e.id == id)
-    }
-
     fn upcoming(&self, id: i64) -> Option<&Upcoming> {
         self.upcoming.iter().find(|u| u.id == id)
     }
@@ -312,49 +410,31 @@ impl Catalogue {
     fn series_author(&self, series: &str) -> Option<&str> {
         self.books
             .iter()
-            .find(|b| b.series.as_ref().is_some_and(|s| s.name == series))
+            .find(|b| b.in_series(series).is_some())
             .map(|b| b.author.as_str())
+    }
+
+    /// Every URL the demo may download: the catalogue's covers and edition
+    /// covers, and the reviewers' avatars, Hardcover's default ones.
+    fn downloads(&'static self) -> HashSet<&'static str> {
+        self.books
+            .iter()
+            .flat_map(|b| {
+                std::iter::once(b.cover.url.as_str()).chain(
+                    b.editions
+                        .iter()
+                        .filter_map(|e| e.cover.as_ref().map(|c| c.url.as_str())),
+                )
+            })
+            .chain(reviews::avatars())
+            .collect()
     }
 }
 
 // ----- wire shapes -----
 
-/// `GoalFields`, for the calendar year `year`. Progress is worked out from the
-/// library like Hardcover does: the reads (or their books' pages) finished
-/// within the goal's dates.
-fn goal(catalogue: &Catalogue, goal: &DemoGoal, year: i32) -> Value {
-    let (start, end) = (format!("{year}-01-01"), format!("{year}-12-31"));
-    let finished = catalogue.library.iter().flat_map(|e| {
-        e.reads
-            .iter()
-            .filter_map(|r| r.finished_at.as_deref())
-            .filter(|f| (start.as_str()..=end.as_str()).contains(f))
-            .map(move |_| e)
-    });
-    let progress: i64 = match goal.metric.as_str() {
-        "page" => finished
-            .filter_map(|e| catalogue.book(e.book))
-            .map(|b| i64::from(b.pages))
-            .sum(),
-        _ => finished.fold(0_i64, |count, _| count + 1),
-    };
-    json!({
-        "id": goal.id,
-        "metric": goal.metric,
-        "goal": goal.goal,
-        "progress": progress,
-        "description": format!("{} {}s in {year}", goal.goal, goal.metric),
-        "start_date": start,
-        "end_date": end,
-        "conditions": {},
-        "archived": false,
-        "completed_at": null,
-        "privacy_setting_id": 1,
-    })
-}
-
 /// `ListFields`.
-fn list(list: &DemoList) -> Value {
+fn list(list: &List) -> Value {
     json!({
         "id": list.id,
         "name": list.name,
@@ -362,27 +442,27 @@ fn list(list: &DemoList) -> Value {
         "description": list.description,
         "privacy_setting_id": list.privacy,
         "ranked": list.ranked,
-        "books_count": list.books.len(),
-        "default_view": "list",
-        "featured_profile": false,
-        "url": null,
+        "books_count": list.rows.len(),
+        "default_view": list.default_view,
+        "featured_profile": list.featured_profile,
+        "url": list.url,
     })
 }
 
-/// Every row on the reader's lists as `{id list_id book_id edition_id}`.
-fn memberships(catalogue: &Catalogue) -> Vec<(i64, Value)> {
-    catalogue
+/// Every row on the reader's lists as `(book, {id list_id book_id edition_id})`.
+fn memberships(state: &State) -> Vec<(i64, Value)> {
+    state
         .lists
         .iter()
         .flat_map(|l| {
-            l.rows().map(move |(id, book, _)| {
+            l.rows.iter().map(move |r| {
                 (
-                    book,
+                    r.book,
                     json!({
-                        "id": id,
+                        "id": r.id,
                         "list_id": l.id,
-                        "book_id": book,
-                        "edition_id": l.is_owned().then_some(book),
+                        "book_id": r.book,
+                        "edition_id": r.edition,
                     }),
                 )
             })
@@ -399,32 +479,66 @@ fn slug(title: &str) -> String {
         .join("-")
 }
 
-fn image(book: &Book) -> Value {
+fn image(cover: &CoverLink) -> Value {
     json!({
-        "url": book.cover.url,
-        "width": book.cover.width,
-        "height": book.cover.height,
+        "url": cover.url,
+        "width": cover.width,
+        "height": cover.height,
     })
 }
 
-/// `EditionFields` for the book's one demo edition. Its id is the book's,
-/// not a Hardcover edition id. Only the title and cover are filled in: the
-/// catalogue's page count and date are the book's, which another edition
-/// may not share.
-fn edition(book: &Book) -> Value {
+/// `reading_format { format }`, by Hardcover's names.
+fn reading_format_name(id: i64) -> Option<&'static str> {
+    match id {
+        1 => Some("Read"),
+        2 => Some("Listened"),
+        4 => Some("Ebook"),
+        _ => None,
+    }
+}
+
+/// `EditionFields`, and a read's shorter edition (which ignores the rest).
+/// The stand-in edition has only the book's id, title and cover: the
+/// catalogue's page count and date are the book's, which another edition may
+/// not share.
+fn edition(book: &Book, edition: Option<&DemoEdition>) -> Value {
+    let Some(e) = edition else {
+        return json!({
+            "id": book.id,
+            "title": book.title,
+            "pages": null,
+            "audio_seconds": null,
+            "edition_format": null,
+            "release_date": null,
+            "isbn_13": null,
+            "cached_image": image(&book.cover),
+            "reading_format_id": null,
+            "reading_format": null,
+            "publisher": null,
+            "language": null,
+        });
+    };
     json!({
-        "id": book.id,
-        "title": book.title,
-        "pages": null,
-        "audio_seconds": null,
-        "edition_format": null,
-        "release_date": null,
-        "isbn_13": null,
-        "cached_image": image(book),
-        "reading_format": null,
-        "publisher": null,
-        "language": null,
+        "id": e.id,
+        "title": e.title.as_deref().unwrap_or(&book.title),
+        "pages": e.pages,
+        "audio_seconds": e.audio_seconds,
+        "edition_format": e.format,
+        "release_date": e.release_date,
+        "isbn_13": e.isbn_13,
+        "cached_image": image(e.cover.as_ref().unwrap_or(&book.cover)),
+        "reading_format_id": e.reading_format,
+        "reading_format": e.reading_format
+            .and_then(reading_format_name)
+            .map(|f| json!({ "format": f })),
+        "publisher": e.publisher.as_ref().map(|n| json!({ "name": n })),
+        "language": e.language.as_ref().map(|l| json!({ "language": l })),
     })
+}
+
+fn edition_by_id(id: i64) -> Option<Value> {
+    let (book, e) = CATALOGUE.edition(id)?;
+    Some(edition(book, e))
 }
 
 fn release_year(book: &Book) -> Option<i64> {
@@ -442,7 +556,7 @@ fn book_summary(book: &Book) -> Value {
         "release_year": release_year(book),
         "rating": book.rating,
         "users_count": book.users_count,
-        "cached_image": image(book),
+        "cached_image": image(&book.cover),
         "cached_contributors": [{
             "author": { "id": CATALOGUE.author_id(&book.author), "name": book.author },
             "contribution": null,
@@ -546,58 +660,82 @@ fn upcoming_details(catalogue: &Catalogue, book: &Upcoming) -> Value {
     details
 }
 
+/// An entry's book: `BookSummaryFields`, its audiobook's length and its
+/// series. A book still to come can be on the Want to Read shelf too.
+fn entry_book(id: i64) -> Option<Value> {
+    let catalogue = &*CATALOGUE;
+    if let Some(book) = catalogue.book(id) {
+        let mut value = book_summary(book);
+        value["audio_seconds"] = json!(book.audio_seconds);
+        value["book_series"] = Value::Array(book_series(book));
+        return Some(value);
+    }
+    let upcoming = catalogue.upcoming(id)?;
+    let mut value = upcoming_summary(catalogue, upcoming);
+    value["audio_seconds"] = Value::Null;
+    value["book_series"] = json!([{
+        "position": upcoming.position,
+        "featured": true,
+        "series": upcoming_series(catalogue, upcoming),
+    }]);
+    Some(value)
+}
+
 /// `UserBookFields`.
-fn user_book(catalogue: &Catalogue, entry: &Entry) -> Option<Value> {
-    let book = catalogue.book(entry.book)?;
+fn user_book(entry: &Entry) -> Option<Value> {
+    let book = entry_book(entry.book)?;
     let mut reads: Vec<&Read> = entry.reads.iter().collect();
     reads.sort_by_key(|r| std::cmp::Reverse(r.id));
-    let reads: Vec<Value> = reads
-        .into_iter()
-        .map(|read| {
-            json!({
-                "id": read.id,
-                "started_at": read.started_at,
-                "finished_at": read.finished_at,
-                "progress": read.progress_pages.map(|p| f64::from(p) * 100.0 / f64::from(book.pages)),
-                "progress_pages": read.progress_pages,
-                "progress_seconds": null,
-                "edition_id": null,
-                "edition": null,
-            })
-        })
-        .collect();
+    let reads: Vec<Value> = reads.into_iter().map(|r| read(entry, r)).collect();
     Some(json!({
         "id": entry.id,
-        "user_id": catalogue.user.id,
+        "user_id": CATALOGUE.user.id,
         "status_id": entry.status,
         "rating": entry.rating,
-        "date_added": entry.date_added,
-        "updated_at": entry.updated_at,
-        "privacy_setting_id": entry.privacy.unwrap_or(1),
+        "date_added": entry.date_added.to_string(),
+        "updated_at": entry.updated_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+        "privacy_setting_id": entry.privacy,
         "private_notes": entry.private_notes,
-        "book": book_with_series(book),
-        "edition": null,
+        "book": book,
+        "edition": entry.edition.and_then(edition_by_id),
         "user_book_reads": reads,
     }))
 }
 
-/// `BookSummaryFields` plus the book's series, as `UserBookFields` asks.
-fn book_with_series(book: &Book) -> Value {
-    let mut value = book_summary(book);
-    if let Some(map) = value.as_object_mut() {
-        map.insert("book_series".into(), Value::Array(book_series(book)));
-    }
-    value
+/// A `user_book_reads` row, with the percentage Hardcover works out from the
+/// length the read counts against.
+fn read(entry: &Entry, read: &Read) -> Value {
+    let percent = |done: u32, of: u32| f64::from(done) * 100.0 / f64::from(of);
+    let progress = match read_length(entry, read) {
+        Some(Length::Pages(of)) if of > 0 => read.progress_pages.map(|p| percent(p, of)),
+        Some(Length::Seconds(of)) if of > 0 => read.progress_seconds.map(|s| percent(s, of)),
+        _ => None,
+    };
+    json!({
+        "id": read.id,
+        "started_at": read.started.map(|d| d.to_string()),
+        "finished_at": read.finished.map(|d| d.to_string()),
+        "progress": progress,
+        "progress_pages": read.progress_pages,
+        "progress_seconds": read.progress_seconds,
+        "edition_id": read.edition,
+        "edition": read.edition.and_then(edition_by_id),
+    })
 }
 
-/// A book's `book_series` rows.
+/// A book's `book_series` rows, featured first, then by position.
 fn book_series(book: &Book) -> Vec<Value> {
-    book.series
-        .iter()
+    let mut rows: Vec<&SeriesRow> = book.series.iter().collect();
+    rows.sort_by(|a, b| {
+        b.featured
+            .cmp(&a.featured)
+            .then_with(|| by_position(a.position, b.position))
+    });
+    rows.into_iter()
         .map(|s| {
             json!({
                 "position": s.position,
-                "featured": true,
+                "featured": s.featured,
                 "series": {
                     "id": CATALOGUE.series_id(&s.name),
                     "name": s.name,
@@ -606,6 +744,16 @@ fn book_series(book: &Book) -> Vec<Value> {
             })
         })
         .collect()
+}
+
+/// `asc_nulls_last` on positions.
+fn by_position(a: Option<f64>, b: Option<f64>) -> std::cmp::Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => a.total_cmp(&b),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
 }
 
 fn book_details(book: &Book) -> Value {
@@ -633,41 +781,44 @@ fn book_details(book: &Book) -> Value {
     details
 }
 
-/// `series_by_pk` for `SeriesPage`.
+/// `series_by_pk` for `SeriesPage`: every book in the series, compilations
+/// included, by position (none last), then the most read.
 fn series_page(catalogue: &Catalogue, id: i64) -> Option<Value> {
     let (id, name) = catalogue.series().into_iter().find(|(i, _)| *i == id)?;
-    let books: Vec<&Book> = catalogue
+    let author = catalogue
+        .series_author(name)
+        .map(|a| json!({ "id": catalogue.author_id(a), "name": a }));
+    let mut rows: Vec<(Option<f64>, i64, Value)> = catalogue
         .books
         .iter()
-        .filter(|b| b.series.as_ref().is_some_and(|s| s.name == name))
-        .collect();
-    let author = books
-        .first()
-        .map(|b| json!({ "id": catalogue.author_id(&b.author), "name": b.author }));
-    let mut rows: Vec<Value> = books
-        .iter()
-        .map(|b| {
+        .filter_map(|b| {
+            let s = b.in_series(name)?;
             let mut book = book_summary(b);
             book["is_partial_book"] = json!(false);
-            json!({
-                "position": b.series.as_ref().map(|s| s.position),
-                "compilation": false,
-                "book": book,
-            })
+            Some((
+                s.position,
+                b.users_count,
+                json!({ "position": s.position, "compilation": s.compilation, "book": book }),
+            ))
         })
+        // Books still to come are on the series page, as on Hardcover.
+        .chain(
+            catalogue
+                .upcoming
+                .iter()
+                .filter(|u| u.series == name)
+                .map(|u| {
+                    let mut book = upcoming_summary(catalogue, u);
+                    book["is_partial_book"] = json!(false);
+                    (
+                        u.position,
+                        0,
+                        json!({ "position": u.position, "compilation": false, "book": book }),
+                    )
+                }),
+        )
         .collect();
-    // Books still to come are on the series page, as on Hardcover.
-    rows.extend(
-        catalogue
-            .upcoming
-            .iter()
-            .filter(|u| u.series == name)
-            .map(|u| {
-                let mut book = upcoming_summary(catalogue, u);
-                book["is_partial_book"] = json!(false);
-                json!({ "position": u.position, "compilation": false, "book": book })
-            }),
-    );
+    rows.sort_by(|a, b| by_position(a.0, b.0).then_with(|| b.1.cmp(&a.1)));
     Some(json!({
         "id": id,
         "name": name,
@@ -676,7 +827,7 @@ fn series_page(catalogue: &Catalogue, id: i64) -> Option<Value> {
         "primary_books_count": null,
         "is_completed": null,
         "author": author,
-        "book_series": rows,
+        "book_series": rows.into_iter().map(|(_, _, row)| row).collect::<Vec<_>>(),
     }))
 }
 
@@ -696,12 +847,12 @@ fn series_overview(catalogue: &Catalogue, vars: &Value) -> Value {
                 .books
                 .iter()
                 .filter_map(|b| {
-                    let s = b.series.as_ref().filter(|s| s.name == name)?;
+                    let s = b.in_series(name).filter(|s| !s.compilation)?;
                     let mut book = book_summary(b);
                     book["canonical_id"] = Value::Null;
                     book["release_date"] = json!(b.release_date);
                     book["is_partial_book"] = json!(false);
-                    Some((s.position, book))
+                    Some((s.position?, book))
                 })
                 .chain(
                     catalogue
@@ -777,7 +928,7 @@ fn search_document(book: &Book) -> Value {
         "title": book.title,
         "subtitle": book.subtitle,
         "author_names": [book.author],
-        "image": image(book),
+        "image": image(&book.cover),
         "pages": book.pages,
         "release_year": release_year(book),
         "slug": slug(&book.title),
@@ -786,37 +937,118 @@ fn search_document(book: &Book) -> Value {
     })
 }
 
-// ----- transport -----
+// ----- transports -----
 
-struct DemoTransport {
-    /// Downloads covers; `None` refuses them (the API client never asks).
-    covers: Option<UreqTransport>,
+/// The GraphQL endpoint: answers from the catalogue and the client's own
+/// state, after the faults have had their say.
+struct ApiTransport {
+    state: Mutex<State>,
+    faults: Faults,
 }
 
-impl HttpTransport for DemoTransport {
+impl HttpTransport for ApiTransport {
     fn send(&self, req: HttpRequest) -> Result<HttpResponse> {
-        match req.method {
-            Method::Get => {
-                let known = CATALOGUE.books.iter().any(|b| b.cover.url == req.url);
-                match &self.covers {
-                    Some(http) if known => http.send(req),
-                    _ => Ok(HttpResponse {
-                        status: 404,
-                        headers: Vec::new(),
-                        body: Vec::new(),
-                    }),
-                }
-            }
-            Method::Post => {
-                let RequestBody::Json(body) = &req.body else {
-                    return Err(Error::Network("the demo only answers GraphQL".into()));
-                };
-                let body: Value = serde_json::from_slice(body)
-                    .map_err(|e| Error::Network(format!("bad demo request: {e}")))?;
-                let op = body["operationName"].as_str().unwrap_or_default();
-                Ok(json_response(&answer(op, &body["variables"])))
-            }
+        let RequestBody::Json(body) = &req.body else {
+            return Err(Error::Network("the demo only answers GraphQL".into()));
+        };
+        let body: Value = serde_json::from_slice(body)
+            .map_err(|e| Error::Network(format!("bad demo request: {e}")))?;
+        let op = body["operationName"].as_str().unwrap_or_default();
+        // Slept before the state is locked, so slow requests don't queue.
+        let latency = self.faults.latency();
+        if !latency.is_zero() {
+            std::thread::sleep(latency);
         }
+        if let Some(scope) = self.faults.refused_scope(op) {
+            return Ok(insufficient_scope(scope));
+        }
+        if let Some(failure) = self.faults.failure(writes::is_write(op), random_unit) {
+            return fail(failure);
+        }
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(json_response(&answer(&mut state, op, &body["variables"])))
+    }
+}
+
+/// Covers: the catalogue's own, downloaded from Hardcover.
+struct CoverTransport {
+    /// Downloads; `None` refuses everything (the tests never download).
+    http: Option<UreqTransport>,
+    faults: Faults,
+}
+
+static DOWNLOADS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| CATALOGUE.downloads());
+
+impl HttpTransport for CoverTransport {
+    fn send(&self, req: HttpRequest) -> Result<HttpResponse> {
+        if req.method != Method::Get {
+            return Err(Error::Network(
+                "the demo's covers are only downloaded".into(),
+            ));
+        }
+        if let Some(failure) = self.faults.cover_failure(random_unit) {
+            return fail(failure);
+        }
+        match &self.http {
+            Some(http) if DOWNLOADS.contains(req.url.as_str()) => http.send(req),
+            _ => Ok(HttpResponse {
+                status: 404,
+                headers: Vec::new(),
+                body: Vec::new(),
+            }),
+        }
+    }
+}
+
+/// A number in `0..1` for the error rate.
+fn random_unit() -> f64 {
+    // 53 random bits, a float's mantissa.
+    #[expect(clippy::cast_precision_loss)]
+    getrandom::u64().map_or(0.0, |n| (n >> 11) as f64 / (1_u64 << 53) as f64)
+}
+
+/// What an injected failure looks like on the wire.
+fn fail(failure: Failure) -> Result<HttpResponse> {
+    let response = |status: u16, headers: Vec<(String, String)>, body: Value| HttpResponse {
+        status,
+        headers,
+        body: serde_json::to_vec(&body).expect("serializing a Value"),
+    };
+    match failure {
+        Failure::Offline => Err(Error::Network(
+            "demo fault: no connection (HARDCOVER_DEMO_FAULTS=offline)".into(),
+        )),
+        Failure::Timeout => Err(Error::Timeout),
+        // Longer than the client retries by itself, so it reports it at once.
+        Failure::RateLimited => Ok(response(
+            429,
+            vec![("retry-after".into(), "60".into())],
+            json!({ "error": "Throttled" }),
+        )),
+        Failure::Unauthorized => Ok(response(
+            401,
+            Vec::new(),
+            json!({ "error": "invalid_token" }),
+        )),
+        Failure::ServerError => Ok(response(
+            500,
+            Vec::new(),
+            json!({ "errors": [{ "message": "demo fault: server error" }] }),
+        )),
+    }
+}
+
+/// Hardcover's answer to a token without the scope a request needs.
+fn insufficient_scope(scope: &str) -> HttpResponse {
+    HttpResponse {
+        status: 403,
+        headers: vec![("content-type".into(), "application/json".into())],
+        body: serde_json::to_vec(&json!({
+            "error": "insufficient_scope",
+            "scope": scope,
+            "error_description": format!("This request needs the {scope} scope."),
+        }))
+        .expect("serializing a Value"),
     }
 }
 
@@ -832,39 +1064,19 @@ fn error(message: impl Into<String>) -> Value {
     json!({ "errors": [{ "message": message.into() }] })
 }
 
-fn is_write_operation(op: &str) -> bool {
-    matches!(
-        op,
-        "InsertUserBook"
-            | "UpdateUserBook"
-            | "DeleteUserBook"
-            | "InsertUserBookRead"
-            | "UpdateUserBookRead"
-            | "DeleteUserBookRead"
-            | "EditionOwned"
-            | "UpdateUserBookReview"
-            | "DeleteUserBookReview"
-            | "InsertGoal"
-            | "UpdateGoal"
-            | "DeleteGoal"
-            | "InsertList"
-            | "UpdateList"
-            | "DeleteList"
-            | "InsertListBook"
-            | "DeleteListBook"
-    )
-}
-
 /// The response body for one GraphQL operation.
-fn answer(op: &str, vars: &Value) -> Value {
-    if is_write_operation(op) {
-        return error(READ_ONLY);
+fn answer(state: &mut State, op: &str, vars: &Value) -> Value {
+    if writes::is_write(op) {
+        return match writes::apply(state, op, vars) {
+            Ok(data) => json!({ "data": data }),
+            Err(message) => error(message),
+        };
     }
+    let state = &*state;
     let catalogue = &*CATALOGUE;
     let int = |name: &str| vars[name].as_i64().unwrap_or_default();
     let mine = || int("userId") == catalogue.user.id;
     let page_size = |name| usize::try_from(int(name)).unwrap_or_default();
-    let year = chrono::Datelike::year(&chrono::Local::now());
     let data = match op {
         "Me" => json!({ "me": [{
             "id": catalogue.user.id,
@@ -872,23 +1084,24 @@ fn answer(op: &str, vars: &Value) -> Value {
             "name": catalogue.user.name,
             "image": {},
         }]}),
-        "LibraryPage" => library_page(catalogue, mine(), int("afterId"), page_size("limit")),
+        "LibraryPage" => library_page(state, mine(), int("afterId"), page_size("limit")),
         "UserBookById" => json!({
-            "user_books_by_pk": catalogue.entry(int("id")).and_then(|e| user_book(catalogue, e)),
+            "user_books_by_pk": state.entry(int("id")).and_then(user_book),
         }),
         "UserBookForUser" => {
-            let found = catalogue
+            let found = state
                 .entry(int("id"))
                 .filter(|_| mine())
-                .and_then(|e| user_book(catalogue, e));
+                .and_then(user_book);
             json!({ "user_books": found.into_iter().collect::<Vec<_>>() })
         }
         "UserBookForBook" => {
-            let found = catalogue
+            let found = state
                 .library
                 .iter()
-                .find(|e| mine() && e.book == int("bookId"))
-                .and_then(|e| user_book(catalogue, e));
+                .filter(|e| mine() && e.book == int("bookId"))
+                .min_by_key(|e| e.id)
+                .and_then(user_book);
             json!({ "user_books": found.into_iter().collect::<Vec<_>>() })
         }
         "SearchBooks" => search(catalogue, vars),
@@ -905,72 +1118,85 @@ fn answer(op: &str, vars: &Value) -> Value {
         "SeriesOverview" => series_overview(catalogue, vars),
         "AuthorPage" => json!({ "authors_by_pk": author_page(catalogue, int("id")) }),
         "BooksByIds" => books_by_ids(catalogue, vars),
-        "ProgressContext" => progress_context(catalogue, int("id"), vars),
+        "ProgressContext" => progress_context(state, int("id"), vars),
         "BookEditions" => {
             let editions: Vec<Value> = catalogue
                 .book(int("bookId"))
-                .filter(|_| int("offset") == 0)
-                .map(edition)
+                .map_or_default(|book| {
+                    if book.editions.is_empty() {
+                        vec![edition(book, None)]
+                    } else {
+                        book.editions
+                            .iter()
+                            .map(|e| edition(book, Some(e)))
+                            .collect()
+                    }
+                })
                 .into_iter()
+                .skip(page_size("offset"))
+                .take(page_size("limit").max(1))
                 .collect();
             json!({ "editions": editions })
         }
         "UserBookReview" => {
-            json!({ "user_books_by_pk": catalogue.entry(int("id")).map(review_fields) })
+            json!({ "user_books_by_pk": state.entry(int("id")).map(review_fields) })
         }
-        "Goals" => json!({
-            "goals": catalogue.goals.iter()
-                .filter(|_| mine())
-                .map(|g| goal(catalogue, g, year))
-                .collect::<Vec<_>>(),
-        }),
+        "Goals" => {
+            let mut goals: Vec<&state::Goal> = state
+                .goals
+                .iter()
+                .filter(|g| mine() && !g.archived)
+                .collect();
+            goals.sort_by(|a, b| b.end.cmp(&a.end).then_with(|| b.id.cmp(&a.id)));
+            json!({ "goals": goals.into_iter().map(|g| state.goal_json(g)).collect::<Vec<_>>() })
+        }
         "GoalById" => json!({
-            "goals_by_pk": catalogue.goals.iter()
+            "goals_by_pk": state.goals.iter()
                 .find(|g| g.id == int("id"))
-                .map(|g| goal(catalogue, g, year)),
+                .map(|g| state.goal_json(g)),
         }),
-        "Lists" => lists_page(catalogue, mine(), int("afterId"), page_size("limit")),
-        "ListById" => json!({
-            "lists_by_pk": catalogue.lists.iter().find(|l| l.id == int("id")).map(list),
-        }),
+        "Lists" => lists_page(state, mine(), int("afterId"), page_size("limit")),
+        "ListById" => json!({ "lists_by_pk": state.list(int("id")).map(list) }),
         "ListMemberships" => {
-            list_memberships_page(catalogue, mine(), int("afterId"), page_size("limit"))
+            list_memberships_page(state, mine(), int("afterId"), page_size("limit"))
         }
         "BookListMemberships" => {
-            let rows: Vec<Value> = memberships(catalogue)
+            let mut rows: Vec<Value> = memberships(state)
                 .into_iter()
                 .filter(|(book, _)| mine() && *book == int("bookId"))
                 .map(|(_, row)| row)
                 .collect();
+            rows.sort_by_key(|row| row["id"].as_i64());
             json!({ "list_books": rows })
         }
         "ListBooks" => list_books_page(
-            catalogue,
+            state,
             int("listId"),
             page_size("offset"),
             page_size("limit"),
         ),
-        "BookReviews" => reviews::page(catalogue, vars),
-        "BookReviewsCount" => reviews::count(catalogue, vars),
+        "BookReviews" => reviews::page(state, vars),
+        "BookReviewsCount" => reviews::count(state, vars),
         other => return error(format!("The demo has no answer for {other}.")),
     };
     json!({ "data": data })
 }
 
+/// `ReviewFields`, with the entry's id.
 fn review_fields(entry: &Entry) -> Value {
-    let review = entry.review.as_ref();
+    let review = &entry.review;
     json!({
         "id": entry.id,
-        "review_markdown": review.map(|r| &r.markdown),
-        "review_raw": null,
-        "review_has_spoilers": review.is_some_and(|r| r.spoilers),
-        "reviewed_at": review.map(|r| format!("{}T00:00:00", r.reviewed_at)),
-        "has_review": review.is_some(),
+        "review_markdown": review.markdown,
+        "review_raw": review.raw,
+        "review_has_spoilers": review.spoilers,
+        "reviewed_at": review.reviewed_at.map(|d| format!("{d}T00:00:00")),
+        "has_review": review.exists(),
     })
 }
 
-fn library_page(catalogue: &Catalogue, mine: bool, after: i64, limit: usize) -> Value {
-    let mut entries: Vec<&Entry> = catalogue
+fn library_page(state: &State, mine: bool, after: i64, limit: usize) -> Value {
+    let mut entries: Vec<&Entry> = state
         .library
         .iter()
         .filter(|e| mine && e.id > after)
@@ -979,64 +1205,86 @@ fn library_page(catalogue: &Catalogue, mine: bool, after: i64, limit: usize) -> 
     let page: Vec<Value> = entries
         .into_iter()
         .take(limit)
-        .filter_map(|e| user_book(catalogue, e))
+        .filter_map(user_book)
         .collect();
     json!({ "user_books": page })
 }
 
-fn progress_context(catalogue: &Catalogue, id: i64, vars: &Value) -> Value {
-    // `$reads` is either `{id: {_eq: n}}` or "unfinished".
+/// `{pages audio_seconds reading_format_id}` of an edition.
+fn lengths(id: Option<i64>) -> Value {
+    match id.and_then(|id| CATALOGUE.edition(id)) {
+        Some((_, Some(e))) => json!({
+            "pages": e.pages,
+            "audio_seconds": e.audio_seconds,
+            "reading_format_id": e.reading_format,
+        }),
+        Some((_, None)) => {
+            json!({ "pages": null, "audio_seconds": null, "reading_format_id": null })
+        }
+        None => Value::Null,
+    }
+}
+
+fn progress_context(state: &State, id: i64, vars: &Value) -> Value {
+    // `$reads` is either `{id: {_eq: n}}` or `{finished_at: {_is_null: true}}`.
     let wanted = vars["reads"]["id"]["_eq"].as_i64();
-    let found = catalogue.entry(id).and_then(|e| {
-        let book = catalogue.book(e.book)?;
+    let found = state.entry(id).map(|e| {
+        let book = CATALOGUE.book(e.book);
         let read = e
             .reads
             .iter()
             .filter(|r| match wanted {
                 Some(id) => r.id == id,
-                None => r.finished_at.is_none(),
+                None => r.finished.is_none(),
             })
             .max_by_key(|r| r.id);
-        Some(json!({
+        json!({
             "id": e.id,
             "status_id": e.status,
-            "book": { "pages": book.pages, "audio_seconds": null },
-            "edition": null,
-            "user_book_reads": read.map(|r| json!({ "id": r.id, "edition": null }))
+            "book": {
+                "pages": book.and_then(|b| b.pages),
+                "audio_seconds": book.and_then(|b| b.audio_seconds),
+            },
+            "edition": lengths(e.edition),
+            "user_book_reads": read.map(|r| json!({ "id": r.id, "edition": lengths(r.edition) }))
                 .into_iter()
                 .collect::<Vec<_>>(),
-        }))
+        })
     });
     json!({ "user_books": found.into_iter().collect::<Vec<_>>() })
 }
 
-fn lists_page(catalogue: &Catalogue, mine: bool, after: i64, limit: usize) -> Value {
-    let lists: Vec<Value> = catalogue
+fn lists_page(state: &State, mine: bool, after: i64, limit: usize) -> Value {
+    let mut lists: Vec<&List> = state
         .lists
         .iter()
         .filter(|l| mine && l.id > after)
-        .take(limit)
-        .map(list)
         .collect();
+    lists.sort_by_key(|l| l.id);
+    let lists: Vec<Value> = lists.into_iter().take(limit).map(list).collect();
     json!({ "lists": lists })
 }
 
-fn list_books_page(catalogue: &Catalogue, id: i64, offset: usize, limit: usize) -> Value {
-    let rows: Vec<Value> = catalogue
-        .lists
-        .iter()
-        .find(|l| l.id == id)
+/// A page of one list's rows, by position (none last), then id.
+fn list_books_page(state: &State, id: i64, offset: usize, limit: usize) -> Value {
+    let Some(l) = state.list(id) else {
+        return json!({ "list_books": [] });
+    };
+    let mut rows: Vec<&state::ListRow> = l.rows.iter().collect();
+    rows.sort_by(|a, b| {
+        by_position(a.position.map(|p| p as f64), b.position.map(|p| p as f64))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    let rows: Vec<Value> = rows
         .into_iter()
-        .flat_map(|l| {
-            l.rows().filter_map(|(id, book, position)| {
-                let book = catalogue.book(book)?;
-                Some(json!({
-                    "id": id,
-                    "position": position,
-                    "edition_id": l.is_owned().then_some(book.id),
-                    "book": book_summary(book),
-                }))
-            })
+        .filter_map(|r| {
+            let book = CATALOGUE.book(r.book)?;
+            Some(json!({
+                "id": r.id,
+                "position": r.position,
+                "edition_id": r.edition,
+                "book": book_summary(book),
+            }))
         })
         .skip(offset)
         .take(limit)
@@ -1044,8 +1292,8 @@ fn list_books_page(catalogue: &Catalogue, id: i64, offset: usize, limit: usize) 
     json!({ "list_books": rows })
 }
 
-fn list_memberships_page(catalogue: &Catalogue, mine: bool, after: i64, limit: usize) -> Value {
-    let mut rows = memberships(catalogue);
+fn list_memberships_page(state: &State, mine: bool, after: i64, limit: usize) -> Value {
+    let mut rows = memberships(state);
     rows.sort_by_key(|(_, row)| row["id"].as_i64());
     let rows: Vec<Value> = rows
         .into_iter()
@@ -1187,18 +1435,15 @@ fn search_series(catalogue: &Catalogue, vars: &Value) -> Value {
         .series()
         .into_iter()
         .filter_map(|(id, name)| {
-            let mut books: Vec<&Book> = catalogue
+            let mut books: Vec<(Option<f64>, &Book)> = catalogue
                 .books
                 .iter()
-                .filter(|b| b.series.as_ref().is_some_and(|s| s.name == name))
+                .filter_map(|b| Some((b.in_series(name)?.position, b)))
                 .collect();
-            books.sort_by(|a, b| {
-                let position = |b: &Book| b.series.as_ref().map_or(0.0, |s| s.position);
-                position(a).total_cmp(&position(b))
-            });
-            let author = books.first().map(|b| b.author.as_str());
+            books.sort_by(|a, b| by_position(a.0, b.0));
+            let author = catalogue.series_author(name);
             let haystack = std::iter::once(name)
-                .chain(books.iter().map(|b| b.title.as_str()))
+                .chain(books.iter().map(|(_, b)| b.title.as_str()))
                 .chain(author)
                 .collect::<Vec<_>>()
                 .join(" ")
@@ -1206,8 +1451,8 @@ fn search_series(catalogue: &Catalogue, vars: &Value) -> Value {
             if !words.iter().all(|w| haystack.contains(w.as_str())) {
                 return None;
             }
-            let readers = books.iter().map(|b| b.users_count).sum();
-            let titles: Vec<&str> = books.iter().map(|b| b.title.as_str()).collect();
+            let readers = books.iter().map(|(_, b)| b.users_count).sum();
+            let titles: Vec<&str> = books.iter().map(|(_, b)| b.title.as_str()).collect();
             Some((
                 id,
                 readers,
@@ -1245,456 +1490,4 @@ fn trending(catalogue: &Catalogue, vars: &Value) -> Value {
     }
     let ids: Vec<i64> = books.into_iter().take(limit).map(|b| b.id).collect();
     json!({ "books_trending": { "error": null, "ids": ids } })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::api::DOCUMENTS;
-    use crate::{BookId, ReadingStatus, UserBookId};
-
-    #[test]
-    fn signs_in_as_the_demo_reader() {
-        let me = client().me().unwrap();
-        assert_eq!(me.username, "demo_reader");
-        assert!(me.avatar.is_none());
-    }
-
-    #[test]
-    fn the_library_fills_every_shelf() {
-        let client = client();
-        let me = client.me().unwrap();
-        let library = client.library(me.id).unwrap();
-        assert_eq!(library.len(), CATALOGUE.library.len());
-        for status in ReadingStatus::ALL {
-            assert!(
-                library.iter().any(|e| e.status == status),
-                "nothing on {status:?}"
-            );
-        }
-        let reading = library
-            .iter()
-            .find(|e| e.status == ReadingStatus::CurrentlyReading)
-            .unwrap();
-        assert!(reading.open_read().unwrap().progress_pages.is_some());
-        assert!(reading.book.cover.is_some());
-        assert!(
-            library.iter().any(|e| e.reads.len() > 1),
-            "no entry shows a read history"
-        );
-        assert!(library.iter().any(|e| e.private_notes.is_some()));
-    }
-
-    #[test]
-    fn every_book_has_one_edition() {
-        let client = client();
-        for book in &CATALOGUE.books {
-            let editions = client.book_editions(BookId::new(book.id), 0).unwrap();
-            assert_eq!(editions.len(), 1, "{}", book.title);
-            let edition = &editions[0];
-            assert_eq!(edition.cover.as_ref().unwrap().url, book.cover.url);
-            assert_eq!(client.book_editions(BookId::new(book.id), 1).unwrap(), []);
-        }
-    }
-
-    #[test]
-    fn library_pages_honour_the_cursor_and_limit() {
-        let page = |after: i64| {
-            let body = answer(
-                "LibraryPage",
-                &json!({ "userId": 1, "afterId": after, "limit": 5 }),
-            );
-            body["data"]["user_books"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|e| e["id"].as_i64().unwrap())
-                .collect::<Vec<_>>()
-        };
-        let mut seen: Vec<i64> = Vec::new();
-        let mut after = 0;
-        loop {
-            let ids = page(after);
-            assert!(ids.len() <= 5);
-            seen.extend(&ids);
-            match ids.last() {
-                Some(last) => after = *last,
-                None => break,
-            }
-        }
-        assert_eq!(seen.len(), CATALOGUE.library.len());
-        assert!(seen.windows(2).all(|w| w[0] < w[1]));
-    }
-
-    #[test]
-    fn every_book_has_details_and_a_hardcover_cover() {
-        let client = client();
-        for book in &CATALOGUE.books {
-            let details = client.book_details(BookId::new(book.id)).unwrap();
-            assert_eq!(details.summary.title, book.title);
-            assert!(details.description.is_some());
-            let cover = details.summary.cover.expect("a cover");
-            assert!(
-                cover.url.starts_with("https://assets.hardcover.app/"),
-                "{}",
-                cover.url
-            );
-        }
-    }
-
-    #[test]
-    fn only_catalogue_covers_are_fetched() {
-        // No transport for covers: nothing reaches the network in tests.
-        let transport = DemoTransport { covers: None };
-        let response = transport
-            .send(HttpRequest::new(Method::Get, "https://example.com/x.jpg"))
-            .unwrap();
-        assert_eq!(response.status, 404);
-    }
-
-    #[test]
-    fn entries_can_be_read_back() {
-        let client = client();
-        let me = client.me().unwrap();
-        let first = &CATALOGUE.library[0];
-        let entry = client.library_entry(UserBookId::new(first.id)).unwrap();
-        assert_eq!(entry.unwrap().user_book_id, UserBookId::new(first.id));
-        let by_book = client
-            .library_entry_for_book(me.id, BookId::new(first.book))
-            .unwrap();
-        assert!(by_book.is_some());
-        assert!(
-            client
-                .library_entry_for_book(me.id, BookId::new(427_314))
-                .unwrap()
-                .is_none(),
-            "Children of Dune is only in search"
-        );
-    }
-
-    #[test]
-    fn search_matches_titles_and_authors() {
-        let client = client();
-        let herbert = client.search_books("frank herbert", 1).unwrap();
-        assert_eq!(herbert.books.len(), 4);
-        let dune = client.search_books("Dune", 1).unwrap();
-        assert_eq!(dune.books.len(), 4);
-        assert_eq!(dune.books[0].title, "Dune", "the most read first");
-        assert_eq!(client.search_books("zzz", 1).unwrap().books, []);
-    }
-
-    #[test]
-    fn the_reader_has_a_goal_counted_from_their_library() {
-        let client = client();
-        let goals = client.goals().unwrap();
-        assert_eq!(goals.len(), 1);
-        let goal = &goals[0];
-        assert_eq!(goal.metric, crate::GoalMetric::Books);
-        assert_eq!(goal.target, 12);
-        // Always this year's, so the demo shows a current goal.
-        assert!(goal.is_current(chrono::Local::now().date_naive()));
-        let err = client.delete_goal(goal.id).unwrap_err();
-        assert!(err.to_string().contains(READ_ONLY), "{err}");
-    }
-
-    #[test]
-    fn the_demo_goal_counts_the_reads_finished_in_its_year() {
-        let finished_in = |year: i32| {
-            CATALOGUE
-                .library
-                .iter()
-                .flat_map(|e| &e.reads)
-                .filter_map(|r| r.finished_at.as_deref())
-                .filter(|f| f.starts_with(&format!("{year}-")))
-                .fold(0_i64, |count, _| count + 1)
-        };
-        assert!(finished_in(2026) > 0);
-        for year in [2026, 2027] {
-            let g = goal(&CATALOGUE, &CATALOGUE.goals[0], year);
-            assert_eq!(g["start_date"], format!("{year}-01-01"));
-            assert_eq!(g["end_date"], format!("{year}-12-31"));
-            assert_eq!(g["description"], format!("12 books in {year}"));
-            assert_eq!(g["progress"], finished_in(year));
-        }
-    }
-
-    #[test]
-    fn the_reader_has_reviewed_a_few_books() {
-        let client = client();
-        let dune = client.review(UserBookId::new(521)).unwrap();
-        assert!(dune.text().unwrap().contains("Dune Messiah"));
-        assert_eq!(
-            dune.reviewed_at,
-            chrono::NaiveDate::from_ymd_opt(2026, 10, 13)
-        );
-        assert!(!dune.has_spoilers);
-        let reviewed = CATALOGUE.library.iter().filter(|e| e.review.is_some());
-        assert_eq!(reviewed.count(), 2);
-        assert!(!client.review(UserBookId::new(501)).unwrap().exists());
-        let err = client
-            .delete_review(UserBookId::new(521), ReadingStatus::Read)
-            .unwrap_err();
-        assert!(err.to_string().contains(READ_ONLY), "{err}");
-    }
-
-    #[test]
-    fn writes_are_refused() {
-        let client = client();
-        let err = client
-            .set_status(UserBookId::new(501), ReadingStatus::Read)
-            .unwrap_err();
-        assert!(err.to_string().contains(READ_ONLY), "{err}");
-    }
-
-    #[test]
-    fn series_and_author_pages_link_up() {
-        let client = client();
-        let dune = client.book_details(BookId::new(312_460)).unwrap();
-        let series_id = dune.series[0].id.expect("a series id");
-        let series = client.series(series_id).unwrap();
-        assert_eq!(series.name, "Dune");
-        let titles: Vec<&str> = series.books.iter().map(|b| b.book.title.as_str()).collect();
-        assert_eq!(
-            titles,
-            vec![
-                "Dune",
-                "Dune Messiah",
-                "Children of Dune",
-                "God Emperor of Dune"
-            ]
-        );
-        let author = series.author.expect("an author");
-        assert_eq!(author.name, "Frank Herbert");
-        assert_eq!(dune.contributors[0].author_id, Some(author.id));
-
-        let page = client.author(author.id).unwrap();
-        assert_eq!(page.books.len(), 4);
-        assert_eq!(page.books[0].book.title, "Dune", "the most read first");
-        assert!(page.bio.is_none() && page.photo.is_none());
-        assert!(client.author(crate::AuthorId::new(1)).is_err());
-    }
-
-    #[test]
-    fn library_entries_carry_their_series() {
-        let client = client();
-        let me = client.me().unwrap();
-        let library = client.library(me.id).unwrap();
-        let messiah = library
-            .iter()
-            .find(|e| e.book.title == "Dune Messiah")
-            .expect("Dune Messiah is shelved");
-        let details = client.book_details(messiah.book.id).unwrap();
-        assert_eq!(messiah.series, details.series, "the same as the book page");
-        assert_eq!(messiah.series[0].name, "Dune");
-        assert_eq!(messiah.series[0].position, Some(2.0));
-        assert!(messiah.series[0].id.is_some());
-        let habits = library.iter().find(|e| e.book.title == "Atomic Habits");
-        assert_eq!(habits.expect("shelved").series, []);
-    }
-
-    #[test]
-    fn similar_books_come_from_the_catalogue() {
-        let client = client();
-        let dune = client.book_details(BookId::new(312_460)).unwrap();
-        assert_ne!(dune.similar_book_ids, []);
-        assert!(!dune.similar_book_ids.contains(&BookId::new(312_460)));
-        let books = client.books_by_ids(&dune.similar_book_ids).unwrap();
-        assert_eq!(books.len(), dune.similar_book_ids.len());
-        assert_eq!(books[0].id, dune.similar_book_ids[0]);
-        assert_eq!(dune.ratings_distribution, []);
-    }
-
-    #[test]
-    fn author_and_series_hits_open_their_pages() {
-        let client = client();
-        let authors = client.search_authors("herbert", 1).unwrap();
-        assert_eq!(authors.hits.len(), 1);
-        let herbert = &authors.hits[0];
-        assert_eq!(herbert.name, "Frank Herbert");
-        assert_eq!(herbert.top_books[0], "Dune");
-        assert_eq!(herbert.books_count, None);
-        assert_eq!(client.author(herbert.id).unwrap().name, "Frank Herbert");
-
-        let series = client.search_series("dune", 1).unwrap();
-        assert_eq!(series.hits.len(), 1);
-        let dune = &series.hits[0];
-        assert_eq!(dune.author.as_deref(), Some("Frank Herbert"));
-        assert_eq!(dune.books.first().map(String::as_str), Some("Dune"));
-        assert_eq!(client.series(dune.id).unwrap().name, "Dune");
-
-        // Every author and series in the catalogue can be found and opened.
-        for (id, name) in CATALOGUE.authors() {
-            let hits = client.search_authors(name, 1).unwrap().hits;
-            let hit = hits.iter().find(|a| a.id.get() == id).expect(name);
-            assert_eq!(client.author(hit.id).unwrap().name, name);
-        }
-        for (id, name) in CATALOGUE.series() {
-            let hits = client.search_series(name, 1).unwrap().hits;
-            let hit = hits.iter().find(|s| s.id.get() == id).expect(name);
-            assert_eq!(client.series(hit.id).unwrap().name, name);
-        }
-        assert_eq!(client.search_series("no such series", 1).unwrap().hits, []);
-    }
-
-    #[test]
-    fn trending_resolves_every_id_for_every_period() {
-        use crate::TrendingPeriod::*;
-        let client = client();
-        let mut firsts = Vec::new();
-        for period in [Week, Month, ThreeMonths, Year, AllTime] {
-            let books = client.trending_books(period).unwrap();
-            assert_eq!(
-                books.len(),
-                crate::api::TRENDING_LIMIT.min(CATALOGUE.books.len())
-            );
-            firsts.push(books[0].id);
-        }
-        // Periods rank differently, so switching shows a change.
-        assert_ne!(firsts[0], firsts[1]);
-        assert_ne!(firsts[1], firsts[3]);
-    }
-
-    #[test]
-    fn the_reader_has_lists_and_an_owned_list() {
-        let client = client();
-        let lists = client.lists().unwrap();
-        assert!(lists.len() >= 3);
-        let owned: Vec<_> = lists.iter().filter(|l| l.is_owned()).collect();
-        assert_eq!(owned.len(), 1);
-        let ranked = lists.iter().find(|l| l.ranked).expect("a ranked list");
-        let books = client.list_books(ranked.id, 0).unwrap();
-        assert_eq!(books.len(), ranked.books_count as usize);
-        let positions: Vec<Option<i32>> = books.iter().map(|b| b.position).collect();
-        assert_eq!(positions[..2], [Some(1), Some(2)]);
-        assert_eq!(client.list_books(ranked.id, 100).unwrap(), []);
-
-        let all = client.list_memberships().unwrap();
-        assert!(all.complete);
-        let total: u32 = lists.iter().map(|l| l.books_count).sum();
-        assert_eq!(all.rows.len(), total as usize);
-        // Owned rows name the book's demo edition; other lists name none.
-        for row in &all.rows {
-            let on_owned = row.list_id == owned[0].id;
-            assert_eq!(row.edition_id.is_some(), on_owned, "{row:?}");
-        }
-        let dune = client.book_list_memberships(BookId::new(312_460)).unwrap();
-        assert!(dune.iter().any(|r| r.list_id == owned[0].id));
-
-        let err = client
-            .add_to_list(ranked.id, BookId::new(312_460), None)
-            .unwrap_err();
-        assert!(err.to_string().contains(READ_ONLY), "{err}");
-        let err = client.remove_from_list(dune[0].id).unwrap_err();
-        assert!(err.to_string().contains(READ_ONLY), "{err}");
-    }
-
-    #[test]
-    fn upcoming_books_follow_the_library_series() {
-        let catalogue = &*CATALOGUE;
-        for u in &catalogue.upcoming {
-            assert!(catalogue.book(u.id).is_none(), "{} is a catalogue id", u.id);
-            assert_ne!(
-                catalogue.series_id(&u.series),
-                0,
-                "{} has no series",
-                u.title
-            );
-            assert!(u.days > 0, "{} is already out", u.title);
-        }
-        assert!(
-            catalogue.upcoming.iter().any(|u| u.days <= 14),
-            "Home shows one soon"
-        );
-
-        let client = client();
-        let library = client.library(client.me().unwrap().id).unwrap();
-        let series: Vec<crate::SeriesId> = library
-            .iter()
-            .flat_map(|e| e.series.iter().filter_map(|s| s.id))
-            .collect();
-        let today = today();
-        let books = client.upcoming_in_series(&series, today).unwrap();
-        assert_eq!(books.len(), catalogue.upcoming.len());
-        assert!(
-            books
-                .windows(2)
-                .all(|w| w[0].release_date <= w[1].release_date)
-        );
-        assert!(
-            books
-                .iter()
-                .all(|b| b.release_date > today && b.book.cover.is_none())
-        );
-        assert!(books.iter().all(|b| !b.series.is_empty()));
-        // Only the series asked for; none, no books.
-        let first = books[0].series[0].id.unwrap();
-        let one = client.upcoming_in_series(&[first], today).unwrap();
-        assert!(one.iter().all(|b| b.series[0].id == Some(first)));
-        assert!(one.len() < books.len());
-
-        // Its page opens, with no description, and its series lists it.
-        let details = client.book_details(books[0].book.id).unwrap();
-        assert_eq!(details.release_date, Some(books[0].release_date));
-        assert!(details.description.is_none());
-        let page = client.series(first).unwrap();
-        assert!(page.books.iter().any(|b| b.book.id == books[0].book.id));
-    }
-
-    #[test]
-    fn the_series_overview_lists_catalogue_and_upcoming_books() {
-        let catalogue = &*CATALOGUE;
-        let client = client();
-        let ids: Vec<crate::SeriesId> = catalogue
-            .series()
-            .into_iter()
-            .map(|(id, _)| crate::SeriesId::new(id))
-            .collect();
-        let series = client.tracked_series(&ids).unwrap();
-        assert_eq!(series.len(), ids.len());
-        let named = |name: &str| series.iter().find(|s| s.name == name).unwrap();
-
-        let dune: Vec<f32> = named("Dune").books.iter().map(|b| b.position).collect();
-        assert_eq!(dune, [1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(named("Dune").author.as_ref().unwrap().name, "Frank Herbert");
-        // A novella still to come, with its date.
-        let mistborn = named("The Mistborn Saga: The Original Trilogy");
-        let novella = mistborn
-            .books
-            .iter()
-            .find(|b| b.position.total_cmp(&3.5).is_eq())
-            .unwrap();
-        assert!(novella.release_date.unwrap() > today());
-        // An upcoming book without a position is filtered, as the query does.
-        assert!(
-            named("Reidverse")
-                .books
-                .iter()
-                .all(|b| b.book.title != "Untitled Reidverse Novel")
-        );
-        assert!(
-            series
-                .iter()
-                .all(|s| { s.books.windows(2).all(|w| w[0].position <= w[1].position) })
-        );
-        // Only the series asked for.
-        let one = client.tracked_series(&ids[..1]).unwrap();
-        assert_eq!(one.len(), 1);
-        assert_eq!(one[0].id, ids[0]);
-    }
-
-    #[test]
-    fn every_document_has_an_answer() {
-        for (name, doc) in DOCUMENTS {
-            let op = doc
-                .split_whitespace()
-                .nth(1)
-                .and_then(|s| s.split(['(', '{']).next())
-                .unwrap();
-            let body = answer(op, &json!({}));
-            let unanswered = body["errors"][0]["message"]
-                .as_str()
-                .is_some_and(|m| m.starts_with("The demo has no answer"));
-            assert!(!unanswered, "{name} ({op}) has no demo answer");
-        }
-    }
 }

@@ -1,19 +1,23 @@
 //! Other readers' reviews in the demo, from `demo/reviews.json`.
 //!
 //! The reviewers and their texts are invented. Project Hail Mary has more
-//! than a page of them (with a spoiler review, a long one, a Persian one and
-//! one without a rating), a few other books have some, and the rest have none.
+//! than a page of them (with a spoiler review, a long one, a Persian one, one
+//! without a rating and one with no text, which the client drops), a few
+//! other books have some, and the rest have none. Dates are days from today.
 //! The demo reader's own reviews are in the pool too, so `$me` has something
-//! to leave out. Reviewers have a colour but no avatar image: the demo
-//! downloads only the catalogue's covers.
+//! to leave out. A few reviewers have one of Hardcover's default avatars
+//! (`static/avatars/profileN.png`, generic pictures, not anyone's); the rest
+//! have a colour or nothing.
 
 use std::cmp::Reverse;
 use std::sync::LazyLock;
 
+use chrono::{Duration, NaiveDate};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::Catalogue;
+use super::CATALOGUE;
+use super::state::State;
 
 #[derive(Deserialize)]
 struct Reviews {
@@ -27,6 +31,8 @@ struct DemoReviewer {
     username: String,
     name: String,
     color: Option<String>,
+    /// One of Hardcover's default avatars.
+    avatar: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -36,7 +42,8 @@ struct DemoCommunityReview {
     user: i64,
     rating: Option<f64>,
     likes: i64,
-    reviewed_at: Option<String>,
+    /// Days from today.
+    reviewed: Option<i64>,
     #[serde(default)]
     spoilers: bool,
     text: String,
@@ -46,37 +53,47 @@ static REVIEWS: LazyLock<Reviews> = LazyLock::new(|| {
     serde_json::from_str(include_str!("reviews.json")).expect("demo/reviews.json parses")
 });
 
+/// The reviewers' avatars, which the demo may download.
+pub(super) fn avatars() -> impl Iterator<Item = &'static str> {
+    REVIEWS.reviewers.iter().filter_map(|r| r.avatar.as_deref())
+}
+
 /// One review row as `BookReviews` returns it, with its sort keys.
 struct Row {
     likes: i64,
-    reviewed_at: Option<String>,
+    reviewed_at: Option<NaiveDate>,
     id: i64,
     value: Value,
 }
 
 /// The reviews of `book` not written by `me`, in the query's order: most
 /// liked, then newest, then the highest id.
-fn rows(catalogue: &Catalogue, book: i64, me: i64) -> Vec<Row> {
+fn rows(state: &State, book: i64, me: i64) -> Vec<Row> {
     let reviews = &*REVIEWS;
+    let today = state.clock.today();
     let mut rows: Vec<Row> = reviews
         .reviews
         .iter()
         .filter(|r| r.book == book && r.user != me)
         .filter_map(|r| {
             let user = reviews.reviewers.iter().find(|u| u.id == r.user)?;
-            let image = match &user.color {
-                Some(color) => json!({ "color": color }),
-                None => json!({}),
-            };
+            let mut image = json!({});
+            if let Some(color) = &user.color {
+                image["color"] = json!(color);
+            }
+            if let Some(url) = &user.avatar {
+                image["url"] = json!(url);
+            }
+            let reviewed_at = r.reviewed.map(|days| today + Duration::days(days));
             Some(Row {
                 likes: r.likes,
-                reviewed_at: r.reviewed_at.clone(),
+                reviewed_at,
                 id: r.id,
                 value: json!({
                     "id": r.id,
                     "rating": r.rating,
                     "likes_count": r.likes,
-                    "reviewed_at": r.reviewed_at.as_ref().map(|d| format!("{d}T00:00:00")),
+                    "reviewed_at": reviewed_at.map(|d| format!("{d}T00:00:00")),
                     "review_has_spoilers": r.spoilers,
                     "review_raw": r.text,
                     "user": {
@@ -90,36 +107,33 @@ fn rows(catalogue: &Catalogue, book: i64, me: i64) -> Vec<Row> {
         })
         .collect();
     // The demo reader's own reviews, which `$me` leaves out.
-    let reader = &catalogue.user;
+    let reader = &CATALOGUE.user;
     rows.extend(
-        catalogue
+        state
             .library
             .iter()
-            .filter(|e| e.book == book && reader.id != me)
-            .filter_map(|e| {
-                let review = e.review.as_ref()?;
-                Some(Row {
-                    likes: 0,
-                    reviewed_at: Some(review.reviewed_at.clone()),
-                    id: e.id,
-                    value: json!({
-                        "id": e.id,
-                        "rating": e.rating,
-                        "likes_count": 0,
-                        "reviewed_at": format!("{}T00:00:00", review.reviewed_at),
-                        "review_has_spoilers": review.spoilers,
-                        "review_raw": review.markdown,
-                        "user": {
-                            "id": reader.id,
-                            "username": reader.username,
-                            "name": reader.name,
-                            "cached_image": {},
-                        },
-                    }),
-                })
+            .filter(|e| e.book == book && reader.id != me && e.review.exists())
+            .map(|e| Row {
+                likes: 0,
+                reviewed_at: e.review.reviewed_at,
+                id: e.id,
+                value: json!({
+                    "id": e.id,
+                    "rating": e.rating,
+                    "likes_count": 0,
+                    "reviewed_at": e.review.reviewed_at.map(|d| format!("{d}T00:00:00")),
+                    "review_has_spoilers": e.review.spoilers,
+                    "review_raw": e.review.raw,
+                    "user": {
+                        "id": reader.id,
+                        "username": reader.username,
+                        "name": reader.name,
+                        "cached_image": {},
+                    },
+                }),
             }),
     );
-    // Dates are ISO, so they sort as strings; no date sorts last.
+    // The newest first; no date sorts last.
     rows.sort_by(|a, b| {
         Reverse(a.likes)
             .cmp(&Reverse(b.likes))
@@ -135,11 +149,11 @@ fn rows(catalogue: &Catalogue, book: i64, me: i64) -> Vec<Row> {
 }
 
 /// `BookReviews`.
-pub(super) fn page(catalogue: &Catalogue, vars: &Value) -> Value {
+pub(super) fn page(state: &State, vars: &Value) -> Value {
     let int = |name: &str| vars[name].as_i64().unwrap_or_default();
     let offset = usize::try_from(int("offset")).unwrap_or_default();
     let limit = usize::try_from(int("limit")).unwrap_or_default();
-    let rows: Vec<Value> = rows(catalogue, int("bookId"), int("me"))
+    let rows: Vec<Value> = rows(state, int("bookId"), int("me"))
         .into_iter()
         .skip(offset)
         .take(limit)
@@ -149,9 +163,9 @@ pub(super) fn page(catalogue: &Catalogue, vars: &Value) -> Value {
 }
 
 /// `BookReviewsCount`.
-pub(super) fn count(catalogue: &Catalogue, vars: &Value) -> Value {
+pub(super) fn count(state: &State, vars: &Value) -> Value {
     let int = |name: &str| vars[name].as_i64().unwrap_or_default();
-    let count = rows(catalogue, int("bookId"), int("me")).len();
+    let count = rows(state, int("bookId"), int("me")).len();
     json!({ "user_books_aggregate": { "aggregate": { "count": count } } })
 }
 
@@ -169,7 +183,9 @@ mod tests {
     fn one_book_has_more_than_a_page_of_reviews() {
         let client = client();
         let first = client.book_reviews(PROJECT_HAIL_MARY, READER, 0).unwrap();
-        assert_eq!(first.reviews.len(), REVIEWS_PER_PAGE as usize);
+        // One row on the first page has no text: dropped, but counted.
+        assert_eq!(first.reviews.len(), REVIEWS_PER_PAGE as usize - 1);
+        assert_eq!(first.next_offset, REVIEWS_PER_PAGE);
         assert!(first.has_more);
         let likes: Vec<u32> = first.reviews.iter().map(|r| r.likes).collect();
         assert!(likes.windows(2).all(|w| w[0] >= w[1]), "{likes:?}");
@@ -182,7 +198,8 @@ mod tests {
             client
                 .book_reviews_count(PROJECT_HAIL_MARY, READER)
                 .unwrap() as usize,
-            total
+            total + 1,
+            "the review with no text counts too"
         );
         let all: Vec<_> = first.reviews.iter().chain(&second.reviews).collect();
         assert!(all.iter().any(|r| r.has_spoilers));
@@ -195,6 +212,7 @@ mod tests {
                 .any(|c| ('\u{0600}'..='\u{06FF}').contains(&c))
         }));
         assert!(all.iter().any(|r| r.reviewer.name.is_none()));
+        assert!(all.iter().any(|r| r.reviewer.avatar.is_some()));
     }
 
     #[test]

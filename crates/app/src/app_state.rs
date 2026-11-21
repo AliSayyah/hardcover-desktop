@@ -157,15 +157,21 @@ pub fn startup() -> Startup {
     real_startup()
 }
 
-/// The demo library, with a cache that lives only in memory.
+/// The demo library, with a cache that lives only in memory, and the faults
+/// `HARDCOVER_DEMO_FAULTS` asks for.
 #[cfg(feature = "demo")]
 fn demo_startup() -> Startup {
-    eprintln!("hardcover: demo build, showing the demo library");
+    let faults = hardcover_core::demo::env_faults();
+    if faults.is_empty() {
+        eprintln!("hardcover: demo build, showing the demo library");
+    } else {
+        eprintln!("hardcover: demo build, showing the demo library with faults: {faults}");
+    }
     Startup::SignedIn {
-        client: hardcover_core::demo::client(),
+        client: hardcover_core::demo::client_with(faults),
         session: None,
         cache: LibraryCache::open_in_memory().ok().map(Arc::new),
-        scopes: GrantedScopes::all(),
+        scopes: faults.granted_scopes(),
     }
 }
 
@@ -254,6 +260,7 @@ impl CoverService {
         #[cfg(feature = "demo")]
         let cache = hardcover_core::demo::cover_cache(
             std::env::temp_dir().join("hardcover-desktop-demo-covers"),
+            hardcover_core::demo::env_faults(),
         );
         #[cfg(not(feature = "demo"))]
         let cache = CoverCache::open_default();
