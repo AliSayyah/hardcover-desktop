@@ -134,6 +134,32 @@ fn binary(prefix: &Path) -> String {
     fs::read_to_string(prefix.join("bin/hardcover-desktop")).unwrap()
 }
 
+/// Every install temporary file under `dir`, at any depth, through links.
+fn temp_files(dir: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(dir).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(temp_files(&path));
+        } else if entry.file_name().to_string_lossy().starts_with(TEMP_PREFIX) {
+            found.push(path.display().to_string());
+        }
+    }
+    found
+}
+
+/// An updater that answers with `version`'s tarball, signed.
+fn serving_tarball(version: &str) -> (Updater, Release) {
+    let key = Key::new();
+    let (u, fake) = updater(&key);
+    let r = release(version);
+    let data = release_tarball(version);
+    fake.push_bytes(200, &key.sign(&data, &r.tarball.as_ref().unwrap().name));
+    fake.push_bytes(200, &data);
+    (u, r)
+}
+
 // ----- versions -----
 
 #[test]
@@ -144,9 +170,43 @@ fn versions_parse_and_order() {
     assert!(v("1.0.0") > v("1.0.0-rc.1"));
     assert!(v("1.0.0-rc.2") > v("1.0.0-rc.1"));
     assert_eq!(v("2.0.1-beta").to_string(), "2.0.1-beta");
-    for bad in ["", "1.2", "1.2.3.4", "1.x.3", "1.2.3-", "-1.2.3", "1..3"] {
+    for bad in [
+        "",
+        "1.2",
+        "1.2.3.4",
+        "1.x.3",
+        "1.2.3-",
+        "-1.2.3",
+        "1..3",
+        "1.2.3-rc..1",
+        "1.2.3-rc.01",
+        "1.2.3-rc_1",
+    ] {
         assert_eq!(Version::parse(bad), None, "{bad:?}");
     }
+}
+
+#[test]
+fn pre_releases_order_as_semantic_versioning_says() {
+    // The example from semver.org, section 11, in order.
+    let ordered = [
+        "1.0.0-alpha",
+        "1.0.0-alpha.1",
+        "1.0.0-alpha.beta",
+        "1.0.0-beta",
+        "1.0.0-beta.2",
+        "1.0.0-beta.11",
+        "1.0.0-rc.1",
+        "1.0.0",
+    ];
+    for pair in ordered.windows(2) {
+        assert!(v(pair[0]) < v(pair[1]), "{} < {}", pair[0], pair[1]);
+    }
+    assert!(v("1.0.0-rc.10") > v("1.0.0-rc.9"));
+    assert!(v("1.0.0-rc.1") > v("1.0.0-rc.0"));
+    // Too long for any integer type, still ordered by value.
+    assert!(v("1.0.0-99999999999999999999999") > v("1.0.0-9999999999999999999999"));
+    assert_eq!(v("1.0.0-rc.1").cmp(&v("1.0.0-rc.1")), Ordering::Equal);
 }
 
 #[test]
@@ -279,7 +339,161 @@ fn install_replaces_the_files_and_cleans_up() {
             .mode();
         assert_eq!(mode & 0o777, 0o755);
     }
-    assert!(!prefix.path().join(STAGING_DIR).exists());
+    assert_eq!(temp_files(prefix.path()), [] as [String; 0]);
+}
+
+#[test]
+fn install_waits_for_the_installer_lock_on_the_prefix() {
+    let (u, r) = serving_tarball("0.2.0");
+    let prefix = old_install();
+    // `install.sh` itself takes the lock, as it does while it installs, and
+    // holds it until its input closes.
+    let mut held = std::process::Command::new("bash")
+        .args([
+            "-c",
+            r#"exec 9<"$1" && flock 9 && echo locked && read -r _"#,
+            "_",
+        ])
+        .arg(prefix.path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut said = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(held.stdout.take().unwrap()),
+        &mut said,
+    )
+    .unwrap();
+    assert_eq!(said, "locked\n");
+
+    let target = tarball_target(prefix.path());
+    let install = std::thread::spawn(move || u.install(&r, &v("0.1.0"), &target));
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(binary(prefix.path()), "binary 0.1.0");
+    assert_eq!(temp_files(prefix.path()), [] as [String; 0]);
+
+    drop(held.stdin.take());
+    held.wait().unwrap();
+    install.join().unwrap().unwrap();
+    assert_eq!(binary(prefix.path()), "binary 0.2.0");
+}
+
+#[test]
+fn install_removes_what_a_crashed_install_left() {
+    let (u, r) = serving_tarball("0.2.0");
+    let prefix = old_install();
+    let p = prefix.path();
+    let stale = [
+        p.join(format!("bin/{TEMP_PREFIX}4242-0")),
+        p.join(format!("share/applications/{TEMP_PREFIX}abcdefgh")),
+    ];
+    for file in &stale {
+        fs::write(file, "half a binary").unwrap();
+    }
+    // Not ours, or not a file: left alone.
+    fs::write(p.join("bin/.hardcover-desktop-probe-1"), "").unwrap();
+    fs::create_dir(p.join(format!("bin/{TEMP_PREFIX}dir"))).unwrap();
+
+    u.install(&r, &v("0.1.0"), &tarball_target(p)).unwrap();
+
+    assert_eq!(binary(p), "binary 0.2.0");
+    for file in &stale {
+        assert!(!file.exists(), "{} is still there", file.display());
+    }
+    assert!(p.join("bin/.hardcover-desktop-probe-1").exists());
+    assert!(p.join(format!("bin/{TEMP_PREFIX}dir")).is_dir());
+}
+
+#[test]
+fn install_works_when_bin_and_share_are_links_to_another_filesystem() {
+    // /dev/shm and the temporary directory are separate mounts here; a rename
+    // between them fails with EXDEV.
+    let Ok(elsewhere) = tempfile::tempdir_in("/dev/shm") else {
+        eprintln!("skipped: no /dev/shm");
+        return;
+    };
+    let prefix = old_install();
+    let p = prefix.path();
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let dev = |path: &Path| fs::metadata(path).unwrap().dev();
+        if dev(p) == dev(elsewhere.path()) {
+            eprintln!("skipped: /dev/shm is on the same filesystem");
+            return;
+        }
+    }
+    for dir in ["bin", "share"] {
+        fs::rename(p.join(dir), elsewhere.path().join(dir)).unwrap_or_else(|_| {
+            // Moving across filesystems: copy the old layout instead.
+            copy_tree(&p.join(dir), &elsewhere.path().join(dir));
+            fs::remove_dir_all(p.join(dir)).unwrap();
+        });
+        std::os::unix::fs::symlink(elsewhere.path().join(dir), p.join(dir)).unwrap();
+    }
+    let (u, r) = serving_tarball("0.2.0");
+
+    u.install(&r, &v("0.1.0"), &tarball_target(p)).unwrap();
+
+    assert_eq!(binary(p), "binary 0.2.0");
+    let desktop = p.join(format!("share/applications/{APP_ID}.desktop"));
+    assert_eq!(fs::read_to_string(desktop).unwrap(), "[Desktop Entry]\n");
+    assert!(p.join("bin").is_symlink());
+    assert_eq!(temp_files(elsewhere.path()), [] as [String; 0]);
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let dest = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &dest);
+        } else {
+            fs::copy(entry.path(), dest).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_failed_install_changes_nothing() {
+    // The binary comes first and the desktop entry's bytes are cut short, so
+    // the failure comes after a file was already written.
+    let key = Key::new();
+    let (u, fake) = updater(&key);
+    let r = release("0.2.0");
+    let t = top("0.2.0");
+    let mut data = tarball(&[
+        (&format!("{t}/bin/hardcover-desktop"), b"binary 0.2.0"),
+        (
+            &format!("{t}/share/applications/{APP_ID}.desktop"),
+            &[b'x'; 4096],
+        ),
+    ]);
+    // Undo the compression to cut the archive inside the second file.
+    let mut raw = Vec::new();
+    flate2::read::GzDecoder::new(data.as_slice())
+        .read_to_end(&mut raw)
+        .unwrap();
+    raw.truncate(512 * 3 + 100);
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    gz.write_all(&raw).unwrap();
+    data = gz.finish().unwrap();
+    fake.push_bytes(200, &key.sign(&data, &r.tarball.as_ref().unwrap().name));
+    fake.push_bytes(200, &data);
+    let prefix = old_install();
+
+    let err = u
+        .install(&r, &v("0.1.0"), &tarball_target(prefix.path()))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("not valid"), "{err}");
+    assert_eq!(binary(prefix.path()), "binary 0.1.0");
+    let desktop = prefix
+        .path()
+        .join(format!("share/applications/{APP_ID}.desktop"));
+    assert_eq!(fs::read_to_string(desktop).unwrap(), "old");
+    assert_eq!(temp_files(prefix.path()), [] as [String; 0]);
 }
 
 fn install_fails(sig: &[u8], data: &[u8], r: &Release, key: &Key) -> (String, String) {
@@ -290,7 +504,7 @@ fn install_fails(sig: &[u8], data: &[u8], r: &Release, key: &Key) -> (String, St
     let err = u
         .install(r, &v("0.1.0"), &tarball_target(prefix.path()))
         .unwrap_err();
-    assert!(!prefix.path().join(STAGING_DIR).exists());
+    assert_eq!(temp_files(prefix.path()), [] as [String; 0]);
     (err.to_string(), binary(prefix.path()))
 }
 
@@ -559,7 +773,7 @@ fn leftovers(dir: &Path) -> Vec<String> {
     fs::read_dir(dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with(STAGING_DIR))
+        .filter(|n| n.starts_with(TEMP_PREFIX))
         .collect()
 }
 

@@ -35,8 +35,6 @@ use gpui_kit::{
     App, AppContext as _, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, actions,
 };
 
-use hardcover_core::update::InstallKind;
-
 use crate::book::star_rating;
 use crate::search::search_view;
 
@@ -160,16 +158,13 @@ fn main() {
             design::theme::init(bundled_fonts, cx);
             bind_keys(cx);
             ui::kit::bind_keys(cx);
-            let install = exe
-                .as_deref()
-                .map_or(InstallKind::Other, InstallKind::detect);
-            // An AppImage restarts from its file: the executable inside it is
-            // gone once this process exits.
-            if let Some(path) = install.restart_path().or(exe.as_deref()) {
-                cx.set_restart_path(path.to_owned());
+            // An AppImage's restart path replaces this once the first update
+            // check has worked out how the app was installed (`update`).
+            if let Some(path) = &exe {
+                cx.set_restart_path(path.clone());
             }
             preferences::init(prefs.clone(), prefs_path.clone(), cx);
-            update::init(install, cx);
+            update::init(exe.clone(), cx);
 
             // Window geometry is a platform boundary: logical pixels, not rems.
             // The design's 1200 × 800 and 800 × 560, at the factor of the

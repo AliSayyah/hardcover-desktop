@@ -5,7 +5,14 @@
 //! [`UpdateModel`] lives for the whole run (an app-level global, like the cover
 //! service), so the state survives signing out and back in. The sidebar shows
 //! it and starts installs; the workspace turns its events into notifications.
+//!
+//! How the app was installed is worked out with the first check, on the
+//! background executor: it reads the `AppImage`'s header and probes whether
+//! `bin/` and `share/` are writable, which is file I/O the UI thread
+//! shouldn't wait on. Nothing needs it sooner: only a release a check found
+//! can be installed.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui_kit::{
@@ -51,7 +58,10 @@ pub enum UpdateEvent {
 pub struct UpdateModel {
     updater: Updater,
     current: Version,
-    install: InstallKind,
+    /// The running executable, resolved at startup.
+    exe: Option<PathBuf>,
+    /// How this copy was installed; `None` until the first check works it out.
+    install: Option<InstallKind>,
     state: UpdateState,
     check_task: Option<Task<()>>,
     install_task: Option<Task<()>>,
@@ -73,16 +83,17 @@ impl Updates {
     }
 }
 
-/// Creates the model and starts automatic checks if they are on. `install`
-/// is detected once at startup, before an update could replace anything.
+/// Creates the model and starts automatic checks if they are on. `exe` is the
+/// running executable, resolved at startup before an update could replace it.
 /// Needs the preferences global.
-pub fn init(install: InstallKind, cx: &mut App) {
+pub fn init(exe: Option<PathBuf>, cx: &mut App) {
     let preferences = AppPreferences::global(cx).clone();
     let model = cx.new(|cx| {
         let mut model = UpdateModel {
             updater: Updater::new(),
             current: Version::current(env!("CARGO_PKG_VERSION")),
-            install,
+            exe,
+            install: None,
             state: UpdateState::Idle,
             check_task: None,
             install_task: None,
@@ -131,12 +142,16 @@ impl UpdateModel {
     /// tarball in a writable prefix, or an `AppImage` in a writable
     /// directory), rather than only announce them.
     pub fn can_install(&self) -> bool {
-        self.install.can_self_update()
+        self.install
+            .as_ref()
+            .is_some_and(InstallKind::can_self_update)
     }
 
     /// Whether `release` has the file this copy updates from.
     pub fn has_download(&self, release: &Release) -> bool {
-        self.install.asset(release).is_some()
+        self.install
+            .as_ref()
+            .is_some_and(|install| install.asset(release).is_some())
     }
 
     /// Starts or stops automatic checks. They also need
@@ -176,11 +191,27 @@ impl UpdateModel {
         cx.notify();
         let updater = self.updater.clone();
         let current = self.current.clone();
+        // Worked out once, with the first check.
+        let detect = self.install.is_none().then(|| self.exe.clone());
         self.check_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { updater.check(&current) })
+            let (install, result) = cx
+                .background_spawn(async move {
+                    let install = detect.map(|exe| {
+                        exe.as_deref()
+                            .map_or(InstallKind::Other, InstallKind::detect)
+                    });
+                    (install, updater.check(&current))
+                })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if let Some(install) = install {
+                    // An AppImage restarts from its file: the executable
+                    // inside it is gone once this process exits.
+                    if let Some(path) = install.restart_path() {
+                        cx.set_restart_path(path.to_owned());
+                    }
+                    this.install = Some(install);
+                }
                 match result {
                     Ok(Some(release)) => {
                         this.state = UpdateState::Available(release);
@@ -217,11 +248,10 @@ impl UpdateModel {
         let UpdateState::Available(release) = &self.state else {
             return;
         };
-        if !self.install.can_self_update() {
+        let Some(install) = self.install.clone().filter(InstallKind::can_self_update) else {
             return;
-        }
+        };
         let release = release.clone();
-        let install = self.install.clone();
         self.state = UpdateState::Installing(release.clone());
         cx.notify();
         let updater = self.updater.clone();
