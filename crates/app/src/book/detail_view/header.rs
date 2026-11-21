@@ -454,10 +454,13 @@ fn book_facts(
     {
         facts.push(year.to_string());
     }
-    match entry
-        .and_then(LibraryEntry::length)
-        .or(book.pages.map(Length::Pages))
-    {
+    // The entry's edition decides; an audiobook whose running time is
+    // unknown shows no length rather than the book's pages.
+    let length = match entry.and_then(LibraryEntry::measure) {
+        Some(measure) => measure.length(),
+        None => book.pages.map(Length::Pages),
+    };
+    match length {
         Some(Length::Pages(pages)) => facts.push(format!("{} pages", count_text(pages))),
         Some(Length::Seconds(seconds)) => facts.push(duration_text(seconds)),
         None => {}

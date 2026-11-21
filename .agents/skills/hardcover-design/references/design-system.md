@@ -219,8 +219,10 @@ selection fill or a nested surface its own radius.
 | Meter | 6 high beside words, 2 high inside a row; 400 wide max (160 in a row) | |
 | Prose | 640 wide max | `size::PROSE` |
 | Page content | 768 wide max (`size::PAGE_MAX`), inside the 32 inset (`PAGE_FRAME_MAX` is both) | |
-| Home | 1024 wide max, its inset included | `size::HOME_MAX` |
-| Series page | 896 wide max | `size::SERIES_COLUMN` |
+| Home | 1024 wide max in two columns, 1840 in three; its inset included | `size::HOME_MAX`, `HOME_WIDE_MAX` |
+| Content column beside another (Home, wide) | 448 to 720 wide | `size::WIDE_COLUMN_MIN`, `COLUMN_MAX` |
+| Series page | 896 wide; up to 1280 when a long series' strip needs it | `size::SERIES_COLUMN`, `SERIES_COLUMN_MAX` |
+| Stats, two columns | each column at least 544, at most 768; 1632 with the inset | `size::CHART_COLUMN_MIN`, `STATS_WIDE_FRAME_MAX` |
 | Empty-state text | 288 wide max | `w_72` |
 | Window | 1200 × 800 by default, 800 × 560 minimum | |
 
@@ -328,6 +330,12 @@ dust jacket.
   operate.
 - A field's label is visible and its help sits next to it. In property lists
   the key column holds the label.
+- A field whose unit the reader chooses ("Update progress…": Page or Time,
+  and %) has a small segmented control before it, the book's own unit
+  first. What the input means goes after the field in `fg-muted`, tabular
+  ("Page 200 of 476", "6h 25m of 16h 10m"). A unit that can't be offered is
+  left out rather than disabled (Kit limits), and a caption under the
+  field says why.
 
 ### Chips (`chip.rs`)
 
@@ -561,12 +569,46 @@ Every screen starts from its task:
 - The sidebar (240) sits beside the destination.
 - Book, series and author pages open over the destination with a Back bar.
   A sidebar destination clears them.
-- **Surplus width:** content keeps to its maximum (768 for pages, 1024 for
-  Home, 896 for Series) on the leading edge, on the same spine as Back; the
-  rest of a wide window stays paper on the trailing side. Content is never
-  centred in the window. A book pane's tools stay over its content.
+- **Wide window:** see "Wide windows" below. A book pane's tools stay over
+  its content.
 - **Short window:** when the sidebar's destinations don't all fit, a
   hairline over the account says the list scrolls under it.
+
+### Wide windows
+
+Surplus width holds more content, never wider rows. A 4K monitor at 1.5
+gives about 2560 logical px; the 1200 × 800 default and the 800 × 560
+minimum are where the README's screenshots are taken, and every screen lays
+out there exactly as it did before this rule.
+
+- **Leading edge.** Content stays on the leading edge, on the same spine as
+  Back. It is never centred in the window; past a layout's widest tier, the
+  rest of the window stays paper on the trailing side.
+- **More columns, more items.** When a region is wide, it gains a column or
+  shows more items. Rows never stretch past their maximum, so a row's
+  actions stay by its book. Prose stays at 640.
+- **Tiers come from the region.** Each layout picks its tier from the width
+  its own region gets: the window less the sidebar, less any list beside it,
+  less its insets. Never from the raw window width. The choice is a pure
+  function with unit tests (`ui::columns::tier`, like `folds`), pinned at
+  800 and 1200 (today's layout), on both sides of each threshold, and at
+  1600 and 2560.
+- **Tiers by screen:**
+  - **Home:** two content columns of at least 448 beside the rail (a 1536
+    window) give it three columns: Continue reading; Coming soon, then Rate
+    what you finished; the rail. Each content column is at most 720, so Home
+    is at most 1840. With nothing for the second column, Home keeps two
+    columns at 1024.
+  - **Series:** the column stays 896, and grows past it only as far as the
+    longest series' strip needs, at most 1280 (23 books). The strip takes
+    the width; the next lanes stay 240 and lined up on the trailing edge.
+  - **Stats:** two columns of at least 544, 32 apart (a 1424 window), each
+    at most 768: Finished per year; Your ratings, then Shelves. The figures
+    stay one row across both, 32 apart, so the third starts on the second
+    column's spine.
+  - **The book pane, and list, series and author pages:** keep the 768
+    column for now; their wide tiers are added here.
+  - **Coming soon, Discover and search** keep the 768 page column.
 
 ### Shelf: list plus book pane
 
@@ -685,6 +727,10 @@ Every screen starts from its task:
 - **Narrow window:** when the main column would get less than 400 beside
   the rail, the rail's sections follow the main column, full width, under
   a hairline (`ui::Columns`).
+- **Wide window:** when two content columns of at least 448 fit beside the
+  rail, "Coming soon" and then "Rate what you finished" move to a second
+  column between the main column and the rail, each column at most 720
+  (`Columns::second`; see "Wide windows").
 
 ### Coming soon (the full list, over Home)
 
@@ -702,7 +748,8 @@ Every screen starts from its task:
 - **Sidebar:** "Series" after Discover, with the `library` icon and the
   count of series not finished. It hides, with the page, without
   `read:catalog`.
-- **Content:** inset 32, at most 896 wide.
+- **Content:** inset 32, 896 wide; on a wide region, up to 1280 as far as
+  the longest series' strip needs (see "Wide windows").
 - **Header:** the `page-title` "Series" with the count shown beside it,
   then the muted line "The series you've started, and what's next in each."
   On the trailing edge, 8 apart: the filter input (168, "Filter series":
@@ -738,7 +785,8 @@ About, sign-in and the dialogs use the same parts:
 
 An author page's header puts the photo where a book has its cover (a large
 avatar), with the name in `display-24`. Stats charts use `accent` for the
-series, `track` for the grid and muted labels.
+series, `track` for the grid and muted labels. Stats is one 768 column, and
+two on a wide region (see "Wide windows").
 
 ## Right-to-left text
 
@@ -891,6 +939,9 @@ commit that fixes it.
   items and ghost buttons, and ghost buttons take half of it there.
 - The sidebar's menu hover is 8%, not 5%.
 - The segmented tab bar's sliding indicator is always paper.
+- A disabled segment of a segmented tab bar is painted paper, like the
+  selected one, so it reads as chosen. The app leaves out a segment it
+  can't offer instead.
 - A disabled switch fades its track, not its thumb.
 - A radio's circle takes no style from outside: unchecked and disabled, it
   is faint, most in dark mode. Settings shows a fixed theme as text rather

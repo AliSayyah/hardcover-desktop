@@ -2,7 +2,11 @@
 //! series the reader has started, under its group, each with its books and
 //! the one next step.
 //!
-//! - **Header:** inset 32, at most 896 wide: the `page-title` "Series" with
+//! - **Column:** inset 32, 896 wide up to the default window; on a wider
+//!   region it grows as far as the longest series' strip needs, at most
+//!   1280 (`row::column_width`), so the strip, not the text, takes the
+//!   extra width and the next lanes stay lined up on its trailing edge.
+//! - **Header:** the `page-title` "Series" with
 //!   the shown count, the line under it, and on the trailing edge the text
 //!   filter and the filter select (168 each). It stays put while the list
 //!   scrolls under it, so the filters are always at hand.
@@ -33,7 +37,7 @@ use hardcover_core::Date;
 
 use super::model::{SeriesModel, SeriesStatus};
 use super::progress::{Counts, Filter, Group, SeriesSummary, counts, grouped, hidden_line};
-use super::row::{SeriesRow, row_height, skeleton_row, strip_width};
+use super::row::{SeriesRow, column_width, row_height, skeleton_row, strip_width};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
 use crate::ui::focus::{keyed_focus, reveal_when};
@@ -317,16 +321,24 @@ impl SeriesTrackerView {
     }
 
     /// The width the column gets: the window less the sidebar and the
-    /// insets, at most 896.
-    fn column_width(window: &Window) -> Pixels {
+    /// insets, at most 896, or wider as far as the longest series' strip
+    /// needs ([`column_width`]).
+    fn column_width(summaries: &[SeriesSummary], window: &Window) -> Pixels {
         let rem = window.rem_size();
         let region = window.viewport_size().width - size::SIDEBAR.to_pixels(rem);
-        (region - rems(2. * INSET).to_pixels(rem)).min(size::SERIES_COLUMN.to_pixels(rem))
+        let longest = summaries.iter().map(|s| s.books.len()).max().unwrap_or(0);
+        column_width(region - rems(2. * INSET).to_pixels(rem), longest, rem)
+    }
+
+    /// The column's frame: `column_width` and the insets.
+    fn frame(column_width: Pixels, rem: Pixels) -> Pixels {
+        column_width + rems(2. * INSET).to_pixels(rem)
     }
 
     fn header(
         &self,
         shown: Option<usize>,
+        frame: Pixels,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -345,7 +357,7 @@ impl SeriesTrackerView {
             Some(n) => PageHeader::new("Series").count(n),
             None => PageHeader::new("Series"),
         };
-        column()
+        column(frame)
             .id("series-header")
             .track_focus(&focus)
             .relative()
@@ -397,11 +409,11 @@ impl SeriesTrackerView {
             )
     }
 
-    fn foot(hidden: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn foot(hidden: usize, frame: Pixels, cx: &mut Context<Self>) -> AnyElement {
         if hidden == 0 {
             return div().into_any_element();
         }
-        column()
+        column(frame)
             .child(
                 h_flex()
                     .pt_6()
@@ -457,14 +469,15 @@ fn header_height(wrapped: bool, rem: Pixels) -> Pixels {
     rems(if wrapped { title + 1. + 2. } else { title }).to_pixels(rem)
 }
 
-/// The page's column: inset 32 on the sides, at most 896 wide.
-fn column() -> gpui_kit::Div {
+/// The page's column: inset 32 on the sides, at most `frame` wide (the
+/// [`column_width`] and the insets: [`SeriesTrackerView::frame`]).
+fn column(frame: Pixels) -> gpui_kit::Div {
     div()
         .flex()
         .flex_col()
         .w_full()
         .px(rems(INSET))
-        .max_w(size::SERIES_COLUMN + rems(2. * INSET))
+        .max_w(frame)
 }
 
 impl Render for SeriesTrackerView {
@@ -481,14 +494,17 @@ impl Render for SeriesTrackerView {
             .size_full()
             .flex()
             .flex_col();
+        let rem = window.rem_size();
+        let column_width = Self::column_width(&summaries, window);
+        let frame = Self::frame(column_width, rem);
 
         if !loaded || summaries.is_empty() {
             let body: AnyElement = match status {
-                SeriesStatus::Failed(message) if !loaded => column()
+                SeriesStatus::Failed(message) if !loaded => column(frame)
                     .pt_4()
                     .child(Self::failed(message, cx))
                     .into_any_element(),
-                _ if !loaded => column()
+                _ if !loaded => column(frame)
                     .pt_6()
                     .children((0..SKELETON_ROWS).map(|_| skeleton_row()))
                     .into_any_element(),
@@ -499,13 +515,11 @@ impl Render for SeriesTrackerView {
                     .into_any_element(),
             };
             return root
-                .child(self.header(None, window, cx))
+                .child(self.header(None, frame, window, cx))
                 .child(div().flex_1().min_h_0().flex().flex_col().child(body))
                 .into_any_element();
         }
 
-        let rem = window.rem_size();
-        let column_width = Self::column_width(window);
         let failed = match status {
             SeriesStatus::Failed(message) => Some(message),
             _ => None,
@@ -528,15 +542,17 @@ impl Render for SeriesTrackerView {
             move |this, range, window, cx| {
                 range
                     .map(|ix| match &items[ix] {
-                        Item::Header => this.header(Some(shown), window, cx).into_any_element(),
-                        Item::Failed(message) => column()
+                        Item::Header => this
+                            .header(Some(shown), frame, window, cx)
+                            .into_any_element(),
+                        Item::Failed(message) => column(frame)
                             .pt_4()
                             .child(Self::failed(message.clone(), cx))
                             .into_any_element(),
-                        Item::Nothing => column()
+                        Item::Nothing => column(frame)
                             .child(this.nothing_shown(&query, cx))
                             .into_any_element(),
-                        Item::Row(series, label) => column()
+                        Item::Row(series, label) => column(frame)
                             .child(SeriesRow::new(
                                 series.clone(),
                                 *label,
@@ -546,7 +562,7 @@ impl Render for SeriesTrackerView {
                                 scroll.clone(),
                             ))
                             .into_any_element(),
-                        Item::Foot { hidden } => Self::foot(*hidden, cx),
+                        Item::Foot { hidden } => Self::foot(*hidden, frame, cx),
                     })
                     .collect::<Vec<_>>()
             },

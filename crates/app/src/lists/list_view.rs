@@ -1,6 +1,8 @@
 //! A list's page: its name, details and books in the list's order. Enter or a
 //! click opens a book; Delete or a row's remove button takes it off the list.
-//! Books load a page at a time as the list scrolls.
+//! Books load a page at a time as the list scrolls. In a wide window the
+//! selected book shows in the book pane beside the list, and a click only
+//! selects (`catalog::book_list::ListPane`).
 //!
 //! The header has the list's name as the page title with Edit… and Delete…
 //! on its trailing edge, the facts, the description (the reader's own words,
@@ -8,7 +10,9 @@
 //! catalogue pages' frame (`catalog::book_list`). The list is a tab stop
 //! after the header's controls; each row's remove button follows it.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
@@ -29,8 +33,8 @@ use crate::RemoveFromList;
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::catalog::book_list::{
-    load_failed, page_body, page_header_scrolling, page_list, page_loading, reset_scroll,
-    row_details,
+    ListPane, follow_pane, load_failed, page_body, page_header_scrolling, page_list, page_loading,
+    reset_scroll, row_details, select_on_click,
 };
 use crate::catalog::navigation::{self, Page};
 use crate::design::{TypeRoles as _, colors, size};
@@ -85,9 +89,16 @@ pub struct ListBooks {
     pages: HashMap<ListId, BooksPage>,
     fetch: Option<Task<()>>,
     focus: RowFocus,
+    /// The book pane is beside the list ([`ListPane`]).
+    beside: Rc<Cell<bool>>,
 }
 
 impl ListBooks {
+    /// The book in row `ix`, for the [`ListPane`].
+    fn book_at(&self, ix: usize) -> Option<hardcover_core::BookSummary> {
+        self.book(ix).map(|b| b.book.clone())
+    }
+
     fn page(&self) -> Option<&BooksPage> {
         self.pages.get(&self.current?)
     }
@@ -268,26 +279,25 @@ impl ListDelegate for ListBooks {
             needs_permission(WRITE_LISTS).into()
         };
         let lists = self.lists.clone();
-        Some(
-            ListItem::new(("list-book", book.id.get().cast_unsigned()))
-                .list_row(focused, cx)
-                .accessibility_label(book.book.title.clone())
-                .child(BookRow::for_catalog(&book.book, details, status))
-                .suffix(move |_, _| {
-                    let (lists, book) = (lists.clone(), book.clone());
-                    row_action(
-                        Button::new(("remove-list-book", book.id.get().cast_unsigned()))
-                            .ghost()
-                            .small_icon_button()
-                            .icon(IconName::Close)
-                            .tooltip(remove_tooltip.clone())
-                            .disabled(busy || !can_write)
-                            .on_click(move |_, window, cx| {
-                                remove_book(&lists, list, &book, window, cx);
-                            }),
-                    )
-                }),
-        )
+        let item = ListItem::new(("list-book", book.id.get().cast_unsigned()))
+            .list_row(focused, cx)
+            .accessibility_label(book.book.title.clone())
+            .child(BookRow::for_catalog(&book.book, details, status))
+            .suffix(move |_, _| {
+                let (lists, book) = (lists.clone(), book.clone());
+                row_action(
+                    Button::new(("remove-list-book", book.id.get().cast_unsigned()))
+                        .ghost()
+                        .small_icon_button()
+                        .icon(IconName::Close)
+                        .tooltip(remove_tooltip.clone())
+                        .disabled(busy || !can_write)
+                        .on_click(move |_, window, cx| {
+                            remove_book(&lists, list, &book, window, cx);
+                        }),
+                )
+            });
+        Some(select_on_click(item, ix, &self.beside, cx))
     }
 
     fn set_selected_index(
@@ -355,6 +365,8 @@ pub struct ListView {
     lists: Entity<ListsModel>,
     library: Entity<LibraryModel>,
     list: Entity<ListState<ListBooks>>,
+    /// The selected book, beside the list when the window is wide.
+    pane: ListPane,
     /// The header's scroll, when it gives way in a short window.
     header_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
@@ -367,6 +379,7 @@ impl ListView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let pane = ListPane::new(library.clone(), window, cx);
         let list = cx.new(|cx| {
             ListState::new(
                 ListBooks {
@@ -376,6 +389,7 @@ impl ListView {
                     pages: HashMap::new(),
                     fetch: None,
                     focus: RowFocus::default(),
+                    beside: pane.beside().clone(),
                 },
                 window,
                 cx,
@@ -383,6 +397,7 @@ impl ListView {
         });
         RowFocus::attach(&list, |d| &mut d.focus, cx);
         let subscriptions = vec![
+            follow_pane(&list, &pane, ListBooks::book_at, window, cx),
             cx.observe(&lists, |_, _, cx| cx.notify()),
             // Status tags follow library changes.
             cx.observe(&library, {
@@ -425,6 +440,7 @@ impl ListView {
             lists,
             library,
             list,
+            pane,
             header_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
@@ -625,11 +641,11 @@ impl ListView {
 }
 
 impl Render for ListView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let list = self
             .current(cx)
             .and_then(|id| self.lists.read(cx).list(id).cloned());
-        v_flex()
+        let column = v_flex()
             .id("list-page")
             .key_context(KEY_CONTEXT)
             .on_action(cx.listener(|this, _: &RemoveFromList, window, cx| {
@@ -644,7 +660,9 @@ impl Render for ListView {
                     self.render_header(&list, cx),
                 ))
                 .child(page_body().child(page_list(&self.list)))
-            })
+            });
+        self.pane
+            .layout(&self.list, ListBooks::book_at, column, window, cx)
     }
 }
 
