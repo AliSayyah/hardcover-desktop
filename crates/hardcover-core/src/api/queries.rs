@@ -21,7 +21,7 @@ macro_rules! user_book_fields {
     ...BookSummaryFields
     audio_seconds
     book_series(order_by: [{featured: desc}, {position: asc_nulls_last}]) {
-      position featured series { id name slug }
+      position featured compilation series { id name slug }
     }
   }
   edition { ...EditionFields }

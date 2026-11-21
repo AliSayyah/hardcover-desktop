@@ -467,8 +467,10 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   shelf's 12 px icon and the position in a caption. The next book's position
   is ink at weight 600. A book not in the library is an empty **slot**
   (`ui::CoverSlot`: a dashed `border-strong` outline in the cover's shape,
-  no fill); one not out yet is a slot with a 12 px clock. A strip that can't
-  show every book keeps the next one in view and ends with a "+N" caption.
+  no fill); one not out yet is a slot with a 12 px clock. An Ignored book
+  keeps its cover and the Ignored icon, and is never the next book. A strip
+  that can't show every book keeps the next one in view and ends with a
+  "+N" caption.
   State never relies on colour: the icon, the slot and the clock carry it.
 - **Property list** (Details): rows at least 24 high, 8 apart. The key
   column (96, or 72 in a rail) is `fg-muted`; the value is ink, with small

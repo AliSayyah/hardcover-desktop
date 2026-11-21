@@ -822,6 +822,12 @@ pub struct SeriesRef {
     pub position: Option<f32>,
     /// Hardcover's featured series for this book.
     pub featured: bool,
+    /// The book collects others of the series (a boxed set, an omnibus):
+    /// its position is theirs, so where the reader is in the series leaves
+    /// it out, as Hardcover's series lists do. Known for library entries
+    /// only (`UserBookFields`).
+    #[serde(default)]
+    pub compilation: bool,
 }
 
 impl SeriesRef {
@@ -832,7 +838,15 @@ impl SeriesRef {
             slug: None,
             position: None,
             featured: false,
+            compilation: false,
         }
+    }
+
+    /// A place in the series that counts towards reading it: not a
+    /// [`compilation`](Self::compilation)'s.
+    #[must_use]
+    pub fn counts_in_series(&self) -> bool {
+        !self.compilation
     }
 }
 
