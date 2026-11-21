@@ -84,6 +84,12 @@ impl<K: PartialEq> LibraryFollow<K> {
         Some(Followed::Changed)
     }
 
+    /// A follow that has already seen `key` (tests).
+    #[cfg(test)]
+    pub fn seen_as(key: K) -> Self {
+        Self { seen: Some(key) }
+    }
+
     /// The key as last seen.
     pub fn seen(&self) -> Option<&K> {
         self.seen.as_ref()

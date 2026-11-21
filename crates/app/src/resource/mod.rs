@@ -300,6 +300,26 @@ where
         }
     }
 
+    /// One status for the keys `keys` holds: loading while any is, else
+    /// failed with the first failure, else loaded once any has settled.
+    pub fn summary<'a>(&self, keys: impl IntoIterator<Item = &'a K>) -> LoadStatus
+    where
+        K: 'a,
+    {
+        let mut status = LoadStatus::Idle;
+        for key in keys {
+            match self.status(key) {
+                LoadStatus::Loading => return LoadStatus::Loading,
+                failed @ LoadStatus::Failed(_) if !matches!(status, LoadStatus::Failed(_)) => {
+                    status = failed;
+                }
+                LoadStatus::Loaded if status == LoadStatus::Idle => status = LoadStatus::Loaded,
+                _ => {}
+            }
+        }
+        status
+    }
+
     /// A request for `key` is in flight.
     pub fn is_loading(&self, key: &K) -> bool {
         self.slots.get(key).is_some_and(|s| s.flight.is_some())

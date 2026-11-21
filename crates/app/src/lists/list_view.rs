@@ -672,9 +672,10 @@ mod tests {
             crate::bind_keys(cx);
             crate::ui::kit::bind_keys(cx);
             session.install(cx);
+            Catalog::init(&session, cx);
         });
-        let lists = cx.update(|cx| ListsModel::init(session.clone(), cx));
-        let library = cx.new(|_| LibraryModel::new(session));
+        let library = cx.new(|_| LibraryModel::new(session.clone()));
+        let lists = cx.update(|cx| ListsModel::init(session, &library, cx));
         lists.update(cx, ListsModel::load);
         cx.run_until_parked();
         let id = lists.read_with(cx, |m, _| m.user_lists().next().map(|l| l.id).unwrap());

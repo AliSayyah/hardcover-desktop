@@ -17,13 +17,14 @@ use gpui_kit::{
     Render, SharedString, Styled as _, Subscription, Window, div,
 };
 
-use super::model::{UpcomingModel, UpcomingStatus};
+use super::model::UpcomingModel;
 use super::row::UpcomingRow;
 use super::schedule::{grouped, shown};
 use crate::cover::CoverSize;
 use crate::design::TypeRoles as _;
 use crate::format::count_text;
 use crate::library::model::LibraryModel;
+use crate::resource::LoadStatus;
 use crate::ui::{Lane, LoadFailed, PageHeader, Sequence, Skeleton, empty_state};
 
 /// Skeleton rows while the list loads.
@@ -114,18 +115,18 @@ impl Render for UpcomingView {
 
         if books.is_empty() {
             let body: AnyElement = match status {
-                UpcomingStatus::Idle | UpcomingStatus::Loading => column()
+                LoadStatus::Idle | LoadStatus::Loading => column()
                     .child(PageHeader::new("Coming soon"))
                     .child(div().pt_6().child(
                         Sequence::new().children((0..SKELETON_ROWS).map(|_| skeleton_row())),
                     ))
                     .into_any_element(),
-                UpcomingStatus::Failed(message) => column()
+                LoadStatus::Failed(message) => column()
                     .gap_2()
                     .child(PageHeader::new("Coming soon"))
                     .child(Self::failed(message, cx))
                     .into_any_element(),
-                UpcomingStatus::Loaded => empty_state(
+                LoadStatus::Loaded => empty_state(
                     IconName::Calendar,
                     "Nothing coming soon".into(),
                     "Hardcover lists no unreleased books in the series on your shelves.".into(),
@@ -149,7 +150,7 @@ impl Render for UpcomingView {
             })
             .collect::<Vec<_>>();
         let failed = match status {
-            UpcomingStatus::Failed(message) => Some(div().pt_2().child(Self::failed(message, cx))),
+            LoadStatus::Failed(message) => Some(div().pt_2().child(Self::failed(message, cx))),
             _ => None,
         };
 
