@@ -346,7 +346,7 @@ impl BookDetailView {
         &self,
         book: &BookSummary,
         details: Option<&BookDetails>,
-        side: Option<usize>,
+        side: Option<SideGrid>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let details = details?;
@@ -361,7 +361,7 @@ impl BookDetailView {
                 .books(
                     books
                         .iter()
-                        .take(side.unwrap_or(SIMILAR_IN_COLUMN))
+                        .take(side.map_or(SIMILAR_IN_COLUMN, |grid| grid.shown(books.len())))
                         .map(|book| {
                             let id = book.id.get().cast_unsigned();
                             (
@@ -396,10 +396,36 @@ impl BookDetailView {
     }
 }
 
-/// How many similar books the side column `width` wide shows: two rows of
-/// lg covers, never fewer than one column shows, at most those fetched.
-pub(super) fn similar_in_side(width: Pixels, rem_size: Pixels) -> usize {
-    (books_that_fit(width, CoverSize::Lg, rem_size) * 2).clamp(SIMILAR_IN_COLUMN, SIMILAR_FETCHED)
+/// The similar books' grid in a side column: how many lg covers a row holds
+/// and how many it shows at most.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct SideGrid {
+    per_row: usize,
+    max: usize,
+}
+
+impl SideGrid {
+    /// How many of `available` books the grid shows: at most [`Self::max`],
+    /// and past one row only whole rows, so no cover sits alone on the last.
+    pub(super) fn shown(self, available: usize) -> usize {
+        let n = available.min(self.max);
+        if n <= self.per_row {
+            n
+        } else {
+            n - n % self.per_row
+        }
+    }
+}
+
+/// The similar books' grid in a side column `width` wide: two rows of lg
+/// covers (at least the eight one column shows, at most those fetched), cut
+/// to whole rows by [`SideGrid::shown`].
+pub(super) fn similar_in_side(width: Pixels, rem_size: Pixels) -> SideGrid {
+    let per_row = books_that_fit(width, CoverSize::Lg, rem_size).max(1);
+    SideGrid {
+        per_row,
+        max: (per_row * 2).clamp(SIMILAR_IN_COLUMN, SIMILAR_FETCHED),
+    }
 }
 
 /// "1 rating", "9,223 ratings".
@@ -502,11 +528,29 @@ mod tests {
         let rem = gpui_kit::px(16.);
         // The side at its narrowest holds three lg covers a row: still the
         // eight one column shows.
-        assert_eq!(similar_in_side(gpui_kit::px(320.), rem), 8);
+        assert_eq!(similar_in_side(gpui_kit::px(320.), rem).max, 8);
         // Five a row (464): two rows.
-        assert_eq!(similar_in_side(gpui_kit::px(464.), rem), 10);
+        assert_eq!(similar_in_side(gpui_kit::px(464.), rem).max, 10);
         // A 2560 pane's side (920) holds nine a row: all that were fetched.
-        assert_eq!(similar_in_side(gpui_kit::px(920.), rem), 16);
+        assert_eq!(similar_in_side(gpui_kit::px(920.), rem).max, 16);
+    }
+
+    #[test]
+    fn the_side_grid_shows_only_whole_rows() {
+        let nine = SideGrid {
+            per_row: 9,
+            max: 16,
+        };
+        // Ten books, nine a row: one full row, not nine and one alone.
+        assert_eq!(nine.shown(10), 9);
+        // All sixteen fetched: still one full row.
+        assert_eq!(nine.shown(16), 9);
+        // Fewer than a row: all of them.
+        assert_eq!(nine.shown(4), 4);
+        let three = SideGrid { per_row: 3, max: 8 };
+        // Eight at most, three a row: two full rows.
+        assert_eq!(three.shown(16), 6);
+        assert_eq!(three.shown(3), 3);
     }
 
     #[test]

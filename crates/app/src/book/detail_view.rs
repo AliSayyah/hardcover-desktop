@@ -168,7 +168,7 @@ struct PaneLayout {
     /// The page's columns, with the rail ([`pane_has_rail`]).
     rail: bool,
     /// The blocks split beside the text: the similar books the side holds.
-    side: Option<usize>,
+    side: Option<catalog_sections::SideGrid>,
 }
 
 impl PaneLayout {
@@ -1061,7 +1061,7 @@ impl BookDetailView {
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         folded: bool,
-        side: Option<usize>,
+        side: Option<catalog_sections::SideGrid>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Columns {
@@ -1253,13 +1253,9 @@ mod tests {
                 side: None
             }
         );
-        // 2560: a main column of 1592 and a side of 920, two rows of nine.
-        assert_eq!(
-            pane(2560.),
-            PaneLayout {
-                rail: true,
-                side: Some(16)
-            }
-        );
+        // 2560: a main column of 1592 and a side of 920, nine a row.
+        let wide = pane(2560.);
+        assert!(wide.rail);
+        assert_eq!(wide.side.map(|grid| grid.shown(16)), Some(9));
     }
 }
