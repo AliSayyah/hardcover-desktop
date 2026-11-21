@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, SystemTime};
 
 use async_lock::Semaphore;
 use fast_image_resize::{self as fir, PixelType};
@@ -218,6 +219,17 @@ const THUMBNAIL_HEIGHT: u32 = 144;
 /// Height of the decoded detail cover, in image pixels. The cover is 12rem
 /// tall, so this is sharp up to 2.5x scale with the default rem.
 const COVER_HEIGHT: u32 = 480;
+/// Every height a cover is scaled to. A download is decoded once into all of
+/// them, and then deleted: the scaled copies are the cache.
+const SCALED_HEIGHTS: [u32; 2] = [THUMBNAIL_HEIGHT, COVER_HEIGHT];
+/// The most disk the cover cache may take. Past it, the copies used least
+/// recently are deleted at the next start, down to [`COVER_CACHE_TARGET`].
+/// A cover takes about 80 KB, so this holds some 3,000 covers.
+const COVER_CACHE_LIMIT: u64 = 256 * 1024 * 1024;
+const COVER_CACHE_TARGET: u64 = COVER_CACHE_LIMIT / 4 * 3;
+/// A copy is marked as used (its modification time set) at most this often,
+/// so the size limit deletes the copies used least recently.
+const TOUCH_AFTER: Duration = Duration::from_hours(24);
 
 /// The cover cache, the download limiter and the decoder thread.
 pub struct CoverService {
@@ -231,7 +243,7 @@ pub struct CoverService {
 impl Global for CoverService {}
 
 impl CoverService {
-    /// Blocking: creates the cache directory and clears out stale scaled copies.
+    /// Blocking: creates the cache directory, and tidies it on another thread.
     pub fn open() -> Self {
         #[cfg(feature = "demo")]
         let cache = hardcover_core::demo::cover_cache(
@@ -246,13 +258,22 @@ impl CoverService {
                 None
             }
         };
+        let decoder = CoverDecoder::spawn();
         if let Some(cache) = &cache {
-            remove_stale_scaled(cache.dir());
+            // A walk of the whole cache: not on the way to the first screen.
+            let dir = cache.dir().to_owned();
+            let decoder = decoder.clone();
+            let spawned = thread::Builder::new()
+                .name("cover-tidy".into())
+                .spawn(move || tidy_cover_dir(&dir, &decoder));
+            if let Err(e) = spawned {
+                eprintln!("hardcover: could not tidy the cover cache: {e}");
+            }
         }
         Self {
             cache,
             downloads: Arc::new(Semaphore::new(COVER_DOWNLOADS)),
-            decoder: CoverDecoder::spawn(),
+            decoder,
             failed: Arc::default(),
         }
     }
@@ -295,12 +316,20 @@ struct CoverLoader {
     failed: Arc<Mutex<HashSet<String>>>,
 }
 
-/// One request to [`CoverDecoder`]: the file, the target height and where to
-/// send the result.
+/// What the decoder made of a cover.
+enum Loaded {
+    Image(Arc<RenderImage>),
+    /// Neither a scaled copy nor the download is on disk.
+    NoSource,
+    Failed,
+}
+
+/// One request to [`CoverDecoder`]: the download's path, the target height
+/// and where to send the result.
 struct DecodeJob {
     path: Arc<Path>,
     max_height: u32,
-    reply: async_channel::Sender<Option<Arc<RenderImage>>>,
+    reply: async_channel::Sender<Loaded>,
 }
 
 /// Decodes covers on one dedicated thread.
@@ -322,37 +351,59 @@ impl CoverDecoder {
         let spawned = thread::Builder::new()
             .name("cover-decoder".into())
             .spawn(move || {
+                let mut deleted = HashSet::new();
                 while let Ok(job) = queue.recv_blocking() {
                     // The requester may have gone away; nothing to do then.
-                    let _ = job
-                        .reply
-                        .send_blocking(load_or_decode(&job.path, job.max_height));
+                    let _ = job.reply.send_blocking(load_or_decode(
+                        &job.path,
+                        job.max_height,
+                        &mut deleted,
+                    ));
                 }
             });
         if let Err(e) = spawned {
-            // Without the thread every decode below resolves to `None`, which
-            // the views show as the placeholder cover.
+            // Without the thread every decode below fails, which the views
+            // show as the placeholder cover.
             eprintln!("hardcover: cover decoder unavailable: {e}");
         }
         Self { jobs }
     }
 
-    async fn decode(&self, path: Arc<Path>, max_height: u32) -> Option<Arc<RenderImage>> {
+    async fn decode(&self, path: Arc<Path>, max_height: u32) -> Loaded {
         let (reply, result) = async_channel::bounded(1);
-        self.jobs
+        let sent = self
+            .jobs
             .send(DecodeJob {
                 path,
                 max_height,
                 reply,
             })
-            .await
-            .ok()?;
-        result.recv().await.ok().flatten()
+            .await;
+        if sent.is_err() {
+            return Loaded::Failed;
+        }
+        result.recv().await.unwrap_or(Loaded::Failed)
+    }
+
+    /// [`Self::decode`], blocking the calling thread until it is done.
+    fn decode_blocking(&self, path: Arc<Path>, max_height: u32) -> Loaded {
+        let (reply, result) = async_channel::bounded(1);
+        let sent = self.jobs.send_blocking(DecodeJob {
+            path,
+            max_height,
+            reply,
+        });
+        if sent.is_err() {
+            return Loaded::Failed;
+        }
+        result.recv_blocking().unwrap_or(Loaded::Failed)
     }
 }
 
 impl CoverLoader {
     /// The cover file on disk, downloading it (behind the limiter) if needed.
+    /// For images the decoder can't read (an SVG avatar), which are kept as
+    /// downloaded.
     async fn file(&self, url: &str) -> Option<Arc<Path>> {
         let cover = Cover::new(url);
         if let Some(path) = self.cache.cached_path(&cover) {
@@ -362,12 +413,23 @@ impl CoverLoader {
         if let Ok(path) = self.cache.fetch(&cover) {
             Some(path.into())
         } else {
-            self.failed
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(url.to_owned());
+            self.failed(url.to_owned());
             None
         }
+    }
+
+    /// Downloads the cover, behind the limiter.
+    async fn download(&self, url: &str) -> bool {
+        let _permit = self.downloads.acquire().await;
+        self.cache.fetch(&Cover::new(url)).is_ok()
+    }
+
+    /// Records a failed load, tried again after the next sync.
+    fn failed(&self, url: String) {
+        self.failed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(url);
     }
 }
 
@@ -410,45 +472,84 @@ impl Asset for CoverImage {
     }
 }
 
+/// The cover scaled to `max_height`: its scaled copy, else the download
+/// decoded, else downloaded first.
 async fn load_scaled(
     loader: Option<CoverLoader>,
     url: String,
     max_height: u32,
 ) -> Option<Arc<RenderImage>> {
     let loader = loader?;
-    let path = loader.file(&url).await?;
-    let image = loader.decoder.decode(path, max_height).await;
-    if image.is_none() {
-        loader
-            .failed
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(url);
+    let path: Arc<Path> = loader.cache.file_path(&Cover::new(&url)).ok()?.into();
+    let mut loaded = loader.decoder.decode(path.clone(), max_height).await;
+    if matches!(loaded, Loaded::NoSource) && loader.download(&url).await {
+        loaded = loader.decoder.decode(path, max_height).await;
     }
-    image
+    if let Loaded::Image(image) = loaded {
+        Some(image)
+    } else {
+        loader.failed(url);
+        None
+    }
 }
 
-/// Decodes an image file, scaled down to at most `max_height` pixels tall.
-pub(crate) fn decode_scaled(path: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
-    let image = image::ImageReader::open(path)
-        .ok()?
+/// A decoded cover at full size, in the pixel layout it decoded to.
+struct Source {
+    width: u32,
+    height: u32,
+    pixel_type: PixelType,
+    pixels: Vec<u8>,
+}
+
+/// Why a download could not be decoded.
+enum SourceError {
+    /// It isn't on disk.
+    Missing,
+    /// It is, but can't be read (permissions, say).
+    Unreadable,
+    /// It was read, but is not an image this build decodes: a download cut
+    /// short, or an unsupported format.
+    Undecodable,
+}
+
+fn decode_source(path: &Path) -> Result<Source, SourceError> {
+    let reader = image::ImageReader::open(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            SourceError::Missing
+        } else {
+            SourceError::Unreadable
+        }
+    })?;
+    let image = reader
         .with_guessed_format()
-        .ok()?
+        .map_err(|_| SourceError::Unreadable)?
         .decode()
-        .ok()?;
-    let (src_width, src_height) = (image.width(), image.height());
-    let (width, height) = scaled_size(src_width, src_height, max_height);
+        .map_err(|_| SourceError::Undecodable)?;
+    let (width, height) = (image.width(), image.height());
     // Covers are mostly JPEG, which decodes to RGB; resize that without
     // adding an alpha channel first.
     let (pixel_type, pixels) = match image {
         image::DynamicImage::ImageRgb8(rgb) => (PixelType::U8x3, rgb.into_raw()),
         other => (PixelType::U8x4, other.into_rgba8().into_raw()),
     };
-    let pixels = if (width, height) == (src_width, src_height) {
-        pixels
+    Ok(Source {
+        width,
+        height,
+        pixel_type,
+        pixels,
+    })
+}
+
+/// `source` scaled down to at most `max_height` pixels tall, as BGRA.
+fn scale(source: &Source, max_height: u32) -> Option<Arc<RenderImage>> {
+    let (width, height) = scaled_size(source.width, source.height, max_height);
+    let pixel_type = source.pixel_type;
+    let pixels = if (width, height) == (source.width, source.height) {
+        source.pixels.clone()
     } else {
         let src =
-            fir::images::Image::from_vec_u8(src_width, src_height, pixels, pixel_type).ok()?;
+            fir::images::ImageRef::new(source.width, source.height, &source.pixels, pixel_type)
+                .ok()?;
         let mut dst = fir::images::Image::new(width, height, pixel_type);
         // Bilinear convolution is the Triangle filter `image` uses, with SIMD.
         let options = fir::ResizeOptions::new()
@@ -474,6 +575,12 @@ pub(crate) fn decode_scaled(path: &Path, max_height: u32) -> Option<Arc<RenderIm
     };
     let frame = image::RgbaImage::from_raw(width, height, bgra)?;
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(frame)])))
+}
+
+/// Decodes an image file, scaled down to at most `max_height` pixels tall.
+#[cfg(test)]
+pub(crate) fn decode_scaled(path: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
+    scale(&decode_source(path).ok()?, max_height)
 }
 
 /// The size a `src_width` x `src_height` cover is shown at: at most
@@ -505,7 +612,7 @@ fn scaled_size(src_width: u32, src_height: u32, max_height: u32) -> (u32, u32) {
 
 /// Scaled copies of covers live in `scaled/<version>/` under the cover cache.
 const SCALED_DIR: &str = "scaled";
-/// Bump whenever [`decode_scaled`] changes its output: copies made by an
+/// Bump whenever [`scale`] changes its output: copies made by an
 /// older build are then ignored, and deleted at the next start.
 const SCALED_VERSION: &str = "v1";
 /// A temporary file older than this was left by a write that never finished.
@@ -514,22 +621,66 @@ const STALE_TEMP_AGE: std::time::Duration = std::time::Duration::from_hours(1);
 const SCALED_JPEG_QUALITY: u8 = 92;
 
 /// The cover scaled to `max_height`, from its saved copy when there is one.
-/// Otherwise the cover is decoded and a copy is saved, so the next run skips
-/// the decode: a relaunch then shows covers without decoding any of them.
-fn load_or_decode(path: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
+///
+/// Otherwise the download at `path` is decoded once and saved at every size
+/// in [`SCALED_HEIGHTS`], then deleted: a relaunch shows covers without
+/// decoding any, and the cache keeps a few small copies instead of a large
+/// original (most downloads are over 1,000 pixels tall). Should saving fail,
+/// the download stays and the next run decodes it again.
+///
+/// A download that doesn't decode is deleted, so the next try downloads it
+/// again (it may have been cut short), but once per run at most: `deleted`
+/// remembers it, so an image this build can't read isn't downloaded over and
+/// over.
+fn load_or_decode(path: &Path, max_height: u32, deleted: &mut HashSet<PathBuf>) -> Loaded {
     if let Some(image) = read_scaled(path, max_height) {
-        return Some(image);
+        return Loaded::Image(image);
     }
-    let image = decode_scaled(path, max_height)?;
-    if let Err(e) = write_scaled(path, max_height, &image) {
-        // The cover still shows; the next run decodes it again. Said once,
-        // since the cause (say, a read-only cache) usually affects them all.
-        static WARNED: AtomicBool = AtomicBool::new(false);
-        if !WARNED.swap(true, Ordering::Relaxed) {
-            eprintln!("hardcover: could not save a scaled cover: {e}");
+    let source = match decode_source(path) {
+        Ok(source) => source,
+        Err(SourceError::Missing) => return Loaded::NoSource,
+        Err(SourceError::Unreadable) => return Loaded::Failed,
+        Err(SourceError::Undecodable) => {
+            if deleted.insert(path.to_owned()) {
+                let _ = std::fs::remove_file(path);
+            }
+            return Loaded::Failed;
+        }
+    };
+    let Some(image) = scale(&source, max_height) else {
+        return Loaded::Failed;
+    };
+    let mut saved = save_scaled(path, max_height, &image);
+    for other in SCALED_HEIGHTS {
+        if other != max_height && !has_scaled(path, other) {
+            saved &= scale(&source, other).is_some_and(|copy| save_scaled(path, other, &copy));
         }
     }
-    Some(image)
+    if saved {
+        let _ = std::fs::remove_file(path);
+    }
+    Loaded::Image(image)
+}
+
+/// Saves a scaled copy; false if that failed.
+fn save_scaled(cover: &Path, max_height: u32, image: &RenderImage) -> bool {
+    let Err(e) = write_scaled(cover, max_height, image) else {
+        return true;
+    };
+    // The cover still shows; the next run decodes it again. Said once,
+    // since the cause (say, a read-only cache) usually affects them all.
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    if !WARNED.swap(true, Ordering::Relaxed) {
+        eprintln!("hardcover: could not save a scaled cover: {e}");
+    }
+    false
+}
+
+/// True if a copy of `cover` scaled to `max_height` is on disk.
+fn has_scaled(cover: &Path, max_height: u32) -> bool {
+    ["qoi", "jpg"]
+        .into_iter()
+        .any(|ext| scaled_path(cover, max_height, ext).is_some_and(|p| p.is_file()))
 }
 
 /// `covers/scaled/v<N>/<cover file>-<height>.<ext>`.
@@ -551,7 +702,8 @@ fn read_scaled(cover: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
     ]
     .into_iter()
     .find_map(|(ext, format)| {
-        let bytes = std::fs::read(scaled_path(cover, max_height, ext)?).ok()?;
+        let path = scaled_path(cover, max_height, ext)?;
+        let bytes = std::fs::read(&path).ok()?;
         // The JPEG decoder fills in a truncated file (say, one cut short by a
         // crash) instead of failing, so check that it is complete. A short
         // QOI file fails to decode on its own.
@@ -567,8 +719,23 @@ fn read_scaled(cover: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
                 pixel.swap(0, 2);
             }
         }
+        mark_used(&path);
         Some(Arc::new(RenderImage::new(vec![image::Frame::new(pixels)])))
     })
+}
+
+/// Sets the file's modification time to now, unless that was done within
+/// [`TOUCH_AFTER`]: the size limit deletes the files untouched the longest.
+fn mark_used(path: &Path) {
+    let now = SystemTime::now();
+    let recent = std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|modified| now.duration_since(modified).ok())
+        .is_none_or(|age| age < TOUCH_AFTER);
+    if !recent && let Ok(file) = std::fs::File::options().write(true).open(path) {
+        let _ = file.set_modified(now);
+    }
 }
 
 /// Saves a scaled cover next to the originals. Thumbnails are small, so they
@@ -651,6 +818,89 @@ fn remove_stale_scaled(cover_dir: &Path) {
     }
 }
 
+/// Tidies the cover cache at startup. Blocking; errors are ignored, as
+/// everything in it can be downloaded again.
+fn tidy_cover_dir(cover_dir: &Path, decoder: &CoverDecoder) {
+    remove_stale_scaled(cover_dir);
+    // One at a time, each awaited, so a cover being shown waits behind one
+    // conversion at most. On the decoder's thread, for its one malloc arena.
+    for download in sweep_downloads(cover_dir) {
+        decoder.decode_blocking(download.into(), COVER_HEIGHT);
+    }
+    enforce_size_limit(cover_dir, COVER_CACHE_LIMIT, COVER_CACHE_TARGET);
+}
+
+/// Deletes temporary files left by downloads that never finished, and
+/// downloads that have both scaled copies (a crash between saving the copies
+/// and deleting it). Returns the other downloads, which earlier builds kept
+/// next to their copies, to be converted: decoding one at
+/// [`COVER_HEIGHT`] saves the copies it lacks and deletes it. SVGs are left
+/// alone: they are shown as downloaded, never decoded.
+fn sweep_downloads(cover_dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(cover_dir) else {
+        return Vec::new();
+    };
+    let mut convert = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        // Recent ones may still be in use, here or by another instance.
+        let stale = meta
+            .modified()
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > STALE_TEMP_AGE);
+        if !meta.is_file() || !stale {
+            continue;
+        }
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        if extension == Some("tmp") || SCALED_HEIGHTS.iter().all(|&h| has_scaled(&path, h)) {
+            let _ = std::fs::remove_file(path);
+        } else if extension != Some("svg") {
+            convert.push(path);
+        }
+    }
+    convert
+}
+
+/// Past `limit` bytes, deletes the files used least recently (downloads and
+/// current scaled copies) until at most `target` bytes are left.
+fn enforce_size_limit(cover_dir: &Path, limit: u64, target: u64) {
+    let mut files: Vec<(SystemTime, u64, PathBuf)> = Vec::new();
+    for dir in [
+        cover_dir.to_owned(),
+        cover_dir.join(SCALED_DIR).join(SCALED_VERSION),
+    ] {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.is_file() {
+                let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                files.push((modified, meta.len(), entry.path()));
+            }
+        }
+    }
+    let mut total: u64 = files.iter().map(|(_, size, _)| size).sum();
+    if total <= limit {
+        return;
+    }
+    files.sort_unstable_by_key(|(modified, _, _)| *modified);
+    for (_, size, path) in files {
+        if total <= target {
+            break;
+        }
+        if std::fs::remove_file(path).is_ok() {
+            total -= size;
+        }
+    }
+}
+
 /// The cached file for `url`, undecoded, starting a background load on first
 /// use: for an image the cover pipeline can't decode (an SVG avatar), which
 /// GPUI's `img` draws itself. The calling view re-renders when it finishes.
@@ -725,13 +975,21 @@ mod tests {
         assert_eq!(scaled_size(1, 5000, 144), (1, 144));
     }
 
+    /// [`load_or_decode`] with a fresh record of deleted downloads.
+    fn load(cover: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
+        match load_or_decode(cover, max_height, &mut HashSet::new()) {
+            Loaded::Image(image) => Some(image),
+            Loaded::NoSource | Loaded::Failed => None,
+        }
+    }
+
     #[test]
     fn thumbnails_are_saved_losslessly_and_reused() {
         let dir = tempfile::tempdir().unwrap();
         let cover = dir.path().join("cover.png");
         sample(&cover, 300, 450, false);
 
-        let decoded = load_or_decode(&cover, THUMBNAIL_HEIGHT).unwrap();
+        let decoded = load(&cover, THUMBNAIL_HEIGHT).unwrap();
         let saved = scaled_path(&cover, THUMBNAIL_HEIGHT, "qoi").unwrap();
         assert!(saved.is_file());
         assert_eq!(
@@ -741,11 +999,174 @@ mod tests {
 
         let reused = read_scaled(&cover, THUMBNAIL_HEIGHT).unwrap();
         assert_eq!(pixels(&reused), pixels(&decoded));
-        // No temporary files left behind.
+        // The thumbnail and the detail copy, and no temporary files.
         assert_eq!(
             std::fs::read_dir(saved.parent().unwrap()).unwrap().count(),
-            1
+            2
         );
+    }
+
+    #[test]
+    fn a_download_is_decoded_once_into_every_size_then_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.png");
+        sample(&cover, 600, 900, false);
+        let thumbnail = load(&cover, THUMBNAIL_HEIGHT).unwrap();
+        assert!(!cover.exists(), "the download is deleted");
+        assert!(has_scaled(&cover, THUMBNAIL_HEIGHT));
+        assert!(has_scaled(&cover, COVER_HEIGHT));
+
+        // Both sizes come from the copies now, as the source decoded them.
+        assert_eq!(
+            pixels(&load(&cover, THUMBNAIL_HEIGHT).unwrap()),
+            pixels(&thumbnail)
+        );
+        let detail = load(&cover, COVER_HEIGHT).unwrap();
+        assert_eq!(pixels(&detail).0, 320);
+        assert_eq!(pixels(&detail).1, 480);
+    }
+
+    #[test]
+    fn a_download_stays_when_its_copies_cannot_be_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.png");
+        sample(&cover, 300, 450, false);
+        // A file where the copies' directory should be.
+        std::fs::write(dir.path().join(SCALED_DIR), b"x").unwrap();
+        assert!(load(&cover, THUMBNAIL_HEIGHT).is_some());
+        assert!(cover.exists());
+    }
+
+    #[test]
+    fn nothing_on_disk_asks_for_a_download() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.jpg");
+        assert!(matches!(
+            load_or_decode(&cover, THUMBNAIL_HEIGHT, &mut HashSet::new()),
+            Loaded::NoSource
+        ));
+    }
+
+    #[test]
+    fn a_broken_download_is_deleted_once_per_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.jpg");
+        let mut deleted = HashSet::new();
+        std::fs::write(&cover, b"not an image").unwrap();
+        assert!(matches!(
+            load_or_decode(&cover, THUMBNAIL_HEIGHT, &mut deleted),
+            Loaded::Failed
+        ));
+        assert!(!cover.exists(), "deleted, so the retry downloads it again");
+
+        // Downloaded again and still broken: kept, so it isn't downloaded
+        // over and over.
+        std::fs::write(&cover, b"not an image").unwrap();
+        assert!(matches!(
+            load_or_decode(&cover, THUMBNAIL_HEIGHT, &mut deleted),
+            Loaded::Failed
+        ));
+        assert!(cover.exists());
+    }
+
+    fn set_age(path: &Path, age: Duration) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(SystemTime::now() - age)
+            .unwrap();
+    }
+
+    #[test]
+    fn copies_are_marked_as_used_at_most_daily() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.png");
+        sample(&cover, 300, 450, false);
+        load(&cover, THUMBNAIL_HEIGHT).unwrap();
+        let copy = scaled_path(&cover, THUMBNAIL_HEIGHT, "qoi").unwrap();
+        let modified = || std::fs::metadata(&copy).unwrap().modified().unwrap();
+
+        set_age(&copy, Duration::from_hours(2));
+        let before = modified();
+        read_scaled(&cover, THUMBNAIL_HEIGHT).unwrap();
+        assert_eq!(modified(), before, "used within a day: left alone");
+
+        set_age(&copy, Duration::from_hours(48));
+        read_scaled(&cover, THUMBNAIL_HEIGHT).unwrap();
+        assert!(modified().elapsed().unwrap() < Duration::from_hours(1));
+    }
+
+    #[test]
+    fn old_downloads_are_converted_and_leftovers_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = Duration::from_hours(2);
+        // As earlier builds left it: a download next to its thumbnail.
+        let kept_before = dir.path().join("kept.png");
+        sample(&kept_before, 600, 900, false);
+        let thumbnail = decode_scaled(&kept_before, THUMBNAIL_HEIGHT).unwrap();
+        write_scaled(&kept_before, THUMBNAIL_HEIGHT, &thumbnail).unwrap();
+        set_age(&kept_before, old);
+        // One with both copies (a crash before it was deleted), a recent one
+        // (it may be being decoded), an SVG avatar and temporary files.
+        let both = dir.path().join("both.png");
+        sample(&both, 300, 450, false);
+        load(&both, THUMBNAIL_HEIGHT).unwrap();
+        sample(&both, 300, 450, false);
+        let recent = dir.path().join("recent.png");
+        sample(&recent, 300, 450, false);
+        let svg = dir.path().join("avatar.svg");
+        let stale_tmp = dir.path().join(".a.jpg.x.tmp");
+        let fresh_tmp = dir.path().join(".b.jpg.y.tmp");
+        for path in [&svg, &stale_tmp, &fresh_tmp] {
+            std::fs::write(path, b"x").unwrap();
+        }
+        for path in [&both, &svg, &stale_tmp] {
+            set_age(path, old);
+        }
+
+        let convert = sweep_downloads(dir.path());
+        assert_eq!(convert, std::slice::from_ref(&kept_before));
+        assert!(!both.exists());
+        assert!(!stale_tmp.exists());
+        for kept in [&recent, &svg, &fresh_tmp, &kept_before] {
+            assert!(kept.exists(), "{}", kept.display());
+        }
+
+        // Converting saves the detail copy it lacked, keeps the thumbnail as
+        // it was, and deletes the download.
+        let thumbnail = pixels(&thumbnail);
+        load(&kept_before, COVER_HEIGHT).unwrap();
+        assert!(!kept_before.exists());
+        assert!(has_scaled(&kept_before, COVER_HEIGHT));
+        let reused = read_scaled(&kept_before, THUMBNAIL_HEIGHT).unwrap();
+        assert_eq!(pixels(&reused), thumbnail);
+    }
+
+    #[test]
+    fn past_the_limit_the_least_recently_used_files_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let scaled = dir.path().join(SCALED_DIR).join(SCALED_VERSION);
+        std::fs::create_dir_all(&scaled).unwrap();
+        let files: Vec<PathBuf> = (0..4)
+            .map(|i| scaled.join(format!("{i}-144.qoi")))
+            .chain([dir.path().join("download.jpg")])
+            .collect();
+        for (age, path) in files.iter().enumerate() {
+            std::fs::write(path, [0u8; 100]).unwrap();
+            // download.jpg is the oldest, 0-144.qoi the newest.
+            set_age(path, Duration::from_hours(1 + age as u64));
+        }
+
+        enforce_size_limit(dir.path(), 500, 200);
+        assert!(
+            files.iter().all(|f| f.exists()),
+            "at the limit: nothing goes"
+        );
+
+        enforce_size_limit(dir.path(), 499, 200);
+        let left: Vec<bool> = files.iter().map(|f| f.exists()).collect();
+        assert_eq!(left, [true, true, false, false, false]);
     }
 
     #[test]
@@ -754,7 +1175,7 @@ mod tests {
         let cover = dir.path().join("cover.png");
         sample(&cover, 600, 900, false);
 
-        let decoded = load_or_decode(&cover, COVER_HEIGHT).unwrap();
+        let decoded = load(&cover, COVER_HEIGHT).unwrap();
         assert!(scaled_path(&cover, COVER_HEIGHT, "jpg").unwrap().is_file());
         let (w, h, original) = pixels(&decoded);
         let (rw, rh, reused) = pixels(&read_scaled(&cover, COVER_HEIGHT).unwrap());
@@ -769,7 +1190,7 @@ mod tests {
         let cover = dir.path().join("cover.png");
         sample(&cover, 600, 900, true);
 
-        let decoded = load_or_decode(&cover, COVER_HEIGHT).unwrap();
+        let decoded = load(&cover, COVER_HEIGHT).unwrap();
         assert!(scaled_path(&cover, COVER_HEIGHT, "qoi").unwrap().is_file());
         let reused = read_scaled(&cover, COVER_HEIGHT).unwrap();
         assert_eq!(pixels(&reused), pixels(&decoded));
@@ -780,7 +1201,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cover = dir.path().join("cover.png");
         sample(&cover, 600, 900, false);
-        load_or_decode(&cover, COVER_HEIGHT).unwrap();
+        load(&cover, COVER_HEIGHT).unwrap();
         let saved = scaled_path(&cover, COVER_HEIGHT, "jpg").unwrap();
         let bytes = std::fs::read(&saved).unwrap();
         std::fs::write(&saved, &bytes[..bytes.len() / 2]).unwrap();
@@ -829,7 +1250,7 @@ mod tests {
         std::fs::write(&saved, b"not an image").unwrap();
 
         assert!(read_scaled(&cover, THUMBNAIL_HEIGHT).is_none());
-        let decoded = load_or_decode(&cover, THUMBNAIL_HEIGHT).unwrap();
+        let decoded = load(&cover, THUMBNAIL_HEIGHT).unwrap();
         let reused = read_scaled(&cover, THUMBNAIL_HEIGHT).unwrap();
         assert_eq!(pixels(&reused), pixels(&decoded));
     }
