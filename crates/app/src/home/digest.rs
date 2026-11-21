@@ -86,11 +86,7 @@ pub fn compute(entries: &[LibraryEntry], today: Date, unreleased: &HashSet<BookI
     let released = |e: &LibraryEntry| is_released(e, today, unreleased);
 
     let mut reading: Vec<&LibraryEntry> = shelf(ReadingStatus::CurrentlyReading).collect();
-    reading.sort_by(|a, b| {
-        b.updated_at
-            .cmp(&a.updated_at)
-            .then(b.user_book_id.cmp(&a.user_book_id))
-    });
+    reading.sort_by(|a, b| newest_first(a, b));
     let reading = reading
         .into_iter()
         .map(|e| Reading {
@@ -131,6 +127,22 @@ pub fn compute(entries: &[LibraryEntry], today: Date, unreleased: &HashSet<BookI
         up_next,
         want_to_read: want.len(),
     }
+}
+
+/// The order of Continue reading: the most recently updated first.
+fn newest_first(a: &LibraryEntry, b: &LibraryEntry) -> std::cmp::Ordering {
+    b.updated_at
+        .cmp(&a.updated_at)
+        .then(b.user_book_id.cmp(&a.user_book_id))
+}
+
+/// The lead of Continue reading (the first of [`Digest::reading`]), found
+/// without working out the rest.
+pub fn lead(entries: &[LibraryEntry]) -> Option<&LibraryEntry> {
+    entries
+        .iter()
+        .filter(|e| e.status == ReadingStatus::CurrentlyReading)
+        .min_by(|a, b| newest_first(a, b))
 }
 
 /// Whether the entry's book is out: not among the upcoming books (`unreleased`,
@@ -467,9 +479,14 @@ mod tests {
         let mut b = reading(2, 300, Some("2026-11-01"), Some(50));
         b.updated_at = Some(at("2026-11-19"));
         let c = reading(3, 300, None, None);
-        let d = compute(&[a, b, c], today, &HashSet::new());
+        let entries = [a, b, c];
+        let d = compute(&entries, today, &HashSet::new());
         let ids: Vec<i64> = d.reading.iter().map(|r| r.id.get()).collect();
         assert_eq!(ids, [2, 1, 3]);
+        assert_eq!(
+            lead(&entries).map(|e| e.user_book_id),
+            Some(d.reading[0].id)
+        );
         assert_eq!(d.reading[0].idle_days, None);
         assert_eq!(d.reading[1].idle_days, Some(8));
         assert_eq!(d.reading[2].idle_days, None, "never updated says nothing");

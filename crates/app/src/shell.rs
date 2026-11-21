@@ -303,7 +303,8 @@ impl Workspace {
         let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
         let upcoming = cx.new(|cx| UpcomingModel::new(session.clone(), model.clone(), cx));
         let upcoming_page = cx.new(|cx| UpcomingView::new(upcoming.clone(), model.clone(), cx));
-        let home = cx.new(|cx| HomeView::new(model.clone(), goals.clone(), upcoming.clone(), cx));
+        let home =
+            cx.new(|cx| HomeView::new(model.clone(), goals.clone(), upcoming.clone(), window, cx));
         let series =
             cx.new(|cx| SeriesModel::new(session.clone(), model.clone(), upcoming.clone(), cx));
         let series_view = cx
