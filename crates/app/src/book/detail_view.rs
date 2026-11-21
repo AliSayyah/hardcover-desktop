@@ -44,7 +44,7 @@
 //! (`review_section.rs`) are views of their own, each following the stores
 //! it shows; the view hands them the book shown.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -147,6 +147,13 @@ impl Shown {
             privacy: entry.privacy,
         }
     }
+}
+
+/// Whether focus is on `on` (if any) or nowhere: after an in-place change
+/// took away the control focus was on, it may be moved somewhere sensible
+/// without taking it from wherever the reader went meanwhile.
+fn focus_gone(on: Option<&FocusHandle>, window: &Window, cx: &App) -> bool {
+    window.focused(cx).is_none() || on.is_some_and(|handle| handle.is_focused(window))
 }
 
 /// Whether a book pane `width` wide takes the page's rail: inside its inset,
@@ -256,6 +263,17 @@ pub struct BookDetailView {
     /// The status menu's trigger, which its commands and their
     /// confirmations give focus back to.
     status_focus: FocusHandle,
+    /// The panel's button, "Start reading" then "Update progress…": one
+    /// handle, so focus moves from one to the other as the panel changes.
+    panel_focus: FocusHandle,
+    /// The "more" menu's trigger, which its commands focus first.
+    more_focus: FocusHandle,
+    /// "Add to library", where focus goes once a book shown is removed.
+    add_focus: FocusHandle,
+    /// "Add a past read…", where focus goes once a read is deleted.
+    add_read_focus: FocusHandle,
+    /// Each read's menu trigger, which its commands focus first.
+    read_focus: RefCell<HashMap<ReadId, FocusHandle>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -324,6 +342,11 @@ impl BookDetailView {
             community_reviews,
             ratings,
             status_focus: cx.focus_handle(),
+            panel_focus: cx.focus_handle(),
+            more_focus: cx.focus_handle(),
+            add_focus: cx.focus_handle(),
+            add_read_focus: cx.focus_handle(),
+            read_focus: RefCell::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -348,6 +371,7 @@ impl BookDetailView {
         }
         self.subject = subject;
         self.shown = None;
+        self.read_focus.get_mut().clear();
         self.sync_controls(window, cx);
         if let Some(book) = self.book(cx) {
             book_lists::book_shown(book.id, cx);
@@ -552,6 +576,18 @@ impl BookDetailView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.run_write_then(write, warning, |_, _, _| {}, window, cx);
+    }
+
+    /// [`Self::run_write`], then `saved` once it succeeded.
+    fn run_write_then<T: Written>(
+        &mut self,
+        write: LibraryWrite<T>,
+        warning: impl FnOnce(&T) -> Option<(&'static str, &'static str)> + 'static,
+        saved: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !matches!(write.target(), WriteTarget::Entry(_)) {
             return;
         }
@@ -563,6 +599,7 @@ impl BookDetailView {
                     if let Some((title, message)) = warning(&written) {
                         window.push_notification(Notification::warning(message).title(title), cx);
                     }
+                    saved(this, window, cx);
                 }
                 WriteOutcome::Failed { .. } | WriteOutcome::Busy => {
                     this.revert_controls(window, cx);
@@ -775,7 +812,7 @@ impl BookDetailView {
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
                     let _ = view.update(cx, |this, cx| {
-                        this.run_write(
+                        this.run_write_then(
                             LibraryWrite::entry(
                                 id,
                                 WriteKind::Reads,
@@ -783,6 +820,14 @@ impl BookDetailView {
                                 move |client| client.delete_read(id, read),
                             ),
                             |_| None,
+                            // Its menu went with it: focus to "Add a past
+                            // read…", if it was there.
+                            move |this, window, cx| {
+                                let trigger = this.read_focus.borrow_mut().remove(&read);
+                                if focus_gone(trigger.as_ref(), window, cx) {
+                                    window.focus(&this.add_read_focus, cx);
+                                }
+                            },
                             window,
                             cx,
                         );
@@ -818,7 +863,7 @@ impl BookDetailView {
     }
 
     fn remove(&mut self, id: UserBookId, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_write(
+        self.run_write_then(
             LibraryWrite::entry(
                 id,
                 WriteKind::Remove,
@@ -826,6 +871,14 @@ impl BookDetailView {
                 move |client| client.remove_from_library(id).map(|()| Removed),
             ),
             |_| None,
+            // The book still shown, now out of the library: focus from the
+            // menu it was removed with to "Add to library".
+            |this, window, cx| {
+                let shown = matches!(this.subject, Some(Subject::Book(_)));
+                if shown && focus_gone(Some(&this.more_focus), window, cx) {
+                    window.focus(&this.add_focus, cx);
+                }
+            },
             window,
             cx,
         );
@@ -899,7 +952,7 @@ impl BookDetailView {
                     window.refresh();
                 }
             })
-            .child(ObjectBar::new().tools(self.render_tools(book, entry, cx)))
+            .child(ObjectBar::new().tools(self.render_tools(book, entry, window, cx)))
             .child(
                 div()
                     // Keyed by book, so another book (a similar one) opens at
@@ -933,7 +986,7 @@ impl BookDetailView {
         if let Some(entry) = entry {
             column.push(self.render_details(entry, false, cx));
             column.push(self.review.clone().into_any_element());
-            column.push(self.render_reads(entry, false, cx));
+            column.push(self.render_reads(entry, false, window, cx));
         }
         column.extend(Self::render_on_hardcover(book, details, false, cx));
         column.extend(self.render_community_reviews(cx));
@@ -943,7 +996,7 @@ impl BookDetailView {
             .w_full()
             .gap_6()
             .child(header)
-            .children(entry.and_then(|entry| self.render_panel(entry, cx)))
+            .children(entry.and_then(|entry| self.render_panel(entry, window, cx)))
             .child(blocks().children(column))
             .into_any_element()
     }
@@ -1016,7 +1069,7 @@ impl BookDetailView {
         rail.extend(Self::render_on_hardcover(book, details, true, cx));
         if let Some(entry) = entry {
             rail.push(self.render_details(entry, true, cx));
-            rail.push(self.render_reads(entry, true, cx));
+            rail.push(self.render_reads(entry, true, window, cx));
             rail.push(self.render_notes(true));
         }
 
@@ -1024,7 +1077,7 @@ impl BookDetailView {
             .w_full()
             .gap_6()
             .child(header)
-            .children(entry.and_then(|entry| self.render_panel(entry, cx)))
+            .children(entry.and_then(|entry| self.render_panel(entry, window, cx)))
             .child(blocks.tab_group().tab_index(1));
         Columns::new(Tier::rail(folded), main).rail(rail)
     }
@@ -1068,12 +1121,12 @@ impl BookDetailView {
 }
 
 impl ObjectTools for BookDetailView {
-    fn object_tools(&mut self, _: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn object_tools(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         if !self.tools_in_bar {
             return Vec::new();
         }
         match self.shown_book(cx) {
-            Some((book, entry)) => self.render_tools(&book, entry.as_ref(), cx),
+            Some((book, entry)) => self.render_tools(&book, entry.as_ref(), window, cx),
             None => Vec::new(),
         }
     }
@@ -1263,6 +1316,93 @@ mod tests {
         cx.run_until_parked();
         let status = model.read_with(cx, |m, _| m.entry(id).map(|e| e.status));
         assert_eq!(status, Some(ReadingStatus::DidNotFinish));
+    }
+
+    /// C3: "Start reading" from the keyboard leaves focus on "Update
+    /// progress…", which takes its place: Enter opens the progress dialog.
+    #[gpui_kit::test]
+    fn starting_a_book_leaves_focus_on_update_progress(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (view, model, cx) = rooted_view(cx);
+        let id = show_entry(&view, &model, cx, |e| e.status == ReadingStatus::WantToRead);
+        let panel = view.read_with(cx, |v, _| v.panel_focus.clone());
+        cx.update(|window, cx| window.focus(&panel, cx));
+        redraw(cx);
+        press(cx, "enter");
+        cx.run_until_parked();
+        redraw(cx);
+        let status = model.read_with(cx, |m, _| m.entry(id).map(|e| e.status));
+        assert_eq!(
+            status,
+            Some(ReadingStatus::CurrentlyReading),
+            "Start reading"
+        );
+        assert!(!dialog_open(cx));
+        press(cx, "enter");
+        redraw(cx);
+        assert!(
+            dialog_open(cx),
+            "Enter on Update progress… opened its dialog"
+        );
+    }
+
+    /// C3: a book removed from the "more" menu, still shown, gives focus
+    /// to "Add to library"; a read deleted from its menu, to "Add a past
+    /// read…".
+    #[gpui_kit::test]
+    fn removing_gives_focus_to_what_takes_its_place(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (view, model, cx) = rooted_view(cx);
+        let id = show_entry(&view, &model, cx, |e| e.reads.len() >= 2);
+
+        // A read deleted after its confirmation.
+        let read = model.read_with(cx, |m, _| m.entry(id).unwrap().reads[0].id);
+        let trigger = view.read_with(cx, |v, _| v.read_focus.borrow().get(&read).cloned());
+        let trigger = trigger.expect("each read's menu has its trigger");
+        cx.update(|window, cx| {
+            window.focus(&trigger, cx);
+            view.update(cx, |v, cx| v.confirm_delete_read(read, window, cx));
+        });
+        redraw(cx);
+        redraw(cx);
+        assert!(dialog_open(cx));
+        press(cx, "tab");
+        press(cx, "enter");
+        cx.run_until_parked();
+        redraw(cx);
+        let reads = model.read_with(cx, |m, _| m.entry(id).unwrap().reads.len());
+        assert!(
+            reads >= 1 && model.read_with(cx, |m, _| m.entry(id).unwrap().read(read).is_none())
+        );
+        let add_read = view.read_with(cx, |v, _| v.add_read_focus.clone());
+        assert!(
+            cx.update(|window, _| add_read.is_focused(window)),
+            "on Add a past read…"
+        );
+
+        // The book, shown from the catalogue, removed.
+        let book = model.read_with(cx, |m, _| m.entry(id).unwrap().book.clone());
+        cx.update(|window, cx| {
+            view.update(cx, |v, cx| {
+                v.set_subject(Some(Subject::Book(book)), window, cx)
+            });
+        });
+        redraw(cx);
+        let more = view.read_with(cx, |v, _| v.more_focus.clone());
+        cx.update(|window, cx| {
+            window.focus(&more, cx);
+            view.update(cx, |v, cx| v.remove(id, window, cx));
+        });
+        cx.run_until_parked();
+        redraw(cx);
+        assert!(model.read_with(cx, |m, _| m.entry(id).is_none()), "removed");
+        let add = view.read_with(cx, |v, _| v.add_focus.clone());
+        assert!(
+            cx.update(|window, _| add.is_focused(window)),
+            "on Add to library"
+        );
     }
 
     #[gpui_kit::test]

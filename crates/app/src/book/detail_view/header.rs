@@ -165,7 +165,7 @@ impl BookDetailView {
             // stretching across the column.
             .child(h_flex().child(match entry {
                 Some(entry) => self.render_actions(entry, window, cx),
-                None => self.render_add(book, cx),
+                None => self.render_add(book, window, cx),
             }));
 
         h_flex()
@@ -349,11 +349,17 @@ impl BookDetailView {
     }
 
     /// "Add to library", a menu of the statuses to add the book with.
-    fn render_add(&self, book: &BookSummary, cx: &mut Context<Self>) -> AnyElement {
+    fn render_add(
+        &self,
+        book: &BookSummary,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let adding = self.model.read(cx).is_adding(book.id);
         let can_write = Self::can_write(cx);
         let view = cx.entity().downgrade();
         Button::new("add-to-library")
+            .keyboard_ring(&self.add_focus, window)
             .icon(IconName::Plus)
             .label("Add to library")
             .dropdown_caret(true)
@@ -386,6 +392,7 @@ impl BookDetailView {
         &self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut tools: Vec<AnyElement> = book_lists::lists_button(book, cx).into_iter().collect();
@@ -404,15 +411,19 @@ impl BookDetailView {
             // one-way "Add to Owned list…".
             let one_way_owned = book_lists::offers_one_way_owned(cx);
             let owning = ListsModel::global(cx).is_some_and(|l| l.read(cx).is_busy(entry.book.id));
-            (entry.clone(), busy, one_way_owned, owning)
+            let has_edition = entry.edition.is_some();
+            (entry.user_book_id, has_edition, busy, one_way_owned, owning)
         });
         let can_write = Self::can_write(cx);
         let view = cx.entity().downgrade();
+        let model = self.model.clone();
+        let trigger = self.more_focus.clone();
         tools.push(
             Button::new("book-more")
                 .ghost()
                 .icon(IconName::Ellipsis)
                 .tooltip("More actions")
+                .keyboard_ring(&self.more_focus, window)
                 .dropdown_menu(move |menu, _, cx| {
                     let menu = match url.clone() {
                         Some(url) => menu.item(
@@ -422,23 +433,29 @@ impl BookDetailView {
                         ),
                         None => menu,
                     };
-                    let Some((entry, busy, one_way_owned, owning)) = library.clone() else {
+                    let Some((id, has_edition, busy, one_way_owned, owning)) = library else {
                         return menu;
                     };
-                    let has_edition = entry.edition.is_some();
                     let remove_view = view.clone();
+                    // Each command focuses the trigger first, so the
+                    // confirmation it opens gives focus back to it.
+                    let (owned_trigger, remove_trigger) = (trigger.clone(), trigger.clone());
                     let menu = if url.is_some() {
                         menu.separator()
                     } else {
                         menu
                     };
                     let menu = if one_way_owned {
-                        let owned_entry = entry.clone();
+                        let model = model.clone();
                         menu.item(
                             PopupMenuItem::new("Add to Owned list…")
                                 .disabled(!has_edition || owning || !can_write || busy)
                                 .on_click(move |_, window, cx| {
-                                    book_lists::confirm_owned(&owned_entry, window, cx);
+                                    window.focus(&owned_trigger, cx);
+                                    let entry = model.read(cx).entry(id).cloned();
+                                    if let Some(entry) = entry {
+                                        book_lists::confirm_owned(&entry, window, cx);
+                                    }
                                 }),
                         )
                         // Ownership is per edition on Hardcover. Without
@@ -454,6 +471,7 @@ impl BookDetailView {
                     menu.item(
                         danger_menu_item("Remove from library…", can_write && !busy, cx).on_click(
                             move |_, window, cx| {
+                                window.focus(&remove_trigger, cx);
                                 let _ = remove_view
                                     .update(cx, |this, cx| this.confirm_remove(window, cx));
                             },
