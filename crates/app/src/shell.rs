@@ -954,9 +954,30 @@ impl Workspace {
                 .icon(IconName::RotateCw)
                 .label("Restart to update")
                 .tooltip(format!("Version {version} is installed"))
-                .on_click(|_, _, cx| cx.restart()),
+                .on_click(|_, window, cx| Self::restart(window, cx)),
         };
         Some(button.small_control().w_full().into_any_element())
+    }
+
+    /// Restarts into the installed update, asking first while a book view
+    /// holds an unsaved review or notes, which restarting would lose.
+    fn restart(window: &mut Window, cx: &mut App) {
+        if !crate::drafts::any(cx) {
+            cx.restart();
+            return;
+        }
+        open_alert_dialog(window, cx, |alert, _, _| {
+            alert
+                .title("Restart without saving your drafts?")
+                .description("A review or notes you haven't saved are lost when the app restarts.")
+                .confirm()
+                .ok_text("Restart")
+                .ok_variant(ButtonVariant::Danger)
+                .on_ok(|_, _, cx| {
+                    cx.restart();
+                    true
+                })
+        });
     }
 
     fn check_for_updates(cx: &mut Context<Self>) {

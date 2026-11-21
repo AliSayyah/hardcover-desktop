@@ -2,7 +2,7 @@
 //! checked where the book is on them, and the Owned switch for a library
 //! entry. They live here so the book page only places them.
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::switch::Switch;
@@ -12,12 +12,14 @@ use gpui_kit::{
     div,
 };
 use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LIBRARY, WRITE_LISTS};
-use hardcover_core::{BookId, BookSummary, EditionSummary, LibraryEntry};
+use hardcover_core::{
+    BookId, BookSummary, EditionId, EditionSummary, LibraryEntry, ListMembership,
+};
 
 use super::list_dialog::open_new_list;
 use super::model::ListsModel;
 use crate::design::{TypeRoles as _, size};
-use crate::format::needs_permission;
+use crate::format::{count_text, needs_permission};
 use crate::notify::{notify_failure, notify_outcome};
 use crate::session;
 use crate::ui::kit::open_alert_dialog;
@@ -158,13 +160,75 @@ pub fn confirm_owned(entry: &LibraryEntry, window: &mut Window, cx: &mut App) {
     });
 }
 
+/// Turns Owned off: takes every edition of the entry's book off the Owned
+/// list, asking first when that is more than the entry's own edition.
+fn take_off_owned(entry: &LibraryEntry, window: &mut Window, cx: &mut App) {
+    let Some(lists) = ListsModel::global(cx) else {
+        return;
+    };
+    let book = entry.book.id;
+    let rows = lists.read(cx).owned_rows(book).unwrap_or_default();
+    let remove = move |window: &mut Window, cx: &mut App| {
+        let task = lists.update(cx, |m, cx| m.set_owned(book, None, false, cx));
+        notify_failure(task, "Couldn't take it off your Owned list", window, cx);
+    };
+    let edition = entry.edition.as_ref().map(|e| e.id);
+    let Some(count) = editions_beyond_own(&rows, edition) else {
+        remove(window, cx);
+        return;
+    };
+    let (title, description) = remove_owned_copy(&entry.book.title, count);
+    open_alert_dialog(window, cx, move |alert, _, _| {
+        let remove = remove.clone();
+        alert
+            .title(title.clone())
+            .description(description)
+            .confirm()
+            .ok_text("Remove")
+            .ok_variant(ButtonVariant::Danger)
+            .on_ok(move |_, window, cx| {
+                remove(window, cx);
+                true
+            })
+    });
+}
+
+/// How many rows turning Owned off removes, when that takes more than the
+/// entry's own `edition` off the list (another edition, or several); `None`
+/// when only its own goes.
+fn editions_beyond_own(rows: &[ListMembership], edition: Option<EditionId>) -> Option<usize> {
+    let own = |row: &ListMembership| edition.is_some() && row.edition_id == edition;
+    (!rows.iter().all(own)).then_some(rows.len())
+}
+
+/// The confirmation's title and sentence for taking `count` editions of
+/// `title` off the Owned list.
+fn remove_owned_copy(title: &str, count: usize) -> (SharedString, &'static str) {
+    if count == 1 {
+        (
+            format!("Remove 1 edition of “{title}” from your Owned list?").into(),
+            "It isn't the edition in your library.",
+        )
+    } else {
+        (
+            format!(
+                "Remove {} editions of “{title}” from your Owned list?",
+                count_text(count)
+            )
+            .into(),
+            "Hardcover counts the book owned while any edition is on the list, so every one comes off.",
+        )
+    }
+}
+
 /// The Owned switch for a library entry, or `None` without `read:lists`
 /// (the book page then offers only the one-way "Add to Owned list…").
 ///
 /// Hardcover owns editions, and a book counts as owned when any edition of
 /// it is on the Owned list. Turning it on adds the entry's edition (and asks
 /// first, since Hardcover announces it); turning it off takes every edition
-/// of the book off the list.
+/// of the book off the list, asking first when that is more than the
+/// entry's own edition.
 pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
     let lists = readable(cx)?;
     let model = lists.read(cx);
@@ -213,16 +277,8 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
                         .on_click(move |checked, window, cx| {
                             if *checked {
                                 confirm_owned(&entry, window, cx);
-                            } else if let Some(lists) = ListsModel::global(cx) {
-                                let task = lists.update(cx, |m, cx| {
-                                    m.set_owned(entry.book.id, None, false, cx)
-                                });
-                                notify_failure(
-                                    task,
-                                    "Couldn't take it off your Owned list",
-                                    window,
-                                    cx,
-                                );
+                            } else {
+                                take_off_owned(&entry, window, cx);
                             }
                         }),
                 ),
@@ -250,6 +306,35 @@ pub fn offers_one_way_owned(cx: &App) -> bool {
 mod tests {
     use super::*;
     use hardcover_core::EditionId;
+
+    fn row(id: i64, edition: Option<i64>) -> ListMembership {
+        ListMembership {
+            id: hardcover_core::ListBookId::new(id),
+            list_id: hardcover_core::ListId::new(1),
+            book_id: BookId::new(7),
+            edition_id: edition.map(EditionId::new),
+        }
+    }
+
+    #[test]
+    fn turning_owned_off_asks_only_beyond_the_entrys_own_edition() {
+        let own = Some(EditionId::new(10));
+        // Just the entry's own edition: no question.
+        assert_eq!(editions_beyond_own(&[row(1, Some(10))], own), None);
+        // Another edition, or several: asked, with the count.
+        assert_eq!(editions_beyond_own(&[row(1, Some(11))], own), Some(1));
+        assert_eq!(
+            editions_beyond_own(&[row(1, Some(10)), row(2, Some(11))], own),
+            Some(2)
+        );
+        // An entry with no edition owns none of them.
+        assert_eq!(editions_beyond_own(&[row(1, Some(10))], None), Some(1));
+        assert_eq!(editions_beyond_own(&[row(1, None)], None), Some(1));
+        assert_eq!(
+            remove_owned_copy("Dune", 3).0,
+            "Remove 3 editions of “Dune” from your Owned list?"
+        );
+    }
 
     #[test]
     fn edition_phrase_names_the_format() {

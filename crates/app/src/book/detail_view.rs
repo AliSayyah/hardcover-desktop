@@ -299,6 +299,12 @@ impl BookDetailView {
                 release_cover_medium(&url, Some(window), cx);
             }
         }));
+        // Restarting into an update asks first while this view holds drafts.
+        let this = cx.entity().downgrade();
+        crate::drafts::register(
+            move |cx| this.upgrade().map(|v| v.read(cx).has_unsaved_drafts(cx)),
+            cx,
+        );
         // The list menu and the Owned switch follow the user's lists.
         if let Some(lists) = ListsModel::global(cx) {
             subscriptions.push(cx.observe(&lists, |_, _, cx| cx.notify()));
@@ -753,6 +759,12 @@ impl BookDetailView {
             s.focus(window, cx);
         });
         cx.notify();
+    }
+
+    /// Whether this view holds words not saved: in the notes or review
+    /// editor, or set aside for another book (`crate::drafts`).
+    pub fn has_unsaved_drafts(&self, cx: &App) -> bool {
+        self.notes_dirty(cx) || !self.notes_drafts.is_empty() || self.review_unsaved(cx)
     }
 
     /// Whether the notes editor shows for `id`: opened, or holding a draft.

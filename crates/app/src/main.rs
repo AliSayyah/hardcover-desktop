@@ -12,6 +12,7 @@ mod cover_pipeline;
 mod cover_quality_tests;
 mod dates;
 mod design;
+mod drafts;
 mod fonts;
 mod format;
 mod freshness;
