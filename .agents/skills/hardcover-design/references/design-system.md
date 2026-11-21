@@ -409,6 +409,10 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   differ from a saved rating by shape, not by lightness alone. It is the
   pointer's preview, never a saved rating; the keyboard changes the rating
   itself.
+- **Keys:** Left and Right move the stars half a star at a time, shown
+  solid at once; the value is saved once the keys rest (half a second), or
+  at once on Enter or when focus leaves. Up and Down stay the page's, so
+  they scroll past the control. Backspace and Delete clear, at once.
 - **Pointer targets:** each half star is a slice of the whole control, its
   full height, and the 2 px gaps belong to the halves beside them: ten
   equal slices, no dead space.

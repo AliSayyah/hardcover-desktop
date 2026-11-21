@@ -7,6 +7,11 @@
 //! value clears it, and the keyboard steps by half a star.
 //!
 //! Controlled: the owner passes the value and receives requested changes.
+//! A click is passed on at once. Keys are not: Left and Right move the
+//! stars shown, and the value they reach is passed on after [`QUIET`] with
+//! no key, or at once on Enter, when the control loses focus, or when it
+//! stops being drawn, so stepping from none to four stars is one change,
+//! not eight. Up and Down are left to the scroller around it.
 //!
 //! The stars are 20 px (16 in a row, [`StarRating::small`]), 2 apart, in
 //! `gold` (the user's own rating is the only gold in the app) over
@@ -21,12 +26,14 @@
 //! on nothing.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui_kit::component::h_flex;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
-    App, ElementId, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _,
-    RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, actions, div,
+    AnyWindowHandle, App, Context, ElementId, Entity, FocusHandle,
+    InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, actions, div,
     prelude::FluentBuilder as _,
 };
 use hardcover_core::Rating;
@@ -38,22 +45,29 @@ use crate::ui::{StarInk, StarSize, render_star};
 /// Key context of the control; [`key_bindings`] are its keys.
 pub const KEY_CONTEXT: &str = "StarRating";
 
-actions!(star_rating, [IncreaseRating, DecreaseRating, ClearRating]);
+actions!(
+    star_rating,
+    [IncreaseRating, DecreaseRating, ClearRating, CommitRating]
+);
 
-/// The control's keys: Right and Up add half a star, Left and Down take one
-/// off, Backspace and Delete clear. `main` binds them.
-pub fn key_bindings() -> [gpui_kit::KeyBinding; 6] {
+/// The control's keys: Right adds half a star, Left takes one off, Enter
+/// passes the stars shown on at once, Backspace and Delete clear. Up and
+/// Down are not bound, so they scroll the page past the control. `main`
+/// binds them.
+pub fn key_bindings() -> [gpui_kit::KeyBinding; 5] {
     use gpui_kit::KeyBinding;
     let context = Some(KEY_CONTEXT);
     [
         KeyBinding::new("right", IncreaseRating, context),
-        KeyBinding::new("up", IncreaseRating, context),
         KeyBinding::new("left", DecreaseRating, context),
-        KeyBinding::new("down", DecreaseRating, context),
+        KeyBinding::new("enter", CommitRating, context),
         KeyBinding::new("backspace", ClearRating, context),
         KeyBinding::new("delete", ClearRating, context),
     ]
 }
+
+/// How long the keys must rest before the stars they set are passed on.
+pub const QUIET: Duration = Duration::from_millis(500);
 
 const STARS: u8 = 5;
 
@@ -95,6 +109,87 @@ pub(crate) fn stepped_value(current: Option<Rating>, up: bool) -> Option<Rating>
 }
 
 type ChangeHandler = Rc<dyn Fn(&Option<Rating>, &mut Window, &mut App)>;
+
+/// The stars the keys have set and not yet passed on, kept for the control
+/// across frames.
+struct KeyDraft {
+    /// The value the keys reached, shown in place of the owner's.
+    value: Option<Option<Rating>>,
+    /// The owner's value and handler as last drawn.
+    owner: Option<Rating>,
+    on_change: Option<ChangeHandler>,
+    window: AnyWindowHandle,
+    /// Passes the value on once the keys rest.
+    quiet: Option<Task<()>>,
+    _blur: Subscription,
+}
+
+impl KeyDraft {
+    fn new(focus: &FocusHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let this = cx.entity().downgrade();
+        let blur = window.on_focus_out(focus, cx, move |_, window, cx| {
+            let _ = this.update(cx, |draft, cx| draft.commit(window, cx));
+        });
+        // Not drawn any more (the pane moved to another book): pass the
+        // value on rather than lose it.
+        cx.on_release(|draft: &mut Self, cx| {
+            let (Some(value), Some(handler)) = (draft.value.take(), draft.on_change.clone()) else {
+                return;
+            };
+            if value == draft.owner {
+                return;
+            }
+            let window = draft.window;
+            cx.defer(move |cx| {
+                let _ = window.update(cx, |_, window, cx| handler(&value, window, cx));
+            });
+        })
+        .detach();
+        Self {
+            value: None,
+            owner: None,
+            on_change: None,
+            window: window.window_handle(),
+            quiet: None,
+            _blur: blur,
+        }
+    }
+
+    /// Shows `value` and passes it on once the keys have rested for
+    /// [`QUIET`].
+    fn step(&mut self, value: Option<Rating>, window: &mut Window, cx: &mut Context<Self>) {
+        self.value = Some(value);
+        self.quiet = Some(cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(QUIET).await;
+            let _ = this.update_in(cx, |draft, window, cx| draft.commit(window, cx));
+        }));
+        cx.notify();
+    }
+
+    /// Passes the value the keys reached on now, if it differs from the
+    /// owner's.
+    fn commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.quiet = None;
+        let Some(value) = self.value.take() else {
+            return;
+        };
+        cx.notify();
+        if value == self.owner {
+            return;
+        }
+        if let Some(handler) = self.on_change.clone() {
+            handler(&value, window, cx);
+        }
+    }
+
+    /// Drops the value the keys reached: a click or Delete passed its own on.
+    fn cancel(&mut self, cx: &mut Context<Self>) {
+        self.quiet = None;
+        if self.value.take().is_some() {
+            cx.notify();
+        }
+    }
+}
 
 #[derive(IntoElement)]
 pub struct StarRating {
@@ -164,13 +259,23 @@ impl RenderOnce for StarRating {
             })
             .read(cx)
             .clone();
+        let draft: Entity<KeyDraft> = window.use_keyed_state(self.child_id("keys"), cx, {
+            let focus = focus.clone();
+            move |window, cx| KeyDraft::new(&focus, window, cx)
+        });
+        draft.update(cx, |draft, _| {
+            draft.owner = self.value;
+            draft.on_change = self.on_change.clone();
+        });
         let hover = window.use_keyed_state(self.child_id("hover"), cx, |_, _| None::<f32>);
         let hovered = if self.disabled { None } else { *hover.read(cx) };
-        let shown = hovered.unwrap_or_else(|| self.value.map_or(0.0, Rating::value));
+        // The keys' value, until it is passed on; then the owner's.
+        let value = draft.read(cx).value.unwrap_or(self.value);
+        let shown = hovered.unwrap_or_else(|| value.map_or(0.0, Rating::value));
         let focused = focus_visible(&focus, window);
         let radius = control_radius(cx);
 
-        let value = self.value;
+        let owner = self.value;
         let disabled = self.disabled;
         let size = if self.small {
             StarSize::Medium
@@ -178,11 +283,16 @@ impl RenderOnce for StarRating {
             StarSize::Large
         };
         let on_change = self.on_change.clone();
-        let request = move |next: Option<Rating>, window: &mut Window, cx: &mut App| {
-            if let Some(handler) = &on_change
-                && next != value
-            {
-                handler(&next, window, cx);
+        // A click, or Delete: passed on at once, past any value the keys set.
+        let request = {
+            let draft = draft.clone();
+            move |next: Option<Rating>, window: &mut Window, cx: &mut App| {
+                draft.update(cx, |draft, cx| draft.cancel(cx));
+                if let Some(handler) = &on_change
+                    && next != owner
+                {
+                    handler(&next, window, cx);
+                }
             }
         };
 
@@ -211,15 +321,25 @@ impl RenderOnce for StarRating {
                 this.track_focus(&focus)
                     .key_context(KEY_CONTEXT)
                     .on_action({
-                        let request = request.clone();
+                        let draft = draft.clone();
                         move |_: &IncreaseRating, window, cx| {
-                            request(stepped_value(value, true), window, cx);
+                            draft.update(cx, |draft, cx| {
+                                draft.step(stepped_value(value, true), window, cx);
+                            });
                         }
                     })
                     .on_action({
-                        let request = request.clone();
+                        let draft = draft.clone();
                         move |_: &DecreaseRating, window, cx| {
-                            request(stepped_value(value, false), window, cx);
+                            draft.update(cx, |draft, cx| {
+                                draft.step(stepped_value(value, false), window, cx);
+                            });
+                        }
+                    })
+                    .on_action({
+                        let draft = draft.clone();
+                        move |_: &CommitRating, window, cx| {
+                            draft.update(cx, |draft, cx| draft.commit(window, cx));
                         }
                     })
                     .on_action({
@@ -331,37 +451,102 @@ mod tests {
         assert_eq!(stepped_value(None, false), None);
     }
 
-    /// The arrows step the rating by half a star; Delete clears it.
-    #[gpui_kit::test]
-    fn the_keys_step_by_half_a_star_and_delete_clears(cx: &mut gpui_kit::TestAppContext) {
-        use crate::ui::test_support::{host, press, redraw, tab};
+    /// A host for one control over a value the test owns, counting every
+    /// change passed on.
+    fn host_stars(
+        cx: &mut gpui_kit::TestAppContext,
+        start: Option<Rating>,
+    ) -> (
+        Rc<std::cell::Cell<Option<Rating>>>,
+        Rc<std::cell::Cell<usize>>,
+        &mut gpui_kit::VisualTestContext,
+    ) {
+        use crate::ui::test_support::{host, tab};
         use gpui_kit::IntoElement as _;
         use std::cell::Cell;
 
-        let value = Rc::new(Cell::new(r(3.0)));
+        let value = Rc::new(Cell::new(start));
+        let changes = Rc::new(Cell::new(0));
         let cx = host(cx, {
-            let value = value.clone();
+            let (value, changes) = (value.clone(), changes.clone());
             move |_, _| {
-                let set = value.clone();
+                let (set, changes) = (value.clone(), changes.clone());
                 StarRating::new("stars")
                     .value(value.get())
-                    .on_change(move |rating, _, _| set.set(*rating))
+                    .on_change(move |rating, _, _| {
+                        set.set(*rating);
+                        changes.set(changes.get() + 1);
+                    })
                     .into_any_element()
             }
         });
-        cx.update(|_, cx| cx.bind_keys(key_bindings()));
+        cx.update(|window, cx| {
+            cx.bind_keys(key_bindings());
+            // Focus events reach listeners only in an active window.
+            window.activate_window();
+        });
         tab(cx);
-        let mut key = |name: &str| {
-            press(cx, name);
+        (value, changes, cx)
+    }
+
+    /// D18: the arrows move the stars shown, and the value they reach is
+    /// passed on once, after the keys rest; Up and Down do nothing.
+    #[gpui_kit::test]
+    fn keys_pass_on_one_change_after_they_rest(cx: &mut gpui_kit::TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (value, changes, cx) = host_stars(cx, r(3.0));
+        for key in ["right", "right", "right", "left"] {
+            press(cx, key);
             redraw(cx);
-            value.get()
-        };
-        assert_eq!(key("right"), r(3.5));
-        assert_eq!(key("up"), r(4.0));
-        assert_eq!(key("left"), r(3.5));
-        assert_eq!(key("down"), r(3.0));
-        assert_eq!(key("delete"), None);
-        assert_eq!(key("up"), r(0.5));
-        assert_eq!(key("backspace"), None);
+        }
+        assert_eq!(changes.get(), 0, "nothing passed on while the keys move");
+        cx.executor().advance_clock(QUIET / 2);
+        cx.run_until_parked();
+        assert_eq!(changes.get(), 0, "not before the keys rest");
+        cx.executor().advance_clock(QUIET);
+        cx.run_until_parked();
+        assert_eq!((changes.get(), value.get()), (1, r(4.0)), "one change");
+
+        press(cx, "up");
+        press(cx, "down");
+        redraw(cx);
+        cx.executor().advance_clock(QUIET * 2);
+        cx.run_until_parked();
+        assert_eq!(
+            (changes.get(), value.get()),
+            (1, r(4.0)),
+            "Up and Down are the page's"
+        );
+    }
+
+    /// Enter and losing focus pass the stars on at once; Delete clears at
+    /// once.
+    #[gpui_kit::test]
+    fn enter_blur_and_delete_pass_on_at_once(cx: &mut gpui_kit::TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (value, changes, cx) = host_stars(cx, None);
+        press(cx, "right");
+        press(cx, "right");
+        press(cx, "enter");
+        redraw(cx);
+        assert_eq!((changes.get(), value.get()), (1, r(1.0)), "Enter");
+
+        press(cx, "right");
+        redraw(cx);
+        cx.update(|window, cx| window.blur(cx));
+        redraw(cx);
+        cx.run_until_parked();
+        redraw(cx);
+        assert_eq!((changes.get(), value.get()), (2, r(1.5)), "blur");
+
+        crate::ui::test_support::tab(cx);
+        press(cx, "delete");
+        redraw(cx);
+        assert_eq!((changes.get(), value.get()), (3, None), "Delete");
+        cx.executor().advance_clock(QUIET * 2);
+        cx.run_until_parked();
+        assert_eq!(changes.get(), 3, "and nothing more");
     }
 }

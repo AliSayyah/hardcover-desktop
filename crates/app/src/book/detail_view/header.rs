@@ -255,7 +255,12 @@ impl BookDetailView {
         let busy = pending.is_some();
         let can_write = Self::can_write(cx);
         let status = entry.status;
-        let rating = entry.rating;
+        // A rating held or saving shows at once.
+        let rating = self
+            .ratings
+            .read(cx)
+            .shown(entry.user_book_id)
+            .unwrap_or(entry.rating);
         let view = cx.entity().downgrade();
         let status_button = Button::new("book-status")
             .icon(status_icon(status))
@@ -284,8 +289,8 @@ impl BookDetailView {
                 menu
             });
         // The stars and Clear rating stay enabled while a write runs, so
-        // they keep the keyboard focus; `change_rating` drops a change made
-        // meanwhile.
+        // they keep the keyboard focus; a change made meanwhile is held and
+        // sent when the write ends (`Ratings`).
         let rate = h_flex()
             .gap_2()
             .child(

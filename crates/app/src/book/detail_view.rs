@@ -72,7 +72,7 @@ use crate::format::read_dates_text;
 use crate::library::model::{
     LibraryModel, LibraryWrite, Removed, WriteKind, WriteOutcome, WriteTarget, Written,
 };
-use crate::library::writes;
+use crate::library::writes::{self, Ratings};
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::resource::{Catalog, Demand, SharedChanged};
@@ -257,6 +257,8 @@ pub struct BookDetailView {
     layout: Rc<Cell<PaneLayout>>,
     review: ReviewEditor,
     community_reviews: CommunityReviews,
+    /// Ratings asked for and not yet saved.
+    ratings: Entity<Ratings>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -270,6 +272,7 @@ impl BookDetailView {
         });
 
         let (review, review_subscriptions) = ReviewEditor::new(window, cx);
+        let ratings = cx.new(|cx| Ratings::new(model.clone(), window, cx));
         let mut subscriptions =
             vec![
                 cx.observe_in(&model, window, |this, _, window, cx| {
@@ -299,6 +302,7 @@ impl BookDetailView {
                 }),
             ];
         subscriptions.extend(review_subscriptions);
+        subscriptions.push(cx.observe(&ratings, |_, _, cx| cx.notify()));
         subscriptions.push(Self::observe_review_scope(cx));
         subscriptions.push(cx.on_release_in(window, |this: &mut Self, window, cx| {
             for url in this.similar_covers.drain(..) {
@@ -342,6 +346,7 @@ impl BookDetailView {
             layout: Rc::new(Cell::new(PaneLayout::default())),
             review,
             community_reviews: CommunityReviews::default(),
+            ratings,
             _subscriptions: subscriptions,
         }
     }
@@ -687,34 +692,19 @@ impl BookDetailView {
         );
     }
 
+    /// Saves a rating, now or once the write running on the entry ends
+    /// ([`Ratings`]); the stars show it meanwhile.
     fn change_rating(
         &mut self,
         rating: Option<Rating>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(entry) = self.current_entry(cx) else {
+        let Some(id) = self.entry(self.model.read(cx)).map(|e| e.user_book_id) else {
             return;
         };
-        let id = entry.user_book_id;
-        // A change while another write runs is dropped: the stars stay
-        // enabled during a write only so that they keep the keyboard focus.
-        if self.model.read(cx).pending_write(id).is_some() {
-            return;
-        }
-        // Sending the shown status keeps Hardcover from marking the book Read.
-        let keep = entry.status;
-        self.run_write(
-            LibraryWrite::entry(
-                id,
-                WriteKind::Rating,
-                "Couldn't save the rating",
-                move |client| client.set_rating(id, rating, keep),
-            ),
-            |_| None,
-            window,
-            cx,
-        );
+        self.ratings
+            .update(cx, |r, cx| r.rate(id, rating, window, cx));
     }
 
     fn change_privacy(&mut self, privacy: Privacy, window: &mut Window, cx: &mut Context<Self>) {

@@ -22,7 +22,7 @@
 //!   md covers, as many as the column holds ([`want_to_read_shown`]). With
 //!   nothing for the second column, Home keeps its two columns.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::ops::Range;
 use std::rc::Rc;
@@ -32,7 +32,7 @@ use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Disableable as _, IconName, h_flex};
 use gpui_kit::{
-    AnyElement, App, Context, Entity, FocusHandle, Focusable, FontWeight, HighlightStyle,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight, HighlightStyle,
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, RenderImage,
     SharedString, Styled as _, StyledText, Subscription, Window, div, prelude::FluentBuilder as _,
 };
@@ -61,8 +61,8 @@ use crate::format::{
 };
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
-use crate::library::model::{LibraryModel, LibraryWrite, WriteKind};
-use crate::library::writes;
+use crate::library::model::{LibraryModel, WriteKind};
+use crate::library::writes::{self, Ratings};
 use crate::session;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
@@ -156,8 +156,8 @@ pub struct HomeView {
     rated_here: HashSet<UserBookId>,
     /// Bumped whenever [`Self::rated_here`] changes.
     rated_generation: u64,
-    /// A rating being saved, shown until the write lands.
-    saving_ratings: HashMap<UserBookId, Option<Rating>>,
+    /// Ratings asked for and not yet saved, shown until they land.
+    ratings: Entity<Ratings>,
     /// The lead book's detail cover (the xl cover needs more than a
     /// thumbnail), released when the lead changes.
     lead_cover: Option<(String, Option<Arc<RenderImage>>)>,
@@ -178,12 +178,10 @@ impl HomeView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let ratings = cx.new(|cx| Ratings::new(model.clone(), window, cx));
         let subscriptions = vec![
             cx.observe_in(&model, window, |this, model, window, cx| {
                 let model = model.read(cx);
-                // A rating stays on screen only while it is being saved.
-                this.saving_ratings
-                    .retain(|id, _| model.pending_write(*id) == Some(WriteKind::Rating));
                 // The lead's detail cover goes once another book leads.
                 let lead = lead(model.entries()).and_then(|e| e.cover().map(|c| c.url.clone()));
                 if this.lead_cover.as_ref().map(|(url, _)| url) != lead.as_ref()
@@ -194,6 +192,7 @@ impl HomeView {
                 cx.notify();
             }),
             cx.observe(&goals, |_, _, cx| cx.notify()),
+            cx.observe(&ratings, |_, _, cx| cx.notify()),
             cx.observe(&upcoming, |_, _, cx| cx.notify()),
         ];
         Self {
@@ -205,7 +204,7 @@ impl HomeView {
             months: None,
             rated_here: HashSet::new(),
             rated_generation: 0,
-            saving_ratings: HashMap::new(),
+            ratings,
             lead_cover: None,
             _subscriptions: subscriptions,
         }
@@ -313,27 +312,11 @@ impl HomeView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let model = self.model.read(cx);
-        // A change while the last one saves is dropped: the stars stay
-        // enabled during a save only so that they keep the keyboard focus.
-        if model.pending_write(id).is_some() {
-            return;
-        }
-        let Some(keep) = model.entry(id).map(|e| e.status) else {
-            return;
-        };
         if self.rated_here.insert(id) {
             self.rated_generation += 1;
         }
-        self.saving_ratings.insert(id, rating);
-        // Sending the status keeps Hardcover from starting a new read.
-        let write = LibraryWrite::entry(
-            id,
-            WriteKind::Rating,
-            "Couldn't save the rating",
-            move |client| client.set_rating(id, rating, keep),
-        );
-        drop(self.model.update(cx, |m, cx| m.write(write, window, cx)));
+        self.ratings
+            .update(cx, |r, cx| r.rate(id, rating, window, cx));
     }
 
     /// Asks before finishing a book: the read ends today, and moving the
@@ -728,11 +711,7 @@ impl HomeView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = entry.user_book_id;
-        let pending = self.model.read(cx).pending_write(id);
-        let rating = match self.saving_ratings.get(&id) {
-            Some(saving) if pending == Some(WriteKind::Rating) => *saving,
-            _ => entry.rating,
-        };
+        let rating = self.ratings.read(cx).shown(id).unwrap_or(entry.rating);
         let byline = finished_byline(&entry.book.authors, finished, today);
         h_flex()
             .w_full()
@@ -1335,11 +1314,14 @@ mod tests {
         cx.update(|window, cx| {
             home.update(cx, |home, cx| home.rate(id, Rating::new(4.0), window, cx));
         });
-        assert!(home.read_with(cx, |h, _| h.saving_ratings.contains_key(&id)));
-        // The demo refuses the write; its end clears the rating shown, with
-        // no frame drawn in between.
+        let shown = |cx: &mut gpui_kit::VisualTestContext| {
+            home.read_with(cx, |h, cx| h.ratings.read(cx).shown(id))
+        };
+        assert_eq!(shown(cx), Some(Rating::new(4.0)));
+        // The write's end clears the rating shown, with no frame drawn in
+        // between.
         cx.run_until_parked();
-        assert!(home.read_with(cx, |h, _| h.saving_ratings.is_empty()));
+        assert_eq!(shown(cx), None);
         assert!(home.read_with(cx, |h, _| h.rated_here.contains(&id)));
     }
 
