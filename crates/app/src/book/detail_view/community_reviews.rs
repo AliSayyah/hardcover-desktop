@@ -2,70 +2,42 @@
 //! reviews of the book, the most liked first, a page at a time, as sequence
 //! rows 16 apart with hairlines between them.
 //!
-//! Fetched once the details are in, after [`REVIEWS_DELAY`], and kept per book
-//! for the run. Stale ones ([`crate::freshness`]) are fetched again from the
-//! first page, which replaces the pages shown; while the book stays on screen
-//! (the window became active) only a single page is replaced, so "Show more"
-//! never folds up under the reader. Hidden without `read:social`. The user's own review is left
-//! out (it has its own section): the query excludes the signed-in user, whose
-//! id the library knows, or `me()` tells when it doesn't yet.
+//! Asked for a moment after the book is shown, whether or not its details
+//! load, and kept per book in the session's catalogue (`resource::Catalog`,
+//! which also says when stale pages are fetched again and folded back into
+//! a fresh first page). Hidden without `read:social`. The user's own review
+//! is left out (it has its own section): the query excludes the signed-in
+//! user, whose id the library knows, or `me()` tells when it doesn't yet.
 
-use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::collections::HashSet;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Subscription,
-    Task, Window, div, prelude::FluentBuilder as _,
+    AnyElement, Context, IntoElement, ParentElement as _, Styled as _, Subscription, Window, div,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_SOCIAL;
 use hardcover_core::{BookId, CommunityReview, UserBookId};
 
-use super::{BookDetailView, Details};
+use super::{BookDetailView, Fetch};
 use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, date_text, rating_text};
-use crate::freshness::Stamp;
-use crate::session::{self, SessionScope};
+use crate::resource::Demand;
+use crate::session;
 use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{Avatar, Block, BylineLink, RowSpacing, Sequence, Skeleton, Stars};
 
-/// Reviews wait this long after the details, a little longer than similar
-/// books, so arrowing through a list fetches neither for books passed over.
-const REVIEWS_DELAY: Duration = Duration::from_millis(700);
 /// A collapsed review shows about this many lines...
 const COLLAPSED_LINES: usize = 6;
 /// ...counting this many characters to a line of the pane's text.
 const CHARS_PER_LINE: usize = 75;
 
-/// The reviews fetched for one book.
-#[derive(Default)]
-struct BookReviews {
-    reviews: Vec<CommunityReview>,
-    /// How many there are, when Hardcover said.
-    total: Option<u32>,
-    next_offset: u32,
-    has_more: bool,
-    /// The first page has arrived.
-    loaded: bool,
-    /// Pages shown: the first, then each "Show more".
-    pages: u32,
-    /// When the first page was last fetched or tried.
-    fetched: Option<Stamp>,
-    /// The last fetch failed: the first page, or the next one once loaded.
-    error: Option<SharedString>,
-}
-
-/// The section's state, kept per book for the run.
+/// What the section keeps of its own: which reviews the reader opened.
 #[derive(Default)]
 pub(super) struct CommunityReviews {
-    books: HashMap<BookId, BookReviews>,
-    /// The book whose page is being fetched. Cleared when the pane moves on,
-    /// which also drops the fetch.
-    loading: Option<BookId>,
-    task: Option<Task<()>>,
     /// Long reviews opened with "Read more".
     expanded: HashSet<UserBookId>,
     /// Spoiler reviews opened with "Show".
@@ -73,164 +45,33 @@ pub(super) struct CommunityReviews {
 }
 
 impl BookDetailView {
-    /// Starts the fetch when `read:social` is granted while a book is shown
-    /// ("Sign in again…" keeps the pane as it is).
+    /// Asks for the reviews when `read:social` is granted while a book is
+    /// shown ("Sign in again…" keeps the pane as it is).
     pub(super) fn observe_review_scope(cx: &mut Context<Self>) -> Subscription {
-        session::observe_grant(cx, Self::load_community_reviews)
-    }
-
-    /// The pane moved to another book: drops a fetch for the old one and
-    /// starts the new one's if its details are in. A first page that failed
-    /// is tried again.
-    pub(super) fn community_reviews_subject_changed(&mut self, cx: &mut Context<Self>) {
-        self.community_reviews.task = None;
-        self.community_reviews.loading = None;
-        if let Some(book) = self.book(cx) {
-            let reviews = &mut self.community_reviews.books;
-            if reviews.get(&book.id).is_some_and(|r| !r.loaded) {
-                reviews.remove(&book.id);
+        session::observe_grant(cx, |this, cx| {
+            if let Some(book) = this.book(cx) {
+                this.fetch(book.id, Fetch::Reviews, Demand::Shown, cx);
             }
-        }
-        self.revalidate_reviews(true, cx);
+        })
     }
 
-    /// Fetches the shown book's first page of reviews once its details are
-    /// in. Not again after a failure, until the book is shown again.
-    pub(super) fn load_community_reviews(&mut self, cx: &mut Context<Self>) {
-        self.revalidate_reviews(false, cx);
-    }
-
-    /// Fetches the first page if there is none, or again if it is stale.
-    /// Replacing more than one page needs `shown_again`.
-    pub(super) fn revalidate_reviews(&mut self, shown_again: bool, cx: &mut Context<Self>) {
-        if !session::has_scope(cx, READ_SOCIAL) {
-            return;
-        }
-        let Some(book) = self.book(cx) else { return };
-        if self
-            .details
-            .get(&book.id)
-            .and_then(Details::loaded)
-            .is_none()
-            || self.community_reviews.loading == Some(book.id)
-        {
-            return;
-        }
-        match self.community_reviews.books.get(&book.id) {
-            None => self.fetch_reviews(book.id, Some(REVIEWS_DELAY), false, cx),
-            Some(state)
-                if state.loaded
-                    && state.fetched.is_some_and(|stamp| stamp.is_stale(cx))
-                    && (shown_again || state.pages <= 1) =>
-            {
-                self.fetch_reviews(book.id, Some(REVIEWS_DELAY), true, cx);
-            }
-            Some(_) => {}
-        }
-    }
-
-    /// Fetches the next page, or the first one again after a failure.
+    /// Fetches the next page, or the first again after it failed.
     fn more_reviews(&mut self, cx: &mut Context<Self>) {
-        let Some(book) = self.book(cx) else { return };
-        if self.community_reviews.loading == Some(book.id) {
-            return;
-        }
-        self.fetch_reviews(book.id, None, false, cx);
-        cx.notify();
-    }
-
-    /// Fetches the next page, or the first while none has arrived. With
-    /// `replace`, fetches the first page again to replace the pages shown; a
-    /// failure then keeps them and shows nothing.
-    fn fetch_reviews(
-        &mut self,
-        id: BookId,
-        delay: Option<Duration>,
-        replace: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let state = self.community_reviews.books.get(&id);
-        let first = replace || state.is_none_or(|s| !s.loaded);
-        let offset = state.filter(|_| !first).map_or(0, |s| s.next_offset);
-        // Only the signed-in account's own id: a cached one may be another's.
-        let user = self.model.read(cx).verified_user_id();
-        let Some(session) = SessionScope::current(cx).cloned() else {
+        let (Some(book), Some(catalog)) = (self.book(cx), self.catalog.clone()) else {
             return;
         };
-        self.community_reviews.loading = Some(id);
-        // Replacing the task cancels a fetch for a book no longer shown.
-        self.community_reviews.task = Some(cx.spawn(async move |this, cx| {
-            if let Some(delay) = delay {
-                cx.background_executor().timer(delay).await;
-            }
-            let Some(result) = session
-                .background(move |client| {
-                    // Before the first sync the library doesn't know whose it is.
-                    let me = match user {
-                        Some(me) => me,
-                        None => client.me()?.id,
-                    };
-                    let page = client.book_reviews(id, me, offset)?;
-                    // A first page that holds them all is its own count; a
-                    // count that fails costs only the caption.
-                    let total = match (first, page.has_more) {
-                        (true, false) => u32::try_from(page.reviews.len()).ok(),
-                        (true, true) => client.book_reviews_count(id, me).ok(),
-                        (false, _) => None,
-                    };
-                    hardcover_core::Result::Ok((page, total))
-                })
-                .await
-            else {
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                if this.community_reviews.loading == Some(id) {
-                    this.community_reviews.loading = None;
-                }
-                let error = result
-                    .as_ref()
-                    .err()
-                    .map(|e| SharedString::from(session::error_message(e, Some(READ_SOCIAL), cx)));
-                let state = this.community_reviews.books.entry(id).or_default();
-                if first {
-                    state.fetched = Some(Stamp::now(cx));
-                }
-                match result {
-                    Ok((page, total)) if replace => {
-                        state.reviews = page.reviews;
-                        state.pages = 1;
-                        state.next_offset = page.next_offset;
-                        state.has_more = page.has_more;
-                        if total.is_some() {
-                            state.total = total;
-                        }
-                        state.loaded = true;
-                        state.error = None;
-                    }
-                    Ok((page, total)) => {
-                        // Likes change between requests, so a review can move
-                        // into the next page: show it once.
-                        let seen: HashSet<UserBookId> =
-                            state.reviews.iter().map(|r| r.id).collect();
-                        state
-                            .reviews
-                            .extend(page.reviews.into_iter().filter(|r| !seen.contains(&r.id)));
-                        state.pages += 1;
-                        state.next_offset = page.next_offset;
-                        state.has_more = page.has_more;
-                        if total.is_some() {
-                            state.total = total;
-                        }
-                        state.loaded = true;
-                        state.error = None;
-                    }
-                    Err(_) if replace => {}
-                    Err(_) => state.error = error,
-                }
-                cx.notify();
-            });
-        }));
+        let loaded = catalog
+            .reviews
+            .read(cx)
+            .resource()
+            .value(&book.id)
+            .is_some();
+        if loaded {
+            let me = self.model.read(cx).verified_user_id();
+            catalog.more_reviews(book.id, me, cx);
+        } else {
+            self.fetch(book.id, Fetch::Reviews, Demand::Now, cx);
+        }
     }
 
     // ----- rendering -----
@@ -247,24 +88,33 @@ impl BookDetailView {
             return None;
         }
         let muted = colors(cx).fg_muted;
-        let loading = self.community_reviews.loading == Some(book);
+        let (state, first_error, more_error, loading) = match &self.catalog {
+            Some(catalog) => {
+                let store = catalog.reviews.read(cx).resource();
+                (
+                    store.value(&book).cloned(),
+                    store.error(&book).cloned(),
+                    store.more_error(&book).cloned(),
+                    store.is_loading(&book),
+                )
+            }
+            None => (None, None, None, false),
+        };
         let retry = |id: &'static str, cx: &mut Context<Self>| {
             Button::new(id)
                 .small_control()
                 .label("Try again")
                 .on_click(cx.listener(|this, _, _, cx| this.more_reviews(cx)))
         };
-        let state = self.community_reviews.books.get(&book);
-        let body: AnyElement = match state {
-            // Waiting out the delay or loading: the shape of two reviews.
-            None => placeholder(loading).into_any_element(),
-            Some(state) if !state.loaded => match &state.error {
+        let body: AnyElement = match &state {
+            None => match first_error {
                 Some(message) if !loading => h_flex()
                     .flex_wrap()
                     .gap_2()
-                    .child(div().body().text_color(muted).child(message.clone()))
+                    .child(div().body().text_color(muted).child(message))
                     .child(retry("retry-reviews", cx))
                     .into_any_element(),
+                // Waiting out the delay or loading: the shape of two reviews.
                 _ => placeholder(loading).into_any_element(),
             },
             Some(state) if state.reviews.is_empty() && !state.has_more => div()
@@ -286,17 +136,17 @@ impl BookDetailView {
                                 .map(|review| self.render_community_review(review, cx)),
                         ),
                 )
-                .when(state.has_more || state.error.is_some(), |this| {
+                .when(state.has_more || more_error.is_some(), |this| {
                     this.child(
                         h_flex()
                             .flex_wrap()
                             .gap_2()
                             .items_center()
-                            .when_some(state.error.clone().filter(|_| !loading), |this, e| {
+                            .when_some(more_error.clone().filter(|_| !loading), |this, e| {
                                 this.child(div().body().text_color(muted).child(e))
                                     .child(retry("retry-more-reviews", cx))
                             })
-                            .when(state.error.is_none() || loading, |this| {
+                            .when(more_error.is_none() || loading, |this| {
                                 this.child(
                                     Button::new("more-reviews")
                                         .small_control()
@@ -312,6 +162,7 @@ impl BookDetailView {
                 .into_any_element(),
         };
         let caption = state
+            .as_ref()
             .and_then(|s| s.total)
             .filter(|n| *n > 0)
             .map(|n| match n {
@@ -535,9 +386,17 @@ mod tests {
     use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 
     use super::super::tests::{BOOK, demo_pane, settle};
+    use crate::resource::catalog::ReviewPages;
+
+    fn reviews(view: &Entity<BookDetailView>, cx: &mut VisualTestContext) -> ReviewPages {
+        view.read_with(cx, |view, cx| {
+            let catalog = view.catalog.as_ref().unwrap();
+            (**catalog.reviews.read(cx).resource().value(&BOOK).unwrap()).clone()
+        })
+    }
 
     fn review_pages(view: &Entity<BookDetailView>, cx: &mut VisualTestContext) -> u32 {
-        view.read_with(cx, |view, _| view.community_reviews.books[&BOOK].pages)
+        reviews(view, cx).pages
     }
 
     #[gpui_kit::test]
@@ -550,7 +409,7 @@ mod tests {
         // Its list's page was fetched again (the reviews being stale too): a
         // new summary, same book.
         cx.update(|window, cx| {
-            crate::freshness::refresh_all(cx);
+            crate::resource::refresh_all(cx);
             view.update(cx, |view, cx| {
                 let mut book = hardcover_core::BookSummary::new(BOOK, "Project Hail Mary");
                 book.users_count = Some(12_345);
@@ -572,7 +431,7 @@ mod tests {
         assert_eq!(review_pages(&view, cx), 2);
 
         // The window became active: the pages the reader opened stay.
-        cx.update(|_, cx| crate::freshness::refresh_all(cx));
+        cx.update(|_, cx| crate::resource::refresh_all(cx));
         view.update(cx, |view, cx| view.revalidate(false, cx));
         settle(cx);
         assert_eq!(review_pages(&view, cx), 2);
@@ -581,11 +440,9 @@ mod tests {
         view.update(cx, |view, cx| view.revalidate(true, cx));
         settle(cx);
         assert_eq!(review_pages(&view, cx), 1);
-        view.read_with(cx, |view, _| {
-            let reviews = &view.community_reviews.books[&BOOK];
-            assert!(reviews.has_more);
-            assert!(!reviews.reviews.is_empty());
-        });
+        let reviews = reviews(&view, cx);
+        assert!(reviews.has_more);
+        assert!(!reviews.reviews.is_empty());
     }
 
     #[test]

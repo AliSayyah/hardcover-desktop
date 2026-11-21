@@ -2,16 +2,22 @@
 //! and an index of which books are on which list, loaded the first time a book
 //! page needs it. Writes update both locally from their own results.
 //!
+//! The lists, the index and books looked up alone are [`Resource`]s; the
+//! lists and the index are kept in the library cache between launches
+//! (`resource::saved`), so the last good ones show at once, offline too.
+//!
 //! Everything here needs `read:lists`; without it the model stays empty and
 //! the views hide the lists. Any view reaches the model through
 //! [`ListsModel::global`], so the book page needs no new constructor argument.
 //! The model belongs to one session ([`SessionScope`]): once it ends,
 //! nothing more is sent and results that land are dropped.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+use std::time::Duration;
 
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task, WeakEntity,
+    App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Subscription, Task,
+    WeakEntity,
 };
 use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LIBRARY, WRITE_LISTS};
 use hardcover_core::{
@@ -19,20 +25,15 @@ use hardcover_core::{
     ListMemberships, OWNED_LIST_SLUG, UserList,
 };
 
-use crate::format::{needs_permission, requested_scope};
-use crate::library::model::STILL_SAVING;
+use crate::format::needs_permission;
+use crate::io::Priority;
+use crate::library::model::{AccountChanged, LibraryModel, STILL_SAVING};
+use crate::resource::{Binding, Debounce, Demand, Landing, LoadStatus, Resource, saved};
 use crate::session::SessionScope;
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum ListsStatus {
-    /// Not loaded, or the session can't read lists.
-    #[default]
-    Idle,
-    Loading,
-    Loaded,
-    /// The last load failed; the lists shown (if any) are the previous ones.
-    Failed(SharedString),
-}
+/// How long after a write to load again what a load in flight missed:
+/// Hardcover can answer a read right after a write with the old rows.
+const RELOAD_DELAY: Duration = Duration::from_secs(2);
 
 /// What a list's page needs to hear about changes made elsewhere.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,18 +51,11 @@ pub enum ListsEvent {
 pub struct ListsModel {
     session: SessionScope,
     /// The Owned list first, then by name.
-    lists: Vec<UserList>,
-    status: ListsStatus,
-    /// A load has finished (or failed) at least once.
-    loaded_once: bool,
-    /// A load has succeeded: `lists` is the user's, so a missing Owned list
-    /// means there is none yet.
-    lists_known: bool,
-    /// Which books are on which list; `None` until first needed.
-    memberships: Option<ListMemberships>,
+    lists: Resource<(), Vec<UserList>>,
+    /// Which books are on which list; asked for once a book page needs it.
+    index: Resource<(), ListMemberships>,
     /// Books looked up one at a time because the index was cut short.
-    book_rows: HashMap<BookId, Vec<ListMembership>>,
-    book_rows_loading: HashSet<BookId>,
+    book_rows: Resource<BookId, Vec<ListMembership>>,
     /// Books a book page asked about before the index could answer; they are
     /// looked up when an index load finishes.
     pending_books: HashSet<BookId>,
@@ -71,12 +65,10 @@ pub struct ListsModel {
     busy_books: HashSet<BookId>,
     /// A list is being created, changed or deleted.
     writing: bool,
-    /// Counts local writes. A load that started before one would bring back
-    /// the old state, so it is run again instead of applied.
-    generation: u64,
-    load_task: Option<Task<()>>,
-    memberships_task: Option<Task<()>>,
-    book_row_tasks: Vec<Task<()>>,
+    /// Loads again what a write made a load in flight drop.
+    reload_dropped: Debounce,
+    _hydrating: Vec<Task<()>>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<ListsEvent> for ListsModel {}
@@ -88,10 +80,48 @@ struct ListsGlobal(WeakEntity<ListsModel>);
 impl Global for ListsGlobal {}
 
 impl ListsModel {
-    /// Creates the model for a new workspace, replacing any earlier one. The
-    /// caller owns it.
-    pub fn init(session: SessionScope, cx: &mut App) -> Entity<Self> {
-        let model = cx.new(|_| Self::new(session));
+    /// Creates the model for a new workspace, replacing any earlier one, and
+    /// shows the lists of the last launch while they load. The caller owns
+    /// it.
+    pub fn init(
+        session: SessionScope,
+        library: &Entity<LibraryModel>,
+        cx: &mut App,
+    ) -> Entity<Self> {
+        let model = cx.new(|cx| {
+            let mut model = Self::new(session.clone());
+            model._hydrating = vec![
+                saved::hydrate(
+                    &session,
+                    "lists",
+                    saved::parse_single,
+                    Self::bind_lists(),
+                    cx,
+                ),
+                saved::hydrate(
+                    &session,
+                    "list_memberships",
+                    saved::parse_single,
+                    Self::bind_index(),
+                    cx,
+                ),
+            ];
+            model._subscriptions =
+                vec![cx.subscribe(library, |this, _, _: &AccountChanged, cx| {
+                    this._hydrating.clear();
+                    this.lists.forget_from_disk();
+                    this.index.forget_from_disk();
+                    cx.notify();
+                })];
+            model.lists = model
+                .lists
+                .persist(saved::saver(&session, "lists", saved::single));
+            model.index =
+                model
+                    .index
+                    .persist(saved::saver(&session, "list_memberships", saved::single));
+            model
+        });
         cx.set_global(ListsGlobal(model.downgrade()));
         model
     }
@@ -110,62 +140,116 @@ impl ListsModel {
 
     fn new(session: SessionScope) -> Self {
         Self {
+            lists: Resource::new(session.clone(), READ_LISTS, Priority::Background),
+            index: Resource::new(session.clone(), READ_LISTS, Priority::Background),
+            book_rows: Resource::new(session.clone(), READ_LISTS, Priority::Interactive),
             session,
-            lists: Vec::new(),
-            status: ListsStatus::Idle,
-            loaded_once: false,
-            lists_known: false,
-            memberships: None,
-            book_rows: HashMap::new(),
-            book_rows_loading: HashSet::new(),
             pending_books: HashSet::new(),
             shown_book: None,
             busy_books: HashSet::new(),
             writing: false,
-            generation: 0,
-            load_task: None,
-            memberships_task: None,
-            book_row_tasks: Vec::new(),
+            reload_dropped: Debounce::default(),
+            _hydrating: Vec::new(),
+            _subscriptions: Vec::new(),
+        }
+    }
+
+    fn bind_lists() -> Binding<Self, (), Vec<UserList>> {
+        Binding {
+            get: |m| &mut m.lists,
+            landed: |this, _, landing, cx| this.landed(landing, cx),
+        }
+    }
+
+    fn bind_index() -> Binding<Self, (), ListMemberships> {
+        Binding {
+            get: |m| &mut m.index,
+            landed: |this, _, landing, cx| {
+                // Complete or not, the index (old or new) now decides which
+                // books waiting on it need a lookup of their own. A failed
+                // one leaves them waiting (Refresh, or "Try again").
+                if landing != Landing::Failed {
+                    for book in this.take_lookups() {
+                        this.look_up(book, Demand::Active, cx);
+                    }
+                }
+                this.landed(landing, cx);
+            },
+        }
+    }
+
+    fn bind_book_rows() -> Binding<Self, BookId, Vec<ListMembership>> {
+        Binding {
+            get: |m| &mut m.book_rows,
+            landed: |this, _, landing, cx| this.landed(landing, cx),
+        }
+    }
+
+    /// A write came after a load started: its result was dropped, so what
+    /// it would have brought loads again shortly.
+    fn landed(&mut self, landing: Landing, cx: &mut Context<Self>) {
+        if landing == Landing::Dropped {
+            self.reload_dropped
+                .schedule(RELOAD_DELAY, Self::load_dropped, cx);
+        }
+        cx.notify();
+    }
+
+    fn load_dropped(&mut self, cx: &mut Context<Self>) {
+        self.request_lists(Demand::Now, cx);
+        if self.index.value(&()).is_some() || self.index.has_settled(&()) {
+            self.request_index(Demand::Now, cx);
+        }
+        if let Some(book) = self.shown_book {
+            self.look_up(book, Demand::Now, cx);
         }
     }
 
     // ----- reads -----
 
     pub fn lists(&self) -> &[UserList] {
-        &self.lists
+        self.lists.value(&()).map_or(&[], |l| l.as_slice())
     }
 
     pub fn list(&self, id: ListId) -> Option<&UserList> {
-        self.lists.iter().find(|l| l.id == id)
+        self.lists().iter().find(|l| l.id == id)
     }
 
     /// The list Hardcover keeps owned editions on, once it exists.
     pub fn owned_list(&self) -> Option<&UserList> {
-        self.lists.iter().find(|l| l.is_owned())
+        self.lists().iter().find(|l| l.is_owned())
     }
 
     /// The lists a book can be put on from its page: all but Owned.
     pub fn user_lists(&self) -> impl Iterator<Item = &UserList> {
-        self.lists.iter().filter(|l| !l.is_owned())
+        self.lists().iter().filter(|l| !l.is_owned())
     }
 
-    pub fn status(&self) -> &ListsStatus {
-        &self.status
+    pub fn status(&self) -> LoadStatus {
+        self.lists.status(&())
     }
 
     /// Whether a page showing list `id` has nothing left to show: the lists
-    /// no longer include it, or can't be read (`Idle` after a refused scope).
-    /// While they load, or after a failed load, the page stays.
+    /// no longer include it, or can't be read (a refused scope). While they
+    /// load, or after a failed load, the page stays.
     pub fn is_gone(&self, id: ListId) -> bool {
-        match self.status {
-            ListsStatus::Idle => true,
-            ListsStatus::Loaded => self.list(id).is_none(),
-            ListsStatus::Loading | ListsStatus::Failed(_) => false,
-        }
+        is_gone(
+            &self.status(),
+            self.list(id).is_some(),
+            self.session.allows(READ_LISTS),
+        )
     }
 
+    /// The lists have loaded (or failed) at least once, or the last launch's
+    /// are shown.
     pub fn has_loaded(&self) -> bool {
-        self.loaded_once
+        self.lists.has_settled(&())
+    }
+
+    /// The lists are the user's (loaded, or the last launch's), so a missing
+    /// Owned list means there is none yet.
+    fn lists_known(&self) -> bool {
+        self.lists.value(&()).is_some()
     }
 
     pub fn is_writing(&self) -> bool {
@@ -178,10 +262,10 @@ impl ListsModel {
 
     /// Every row of `book` on the user's lists, or `None` while that is unknown.
     pub fn rows_for(&self, book: BookId) -> Option<Vec<ListMembership>> {
-        if let Some(rows) = self.book_rows.get(&book) {
-            return Some(rows.clone());
+        if let Some(rows) = self.book_rows.value(&book) {
+            return Some(rows.to_vec());
         }
-        let index = self.memberships.as_ref()?;
+        let index = self.index.value(&())?;
         index.complete.then(|| {
             index
                 .rows
@@ -201,7 +285,7 @@ impl ListsModel {
     /// The Owned list's rows for `book` (one per owned edition), or `None`
     /// while that is unknown. Empty when there is no Owned list yet.
     pub fn owned_rows(&self, book: BookId) -> Option<Vec<ListMembership>> {
-        if !self.lists_known {
+        if !self.lists_known() {
             return None;
         }
         let rows = self.rows_for(book)?;
@@ -211,153 +295,138 @@ impl ListsModel {
         })
     }
 
+    /// Why `book`'s lists can't be told, when nothing on its way could tell
+    /// them: the lists, the index or the book's own lookup failed. The book
+    /// page says so beside its list controls, with "Try again"
+    /// ([`Self::retry_book`]).
+    pub fn book_failure(&self, book: BookId) -> Option<SharedString> {
+        if self.rows_for(book).is_some() && self.lists_known() {
+            return None;
+        }
+        let loading = self.lists.is_loading(&())
+            || self.index.is_loading(&())
+            || self.book_rows.is_loading(&book);
+        if loading {
+            return None;
+        }
+        self.lists
+            .error(&())
+            .or_else(|| self.index.error(&()))
+            .or_else(|| self.book_rows.error(&book))
+            .cloned()
+    }
+
     // ----- loading -----
 
-    /// Loads the lists, keeping the ones shown until the new ones arrive.
+    /// Loads the lists where they are stale or failed (at start), keeping
+    /// the ones shown until the new ones arrive.
     pub fn load(&mut self, cx: &mut Context<Self>) {
-        if !self.session.allows(READ_LISTS) {
-            return;
-        }
-        self.status = ListsStatus::Loading;
-        cx.notify();
-        let generation = self.generation;
-        let lists = self.session.background(|client| client.lists());
-        self.load_task = Some(cx.spawn(async move |this, cx| {
-            let Some(result) = lists.await else {
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                if this.generation != generation && result.is_ok() {
-                    this.load(cx);
-                    return;
-                }
-                match result {
-                    Ok(lists) => {
-                        this.lists = lists;
-                        sort(&mut this.lists);
-                        this.status = ListsStatus::Loaded;
-                        this.loaded_once = true;
-                        this.lists_known = true;
-                    }
-                    Err(e) => this.failed(e, cx),
-                }
-                cx.notify();
-            });
-        }));
+        self.request_lists(Demand::Shown, cx);
     }
 
-    /// Clears what the session can no longer read, or records a failure.
-    fn failed(&mut self, error: Error, cx: &mut Context<Self>) {
-        match error {
-            // A scope the app never requests falls through to the generic
-            // message: signing in again could not grant it.
-            Error::InsufficientScope { scope }
-                if scope.is_none() || requested_scope(scope.as_deref()).is_some() =>
-            {
-                self.lists.clear();
-                self.lists_known = false;
-                self.memberships = None;
-                self.book_rows.clear();
-                self.pending_books.clear();
-                self.status = ListsStatus::Idle;
-                let scope = requested_scope(scope.as_deref()).unwrap_or(READ_LISTS);
-                self.session.scope_refused(scope, cx);
-            }
-            e => {
-                self.loaded_once = true;
-                let message = self.session.error_message(&e, None, cx);
-                self.status = ListsStatus::Failed(message.into());
-            }
+    /// "Try again" after the lists failed to load.
+    pub fn retry(&mut self, cx: &mut Context<Self>) {
+        self.request_lists(Demand::Now, cx);
+    }
+
+    fn request_lists(&mut self, demand: Demand, cx: &mut Context<Self>) {
+        let call = |client: &Client| {
+            client.lists().map(|mut lists| {
+                sort(&mut lists);
+                lists
+            })
+        };
+        if self.lists.request((), demand, call, Self::bind_lists(), cx) {
+            cx.notify();
         }
     }
 
-    /// Reloads the lists, and the index if a book page has needed it
-    /// (Refresh, or a new grant). The old index answers until the new one
-    /// arrives; this also retries one that failed.
+    fn request_index(&mut self, demand: Demand, cx: &mut Context<Self>) {
+        let call = |client: &Client| client.list_memberships();
+        if self.index.request((), demand, call, Self::bind_index(), cx) {
+            cx.notify();
+        }
+    }
+
+    /// Reloads what is stale or failed: the lists, and the index if a book
+    /// page has needed it (Refresh, which made them stale, or a new grant).
+    /// The old index answers until the new one arrives.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
+        self.reload_with(Demand::Shown, cx);
+    }
+
+    /// Reloads the lists, the index and the book shown, however fresh: a
+    /// write changed them in ways its result doesn't say. List pages load
+    /// their books again too (`ListsEvent::Reloaded`).
+    fn reload_with(&mut self, demand: Demand, cx: &mut Context<Self>) {
         if !self.session.allows(READ_LISTS) {
             return;
         }
-        self.load(cx);
+        self.request_lists(demand, cx);
         if self.plan_reload() {
-            self.load_memberships(cx);
+            self.request_index(demand, cx);
+        }
+        // Without an index on its way, the books waiting on it are looked
+        // up now.
+        if !self.index.is_loading(&()) {
+            for book in self.take_lookups() {
+                self.look_up(book, demand, cx);
+            }
         }
         cx.emit(ListsEvent::Reloaded);
     }
 
-    /// Forgets the books looked up alone, queueing the one shown to be looked
-    /// up again. Whether the index should load again: only if it was loaded
-    /// or wanted, so a Refresh with no book page opened costs no index load.
+    /// Marks the books looked up alone to be looked up again (their rows
+    /// answer meanwhile), queueing the one shown. Whether the index should
+    /// load again: only if it was loaded or wanted, so a Refresh with no
+    /// book page opened costs no index load.
     fn plan_reload(&mut self) -> bool {
-        self.book_rows.clear();
+        self.book_rows.invalidate_all_but(|_| false);
         if let Some(book) = self.shown_book {
             self.pending_books.insert(book);
         }
-        self.memberships.is_some()
-            || self.memberships_task.is_some()
+        self.index.value(&()).is_some()
+            || self.index.has_settled(&())
+            || self.index.is_loading(&())
             || !self.pending_books.is_empty()
-    }
-
-    /// Loads the index of the user's books on lists, if it isn't loaded yet.
-    pub fn ensure_memberships(&mut self, cx: &mut Context<Self>) {
-        if self.memberships.is_none() && self.memberships_task.is_none() {
-            self.load_memberships(cx);
-        }
-    }
-
-    fn load_memberships(&mut self, cx: &mut Context<Self>) {
-        if !self.session.allows(READ_LISTS) {
-            return;
-        }
-        let generation = self.generation;
-        let index = self.session.background(|client| client.list_memberships());
-        self.memberships_task = Some(cx.spawn(async move |this, cx| {
-            let Some(result) = index.await else {
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.memberships_task = None;
-                if this.generation != generation && result.is_ok() {
-                    this.load_memberships(cx);
-                    return;
-                }
-                match result {
-                    Ok(index) => this.memberships = Some(index),
-                    // The lists themselves report the failure; the book page
-                    // keeps its list controls waiting, and Refresh retries.
-                    Err(e) => {
-                        let _ = this.session.error_message(&e, Some(READ_LISTS), cx);
-                    }
-                }
-                // Complete or not, the index (old or new) now decides which
-                // books waiting on it need a lookup of their own.
-                for book in this.take_lookups() {
-                    this.look_up(book, cx);
-                }
-                cx.notify();
-            });
-        }));
-        cx.notify();
     }
 
     /// Makes sure `book`'s lists become known for its page: loads the index
     /// if needed, and looks the book up alone if the index was cut short.
     pub fn ensure_book(&mut self, book: BookId, cx: &mut Context<Self>) {
         self.shown_book = Some(book);
-        self.ensure_memberships(cx);
-        if self.memberships_task.is_some() || self.memberships.is_none() {
+        self.request_index(Demand::Active, cx);
+        if self.index.is_loading(&()) || self.index.value(&()).is_none() {
             // Decided when the index lands.
             self.pending_books.insert(book);
             return;
         }
-        self.look_up(book, cx);
+        self.look_up(book, Demand::Active, cx);
+    }
+
+    /// "Try again" beside a book's list controls ([`Self::book_failure`]):
+    /// asks again for whatever failed.
+    pub fn retry_book(&mut self, book: BookId, cx: &mut Context<Self>) {
+        if self.lists.error(&()).is_some() {
+            self.request_lists(Demand::Now, cx);
+        }
+        if self.index.error(&()).is_some() {
+            self.pending_books.insert(book);
+            self.request_index(Demand::Now, cx);
+        }
+        if self.book_rows.error(&book).is_some() {
+            self.look_up(book, Demand::Now, cx);
+        }
     }
 
     /// The waiting books that need a lookup of their own, now that an index
     /// load has finished. Without any index they keep waiting (Refresh
-    /// retries); a complete index answers for them all.
+    /// retries); a complete index answers for them all. One looked up
+    /// already is asked for again only if its rows are stale (`look_up`'s
+    /// demand decides).
+    #[must_use]
     fn take_lookups(&mut self) -> Vec<BookId> {
-        let Some(index) = &self.memberships else {
+        let Some(index) = self.index.value(&()) else {
             return Vec::new();
         };
         let complete = index.complete;
@@ -367,89 +436,73 @@ impl ListsModel {
         }
         books
             .into_iter()
-            .filter(|b| !self.book_rows.contains_key(b) && !self.book_rows_loading.contains(b))
+            .filter(|b| !self.book_rows.is_loading(b))
             .collect()
     }
 
     /// Looks `book` up on its own when the index was cut short and doesn't say.
-    fn look_up(&mut self, book: BookId, cx: &mut Context<Self>) {
-        let needed = self.memberships.as_ref().is_some_and(|m| !m.complete)
-            && !self.book_rows.contains_key(&book)
-            && !self.book_rows_loading.contains(&book);
+    fn look_up(&mut self, book: BookId, demand: Demand, cx: &mut Context<Self>) {
+        let needed = self.index.value(&()).is_some_and(|m| !m.complete);
         if !needed {
             return;
         }
-        if !self.session.allows(READ_LISTS) {
-            return;
+        let call = move |client: &Client| client.book_list_memberships(book);
+        if self
+            .book_rows
+            .request(book, demand, call, Self::bind_book_rows(), cx)
+        {
+            cx.notify();
         }
-        self.book_rows_loading.insert(book);
-        let generation = self.generation;
-        let rows = self
-            .session
-            .interactive(move |client| client.book_list_memberships(book));
-        let task = cx.spawn(async move |this, cx| {
-            let Some(result) = rows.await else {
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.book_rows_loading.remove(&book);
-                match result {
-                    Ok(rows) if this.generation == generation => {
-                        this.book_rows.insert(book, rows);
-                    }
-                    Ok(_) => this.look_up(book, cx),
-                    // Looked up again after the next index load (Refresh).
-                    Err(e) => {
-                        this.pending_books.insert(book);
-                        let _ = this.session.error_message(&e, Some(READ_LISTS), cx);
-                    }
-                }
-                cx.notify();
-            });
-        });
-        // Finished lookups are dropped with the next one; there are few.
-        self.book_row_tasks.retain(|t| !t.is_ready());
-        self.book_row_tasks.push(task);
     }
 
     // ----- local changes -----
 
+    /// Changes the lists in place, as a write did, keeping their order.
+    fn edit_lists(&mut self, edit: impl FnOnce(&mut Vec<UserList>), cx: &App) {
+        let mut lists = self.lists().to_vec();
+        edit(&mut lists);
+        sort(&mut lists);
+        self.lists.set((), lists, cx);
+    }
+
     /// Records `row` in the index and the book's own rows, where missing.
     /// True if neither held it: the book wasn't known to be on the list.
     fn record_row(&mut self, row: ListMembership) -> bool {
-        let index_rows = self.memberships.as_mut().map(|m| &mut m.rows);
-        let book_rows = self.book_rows.get_mut(&row.book_id);
         let mut known = false;
-        for rows in [index_rows, book_rows].into_iter().flatten() {
+        let mut add = |rows: &mut Vec<ListMembership>| {
             if rows.iter().any(|r| r.id == row.id) {
                 known = true;
             } else {
                 rows.push(row);
             }
-        }
+        };
+        self.index.update(&(), |index| add(&mut index.rows));
+        self.book_rows.update(&row.book_id, |rows| add(rows));
         !known
     }
 
     /// Records a new row and counts it on its list. Without an index it is
     /// counted anyway: the list's count is all there is.
     fn insert_row(&mut self, row: ListMembership) {
-        if self.record_row(row)
-            && let Some(list) = self.lists.iter_mut().find(|l| l.id == row.list_id)
-        {
-            list.books_count += 1;
+        if self.record_row(row) {
+            self.lists.update(&(), |lists| {
+                if let Some(list) = lists.iter_mut().find(|l| l.id == row.list_id) {
+                    list.books_count += 1;
+                }
+            });
         }
     }
 
     fn remove_row(&mut self, list: ListId, row: ListBookId) {
-        if let Some(index) = self.memberships.as_mut() {
-            index.rows.retain(|r| r.id != row);
-        }
-        for rows in self.book_rows.values_mut() {
-            rows.retain(|r| r.id != row);
-        }
-        if let Some(list) = self.lists.iter_mut().find(|l| l.id == list) {
-            list.books_count = list.books_count.saturating_sub(1);
-        }
+        self.index
+            .update(&(), |index| index.rows.retain(|r| r.id != row));
+        self.book_rows
+            .update_all(|_, rows| rows.retain(|r| r.id != row));
+        self.lists.update(&(), |lists| {
+            if let Some(list) = lists.iter_mut().find(|l| l.id == list) {
+                list.books_count = list.books_count.saturating_sub(1);
+            }
+        });
     }
 
     /// When the lists are known and `id` isn't one of them, it is the Owned
@@ -457,14 +510,26 @@ impl ListsModel {
     /// until the lists reload, so the switch shows on (and can't post the
     /// edition again). True if it did.
     fn add_owned_placeholder(&mut self, id: ListId) -> bool {
-        if !self.lists_known || self.list(id).is_some() {
+        if !self.lists_known() || self.list(id).is_some() {
             return false;
         }
         let mut owned = UserList::new(id, "Owned");
         owned.slug = Some(OWNED_LIST_SLUG.into());
-        self.lists.push(owned);
-        sort(&mut self.lists);
+        self.lists.update(&(), |lists| {
+            lists.push(owned);
+            sort(lists);
+        });
         true
+    }
+
+    /// A write is starting or has ended: whatever a load in flight brings
+    /// is older than it, and dropped.
+    fn note_write(&mut self, book: Option<BookId>) {
+        self.lists.note_write(&());
+        self.index.note_write(&());
+        if let Some(book) = book {
+            self.book_rows.note_write(&book);
+        }
     }
 
     // ----- list writes -----
@@ -490,7 +555,7 @@ impl ListsModel {
             return Task::ready(Some(Err(needs_permission(WRITE_LISTS).into())));
         }
         self.writing = true;
-        self.generation += 1;
+        self.note_write(None);
         cx.notify();
         let call = self.session.interactive(run);
         cx.spawn(async move |this, cx| {
@@ -498,7 +563,7 @@ impl ListsModel {
             this.update(cx, |this, cx| {
                 this.writing = false;
                 // A load that started while the write ran may predate it too.
-                this.generation += 1;
+                this.note_write(None);
                 cx.notify();
                 // Dropped: the session ended (or the call panicked).
                 Some(match result? {
@@ -532,17 +597,16 @@ impl ListsModel {
                 match added {
                     Some(Ok(row)) => {
                         list.books_count = list.books_count.max(1);
-                        this.lists.push(list);
+                        this.edit_lists(|lists| lists.push(list), cx);
                         // Counted above: the new list's count came from the server.
                         this.record_row(row);
                     }
                     Some(Err(e)) => {
-                        this.lists.push(list);
+                        this.edit_lists(|lists| lists.push(list), cx);
                         failure = Some(e);
                     }
-                    None => this.lists.push(list),
+                    None => this.edit_lists(|lists| lists.push(list), cx),
                 }
-                sort(&mut this.lists);
                 cx.emit(ListsEvent::BookAdded(id));
                 failure.map(|e| this.session.error_message(&e, Some(WRITE_LISTS), cx).into())
             },
@@ -565,12 +629,14 @@ impl ListsModel {
         let edit = ListEdit::between(list, &draft);
         self.write_list(
             move |client| client.update_list(id, &edit),
-            |this, saved, _| {
-                match this.lists.iter_mut().find(|l| l.id == saved.id) {
-                    Some(l) => *l = saved,
-                    None => this.lists.push(saved),
-                }
-                sort(&mut this.lists);
+            |this, saved, cx| {
+                this.edit_lists(
+                    |lists| match lists.iter_mut().find(|l| l.id == saved.id) {
+                        Some(l) => *l = saved,
+                        None => lists.push(saved),
+                    },
+                    cx,
+                );
             },
             cx,
         )
@@ -584,13 +650,11 @@ impl ListsModel {
         self.write_list(
             move |client| client.delete_list(id),
             move |this, (), cx| {
-                this.lists.retain(|l| l.id != id);
-                if let Some(index) = this.memberships.as_mut() {
-                    index.rows.retain(|r| r.list_id != id);
-                }
-                for rows in this.book_rows.values_mut() {
-                    rows.retain(|r| r.list_id != id);
-                }
+                this.edit_lists(|lists| lists.retain(|l| l.id != id), cx);
+                this.index
+                    .update(&(), |index| index.rows.retain(|r| r.list_id != id));
+                this.book_rows
+                    .update_all(|_, rows| rows.retain(|r| r.list_id != id));
                 cx.emit(ListsEvent::Deleted(id));
             },
             cx,
@@ -620,14 +684,14 @@ impl ListsModel {
             return Task::ready(Some(Err(needs_permission(scope).into())));
         }
         self.busy_books.insert(book);
-        self.generation += 1;
+        self.note_write(Some(book));
         cx.notify();
         let call = self.session.interactive(run);
         cx.spawn(async move |this, cx| {
             let result = call.await;
             this.update(cx, |this, cx| {
                 this.busy_books.remove(&book);
-                this.generation += 1;
+                this.note_write(Some(book));
                 cx.notify();
                 // Dropped: the session ended (or the call panicked).
                 Some(match result? {
@@ -749,16 +813,27 @@ impl ListsModel {
                         this.insert_row(row);
                         cx.emit(ListsEvent::BookAdded(row.list_id));
                         if created {
-                            this.load(cx);
+                            this.reload_dropped
+                                .schedule(RELOAD_DELAY, Self::load_dropped, cx);
                         }
                     }
                     // `Reloaded` also has the Owned list's page load again.
-                    None => this.reload(cx),
+                    None => this.reload_with(Demand::Now, cx),
                 }
                 Ok(())
             },
             cx,
         )
+    }
+}
+
+/// Whether a list's page has nothing left to show ([`ListsModel::is_gone`]).
+fn is_gone(status: &LoadStatus, listed: bool, readable: bool) -> bool {
+    match status {
+        _ if !readable => true,
+        LoadStatus::Idle => true,
+        LoadStatus::Loaded => !listed,
+        LoadStatus::Loading | LoadStatus::Failed(_) => false,
     }
 }
 
@@ -836,50 +911,55 @@ mod tests {
         }
     }
 
+    fn index(rows: Vec<ListMembership>, complete: bool) -> ListMemberships {
+        ListMemberships { rows, complete }
+    }
+
     #[test]
     fn membership_is_unknown_until_the_index_says() {
         let mut m = ListsModel::new(session());
-        m.loaded_once = true;
-        m.lists_known = true;
-        m.status = ListsStatus::Loaded;
-        m.lists = vec![list(1, "Owned", "owned"), list(2, "Picks", "picks")];
+        m.lists.hydrate(
+            (),
+            vec![list(1, "Owned", "owned"), list(2, "Picks", "picks")],
+        );
         let book = BookId::new(10);
         assert_eq!(m.is_on(ListId::new(2), book), None);
 
-        m.memberships = Some(ListMemberships {
-            rows: vec![row(100, 1, 10), row(101, 1, 10), row(102, 2, 11)],
-            complete: true,
-        });
+        m.index.hydrate(
+            (),
+            index(
+                vec![row(100, 1, 10), row(101, 1, 10), row(102, 2, 11)],
+                true,
+            ),
+        );
         assert_eq!(m.is_on(ListId::new(2), book), Some(false));
         assert_eq!(m.owned_rows(book).map(|r| r.len()), Some(2));
         assert_eq!(m.owned_rows(BookId::new(11)).map(|r| r.len()), Some(0));
 
         // A cut-short index can't say "not on it"; a lookup of the book can.
-        m.memberships.as_mut().unwrap().complete = false;
+        m.index.update(&(), |i| i.complete = false);
         assert_eq!(m.is_on(ListId::new(2), book), None);
-        m.book_rows.insert(book, vec![row(103, 2, 10)]);
+        m.book_rows.hydrate(book, vec![row(103, 2, 10)]);
         assert_eq!(m.is_on(ListId::new(2), book), Some(true));
     }
 
     #[test]
     fn local_rows_keep_counts_without_counting_twice() {
         let mut m = ListsModel::new(session());
-        m.lists = vec![list(2, "Picks", "picks")];
-        m.memberships = Some(ListMemberships {
-            rows: Vec::new(),
-            complete: true,
-        });
+        m.lists.hydrate((), vec![list(2, "Picks", "picks")]);
+        m.index.hydrate((), index(Vec::new(), true));
+        let count = |m: &ListsModel| m.lists()[0].books_count;
         m.insert_row(row(100, 2, 10));
         // Adding a book already on the list returns the same row.
         m.insert_row(row(100, 2, 10));
-        assert_eq!(m.lists[0].books_count, 1);
+        assert_eq!(count(&m), 1);
         assert_eq!(m.is_on(ListId::new(2), BookId::new(10)), Some(true));
         m.remove_row(ListId::new(2), ListBookId::new(100));
-        assert_eq!(m.lists[0].books_count, 0);
+        assert_eq!(count(&m), 0);
         assert_eq!(m.is_on(ListId::new(2), BookId::new(10)), Some(false));
         // Never below zero.
         m.remove_row(ListId::new(2), ListBookId::new(100));
-        assert_eq!(m.lists[0].books_count, 0);
+        assert_eq!(count(&m), 0);
     }
 
     #[test]
@@ -887,20 +967,17 @@ mod tests {
         let mut m = ListsModel::new(session());
         let mut picks = list(2, "Picks", "picks");
         picks.books_count = 5;
-        m.lists = vec![picks];
+        m.lists.hydrate((), vec![picks]);
         // The index was cut short before this book; its own lookup has it.
-        m.memberships = Some(ListMemberships {
-            rows: Vec::new(),
-            complete: false,
-        });
-        m.book_rows.insert(BookId::new(10), vec![row(100, 2, 10)]);
+        m.index.hydrate((), index(Vec::new(), false));
+        m.book_rows.hydrate(BookId::new(10), vec![row(100, 2, 10)]);
         // Adding it again returns the same row.
         m.insert_row(row(100, 2, 10));
-        assert_eq!(m.lists[0].books_count, 5);
-        assert_eq!(m.memberships.as_ref().unwrap().rows, [row(100, 2, 10)]);
+        assert_eq!(m.lists()[0].books_count, 5);
+        assert_eq!(m.index.value(&()).unwrap().rows, [row(100, 2, 10)]);
         // A row neither holds is new.
         m.insert_row(row(101, 2, 11));
-        assert_eq!(m.lists[0].books_count, 6);
+        assert_eq!(m.lists()[0].books_count, 6);
     }
 
     #[test]
@@ -912,17 +989,15 @@ mod tests {
         assert_eq!(m.take_lookups(), []);
         assert_eq!(m.pending_books.len(), 2);
 
-        m.memberships = Some(ListMemberships {
-            rows: Vec::new(),
-            complete: false,
-        });
-        m.book_rows.insert(b, Vec::new());
-        assert_eq!(m.take_lookups(), [a]);
+        m.index.hydrate((), index(Vec::new(), false));
+        let mut books = m.take_lookups();
+        books.sort();
+        assert_eq!(books, [a, b]);
         assert!(m.pending_books.is_empty());
 
         // A complete index answers for every book.
         m.pending_books.insert(a);
-        m.memberships.as_mut().unwrap().complete = true;
+        m.index.update(&(), |i| i.complete = true);
         assert_eq!(m.take_lookups(), []);
         assert!(m.pending_books.is_empty());
     }
@@ -934,26 +1009,19 @@ mod tests {
 
         let book = BookId::new(10);
         m.shown_book = Some(book);
-        m.memberships = Some(ListMemberships {
-            rows: Vec::new(),
-            complete: false,
-        });
-        m.book_rows.insert(book, vec![row(100, 2, 10)]);
+        m.index.hydrate((), index(Vec::new(), false));
+        m.book_rows.hydrate(book, vec![row(100, 2, 10)]);
         assert!(m.plan_reload());
-        assert!(m.book_rows.is_empty());
+        // Still answering until it is looked up again.
+        assert!(m.book_rows.value(&book).is_some());
         assert!(m.pending_books.contains(&book));
     }
 
     #[test]
     fn the_first_owned_edition_shows_owned_before_the_lists_reload() {
         let mut m = ListsModel::new(session());
-        m.lists_known = true;
-        m.status = ListsStatus::Loaded;
-        m.lists = vec![list(2, "Picks", "picks")];
-        m.memberships = Some(ListMemberships {
-            rows: Vec::new(),
-            complete: true,
-        });
+        m.lists.hydrate((), vec![list(2, "Picks", "picks")]);
+        m.index.hydrate((), index(Vec::new(), true));
         let book = BookId::new(10);
         assert_eq!(m.owned_rows(book).map(|r| r.len()), Some(0));
 
@@ -967,29 +1035,105 @@ mod tests {
         // Only once, and never for a list already known.
         assert!(!m.add_owned_placeholder(ListId::new(7)));
         assert!(!m.add_owned_placeholder(ListId::new(2)));
-        assert_eq!(m.lists.len(), 2);
+        assert_eq!(m.lists().len(), 2);
     }
 
     #[test]
     fn the_first_owned_edition_adds_nothing_while_the_lists_are_unknown() {
         let mut m = ListsModel::new(session());
         assert!(!m.add_owned_placeholder(ListId::new(7)));
-        assert_eq!(m.lists, []);
+        assert_eq!(m.lists(), []);
     }
 
     #[test]
     fn a_list_page_gives_way_when_the_list_is_gone_or_unreadable() {
-        let mut m = ListsModel::new(session());
-        let id = ListId::new(2);
-        // A refused scope leaves the lists Idle and empty.
-        assert!(m.is_gone(id));
-        m.status = ListsStatus::Loading;
-        assert!(!m.is_gone(id));
-        m.status = ListsStatus::Failed("offline".into());
-        assert!(!m.is_gone(id));
-        m.status = ListsStatus::Loaded;
-        assert!(m.is_gone(id));
-        m.lists = vec![list(2, "Picks", "picks")];
-        assert!(!m.is_gone(id));
+        let failed = LoadStatus::Failed("offline".into());
+        assert!(is_gone(&LoadStatus::Idle, false, true));
+        assert!(!is_gone(&LoadStatus::Loading, false, true));
+        assert!(!is_gone(&failed, false, true));
+        assert!(is_gone(&LoadStatus::Loaded, false, true));
+        assert!(!is_gone(&LoadStatus::Loaded, true, true));
+        // A refused scope.
+        assert!(is_gone(&LoadStatus::Loaded, true, false));
+    }
+
+    /// D14: after the lists fail to load, the Owned switch says so (with a
+    /// way to try again) instead of checking for ever.
+    #[gpui_kit::test]
+    fn a_failed_load_is_said_beside_the_book_and_tried_again(cx: &mut gpui_kit::TestAppContext) {
+        let faults = hardcover_core::demo::Faults::parse("500").unwrap();
+        let session = SessionScope::for_tests(hardcover_core::demo::client_with(&faults), None);
+        let model = cx.new(|_| ListsModel::new(session));
+        let book = BookId::new(10);
+        model.update(cx, |m, cx| {
+            m.load(cx);
+            m.ensure_book(book, cx);
+        });
+        cx.run_until_parked();
+        let failure = model.read_with(cx, |m, _| {
+            assert_eq!(m.owned_rows(book), None);
+            m.book_failure(book)
+        });
+        assert!(failure.is_some(), "said, not checking for ever");
+
+        model.update(cx, |m, cx| m.retry_book(book, cx));
+        model.read_with(cx, |m, _| {
+            assert_eq!(m.lists.started(), 2);
+            assert_eq!(m.index.started(), 2);
+        });
+    }
+
+    /// A reload a write asks for (the Owned list changed in ways its result
+    /// doesn't say) goes out however fresh the lists; one for a new grant
+    /// only fetches what is stale.
+    #[gpui_kit::test]
+    fn a_write_reloads_however_fresh(cx: &mut gpui_kit::TestAppContext) {
+        let model = cx.new(|_| ListsModel::new(session()));
+        model.update(cx, |m, cx| {
+            m.load(cx);
+            m.ensure_book(BookId::new(10), cx);
+        });
+        cx.run_until_parked();
+        let asked = |cx: &mut gpui_kit::TestAppContext| {
+            model.read_with(cx, |m, _| (m.lists.started(), m.index.started()))
+        };
+        let before = asked(cx);
+        model.update(cx, |m, cx| m.reload(cx));
+        assert_eq!(asked(cx), before, "fresh: nothing");
+        model.update(cx, |m, cx| m.reload_with(Demand::Now, cx));
+        assert_eq!(asked(cx), (before.0 + 1, before.1 + 1));
+    }
+
+    /// B7: offline, the lists and the index of the last launch show.
+    #[gpui_kit::test]
+    fn the_last_lists_show_offline(cx: &mut gpui_kit::TestAppContext) {
+        use hardcover_core::store::LibraryCache;
+        use std::sync::Arc;
+        let cache = Arc::new(LibraryCache::open_in_memory().unwrap());
+        let launch = |client, cx: &mut gpui_kit::TestAppContext| {
+            let session = SessionScope::for_tests(client, Some(cache.clone()));
+            cx.update(|cx| session.install(cx));
+            let library = cx.new(|_| LibraryModel::new(session.clone()));
+            let model = cx.update(|cx| ListsModel::init(session, &library, cx));
+            model.update(cx, |m, cx| {
+                m.load(cx);
+                m.ensure_book(BookId::new(1), cx);
+            });
+            cx.run_until_parked();
+            model
+        };
+        let online = launch(hardcover_core::demo::client(), cx);
+        let (lists, index) =
+            online.read_with(cx, |m, _| (m.lists().to_vec(), m.index.value(&()).cloned()));
+        assert!(!lists.is_empty());
+        assert!(index.is_some());
+
+        let faults = hardcover_core::demo::Faults::parse("offline").unwrap();
+        let offline = launch(hardcover_core::demo::client_with(&faults), cx);
+        offline.read_with(cx, |m, _| {
+            assert_eq!(m.lists(), lists.as_slice());
+            assert_eq!(m.index.value(&()).cloned(), index);
+            assert!(matches!(m.status(), LoadStatus::Failed(_)));
+        });
     }
 }

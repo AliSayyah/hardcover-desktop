@@ -5,53 +5,43 @@
 //! read, the description in `prose`, and "Open on Hardcover". The books
 //! follow as catalogue rows.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui_kit::ScrollHandle;
 use gpui_kit::component::list::ListState;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Context, Entity, FocusHandle, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, Context, Entity, FocusHandle, IntoElement, ParentElement as _, Render,
+    Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
 };
-use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{SeriesDetails, SeriesId};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, ListPane, focus_list_if_fallback_is_focused, follow_list, new_list,
-    page_body, page_header_scrolling, page_list, read_summary, replace_rows, reset_scroll,
+    CatalogBooks, CatalogRow, ListPane, PageRows, demand, focus_list_if_fallback_is_focused,
+    follow_list, new_list, page_body, page_header_scrolling, page_list, read_summary, reset_scroll,
     row_details,
 };
 use super::navigation::Page;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::series_position_text;
-use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
-use crate::session::{self, SessionScope};
+use crate::resource::{Catalog, Demand, SharedChanged};
 use crate::ui::{ExternalLink, LoadFailed, PageHeader, Skeleton, TextButton};
-
-enum Loaded {
-    /// Kept for the run, fetched again when stale ([`crate::freshness`]).
-    Ready(Fetched<Arc<SeriesDetails>>),
-    Failed(SharedString),
-}
 
 pub struct SeriesView {
     model: Entity<LibraryModel>,
+    /// The session's catalogue, which holds the pages; `None` once signed
+    /// out.
+    catalog: Option<Catalog>,
     current: Option<SeriesId>,
-    /// Pages fetched this session, so Back costs no request.
-    pages: HashMap<SeriesId, Loaded>,
-    loading: Option<SeriesId>,
-    task: Option<Task<()>>,
     /// Holds focus while the page loads; see [`Self::focus`].
     focus_when_ready: Option<FocusHandle>,
     list: Entity<ListState<CatalogBooks>>,
     /// The selected book, beside the list when the window is wide.
     pane: ListPane,
-    /// The series whose books the list holds.
-    listed: Option<SeriesId>,
+    /// The series whose books the list holds, and each page's selection.
+    rows: PageRows<SeriesId, SeriesDetails>,
     /// The header's scroll, when it gives way in a short window.
     header_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
@@ -67,17 +57,27 @@ impl SeriesView {
             window,
             cx,
         );
-        let subscriptions = follow_list(&list, &model, &pane, window, cx);
+        let mut subscriptions = follow_list(&list, &model, &pane, window, cx);
+        let catalog = Catalog::global(cx);
+        if let Some(catalog) = &catalog {
+            subscriptions.push(cx.subscribe_in(
+                &catalog.series,
+                window,
+                |this, _, SharedChanged(id): &SharedChanged<SeriesId>, window, cx| {
+                    if this.current == Some(*id) {
+                        this.page_changed(window, cx);
+                    }
+                },
+            ));
+        }
         Self {
             model,
+            catalog,
             current: None,
-            pages: HashMap::new(),
-            loading: None,
-            task: None,
             focus_when_ready: None,
             list,
             pane,
-            listed: None,
+            rows: PageRows::default(),
             header_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
@@ -88,7 +88,7 @@ impl SeriesView {
             reset_scroll(&self.header_scroll);
         }
         self.current = Some(id);
-        self.load(window, cx);
+        self.request(Demand::Shown, cx);
         self.fill_list(window, cx);
         cx.notify();
     }
@@ -97,7 +97,7 @@ impl SeriesView {
     /// Until then `fallback` holds focus, so Escape and Back keep working, and
     /// the list takes over when the page arrives if `fallback` still has it.
     pub fn focus(&mut self, fallback: &FocusHandle, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_ready() {
+        if self.page(cx).is_some() {
             self.focus_when_ready = None;
             crate::ui::enter_list(&self.list, window, cx);
         } else {
@@ -106,129 +106,62 @@ impl SeriesView {
         }
     }
 
-    fn is_ready(&self) -> bool {
-        self.current
-            .is_some_and(|id| matches!(self.pages.get(&id), Some(Loaded::Ready(_))))
+    /// The current page, once fetched.
+    fn page(&self, cx: &App) -> Option<Arc<SeriesDetails>> {
+        let id = self.current?;
+        self.catalog
+            .as_ref()?
+            .series
+            .read(cx)
+            .resource()
+            .value(&id)
+            .cloned()
     }
 
-    fn load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.current else { return };
-        let revalidating = match self.pages.get(&id) {
-            Some(Loaded::Ready(fetched)) if !fetched.is_stale(cx) => return,
-            Some(Loaded::Ready(_)) => true,
-            Some(Loaded::Failed(_)) | None => false,
-        };
-        if self.loading == Some(id) {
-            return;
+    fn request(&mut self, demand: Demand, cx: &mut Context<Self>) {
+        if let (Some(id), Some(catalog)) = (self.current, &self.catalog) {
+            catalog.request_series(id, demand, cx);
         }
-        // A stale page stays on screen while it is fetched again.
-        if !revalidating {
-            self.pages.remove(&id);
-        }
-        self.loading = Some(id);
-        let Some(session) = SessionScope::current(cx) else {
-            return;
-        };
-        let page = session.interactive(move |client| client.series(id));
-        // Replacing the task drops the fetch for a page no longer shown.
-        self.task = Some(cx.spawn_in(window, async move |this, cx| {
-            let Some(result) = page.await else {
-                return;
-            };
-            let _ = this.update_in(cx, |this, window, cx| {
-                if this.loading == Some(id) {
-                    this.loading = None;
-                }
-                let result = result.map(Arc::new);
-                let changed = match (this.pages.get_mut(&id), result) {
-                    // A refetch: a failure keeps the page shown, and only
-                    // records a refused scope.
-                    (Some(Loaded::Ready(fetched)), result) => {
-                        if let Err(e) = &result {
-                            session::error_message(e, Some(READ_CATALOG), cx);
-                        }
-                        fetched.refetched(result, cx)
-                    }
-                    (_, Ok(page)) => {
-                        this.pages.insert(id, Loaded::Ready(Fetched::new(page, cx)));
-                        false
-                    }
-                    (_, Err(e)) => {
-                        let message = session::error_message(&e, Some(READ_CATALOG), cx);
-                        this.pages.insert(id, Loaded::Failed(message.into()));
-                        false
-                    }
-                };
-                if changed
-                    && this.listed == Some(id)
-                    && let Some(rows) = this.rows(id)
-                {
-                    replace_rows(&this.list, rows, window, cx);
-                }
-                this.fill_list(window, cx);
-                if this.is_ready() {
-                    focus_list_if_fallback_is_focused(
-                        &this.list,
-                        this.focus_when_ready.take(),
-                        window,
-                        cx,
-                    );
-                }
-                cx.notify();
-            });
-        }));
     }
 
-    fn retry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.loading = None;
-        self.load(window, cx);
+    /// The page shown changed in the catalogue: it loaded, failed, or was
+    /// fetched again.
+    fn page_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.fill_list(window, cx);
+        if self.page(cx).is_some() {
+            focus_list_if_fallback_is_focused(&self.list, self.focus_when_ready.take(), window, cx);
+        }
+        cx.notify();
+    }
+
+    fn retry(&mut self, cx: &mut Context<Self>) {
+        self.request(Demand::Now, cx);
         cx.notify();
     }
 
     fn fill_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.current else { return };
-        if self.listed == Some(id) {
-            return;
-        }
-        let Some(rows) = self.rows(id) else {
-            return;
-        };
-        self.listed = Some(id);
-        self.list.update(cx, |list, cx| {
-            list.delegate_mut().set_rows(rows);
-            list.set_selected_index(None, window, cx);
-            cx.notify();
-        });
+        let page = self.page(cx);
+        self.rows
+            .show(id, page.as_ref(), Self::rows, false, &self.list, window, cx);
     }
 
     /// The list's rows for a loaded page.
-    fn rows(&self, id: SeriesId) -> Option<Vec<CatalogRow>> {
-        let Some(Loaded::Ready(series)) = self.pages.get(&id) else {
-            return None;
-        };
-        let rows = series
-            .value()
+    fn rows(series: &SeriesDetails) -> Vec<CatalogRow> {
+        series
             .books
             .iter()
             .map(|b| CatalogRow {
                 details: row_details(&[b.position.map_or_default(series_position_text)], &b.book),
                 book: b.book.clone(),
             })
-            .collect();
-        Some(rows)
+            .collect()
     }
 
-    /// Fetches the page again if it is stale ([`crate::freshness`]), and
-    /// the book in the pane beside the list.
-    /// A failed page is tried again only with `shown_again`.
-    pub fn revalidate(&mut self, shown_again: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let failed = self
-            .current
-            .is_some_and(|id| matches!(self.pages.get(&id), Some(Loaded::Failed(_))));
-        if shown_again || !failed {
-            self.load(window, cx);
-        }
+    /// Asks for the page again if it is stale (`resource`; a failed one only
+    /// when `shown_again`), and for the book in the pane beside the list.
+    pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
+        self.request(demand(shown_again), cx);
         self.pane.revalidate(shown_again, cx);
     }
 
@@ -305,30 +238,41 @@ impl SeriesView {
 
 impl SeriesView {
     /// The name of a page already loaded this session, for Back's label.
-    pub fn name(&self, id: SeriesId) -> Option<&str> {
-        match self.pages.get(&id)? {
-            Loaded::Ready(details) => Some(&details.value().name),
-            Loaded::Failed(_) => None,
-        }
+    pub fn name<'a>(&self, id: SeriesId, cx: &'a App) -> Option<&'a str> {
+        let series = self
+            .catalog
+            .as_ref()?
+            .series
+            .read(cx)
+            .resource()
+            .value(&id)?;
+        Some(&series.name)
     }
 }
 
 impl Render for SeriesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let current = self.current.and_then(|id| self.pages.get(&id));
-        let header = match current {
-            Some(Loaded::Ready(series)) => self.render_header(&series.value().clone(), cx),
-            Some(Loaded::Failed(message)) => LoadFailed::new("retry-series", message.clone())
-                .on_retry(cx.listener(|this, _, window, cx| this.retry(window, cx)))
+        let page = self.page(cx);
+        let error = match (self.current, &self.catalog) {
+            (Some(id), Some(catalog)) => {
+                let store = catalog.series.read(cx).resource();
+                store.error(&id).filter(|_| !store.is_loading(&id)).cloned()
+            }
+            _ => None,
+        };
+        let header = match (&page, error) {
+            (Some(series), _) => self.render_header(series, cx),
+            (None, Some(message)) => LoadFailed::new("retry-series", message)
+                .on_retry(cx.listener(|this, _, _, cx| this.retry(cx)))
                 .into_any_element(),
-            None => v_flex()
+            (None, None) => v_flex()
                 .gap_2()
                 .child(Skeleton::line_in(TypeRole::PageTitle).w_64())
                 .child(Skeleton::line().w_48())
                 .child(Skeleton::line().w_32())
                 .into_any_element(),
         };
-        let ready = matches!(current, Some(Loaded::Ready(_)));
+        let ready = page.is_some();
         let column = v_flex()
             .size_full()
             .min_w_0()
@@ -350,22 +294,28 @@ mod tests {
     use std::time::Duration;
 
     use gpui_kit::component::IndexPath;
+    use gpui_kit::component::list::ListDelegate as _;
     use gpui_kit::{AppContext as _, TestAppContext, VisualTestContext};
     use hardcover_core::BookId;
     use hardcover_core::store::LibraryCache;
 
     use super::*;
+    use crate::session::SessionScope;
 
-    /// A demo series with at least three books.
-    fn demo_series() -> SeriesId {
+    /// Two demo series with at least three books each.
+    fn demo_series() -> (SeriesId, SeriesId) {
         let client = hardcover_core::demo::client();
         let me = client.me().unwrap();
         let entries = client.library_with_progress(me.id, |_| {}).unwrap().entries;
-        entries
+        let mut ids: Vec<SeriesId> = entries
             .iter()
             .flat_map(|e| e.series.iter().filter_map(|s| s.id))
-            .find(|id| client.series(*id).is_ok_and(|s| s.books.len() >= 3))
-            .expect("a demo series with three books")
+            .filter(|id| client.series(*id).is_ok_and(|s| s.books.len() >= 3))
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert!(ids.len() >= 2, "two demo series with three books");
+        (ids[0], ids[1])
     }
 
     fn settle(cx: &mut VisualTestContext) {
@@ -373,59 +323,104 @@ mod tests {
         cx.run_until_parked();
     }
 
-    fn selected_book(view: &Entity<SeriesView>, cx: &mut VisualTestContext) -> (usize, BookId) {
+    fn selected_book(
+        view: &Entity<SeriesView>,
+        cx: &mut VisualTestContext,
+    ) -> Option<(usize, BookId)> {
         view.read_with(cx, |view, cx| {
             let list = view.list.read(cx);
-            let row = list.selected_index().unwrap().row;
-            (row, list.delegate().book_at(row).unwrap().id)
+            let row = list.selected_index()?.row;
+            Some((row, list.delegate().book_at(row)?.id))
         })
     }
 
-    #[gpui_kit::test]
-    fn a_page_fetched_again_keeps_the_selected_book(cx: &mut TestAppContext) {
-        let id = demo_series();
+    fn rows(view: &Entity<SeriesView>, cx: &mut VisualTestContext) -> usize {
+        view.read_with(cx, |view, cx| {
+            view.list.read(cx).delegate().items_count(0, cx)
+        })
+    }
+
+    fn series_view(cx: &mut TestAppContext) -> (Entity<SeriesView>, &mut VisualTestContext) {
         let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
         let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
         cx.update(|cx| {
             gpui_kit::init(cx);
             session.install(cx);
+            Catalog::init(&session, cx);
         });
         let model = cx.new(|_| LibraryModel::new(session));
-        let (view, cx) = cx.add_window_view(|window, cx| SeriesView::new(model, window, cx));
+        cx.add_window_view(|window, cx| SeriesView::new(model, window, cx))
+    }
+
+    fn select(view: &Entity<SeriesView>, row: usize, cx: &mut VisualTestContext) {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.list.update(cx, |list, cx| {
+                    list.set_selected_index(Some(IndexPath::new(row)), window, cx);
+                });
+            });
+        });
+    }
+
+    #[gpui_kit::test]
+    fn a_page_fetched_again_keeps_the_selected_book(cx: &mut TestAppContext) {
+        let (id, _) = demo_series();
+        let (view, cx) = series_view(cx);
         cx.update(|window, cx| view.update(cx, |view, cx| view.show(id, window, cx)));
         settle(cx);
 
         // As if the page had been fetched with its books the other way
         // round, the reader having selected the first row.
-        let count = cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                let Some(Loaded::Ready(fetched)) = view.pages.get(&id) else {
-                    panic!("the page loaded");
-                };
-                let mut older = (**fetched.value()).clone();
-                older.books.reverse();
-                let count = older.books.len();
-                view.pages
-                    .insert(id, Loaded::Ready(Fetched::new(Arc::new(older), cx)));
-                view.listed = None;
-                view.fill_list(window, cx);
-                view.list.update(cx, |list, cx| {
-                    list.set_selected_index(Some(IndexPath::new(0)), window, cx);
-                });
-                count
-            })
+        let catalog = view.read_with(cx, |view, _| view.catalog.clone().unwrap());
+        let count = catalog.series.update(cx, |store, cx| {
+            let mut older = (**store.resource().value(&id).unwrap()).clone();
+            older.books.reverse();
+            let count = older.books.len();
+            store.set(id, older, cx);
+            count
         });
-        let (_, book) = selected_book(&view, cx);
+        cx.run_until_parked();
+        select(&view, 0, cx);
+        let (_, book) = selected_book(&view, cx).unwrap();
 
-        cx.update(|window, cx| {
-            crate::freshness::refresh_all(cx);
-            view.update(cx, |view, cx| view.revalidate(false, window, cx));
+        cx.update(|_, cx| {
+            crate::resource::refresh_all(cx);
+            view.update(cx, |view, cx| view.revalidate(false, cx));
         });
         settle(cx);
         assert_eq!(
             selected_book(&view, cx),
-            (count - 1, book),
+            Some((count - 1, book)),
             "the same book, now in the last row"
+        );
+    }
+
+    /// D15: another page doesn't show the rows (or the pane's book) of the
+    /// page left while it loads, and Back finds the book selected there.
+    #[gpui_kit::test]
+    fn another_page_starts_empty_and_back_finds_the_selection(cx: &mut TestAppContext) {
+        let (first, second) = demo_series();
+        let (view, cx) = series_view(cx);
+        let show = |id, cx: &mut VisualTestContext| {
+            cx.update(|window, cx| view.update(cx, |view, cx| view.show(id, window, cx)));
+        };
+        show(first, cx);
+        settle(cx);
+        select(&view, 1, cx);
+        let chosen = selected_book(&view, cx).unwrap();
+
+        show(second, cx);
+        assert_eq!(rows(&view, cx), 0, "nothing of the page left");
+        assert_eq!(selected_book(&view, cx), None);
+        settle(cx);
+        assert!(rows(&view, cx) >= 3);
+        assert_eq!(selected_book(&view, cx), None, "a new page selects nothing");
+
+        show(first, cx);
+        assert_eq!(
+            selected_book(&view, cx),
+            Some(chosen),
+            "Back finds it again"
         );
     }
 }

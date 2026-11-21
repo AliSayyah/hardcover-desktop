@@ -13,11 +13,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::{AppContext as _, Context, SharedString, Task, Window};
+use gpui_kit::{AppContext as _, Context, EventEmitter, SharedString, Task, Window};
 use hardcover_core::auth::scopes::{READ_LIBRARY, WRITE_LIBRARY};
 use hardcover_core::store::LibraryCache;
 use hardcover_core::{
@@ -28,6 +29,8 @@ use hardcover_core::{
 use super::cache_worker::CacheWorker;
 use super::collection::{LocalChange, RecentWrites, merge_sync, same_entries, status_counts};
 use crate::app_state::CoverService;
+use crate::io::Priority;
+use crate::resource::{Binding, Demand, Resource};
 use crate::session::SessionScope;
 
 /// How old the last sync (or try) must be before coming back to the window
@@ -65,74 +68,6 @@ pub enum WriteTarget {
 pub const STILL_SAVING: &str =
     "Another change to this book is still being saved. Try again in a moment.";
 
-/// An entry's review as far as this run knows it. Reviews are fetched when a
-/// book page shows the entry, not by the sync, and kept for the run.
-#[derive(Debug, Clone, Default)]
-pub struct ReviewSlot {
-    /// The last review known, kept while it is fetched again.
-    pub review: Option<Review>,
-    pub fetching: bool,
-    /// Why the last fetch failed.
-    pub error: Option<SharedString>,
-    /// False until fetched or written, and again after each sync, which may
-    /// bring changes made elsewhere.
-    current: bool,
-    /// Bumped by each fetch started and each write applied: a fetch that
-    /// lands to a different generation is older than what the slot holds.
-    generation: u64,
-}
-
-impl ReviewSlot {
-    /// Starts a fetch as `generation`; false if one is already running.
-    fn begin_fetch(&mut self, generation: u64) -> bool {
-        if self.fetching {
-            return false;
-        }
-        self.fetching = true;
-        self.error = None;
-        self.generation = generation;
-        true
-    }
-
-    /// A fetch started as `generation` finished. Dropped if a write (or a
-    /// newer fetch) came after it started.
-    fn finish_fetch(&mut self, generation: u64, result: Result<Review, SharedString>) {
-        if self.generation != generation {
-            return;
-        }
-        self.fetching = false;
-        match result {
-            Ok(review) => {
-                self.review = Some(review);
-                self.current = true;
-            }
-            Err(error) => self.error = Some(error),
-        }
-    }
-
-    /// A fetch started as `generation` brought nothing; the next one may go.
-    fn abandon_fetch(&mut self, generation: u64) {
-        if self.generation == generation {
-            self.fetching = false;
-        }
-    }
-
-    /// A review write returned `review`; any fetch still running is older.
-    fn written(&mut self, review: Review, generation: u64) {
-        self.review = Some(review);
-        self.current = true;
-        self.fetching = false;
-        self.error = None;
-        self.generation = generation;
-    }
-
-    /// A sync may have brought changes made elsewhere.
-    fn mark_stale(&mut self) {
-        self.current = false;
-        self.error = None;
-    }
-}
-
 /// Where the last sync stands.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum SyncStatus {
@@ -148,10 +83,17 @@ pub enum SyncStatus {
     },
 }
 
+/// The sync found the cache was another account's: it is dropped, and
+/// whatever else was shown from it must go too.
+pub struct AccountChanged;
+
+impl EventEmitter<AccountChanged> for LibraryModel {}
+
 pub struct LibraryModel {
     session: SessionScope,
-    /// `None` without a cache, and once the session ended.
-    cache: Option<CacheWorker>,
+    /// The session's cache worker; `None` without a cache, and once the
+    /// session ended.
+    cache: Option<Rc<CacheWorker>>,
     /// The cached user until the session's own `me()` answers.
     user: Option<User>,
     /// True once `me()` answered for this session: `user` is the account
@@ -182,11 +124,11 @@ pub struct LibraryModel {
     /// The writes in flight. Each holds its task: removing it (the write
     /// finished, or the session ended) is what ends the write.
     writes: HashMap<WriteTarget, InFlight>,
-    reviews: HashMap<UserBookId, ReviewSlot>,
-    review_tasks: HashMap<UserBookId, Task<()>>,
-    /// The last [`ReviewSlot`] generation handed out. Model-wide, so a slot
-    /// made again after its entry was removed can't repeat an old one.
-    review_generation: u64,
+    /// Each entry's own review, fetched when a book page shows the entry,
+    /// not by the sync (review text can be long), and again after the next
+    /// sync. A review write's response replaces it, and a fetch that
+    /// started before the write is dropped.
+    reviews: Resource<UserBookId, Review>,
     sync_task: Option<Task<()>>,
 }
 
@@ -198,10 +140,9 @@ struct InFlight {
 
 impl LibraryModel {
     pub fn new(session: SessionScope) -> Self {
-        let cache = session
-            .cache()
-            .and_then(|cache| CacheWorker::start(cache.clone(), session.io()));
+        let cache = session.cache_worker();
         Self {
+            reviews: Resource::new(session.clone(), READ_LIBRARY, Priority::Interactive),
             session,
             cache,
             user: None,
@@ -219,9 +160,6 @@ impl LibraryModel {
             fill_during_sync: false,
             recent: RecentWrites::default(),
             writes: HashMap::new(),
-            reviews: HashMap::new(),
-            review_tasks: HashMap::new(),
-            review_generation: 0,
             sync_task: None,
         }
     }
@@ -297,16 +235,28 @@ impl LibraryModel {
         self.writes.contains_key(&WriteTarget::Add(book))
     }
 
-    pub fn review(&self, id: UserBookId) -> Option<&ReviewSlot> {
-        self.reviews.get(&id)
+    /// The entries' own reviews, as far as this run knows them.
+    pub fn reviews(&self) -> &Resource<UserBookId, Review> {
+        &self.reviews
     }
 
-    /// True if the entry's review should be fetched: never fetched, or not
-    /// since the last sync. A failed fetch waits for [`Self::fetch_review`].
-    pub fn wants_review(&self, id: UserBookId) -> bool {
-        self.reviews
-            .get(&id)
-            .is_none_or(|s| !s.current && !s.fetching && s.error.is_none())
+    /// Fetches entry `id`'s own review if `demand` calls for it: never
+    /// fetched, or not since the last sync. The review shown, if any, stays
+    /// until the new one arrives.
+    pub fn request_review(&mut self, id: UserBookId, demand: Demand, cx: &mut Context<Self>) {
+        let sent = self.reviews.request(
+            id,
+            demand,
+            move |client| client.review(id),
+            Binding {
+                get: |m: &mut Self| &mut m.reviews,
+                landed: |_, _, _, cx| cx.notify(),
+            },
+            cx,
+        );
+        if sent {
+            cx.notify();
+        }
     }
 
     // ----- loading and syncing -----
@@ -431,12 +381,13 @@ impl LibraryModel {
             self.loaded = false;
             self.fill_during_sync = true;
             self.last_synced_at = None;
-            self.reviews.clear();
-            self.review_tasks.clear();
+            self.reviews.retain(|_| false);
             self.recent.clear();
             if let Some(cache) = &self.cache {
                 cache.write(LibraryCache::clear);
             }
+            // What other models showed from the cache goes with it.
+            cx.emit(AccountChanged);
         }
         self.user = Some(user);
         self.user_verified = true;
@@ -497,11 +448,7 @@ impl LibraryModel {
                         _ => None,
                     })
                     .collect();
-                for (id, slot) in &mut self.reviews {
-                    if !written.contains(id) {
-                        slot.mark_stale();
-                    }
-                }
+                self.reviews.invalidate_all_but(|id| written.contains(id));
                 // Sent from this update, so the cache sees the writes in the
                 // order the model made them.
                 if let (Some(cache), Some(user)) = (&self.cache, self.user.clone()) {
@@ -542,20 +489,11 @@ impl LibraryModel {
     pub fn end_session(&mut self, cx: &mut Context<Self>) -> impl Future<Output = ()> + use<> {
         self.sync_task = None;
         self.writes.clear();
-        self.review_tasks.clear();
-        let cleared = self.cache.take().map(|cache| {
-            cache.ask(|cache| {
-                if let Err(e) = cache.clear() {
-                    eprintln!("hardcover: could not clear the library cache: {e}");
-                }
-            })
-        });
+        self.reviews.retain(|_| false);
+        self.cache = None;
+        let cleared = self.session.clear_cache();
         cx.notify();
-        async move {
-            if let Some(cleared) = cleared {
-                cleared.await;
-            }
-        }
+        cleared
     }
 
     // ----- writes -----
@@ -685,7 +623,6 @@ impl LibraryModel {
 
     fn apply_removed(&mut self, id: UserBookId, cx: &mut Context<Self>) {
         self.reviews.remove(&id);
-        self.review_tasks.remove(&id);
         self.recent
             .record(SystemTime::now(), LocalChange::Removed(id));
         let mut entries = std::mem::take(&mut self.entries);
@@ -701,57 +638,8 @@ impl LibraryModel {
     fn apply_review(&mut self, id: UserBookId, review: Review, cx: &mut Context<Self>) {
         self.recent
             .record(SystemTime::now(), LocalChange::Reviewed(id));
-        let generation = self.next_review_generation();
-        self.reviews
-            .entry(id)
-            .or_default()
-            .written(review, generation);
+        self.reviews.set(id, review, cx);
         cx.notify();
-    }
-
-    /// Fetches the entry's review in the background. The review shown, if
-    /// any, stays until the new one arrives.
-    pub fn fetch_review(&mut self, id: UserBookId, cx: &mut Context<Self>) {
-        if !self.session.is_alive() {
-            return;
-        }
-        let generation = self.next_review_generation();
-        if !self.reviews.entry(id).or_default().begin_fetch(generation) {
-            return;
-        }
-        cx.notify();
-        let fetch = self.session.interactive(move |client| client.review(id));
-        let task = cx.spawn(async move |this, cx| {
-            let result = fetch.await;
-            let _ = this.update(cx, |this, cx| {
-                if let Some(task) = this.review_tasks.remove(&id) {
-                    task.detach();
-                }
-                let Some(result) = result else {
-                    // The session ended, or the call panicked.
-                    if let Some(slot) = this.reviews.get_mut(&id) {
-                        slot.abandon_fetch(generation);
-                    }
-                    return;
-                };
-                let result = result.map_err(|e| {
-                    this.session
-                        .error_message(&e, Some(READ_LIBRARY), cx)
-                        .into()
-                });
-                // `None` if the entry was removed meanwhile.
-                if let Some(slot) = this.reviews.get_mut(&id) {
-                    slot.finish_fetch(generation, result);
-                    cx.notify();
-                }
-            });
-        });
-        self.review_tasks.insert(id, task);
-    }
-
-    fn next_review_generation(&mut self) -> u64 {
-        self.review_generation += 1;
-        self.review_generation
     }
 
     fn set_entries(&mut self, entries: Vec<LibraryEntry>) {
@@ -954,26 +842,6 @@ mod tests {
         Review::new(text, false, None)
     }
 
-    #[test]
-    fn a_fetch_that_started_before_a_write_is_dropped_even_after_a_sync() {
-        let mut slot = ReviewSlot::default();
-        assert!(slot.begin_fetch(1));
-        assert!(!slot.begin_fetch(2), "one fetch at a time");
-        slot.written(review("Saved."), 2);
-        // A sync lands before the old fetch does.
-        slot.mark_stale();
-        slot.finish_fetch(1, Ok(review("Old.")));
-        assert_eq!(slot.review, Some(review("Saved.")));
-        assert!(!slot.fetching);
-
-        // A failure from before the write is dropped too.
-        assert!(slot.begin_fetch(3));
-        slot.written(review("Newer."), 4);
-        slot.finish_fetch(3, Err("offline".into()));
-        assert_eq!(slot.error, None);
-        assert_eq!(slot.review, Some(review("Newer.")));
-    }
-
     /// A model over the demo client, with an empty cache in memory. Its
     /// calls run inline (`SessionScope::for_tests`).
     fn demo_model(
@@ -984,6 +852,26 @@ mod tests {
         cx.update(|cx| session.install(cx));
         let model = cx.new(|_| LibraryModel::new(session.clone()));
         (model, session, cache)
+    }
+
+    /// A fetch of the reader's own review that started before a write of it
+    /// is dropped, even after a sync made every review stale meanwhile.
+    #[gpui_kit::test]
+    fn an_own_review_fetch_older_than_a_write_is_dropped(cx: &mut gpui_kit::TestAppContext) {
+        let (model, _, _) = demo_model(cx);
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let id = model.read_with(cx, |m, _| m.entries()[0].user_book_id);
+        model.update(cx, |m, cx| {
+            m.request_review(id, Demand::Shown, cx);
+            m.apply_review(id, review("Written here"), cx);
+            m.reviews.invalidate_all_but(|_| false);
+        });
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| {
+            let shown = m.reviews().value(&id).map(|r| (**r).clone());
+            assert_eq!(shown, Some(review("Written here")));
+        });
     }
 
     /// Signs out as the workspace does: the session ends, then the model.
@@ -1313,23 +1201,5 @@ mod tests {
             assert_eq!(m.count(ReadingStatus::CurrentlyReading), 1);
             assert_eq!(m.count(ReadingStatus::WantToRead), 1);
         });
-    }
-
-    #[test]
-    fn a_fetch_with_nothing_after_it_lands() {
-        let mut slot = ReviewSlot::default();
-        assert!(slot.begin_fetch(1));
-        slot.finish_fetch(1, Err("offline".into()));
-        assert_eq!(slot.error.as_deref(), Some("offline"));
-        assert!(!slot.fetching);
-
-        // A retry clears the error, and its review replaces the cached one.
-        slot.review = Some(review("Cached."));
-        slot.mark_stale();
-        assert!(slot.begin_fetch(2));
-        assert_eq!(slot.error, None);
-        slot.finish_fetch(2, Ok(review("Fresh.")));
-        assert_eq!(slot.review, Some(review("Fresh.")));
-        assert!(slot.current);
     }
 }

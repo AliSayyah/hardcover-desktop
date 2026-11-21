@@ -37,11 +37,12 @@ use gpui_kit::{
 };
 use hardcover_core::Date;
 
-use super::model::{SeriesModel, SeriesStatus};
+use super::model::SeriesModel;
 use super::progress::{Counts, Filter, Group, SeriesSummary, counts, grouped, hidden_line};
 use super::row::{SeriesRow, row_height, skeleton_row, strip_capacity};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
+use crate::resource::LoadStatus;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{EmptyState, LoadFailed, PageHeader, region_width};
@@ -433,7 +434,7 @@ impl Render for SeriesTrackerView {
         let today = Self::today();
         let summaries = self.summaries(cx);
         let model = self.model.read(cx);
-        let status = model.status().clone();
+        let status = model.status();
         let loaded = model.is_loaded();
         let query = self.query(cx);
         let root = div()
@@ -457,7 +458,7 @@ impl Render for SeriesTrackerView {
         }
         if !loaded || summaries.is_empty() {
             let body: AnyElement = match status {
-                SeriesStatus::Failed(message) if !loaded => {
+                LoadStatus::Failed(message) if !loaded => {
                     Self::failed(message, cx).into_any_element()
                 }
                 _ if !loaded => column()
@@ -477,7 +478,7 @@ impl Render for SeriesTrackerView {
         }
 
         let failed = match status {
-            SeriesStatus::Failed(message) => Some(message),
+            LoadStatus::Failed(message) => Some(message),
             _ => None,
         };
         let (items, sizes) = self.list(&summaries, &query, rem);

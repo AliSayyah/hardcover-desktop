@@ -13,8 +13,8 @@
 //! after the header's controls; each row's remove button follows it.
 
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
@@ -23,11 +23,11 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Disableable as _, IconName, IndexPath, h_flex, v_flex};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
+    ParentElement as _, Render, SharedString, Styled as _, Subscription, Window, div,
     prelude::FluentBuilder as _,
 };
-use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LISTS};
-use hardcover_core::{ListBook, ListBookId, ListId, OffsetPage, UserList};
+use hardcover_core::auth::scopes::WRITE_LISTS;
+use hardcover_core::{ListBook, ListId, UserList};
 
 use super::list_dialog::open_edit_list;
 use super::model::{ListsEvent, ListsModel};
@@ -43,7 +43,8 @@ use crate::format::{authors_text, needs_permission};
 use crate::library::book_row::BookRow;
 use crate::library::model::LibraryModel;
 use crate::notify::{notify_failure, notify_outcome};
-use crate::session::{self, SessionScope};
+use crate::resource::{Catalog, Demand, Paged, SharedChanged};
+use crate::session;
 use crate::ui::kit::{SmallControl as _, SmallIconButton as _};
 use crate::ui::kit::{open_alert_dialog, row_action};
 use crate::ui::{
@@ -55,59 +56,25 @@ use crate::ui::{
 /// while the list has focus.
 pub const KEY_CONTEXT: &str = "ListPage";
 
-/// The books of one list loaded so far.
+/// The shown list's books as the catalogue holds them
+/// (`resource::Catalog::list_books`), copied when they change so the list's
+/// rows read them without the app.
 #[derive(Default)]
-struct BooksPage {
-    books: Vec<ListBook>,
-    /// Hardcover has more rows after the ones fetched.
-    more: bool,
-    /// Where the next page starts: the rows Hardcover has sent, less the
-    /// ones taken off since. Rows whose book didn't resolve count too, so
-    /// this can be more than `books.len()`.
-    next_offset: u32,
+struct BooksShown {
+    page: Option<Arc<Paged<ListBook>>>,
     loading: bool,
+    /// The first page failed.
     error: Option<SharedString>,
-}
-
-impl BooksPage {
-    /// Showing the list should fetch: nothing loaded yet, or the last fetch
-    /// failed. (`fetch` itself stops at the end of the list.)
-    fn needs_fetch(&self) -> bool {
-        self.books.is_empty() || self.error.is_some()
-    }
-
-    /// Adds a fetched page.
-    fn receive(&mut self, page: OffsetPage<ListBook>) {
-        self.more = page.has_more;
-        self.next_offset = page.next_offset;
-        self.books.extend(page.items);
-    }
-
-    /// Takes one row off. True if a fetch in flight must start again: it
-    /// asked from an offset that now skips a book.
-    fn remove(&mut self, row: ListBookId) -> bool {
-        let before = self.books.len();
-        self.books.retain(|b| b.id != row);
-        let removed = self.books.len() != before;
-        if removed {
-            // The rows after it moved up one on Hardcover.
-            self.next_offset = self.next_offset.saturating_sub(1);
-        }
-        let restart = self.loading && removed;
-        if restart {
-            self.loading = false;
-        }
-        restart
-    }
+    /// A later page failed.
+    more_error: Option<SharedString>,
 }
 
 pub struct ListBooks {
     library: Entity<LibraryModel>,
     lists: Entity<ListsModel>,
+    catalog: Option<Catalog>,
     current: Option<ListId>,
-    /// Lists opened this session, so going back to one costs no request.
-    pages: HashMap<ListId, BooksPage>,
-    fetch: Option<Task<()>>,
+    shown: BooksShown,
     focus: RowFocus,
     /// The book pane is beside the list ([`ListPane`]).
     beside: Rc<Cell<bool>>,
@@ -119,105 +86,49 @@ impl ListBooks {
         self.book(ix).map(|b| b.book.clone())
     }
 
-    fn page(&self) -> Option<&BooksPage> {
-        self.pages.get(&self.current?)
+    fn books(&self) -> &[ListBook] {
+        self.shown
+            .page
+            .as_deref()
+            .map_or(&[], |p| p.items.as_slice())
     }
 
     fn book(&self, ix: usize) -> Option<&ListBook> {
-        self.page()?.books.get(ix)
+        self.books().get(ix)
     }
 
-    /// Fetches the current list's next page, unless one is on its way.
-    fn fetch(&mut self, window: &mut Window, cx: &mut Context<ListState<Self>>) {
-        let Some(id) = self.current else { return };
-        let page = self.pages.entry(id).or_insert_with(|| BooksPage {
-            more: true,
-            ..BooksPage::default()
-        });
-        if page.loading || !page.more {
-            return;
-        }
-        let offset = page.next_offset;
-        let Some(session) = SessionScope::current(cx) else {
+    /// Copies the shown list's books from the catalogue.
+    fn follow_store(&mut self, cx: &App) {
+        let (Some(id), Some(catalog)) = (self.current, &self.catalog) else {
+            self.shown = BooksShown::default();
             return;
         };
-        let books = session.interactive(move |client| client.list_books(id, offset));
-        page.loading = true;
-        page.error = None;
-        cx.notify();
-        // Replacing the task drops a fetch for a list no longer shown.
-        self.fetch = Some(cx.spawn_in(window, async move |state, cx| {
-            let Some(result) = books.await else {
-                return;
-            };
-            let _ = state.update_in(cx, |state, _, cx| {
-                let message = match &result {
-                    Err(e) => Some(session::error_message(e, Some(READ_LISTS), cx).into()),
-                    Ok(_) => None,
-                };
-                let delegate = state.delegate_mut();
-                let Some(page) = delegate.pages.get_mut(&id) else {
-                    return;
-                };
-                page.loading = false;
-                match result {
-                    Ok(books) => page.receive(books),
-                    Err(_) => page.error = message,
-                }
-                cx.notify();
-            });
-        }));
+        let store = catalog.list_books.read(cx).resource();
+        self.shown = BooksShown {
+            page: store.value(&id).cloned(),
+            loading: store.is_loading(&id),
+            error: store.error(&id).cloned(),
+            more_error: store.more_error(&id).cloned(),
+        };
     }
 
-    fn show(&mut self, id: ListId, window: &mut Window, cx: &mut Context<ListState<Self>>) {
-        if self.current != Some(id) {
-            // A fetch still running for another list is dropped; that list
-            // loads again from where it stopped.
-            if let Some(page) = self.current.and_then(|c| self.pages.get_mut(&c)) {
-                page.loading = false;
-            }
-            self.fetch = None;
-            self.current = Some(id);
+    fn request(&self, demand: Demand, cx: &mut App) {
+        if let (Some(id), Some(catalog)) = (self.current, &self.catalog) {
+            catalog.request_list_books(id, demand, cx);
         }
-        if self.page().is_none_or(BooksPage::needs_fetch) {
-            self.fetch(window, cx);
-        }
+    }
+
+    fn show(&mut self, id: ListId, cx: &mut Context<ListState<Self>>) {
+        self.current = Some(id);
+        self.request(Demand::Shown, cx);
+        self.follow_store(cx);
     }
 
     /// Fetches again after a failure: the first page, or the next one.
-    fn retry(&mut self, window: &mut Window, cx: &mut Context<ListState<Self>>) {
-        if let Some(page) = self.current.and_then(|id| self.pages.get_mut(&id)) {
-            page.error = None;
-        }
-        self.fetch(window, cx);
-    }
-
-    /// Forgets every list's books (Refresh), loading the one shown again.
-    fn reload(&mut self, window: &mut Window, cx: &mut Context<ListState<Self>>) {
-        self.pages.clear();
-        self.fetch = None;
-        self.fetch(window, cx);
-    }
-
-    /// Forgets a list's books, so it loads again when shown.
-    fn forget(&mut self, id: ListId) {
-        self.pages.remove(&id);
-        if self.current == Some(id) {
-            self.fetch = None;
-        }
-    }
-
-    fn removed(
-        &mut self,
-        list: ListId,
-        row: ListBookId,
-        window: &mut Window,
-        cx: &mut Context<ListState<Self>>,
-    ) {
-        let restart = self.pages.get_mut(&list).is_some_and(|p| p.remove(row));
-        if restart && self.current == Some(list) {
-            self.fetch = None;
-            self.fetch(window, cx);
+    fn retry(&mut self, cx: &mut Context<ListState<Self>>) {
+        match (&self.shown.page, self.current, &self.catalog) {
+            (Some(_), Some(id), Some(catalog)) => catalog.more_list_books(id, cx),
+            _ => self.request(Demand::Now, cx),
         }
     }
 
@@ -291,7 +202,7 @@ impl ListDelegate for ListBooks {
     type Item = ListItem;
 
     fn items_count(&self, _: usize, _: &App) -> usize {
-        let rows = self.page().map_or(0, |p| p.books.len());
+        let rows = self.books().len();
         self.focus.stop_when_rows(rows);
         rows
     }
@@ -363,7 +274,7 @@ impl ListDelegate for ListBooks {
         _: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
-        match self.page().and_then(|p| p.error.clone()) {
+        match self.shown.error.clone() {
             Some(message) => empty_state_with_action(
                 IconName::CircleAlert,
                 "Couldn't load this list".into(),
@@ -371,8 +282,8 @@ impl ListDelegate for ListBooks {
                 Button::new("retry-list-empty")
                     .small_control()
                     .label("Try again")
-                    .on_click(cx.listener(|state, _, window, cx| {
-                        state.delegate_mut().retry(window, cx);
+                    .on_click(cx.listener(|state, _, _, cx| {
+                        state.delegate_mut().retry(cx);
                     })),
             )
             .into_any_element(),
@@ -386,7 +297,7 @@ impl ListDelegate for ListBooks {
     }
 
     fn loading(&self, _: &App) -> bool {
-        self.page().is_none_or(|p| p.loading && p.books.is_empty())
+        self.shown.page.is_none() && self.shown.error.is_none()
     }
 
     fn render_loading(
@@ -398,20 +309,25 @@ impl ListDelegate for ListBooks {
     }
 
     fn has_more(&self, _: &App) -> bool {
-        self.page().is_some_and(|p| p.more && p.error.is_none())
+        self.shown.more_error.is_none() && self.shown.page.as_ref().is_some_and(|p| p.has_more)
     }
 
     fn load_more_threshold(&self) -> usize {
         20
     }
 
-    fn load_more(&mut self, window: &mut Window, cx: &mut Context<ListState<Self>>) {
-        self.fetch(window, cx);
+    fn load_more(&mut self, _: &mut Window, cx: &mut Context<ListState<Self>>) {
+        if let (Some(id), Some(catalog)) = (self.current, &self.catalog)
+            && !self.shown.loading
+        {
+            catalog.more_list_books(id, cx);
+        }
     }
 }
 
 pub struct ListView {
     lists: Entity<ListsModel>,
+    catalog: Option<Catalog>,
     library: Entity<LibraryModel>,
     list: Entity<ListState<ListBooks>>,
     /// The selected book, beside the list when the window is wide.
@@ -429,14 +345,15 @@ impl ListView {
         cx: &mut Context<Self>,
     ) -> Self {
         let pane = ListPane::new(library.clone(), window, cx);
+        let catalog = Catalog::global(cx);
         let list = cx.new(|cx| {
             ListState::new(
                 ListBooks {
                     library: library.clone(),
                     lists: lists.clone(),
+                    catalog: catalog.clone(),
                     current: None,
-                    pages: HashMap::new(),
-                    fetch: None,
+                    shown: BooksShown::default(),
                     focus: RowFocus::default(),
                     beside: pane.beside().clone(),
                 },
@@ -445,7 +362,21 @@ impl ListView {
             )
         });
         RowFocus::attach(&list, |d| &mut d.focus, cx);
-        let subscriptions = vec![
+        let mut subscriptions = Vec::new();
+        if let Some(catalog) = &catalog {
+            subscriptions.push(cx.subscribe(&catalog.list_books, {
+                let list = list.clone();
+                move |_, _, SharedChanged(id): &SharedChanged<ListId>, cx| {
+                    list.update(cx, |state, cx| {
+                        if state.delegate().current == Some(*id) {
+                            state.delegate_mut().follow_store(cx);
+                            cx.notify();
+                        }
+                    });
+                }
+            }));
+        }
+        subscriptions.extend([
             follow_pane(&list, &pane, ListBooks::book_at, window, cx),
             cx.observe(&lists, |_, _, cx| cx.notify()),
             // Status tags follow library changes.
@@ -453,24 +384,8 @@ impl ListView {
                 let list = list.clone();
                 move |_, _, cx| list.update(cx, |_, cx| cx.notify())
             }),
-            cx.subscribe_in(&lists, window, |this, _, event: &ListsEvent, window, cx| {
-                this.list.update(cx, |state, cx| {
-                    let delegate = state.delegate_mut();
-                    match event {
-                        ListsEvent::BookAdded(id) => {
-                            delegate.forget(*id);
-                            if delegate.current == Some(*id) {
-                                delegate.fetch(window, cx);
-                            }
-                        }
-                        ListsEvent::BookRemoved { list, row } => {
-                            delegate.removed(*list, *row, window, cx);
-                        }
-                        ListsEvent::Deleted(id) => delegate.forget(*id),
-                        ListsEvent::Reloaded => delegate.reload(window, cx),
-                    }
-                    cx.notify();
-                });
+            cx.subscribe(&lists, |this, _, event: &ListsEvent, cx| {
+                this.list_changed(event, cx);
             }),
             on_keyboard_entry(&list, window, cx, |this, window, cx| {
                 select_first_row(&this.list, window, cx);
@@ -484,14 +399,48 @@ impl ListView {
                 }
                 ListEvent::Select(_) | ListEvent::Cancel => {}
             }),
-        ];
+        ]);
         Self {
+            catalog,
             lists,
             library,
             list,
             pane,
             header_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
+        }
+    }
+
+    /// A change made to the lists elsewhere, in the catalogue's copy of a
+    /// list's books.
+    fn list_changed(&mut self, event: &ListsEvent, cx: &mut Context<Self>) {
+        let Some(catalog) = self.catalog.clone() else {
+            return;
+        };
+        let current = self.current(cx);
+        match event {
+            // A book went onto it from a book page: a page showing it
+            // reloads, and another loads again when shown.
+            ListsEvent::BookAdded(id) => {
+                catalog.list_books.update(cx, |s, _| s.invalidate(id));
+                if current == Some(*id) {
+                    catalog.request_list_books(*id, Demand::Shown, cx);
+                }
+            }
+            ListsEvent::BookRemoved { list, row } => {
+                catalog
+                    .list_books
+                    .update(cx, |s, cx| s.update(list, |p| p.remove(*row), cx));
+            }
+            ListsEvent::Deleted(id) => catalog.list_books.update(cx, |s, cx| s.remove(id, cx)),
+            // Refresh, a new grant, or a write whose effect on the lists'
+            // books isn't known: every list's books load again when shown.
+            ListsEvent::Reloaded => {
+                catalog.list_books.update(cx, |s, _| s.invalidate_all());
+                if let Some(id) = current {
+                    catalog.request_list_books(id, Demand::Shown, cx);
+                }
+            }
         }
     }
 
@@ -504,7 +453,7 @@ impl ListView {
         let header_scroll = self.header_scroll.clone();
         self.list.update(cx, |state, cx| {
             let changed = state.delegate().current != Some(id);
-            state.delegate_mut().show(id, window, cx);
+            state.delegate_mut().show(id, cx);
             if changed {
                 reset_scroll(&header_scroll);
                 state.set_selected_index(None, window, cx);
@@ -515,10 +464,13 @@ impl ListView {
         cx.notify();
     }
 
-    /// Fetches the book in the pane beside the list again where it is stale
-    /// ([`crate::freshness`]). The list's own books follow Refresh
-    /// (`ListsModel::reload`).
+    /// Asks for the list's books again where they are stale (`resource`; a
+    /// failed first page only when `shown_again`), and for the book in the
+    /// pane beside the list.
     pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
+        let demand = crate::catalog::book_list::demand(shown_again);
+        self.list
+            .update(cx, |state, cx| state.delegate().request(demand, cx));
         self.pane.revalidate(shown_again, cx);
     }
 
@@ -526,9 +478,9 @@ impl ListView {
         crate::ui::enter_list(&self.list, window, cx);
     }
 
-    fn retry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn retry(&mut self, cx: &mut Context<Self>) {
         self.list
-            .update(cx, |state, cx| state.delegate_mut().retry(window, cx));
+            .update(cx, |state, cx| state.delegate_mut().retry(cx));
     }
 
     /// Delete: takes the selected book off the list, only while the list
@@ -615,20 +567,9 @@ impl ListView {
             .read(cx)
             .user()
             .and_then(|u| list.web_url(&u.username));
-        let error = self
-            .list
-            .read(cx)
-            .delegate()
-            .page()
-            .and_then(|p| p.error.clone())
-            .filter(|_| {
-                // An empty list shows its error in place of the books.
-                self.list
-                    .read(cx)
-                    .delegate()
-                    .page()
-                    .is_some_and(|p| !p.books.is_empty())
-            });
+        // An empty list shows a first page's error in place of the books;
+        // a later page's shows here.
+        let error = self.list.read(cx).delegate().shown.more_error.clone();
         let actions = self.list_actions(list, cx);
         let mut header = PageHeader::new(list.name.clone())
             .wraps()
@@ -660,7 +601,7 @@ impl ListView {
             .when_some(error, |this, message| {
                 this.child(
                     LoadFailed::new("retry-list", message)
-                        .on_retry(cx.listener(|this, _, window, cx| this.retry(window, cx))),
+                        .on_retry(cx.listener(|this, _, _, cx| this.retry(cx))),
                 )
             })
     }
@@ -707,11 +648,11 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::session::SessionScope;
     use crate::ui::test_support::{has_focus, press, redraw, shift_tab};
     use gpui_kit::component::{Root, WindowExt as _};
     use gpui_kit::{TestAppContext, VisualTestContext};
     use hardcover_core::store::LibraryCache;
-    use hardcover_core::{BookId, BookSummary};
 
     fn settle(cx: &mut VisualTestContext) {
         cx.executor().advance_clock(Duration::from_secs(1));
@@ -732,9 +673,10 @@ mod tests {
             crate::bind_keys(cx);
             crate::ui::kit::bind_keys(cx);
             session.install(cx);
+            Catalog::init(&session, cx);
         });
-        let lists = cx.update(|cx| ListsModel::init(session.clone(), cx));
-        let library = cx.new(|_| LibraryModel::new(session));
+        let library = cx.new(|_| LibraryModel::new(session.clone()));
+        let lists = cx.update(|cx| ListsModel::init(session, &library, cx));
         lists.update(cx, ListsModel::load);
         cx.run_until_parked();
         let id = lists.read_with(cx, |m, _| m.user_lists().next().map(|l| l.id).unwrap());
@@ -790,64 +732,5 @@ mod tests {
             "Removed “Dune” from “Book club”."
         );
         assert_eq!(removed_text("Dune", None), "Removed “Dune” from the list.");
-    }
-
-    fn book(row: i64) -> ListBook {
-        ListBook::new(
-            ListBookId::new(row),
-            BookSummary::new(BookId::new(row + 1000), format!("Book {row}")),
-        )
-    }
-
-    #[test]
-    fn a_failed_or_empty_page_fetches_when_shown() {
-        let mut page = BooksPage::default();
-        assert!(page.needs_fetch());
-        page.books.push(book(1));
-        assert!(!page.needs_fetch());
-        page.error = Some("offline".into());
-        assert!(page.needs_fetch());
-    }
-
-    /// D7: a row whose book didn't resolve neither ends the list nor
-    /// shifts the next page, and a removal moves the next page back one.
-    #[test]
-    fn the_next_page_starts_after_every_row_hardcover_sent() {
-        let mut page = BooksPage::default();
-        // 100 rows sent, one of them unresolved.
-        let mut first = OffsetPage::default();
-        first.items = (1..=99).map(book).collect();
-        first.next_offset = 100;
-        first.has_more = true;
-        page.receive(first);
-        assert_eq!((page.books.len(), page.next_offset), (99, 100));
-        assert!(page.more);
-        // Taking a loaded row off moves the rest up one on Hardcover.
-        page.remove(ListBookId::new(5));
-        assert_eq!(page.next_offset, 99);
-        // A row not loaded here changes nothing.
-        page.remove(ListBookId::new(500));
-        assert_eq!(page.next_offset, 99);
-    }
-
-    #[test]
-    fn removing_a_row_restarts_a_fetch_in_flight() {
-        let mut page = BooksPage {
-            books: vec![book(1), book(2)],
-            more: true,
-            next_offset: 2,
-            loading: false,
-            error: None,
-        };
-        assert!(!page.remove(ListBookId::new(1)));
-        assert_eq!(page.books.len(), 1);
-
-        page.loading = true;
-        // A row not on this page changes no offset.
-        assert!(!page.remove(ListBookId::new(9)));
-        assert!(page.loading);
-        assert!(page.remove(ListBookId::new(2)));
-        assert_eq!(page.books, []);
-        assert!(!page.loading);
     }
 }

@@ -10,8 +10,9 @@ use hardcover_core::ListId;
 use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LISTS};
 
 use super::list_dialog::open_new_list;
-use super::model::{ListsModel, ListsStatus};
+use super::model::ListsModel;
 use crate::format::{count_text, needs_permission};
+use crate::resource::LoadStatus;
 use crate::session;
 use crate::ui::{NavRow, sidebar_label};
 
@@ -28,7 +29,7 @@ pub fn lists_section(
 ) -> Option<Div> {
     let model = lists.read(cx);
     if !session::has_scope(cx, READ_LISTS)
-        || matches!(model.status(), ListsStatus::Idle)
+        || matches!(model.status(), LoadStatus::Idle)
         || !model.has_loaded()
     {
         return None;
@@ -54,7 +55,7 @@ pub fn lists_section(
         .on_click(move |_, window, cx| select(id, window, cx))
     });
     let failed = match model.status() {
-        ListsStatus::Failed(message) if model.lists().is_empty() => Some(message.clone()),
+        LoadStatus::Failed(message) if model.lists().is_empty() => Some(message),
         _ => None,
     };
     let retry = failed.map(|message| {
@@ -65,7 +66,7 @@ pub fn lists_section(
             "Try loading your lists again",
         )
         .tooltip(Some(format!("Couldn't load your lists. {message}")))
-        .on_click(move |_, _, cx| lists.update(cx, ListsModel::load))
+        .on_click(move |_, _, cx| lists.update(cx, ListsModel::retry))
     });
     let new_list = lists.clone();
     let create = NavRow::new("nav-new-list", IconName::Plus, "New list…")

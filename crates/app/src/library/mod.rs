@@ -2,7 +2,7 @@
 //! the master–detail view.
 
 pub mod book_row;
-mod cache_worker;
+pub mod cache_worker;
 pub mod collection;
 pub mod library_view;
 pub mod model;

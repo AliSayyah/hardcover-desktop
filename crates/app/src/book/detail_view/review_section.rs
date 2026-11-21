@@ -7,7 +7,6 @@
 //! moves to another book, and restored when it comes back.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::calendar::Date as CalendarDate;
@@ -18,10 +17,10 @@ use gpui_kit::component::text::TextView;
 use gpui_kit::component::{Disableable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, IntoElement, ParentElement as _,
-    SharedString, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
+    SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::WRITE_REVIEWS;
-use hardcover_core::{Date, LibraryEntry, Review, UserBookId};
+use hardcover_core::{BookId, Date, LibraryEntry, Review, UserBookId};
 
 use super::BookDetailView;
 use super::your_book::{paragraphs, saved_note};
@@ -29,15 +28,12 @@ use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{date_text, needs_permission};
 use crate::library::model::{LibraryWrite, WriteKind};
+use crate::resource::Demand;
 use crate::session;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{Block, ExternalLink, Skeleton};
-
-/// Wait before fetching a review, so arrowing through a list does not spend
-/// the rate limit on every book passed over.
-const REVIEW_DELAY: Duration = Duration::from_millis(400);
 
 /// What the editor holds, or held when it was opened.
 #[derive(Debug, Clone, PartialEq)]
@@ -99,9 +95,12 @@ pub(super) struct ReviewEditor {
     /// The entry whose review was just saved, until the pane moves on.
     saved: Option<UserBookId>,
     writing: Option<ReviewWrite>,
-    /// The entry whose review fetch waits out [`REVIEW_DELAY`].
-    scheduled: Option<UserBookId>,
-    fetch_task: Option<Task<()>>,
+    /// The entry the editor last followed.
+    entry: Option<UserBookId>,
+    /// The book whose own review the view has asked for (`Fetch::OwnReview`):
+    /// an entry that appears for it later (the book was added) is asked for
+    /// at once.
+    pub(super) asked: Option<BookId>,
 }
 
 impl ReviewEditor {
@@ -142,16 +141,18 @@ impl ReviewEditor {
             drafts: HashMap::new(),
             saved: None,
             writing: None,
-            scheduled: None,
-            fetch_task: None,
+            entry: None,
+            asked: None,
         };
         (editor, subscriptions)
     }
 }
 
 impl BookDetailView {
-    /// Follows the entry shown: sets an unsaved review aside or restores it,
-    /// and fetches the review if the model wants it.
+    /// Follows the entry shown: sets an unsaved review aside or restores it.
+    /// The review itself is asked for with the rest of the book
+    /// (`BookDetailView::fetch`), or here when an entry appears for a book
+    /// already asked about.
     pub(super) fn sync_review(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let current = self.entry(self.model.read(cx)).map(|e| e.user_book_id);
         if let Some((open, base)) = self.review.editing.clone()
@@ -173,9 +174,9 @@ impl BookDetailView {
                 .drafts
                 .retain(|id, _| model.entry(*id).is_some());
         }
+        let appeared = current.is_some() && current != self.review.entry;
+        self.review.entry = current;
         let Some(id) = current else {
-            self.review.scheduled = None;
-            self.review.fetch_task = None;
             return;
         };
         if self.review.editing.is_none()
@@ -183,43 +184,29 @@ impl BookDetailView {
         {
             self.fill_review_editor(id, draft, base, false, window, cx);
         }
-        if !self.model.read(cx).wants_review(id) {
-            // Also drops a wait for a book left behind.
-            self.review.scheduled = None;
-            self.review.fetch_task = None;
-            return;
+        let book = self.book(cx).map(|b| b.id);
+        if appeared && book.is_some() && self.review.asked == book {
+            self.model
+                .update(cx, |m, cx| m.request_review(id, Demand::Active, cx));
         }
-        if self.review.scheduled == Some(id) {
-            return;
-        }
-        self.review.scheduled = Some(id);
-        let model = self.model.clone();
-        // Replacing the task cancels the wait for a book no longer shown.
-        self.review.fetch_task = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(REVIEW_DELAY).await;
-            let _ = this.update(cx, |this, cx| {
-                if this.review.scheduled == Some(id) {
-                    this.review.scheduled = None;
-                    model.update(cx, |m, cx| m.fetch_review(id, cx));
-                }
-            });
-        }));
     }
 
     fn retry_review(&mut self, cx: &mut Context<Self>) {
         let Some(entry) = self.current_entry(cx) else {
             return;
         };
-        self.model
-            .update(cx, |m, cx| m.fetch_review(entry.user_book_id, cx));
+        self.model.update(cx, |m, cx| {
+            m.request_review(entry.user_book_id, Demand::Now, cx)
+        });
     }
 
     /// The saved review of `id`, if it has one.
     fn saved_review(&self, id: UserBookId, cx: &Context<Self>) -> Option<Review> {
         self.model
             .read(cx)
-            .review(id)
-            .and_then(|s| s.review.clone())
+            .reviews()
+            .value(&id)
+            .map(|r| (**r).clone())
             .filter(Review::exists)
     }
 
@@ -227,7 +214,7 @@ impl BookDetailView {
     /// opened now would start from a review that may be out of date.
     fn review_refreshing(&self, id: UserBookId, cx: &Context<Self>) -> bool {
         let model = self.model.read(cx);
-        model.review(id).is_some_and(|s| s.fetching) || model.wants_review(id)
+        model.reviews().is_loading(&id) || model.reviews().is_stale(&id, cx)
     }
 
     fn review_draft(&self, cx: &App) -> Draft {
@@ -440,14 +427,14 @@ impl BookDetailView {
         let can_write = session::has_scope(cx, WRITE_REVIEWS);
         let muted = colors(cx).fg_muted;
         let model = self.model.read(cx);
-        let slot = model.review(id);
-        let fetched = slot.is_some_and(|s| s.review.is_some());
-        let fetching = slot.is_some_and(|s| s.fetching);
-        let error = slot.and_then(|s| s.error.clone());
-        let review = slot
-            .and_then(|s| s.review.as_ref())
+        let reviews = model.reviews();
+        let fetched = reviews.value(&id).is_some();
+        let fetching = reviews.is_loading(&id);
+        let error = reviews.error(&id).cloned();
+        let review = reviews
+            .value(&id)
             .filter(|r| r.exists())
-            .cloned();
+            .map(|r| (**r).clone());
         let editing = self.review.editing.as_ref().is_some_and(|(e, _)| *e == id);
         let busy = self.model.read(cx).pending_write(id).is_some();
         let refreshing = self.review_refreshing(id, cx);

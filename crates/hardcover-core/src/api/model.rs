@@ -1123,7 +1123,7 @@ impl SearchPage {
 }
 
 /// What a reading goal counts (`goals.metric`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GoalMetric {
     /// Books finished.
     Books,
@@ -1161,7 +1161,8 @@ impl GoalMetric {
 /// Which books count toward a goal (`goals.conditions`): a format, categories
 /// or author facts. Kept exactly as Hardcover sent it, because changing a goal
 /// resends the whole goal, conditions included.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct GoalConditions(pub(crate) serde_json::Value);
 
 /// `GoalConditionInput`'s fields. The stored JSON uses the same names (the
@@ -1213,7 +1214,7 @@ impl GoalConditions {
 
 /// A reading goal: read `target` books (or pages, or hours) between `start`
 /// and `end`. Hardcover calculates the progress from the user's reading.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Goal {
     pub id: GoalId,
@@ -1453,7 +1454,7 @@ impl TrendingPeriod {
 pub const OWNED_LIST_SLUG: &str = "owned";
 
 /// One of the signed-in user's lists (`lists`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct UserList {
     pub id: ListId,
@@ -1523,7 +1524,7 @@ pub struct ListDraft {
 }
 
 /// That a book is on one of the user's lists (`list_books`), without the book.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ListMembership {
     pub id: ListBookId,
     pub list_id: ListId,
@@ -1533,7 +1534,7 @@ pub struct ListMembership {
 }
 
 /// Every book on the user's lists, from [`crate::api::Client::list_memberships`].
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ListMemberships {
     pub rows: Vec<ListMembership>,
     /// False if there were more rows than the client reads in one go: a

@@ -1,6 +1,12 @@
 //! SQLite cache of the signed-in user and their library, so the app can show
 //! something instantly on start and work offline.
 //!
+//! Beside the library it keeps its companions, the last good copy of what
+//! the app shows with it (the started series, the books coming soon, the
+//! goals, the lists), as JSON per kind and key
+//! ([`LibraryCache::save_companion`]). They belong to the account the
+//! library does, and go with it.
+//!
 //! Entries are stored as JSON blobs of [`LibraryEntry`] keyed by `user_book_id`.
 //! The database carries a schema version (`PRAGMA user_version`). An older
 //! file is upgraded in place by `MIGRATIONS`, so the library still shows
@@ -138,7 +144,8 @@ impl LibraryCache {
             conn.execute_batch(
                 "DROP TABLE IF EXISTS library_entries;
                  DROP TABLE IF EXISTS sync_state;
-                 DROP TABLE IF EXISTS current_user;",
+                 DROP TABLE IF EXISTS current_user;
+                 DROP TABLE IF EXISTS companions;",
             )?;
         }
         conn.execute_batch(
@@ -156,6 +163,12 @@ impl LibraryCache {
              CREATE TABLE IF NOT EXISTS sync_state (
                  user_id INTEGER PRIMARY KEY,
                  last_synced_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS companions (
+                 kind TEXT NOT NULL,
+                 key TEXT NOT NULL,
+                 json TEXT NOT NULL,
+                 PRIMARY KEY (kind, key)
              );",
         )?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -322,6 +335,64 @@ impl LibraryCache {
         )
     }
 
+    /// Saves `value` as the companion `kind`/`key`, replacing what was there.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `value` cannot be serialized or stored.
+    pub fn save_companion<T: serde::Serialize>(
+        &self,
+        kind: &str,
+        key: &str,
+        value: &T,
+    ) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO companions (kind, key, json) VALUES (?1, ?2, ?3)
+             ON CONFLICT (kind, key) DO UPDATE SET json = excluded.json",
+            params![kind, key, to_json(value)?],
+        )?;
+        Ok(())
+    }
+
+    /// Forgets the companion `kind`/`key`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SQLite cannot delete the row.
+    pub fn remove_companion(&self, kind: &str, key: &str) -> Result<()> {
+        self.conn().execute(
+            "DELETE FROM companions WHERE kind = ?1 AND key = ?2",
+            params![kind, key],
+        )?;
+        Ok(())
+    }
+
+    /// Every companion of `kind`, by key. Rows that no longer decode are
+    /// skipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SQLite cannot read the rows.
+    pub fn load_companions<T: serde::de::DeserializeOwned>(
+        &self,
+        kind: &str,
+    ) -> Result<Vec<(String, T)>> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare("SELECT key, json FROM companions WHERE kind = ?1 ORDER BY key")?;
+        let rows = stmt.query_map([kind], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (key, json) = row?;
+            if let Ok(value) = serde_json::from_str(&json) {
+                out.push((key, value));
+            }
+        }
+        Ok(out)
+    }
+
     /// Forgets everything (use on sign-out), leaving none of it readable in
     /// the files: deleted rows are overwritten (`secure_delete`), the WAL,
     /// which still holds the old pages, is checkpointed and truncated, and a
@@ -334,7 +405,8 @@ impl LibraryCache {
     pub fn clear(&self) -> Result<()> {
         let conn = self.conn();
         conn.execute_batch(
-            "DELETE FROM library_entries; DELETE FROM sync_state; DELETE FROM current_user;",
+            "DELETE FROM library_entries; DELETE FROM sync_state; DELETE FROM current_user;
+             DELETE FROM companions;",
         )?;
         if let Some(path) = &self.path {
             // A damaged file set aside holds the old library too.
@@ -797,6 +869,7 @@ mod tests {
         c.save_user(&u).unwrap();
         c.replace_library(UserId::new(1), &[noted, entry(2, 1, ReadingStatus::Read)])
             .unwrap();
+        c.save_companion("lists", "", &"PRIVATE-LIST-NAME").unwrap();
         let on_disk = |needle: &[u8]| {
             std::iter::once(path.clone())
                 .chain(companions(&path))
@@ -816,9 +889,53 @@ mod tests {
             "the account is still in the file"
         );
         assert!(!on_disk(b"Synthetic 2"), "a title is still in the file");
+        assert!(
+            !on_disk(b"PRIVATE-LIST-NAME"),
+            "a companion is still in the file"
+        );
         // Still a working cache.
         c.upsert(&entry(3, 1, ReadingStatus::Read)).unwrap();
         assert_eq!(c.load_library(UserId::new(1)).unwrap().len(), 1);
+    }
+
+    /// A cache made before the companions table gets it at the next open,
+    /// keeping its library: no version bump needed.
+    #[test]
+    fn a_cache_without_companions_gains_them_and_keeps_its_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        let me = UserId::new(1);
+        {
+            let c = LibraryCache::open(&path).unwrap();
+            c.replace_library(me, &[entry(1, 1, ReadingStatus::Read)])
+                .unwrap();
+            c.conn().execute_batch("DROP TABLE companions").unwrap();
+        }
+        let c = LibraryCache::open(&path).unwrap();
+        assert_eq!(c.load_library(me).unwrap().len(), 1);
+        c.save_companion("goals", "", &vec![1, 2]).unwrap();
+        let goals: Vec<(String, Vec<i32>)> = c.load_companions("goals").unwrap();
+        assert_eq!(goals, [(String::new(), vec![1, 2])]);
+    }
+
+    #[test]
+    fn companions_round_trip_by_kind_and_key() {
+        let c = LibraryCache::open_in_memory().unwrap();
+        c.save_companion("series", "2", &vec![2]).unwrap();
+        c.save_companion("series", "1", &vec![1]).unwrap();
+        c.save_companion("series", "1", &vec![1, 1]).unwrap();
+        c.save_companion("goals", "", &vec![9]).unwrap();
+        c.save_companion("series", "3", &"not a list").unwrap();
+        let series: Vec<(String, Vec<i32>)> = c.load_companions("series").unwrap();
+        assert_eq!(
+            series,
+            [("1".to_owned(), vec![1, 1]), ("2".to_owned(), vec![2])],
+            "replaced, by key, undecodable rows skipped"
+        );
+        c.remove_companion("series", "1").unwrap();
+        assert_eq!(c.load_companions::<Vec<i32>>("series").unwrap().len(), 1);
+        c.clear().unwrap();
+        assert!(c.load_companions::<Vec<i32>>("goals").unwrap().is_empty());
     }
 
     #[test]

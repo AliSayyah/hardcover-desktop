@@ -22,6 +22,7 @@ use crate::design::{TypeRoles as _, size};
 use crate::format::{count_text, needs_permission};
 use crate::notify::{notify_failure, notify_outcome};
 use crate::session;
+use crate::ui::LoadFailed;
 use crate::ui::kit::open_alert_dialog;
 
 /// The model, when the session can read lists.
@@ -55,7 +56,23 @@ pub fn lists_button(book: &BookSummary, cx: &App) -> Option<AnyElement> {
                 // Capped at half the window; many lists scroll.
                 let mut menu = menu.scrollable(true);
                 if !known {
-                    menu = menu.item(PopupMenuItem::label("Loading your lists…"));
+                    match model.book_failure(book.id) {
+                        Some(message) => {
+                            let (lists, id) = (lists.clone(), book.id);
+                            menu = menu
+                                .item(PopupMenuItem::label(format!(
+                                    "Couldn't load your lists. {message}"
+                                )))
+                                .item(
+                                    PopupMenuItem::new("Try again")
+                                        .icon(IconName::RefreshCw)
+                                        .on_click(move |_, _, cx| {
+                                            lists.update(cx, |m, cx| m.retry_book(id, cx));
+                                        }),
+                                );
+                        }
+                        None => menu = menu.item(PopupMenuItem::label("Loading your lists…")),
+                    }
                 }
                 let mut any = false;
                 for list in model.user_lists() {
@@ -234,12 +251,16 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
     let model = lists.read(cx);
     let book = entry.book.id;
     let rows = model.owned_rows(book);
+    // Nothing on its way can tell: say why, beside a way to ask again.
+    let failure = rows.is_none().then(|| model.book_failure(book)).flatten();
     let owned = rows.as_ref().is_some_and(|r| !r.is_empty());
     let busy = model.is_busy(book);
     let edition = entry.edition.as_ref();
     // Adding goes through `edition_owned` (write:library); taking it off is
     // a list change (write:lists).
     let (allowed, reason): (bool, Option<SharedString>) = match (&rows, owned) {
+        // A failure is said by `LoadFailed`, below.
+        (None, _) if failure.is_some() => (false, None),
         (None, _) => (false, Some("Checking your Owned list…".into())),
         (Some(_), true) if !session::has_scope(cx, WRITE_LISTS) => {
             (false, Some(needs_permission(WRITE_LISTS).into()))
@@ -258,6 +279,14 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
             .map(|_| "Another edition is on your Owned list".into()),
         _ => None,
     };
+    let failed = failure.map(|message| {
+        let lists = lists.clone();
+        LoadFailed::new(
+            "book-owned-retry",
+            format!("Couldn't check your Owned list. {message}"),
+        )
+        .on_retry(move |_, _, cx| lists.update(cx, |m, cx| m.retry_book(book, cx)))
+    });
     let entry = entry.clone();
     // The hint is a caption beside the switch, wrapping under it where the
     // column is narrow (a rail): each line is a property row's 24, so the
@@ -292,6 +321,7 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
                     .caption(cx)
                     .child(note)
             }))
+            .children(failed)
             .into_any_element(),
     )
 }

@@ -17,6 +17,9 @@ fast_image_resize = "6"
 gpui-kit = "0.10"
 hardcover-core = { path = "../hardcover-core" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "qoi"] }
+# The bounds for what the library cache keeps beside the library
+# (`resource::saved`); the core does the encoding. Already in the tree.
+serde = "1"
 # Already in the tree through GPUI's text system: right-to-left text is laid
 # out by the bidirectional algorithm (`bidi.rs`), with mirrored brackets.
 unicode-bidi = "0.3"

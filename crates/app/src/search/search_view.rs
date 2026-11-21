@@ -614,10 +614,13 @@ impl SearchView {
         cx.notify();
     }
 
-    /// Fetches the pane's book again where it is stale ([`crate::freshness`]).
+    /// Fetches the pane's book again where it is stale ([`crate::resource`]).
     pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
-        self.detail
-            .update(cx, |detail, cx| detail.revalidate(shown_again, cx));
+        // The pane shows only on the Books tab.
+        if self.kind == SearchKind::Books {
+            self.detail
+                .update(cx, |detail, cx| detail.revalidate(shown_again, cx));
+        }
     }
 
     pub fn focus_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -671,6 +674,8 @@ impl SearchView {
             SearchKind::Authors => self.search_if_stale::<AuthorHit>(query, window, cx),
             SearchKind::Series => self.search_if_stale::<SeriesHit>(query, window, cx),
         }
+        // The book pane is shown again.
+        self.revalidate(true, cx);
         // Keep the query as typed: the next key edits it rather than replacing it.
         self.input.update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
@@ -1011,6 +1016,59 @@ impl Render for SearchView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    use gpui_kit::{TestAppContext, VisualTestContext};
+
+    use crate::resource::{Catalog, refresh_all};
+
+    fn settle(cx: &mut VisualTestContext) {
+        for _ in 0..3 {
+            cx.executor().advance_clock(Duration::from_secs(1));
+            cx.run_until_parked();
+        }
+    }
+
+    /// The book pane shows only on the Books tab: on another tab, Refresh
+    /// sends nothing for it, and it catches up when Books is shown again.
+    #[gpui_kit::test]
+    fn the_hidden_pane_is_not_fetched_again(cx: &mut TestAppContext) {
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), None);
+        let catalog = cx.update(|cx| {
+            gpui_kit::init(cx);
+            session.install(cx);
+            Catalog::init(&session, cx)
+        });
+        let model = cx.new(|_| LibraryModel::new(session));
+        let (view, cx) = cx.add_window_view(|window, cx| SearchView::new(&model, window, cx));
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let book = BookSummary::new(BookId::new(427_578), "Project Hail Mary");
+                view.select(book, window, cx);
+            });
+        });
+        settle(cx);
+        let asked = |cx: &mut VisualTestContext| {
+            catalog.details.read_with(cx, |s, _| s.resource().started())
+        };
+        let before = asked(cx);
+        assert_eq!(before, 1);
+
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.set_kind(SearchKind::Authors, window, cx)
+            });
+            refresh_all(cx);
+            view.update(cx, |view, cx| view.revalidate(true, cx));
+        });
+        settle(cx);
+        assert_eq!(asked(cx), before, "hidden: nothing sent");
+
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| view.set_kind(SearchKind::Books, window, cx));
+        });
+        assert_eq!(asked(cx), before + 1, "shown again: fetched");
+    }
 
     fn books(ids: &[i64]) -> Vec<BookSummary> {
         ids.iter()
