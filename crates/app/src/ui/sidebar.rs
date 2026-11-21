@@ -165,9 +165,7 @@ impl RenderOnce for GoalRow {
                         .items_center()
                         .gap_2()
                         .child(
-                            // The mockup's target isn't in the kit's icon set;
-                            // the calendar stands for the goal's period.
-                            Icon::new(IconName::Calendar)
+                            Icon::new(crate::icons::target())
                                 .size_4()
                                 .flex_none()
                                 .text_color(colors.fg_muted),

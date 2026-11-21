@@ -32,7 +32,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::{
     ElementExt as _, Icon, IconName, IndexPath, Sizable as _, h_flex, h_resizable, resizable_panel,
     v_flex,
@@ -57,6 +57,7 @@ use crate::search::results::{Hit, Phase, SearchResults};
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::gutter_list;
+use crate::ui::kit::small_tab;
 use crate::ui::{
     ListRow as _, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
     select_first_row,
@@ -784,9 +785,9 @@ impl SearchView {
                     .child(
                         TabBar::new("search-kind")
                             .segmented()
-                            .small()
+                            .small_control()
                             .selected_index(self.kind.index())
-                            .children(SearchKind::ALL.map(|k| Tab::new().label(k.label())))
+                            .children(SearchKind::ALL.map(|k| small_tab(k.label())))
                             .on_click(move |ix, window, cx| {
                                 let kind = SearchKind::ALL[*ix];
                                 let _ = view.update(cx, |this, cx| this.set_kind(kind, window, cx));

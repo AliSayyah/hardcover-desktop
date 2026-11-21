@@ -22,6 +22,7 @@ gpui_kit::assets::icon_assets!(
     [
         Library,
         Clock,
+        Target,
         // The genre icons (`chip::genre`); search, heart and palette are
         // among the kit's defaults.
         Backpack,
@@ -96,13 +97,18 @@ pub fn clock() -> IconName {
     IconName::Clock
 }
 
+/// The reading goal: the sidebar's goal row.
+pub fn target() -> IconName {
+    IconName::Target
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn the_extra_icons_and_the_defaults_both_load() {
-        for icon in [library(), clock()] {
+        for icon in [library(), clock(), target()] {
             let bytes = AppAssets.load(&icon.path()).unwrap().unwrap();
             assert!(bytes.starts_with(b"<svg"));
         }

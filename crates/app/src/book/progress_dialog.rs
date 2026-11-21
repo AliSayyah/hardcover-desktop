@@ -27,8 +27,8 @@ use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::tab::TabBar;
+use gpui_kit::component::{Disableable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, Global, IntoElement, ParentElement as _, Render,
     SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
@@ -46,6 +46,7 @@ use crate::library::writes;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_dialog;
+use crate::ui::kit::small_tab;
 
 /// Opens the dialog for `entry`, which must be in `model`.
 pub fn open_progress(
@@ -387,14 +388,10 @@ impl Render for ProgressDialog {
                         this.child(
                             TabBar::new("progress-unit")
                                 .segmented()
-                                .small()
+                                .small_control()
                                 .selected_index(usize::from(unit == InputUnit::Percent))
-                                .child(Tab::new().label(native.label()))
-                                .child(
-                                    Tab::new()
-                                        .label(InputUnit::Percent.label())
-                                        .aria_label("Percent"),
-                                )
+                                .child(small_tab(native.label()))
+                                .child(small_tab(InputUnit::Percent.label()).aria_label("Percent"))
                                 .on_click(move |ix, window, cx| {
                                     let unit = units[*ix];
                                     let _ =

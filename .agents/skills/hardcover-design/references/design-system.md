@@ -356,8 +356,8 @@ dust jacket.
   and %) has a small segmented control before it, the book's own unit
   first. What the input means goes after the field in `fg-muted`, tabular
   ("Page 200 of 476", "6h 25m of 16h 10m"). A unit that can't be offered is
-  left out rather than disabled (Kit limits), and a caption under the
-  field says why.
+  left out, and a caption under the field says why. The segments are
+  `ui::kit::small_tab`s in a `.small_control()` bar: 24 high, 12 px labels.
 
 ### Chips (`chip.rs`)
 
@@ -1000,9 +1000,11 @@ demo build shows them all with `HARDCOVER_GALLERY=1`).
 
 `ui::kit` fixes what the theme can't reach and the kit lets the app
 refine: inputs, selects and text areas on `raised` (`RaisedField`), small
-controls at 12 px (`SmallControl`, `SmallIconButton`), dialogs on `raised`
-with the system's widths and keys (`open_dialog`, `open_alert_dialog`,
-`bind_keys`), and quiet buttons on the text spine (`OnTextSpine`).
+controls at 12 px (`SmallControl`, `SmallIconButton`, `small_tab`),
+dialogs on `raised` with the system's widths and keys (`open_dialog`,
+`open_alert_dialog`, `bind_keys`; a confirmation's own footer focuses its
+button by handle, with the ring only after keyboard input), and quiet
+buttons on the text spine (`OnTextSpine`).
 
 What follows is off the system and can't be fixed without patching the
 kit. Keep it in step with `ui::kit`'s module doc; remove an item in the
@@ -1013,11 +1015,9 @@ commit that fixes it.
   the menu sets both itself.
 - Menu items hover at 10% in dark mode: the kit's `accent` serves both menu
   items and ghost buttons, and ghost buttons take half of it there.
-- The sidebar's menu hover is 8%, not 5%.
-- The segmented tab bar's sliding indicator is always paper.
-- A disabled segment of a segmented tab bar is painted paper, like the
-  selected one, so it reads as chosen. The app leaves out a segment it
-  can't offer instead.
+- The segmented tab bar's sliding indicator is always paper, and casts the
+  kit's small shadow: a shadow on a control.
+- A small segment pads its label 10, not 8.
 - A disabled switch fades its track, not its thumb.
 - A radio's circle takes no style from outside: unchecked and disabled, it
   is faint, most in dark mode. Settings shows a fixed theme as text rather
@@ -1032,3 +1032,10 @@ commit that fixes it.
   labels (Stats, the goal's months) are a fixed 10 px; a segmented tab
   bar's height and padding (Search's tabs, Discover's periods, the progress
   dialog's units); a dialog's margins.
+- The kit's buttons and switches show their ring whenever they hold focus,
+  not only after keyboard input. A press never focuses one, so this shows
+  only where focus is handed to it after a pointer action: a menu closing
+  onto its trigger, a dialog closing onto its opener, Back. Buttons whose
+  focus the app keeps (the alert footers, `ui::kit::KeyboardRing`) follow
+  the rule.
+- Empty-state icons are Lucide's, at stroke 2, not 1.5.
