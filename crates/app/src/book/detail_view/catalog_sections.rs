@@ -11,7 +11,7 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, SharedString,
+    AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, Pixels, SharedString,
     Styled as _, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
@@ -30,6 +30,7 @@ use crate::format::{average_rating_text, count_text};
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{
     Block, CoverShelf, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars, TextButton,
+    books_that_fit,
 };
 
 /// Similar books fetched for one book.
@@ -41,8 +42,12 @@ pub(super) enum Similar {
 /// Similar books wait this long after the details, so arrowing through a
 /// list spends one request per book passed over, not two.
 const SIMILAR_DELAY: Duration = Duration::from_millis(600);
-/// Similar books shown.
-const SIMILAR_SHOWN: usize = 8;
+/// Similar books fetched: two rows of lg covers in the side column of a
+/// wide window. One `books` field, so one request whatever the count.
+const SIMILAR_FETCHED: usize = 16;
+/// Similar books shown in one column (the narrow pane, the page without a
+/// side column).
+const SIMILAR_IN_COLUMN: usize = 8;
 /// Tags shown per group until "Show all tags".
 const TAGS_SHOWN: usize = 6;
 /// Other titles shown.
@@ -69,7 +74,7 @@ impl BookDetailView {
             .iter()
             .copied()
             .filter(|b| *b != id)
-            .take(SIMILAR_SHOWN)
+            .take(SIMILAR_FETCHED)
             .collect();
         self.similar.remove(&id);
         self.similar_loading = Some(id);
@@ -335,10 +340,13 @@ impl BookDetailView {
 
     /// Similar books: lg covers with their shadow, 16 apart, each with its
     /// title under it, a text button in two lines at most.
+    /// Similar books: in one column, the first [`SIMILAR_IN_COLUMN`]; in the
+    /// side column (`side`, the books it holds), a grid of them.
     pub(super) fn render_similar(
         &self,
         book: &BookSummary,
         details: Option<&BookDetails>,
+        side: Option<usize>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let details = details?;
@@ -349,17 +357,23 @@ impl BookDetailView {
         let body = match self.similar.get(&book.id) {
             Some(Similar::Ready(books)) if books.is_empty() => return None,
             Some(Similar::Ready(books)) => CoverShelf::new(CoverSize::Lg)
-                .books(books.iter().map(|book| {
-                    let id = book.id.get().cast_unsigned();
-                    (
-                        Cover::new(CoverSize::Lg, book.title.clone())
-                            .author(book.authors.first().cloned())
-                            .thumbnail(book.cover.as_ref().map(|c| c.url.clone()))
-                            .shadow(true)
-                            .opens(("similar-cover", id), Page::Book(book.clone())),
-                        TextButton::book(("similar-title", id), book),
-                    )
-                }))
+                .when(side.is_some(), CoverShelf::grid)
+                .books(
+                    books
+                        .iter()
+                        .take(side.unwrap_or(SIMILAR_IN_COLUMN))
+                        .map(|book| {
+                            let id = book.id.get().cast_unsigned();
+                            (
+                                Cover::new(CoverSize::Lg, book.title.clone())
+                                    .author(book.authors.first().cloned())
+                                    .thumbnail(book.cover.as_ref().map(|c| c.url.clone()))
+                                    .shadow(true)
+                                    .opens(("similar-cover", id), Page::Book(book.clone())),
+                                TextButton::book(("similar-title", id), book),
+                            )
+                        }),
+                )
                 .into_any_element(),
             Some(Similar::Failed(message)) => h_flex()
                 .flex_wrap()
@@ -380,6 +394,12 @@ impl BookDetailView {
         };
         Some(Block::new("Similar books").child(body).into_any_element())
     }
+}
+
+/// How many similar books the side column `width` wide shows: two rows of
+/// lg covers, never fewer than one column shows, at most those fetched.
+pub(super) fn similar_in_side(width: Pixels, rem_size: Pixels) -> usize {
+    (books_that_fit(width, CoverSize::Lg, rem_size) * 2).clamp(SIMILAR_IN_COLUMN, SIMILAR_FETCHED)
 }
 
 /// "1 rating", "9,223 ratings".
@@ -475,6 +495,18 @@ mod tests {
             .into_iter()
             .map(|b| (b.rating, b.count))
             .collect()
+    }
+
+    #[test]
+    fn the_side_column_shows_two_rows_of_similar_books() {
+        let rem = gpui_kit::px(16.);
+        // The side at its narrowest holds three lg covers a row: still the
+        // eight one column shows.
+        assert_eq!(similar_in_side(gpui_kit::px(320.), rem), 8);
+        // Five a row (464): two rows.
+        assert_eq!(similar_in_side(gpui_kit::px(464.), rem), 10);
+        // A 2560 pane's side (920) holds nine a row: all that were fetched.
+        assert_eq!(similar_in_side(gpui_kit::px(920.), rem), 16);
     }
 
     #[test]

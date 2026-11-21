@@ -69,17 +69,12 @@ pub const PACE_TICK_WIDTH: Pixels = px(2.);
 pub const PACE_TICK_OVERHANG: Pixels = px(3.);
 
 /// The widest a page's content gets (768): Coming soon, Discover, Stats (in
-/// one column), list, series and author pages, and the book pane's content.
-/// The page inset is outside it.
+/// one column), list, series and author pages. The page inset is outside it.
 pub const PAGE_MAX: Rems = rems(48.);
 /// A page's inset (32; `p_8`).
 pub const PAGE_INSET: Rems = rems(2.);
 /// A page's frame at its widest: [`PAGE_MAX`] and the inset on both sides.
 pub const PAGE_FRAME_MAX: Rems = rems(PAGE_MAX.0 + 2. * PAGE_INSET.0);
-/// The widest Home's content gets in two columns (1024), its inset
-/// included: beyond it the rows' actions drift away from their books. A
-/// wider region gives Home a third column instead ([`HOME_WIDE_MAX`]).
-pub const HOME_MAX: Rems = rems(64.);
 /// The narrowest a page's main column gets beside its rail (400): a lead
 /// book's xl cover with its title and buttons, or a row's cover, text and
 /// actions. Narrower, the rail folds under it.
@@ -90,16 +85,6 @@ pub const HEADER_INFO_MIN: Rems = rems(12.);
 pub const BACK_LABEL_MAX: Rems = rems(20.);
 /// The book pane's inset (24; `px_6`).
 pub const PANE_INSET: Rems = rems(1.5);
-/// The book pane at its widest: [`PAGE_MAX`] and the pane's inset on both
-/// sides. Its object bar keeps to it, so the tools stay over the content.
-pub const PANE_FRAME_MAX: Rems = rems(PAGE_MAX.0 + 2. * PANE_INSET.0);
-/// A main column at [`PAGE_MAX`] beside the [`RAIL`], 24 apart (1064): the
-/// book pane's content when the pane is wide enough for its rail.
-pub const COLUMNS_MAX: Rems = rems(PAGE_MAX.0 + 1.5 + RAIL.0);
-/// The book pane with its rail at its widest (1112): [`COLUMNS_MAX`] and the
-/// pane's inset on both sides. Its object bar keeps to it, as to
-/// [`PANE_FRAME_MAX`] when it has no rail.
-pub const PANE_COLUMNS_FRAME_MAX: Rems = rems(COLUMNS_MAX.0 + 2. * PANE_INSET.0);
 /// The narrowest book pane beside a catalogue page's list (392): its header
 /// keeps the xl cover beside the info column at [`HEADER_INFO_MIN`], 24
 /// apart, inside the pane's inset (24 + 128 + 24 + 192 + 24). Narrower, the
@@ -118,20 +103,13 @@ pub const CHART_SHORT: Rems = rems(10.);
 /// to a row at the page's width and two in a narrow window.
 pub const FIGURE: Rems = rems(10.);
 
-// ----- Wide windows: surplus width holds more content, never wider rows -----
+// ----- Wide windows: rows and panels fill the width; reading text keeps its measure -----
 
 /// The narrowest a content column gets beside another (448): two of them
 /// and the [`RAIL`] need a 1536 window, so the 1200 default keeps two
 /// columns. [`MAIN_MIN`] is too tight here: the lead book's buttons overrun
 /// it, and an upcoming row's title has little room beside its date and lane.
 pub const WIDE_COLUMN_MIN: Rems = rems(28.);
-/// The widest a content column gets beside another (720): Home's two
-/// content columns in its wide tier. Its rows' actions stay by their books.
-pub const COLUMN_MAX: Rems = rems(45.);
-/// The widest Home's content gets in three columns (1840), its inset
-/// included: two [`COLUMN_MAX`] columns and the [`RAIL`], 32 apart. Beyond
-/// it, paper.
-pub const HOME_WIDE_MAX: Rems = rems(2. * COLUMN_MAX.0 + 2. * 2. + RAIL.0 + 2. * PAGE_INSET.0);
 /// The widest the Series destination's column gets (1280): room for a
 /// strip of 23 books beside the [`NEXT_LANE`]. It grows past
 /// [`SERIES_COLUMN`] only as far as the longest series needs.
@@ -146,6 +124,12 @@ pub const STATS_WIDE_FRAME_MAX: Rems = rems(2. * PAGE_MAX.0 + 2. + 2. * PAGE_INS
 
 /// The widest prose and readers' words get (640).
 pub const PROSE: Rems = rems(40.);
+/// The narrowest the side column beside a book's text gets (320): its tags
+/// and a row of three lg similar covers. The book's blocks split into the
+/// text at [`PROSE`] and this side column, 32 apart, only when the main
+/// column holds both (992: the full page in a 1600 window); narrower, they
+/// stay in one column.
+pub const SIDE_MIN: Rems = rems(20.);
 /// The widest an empty state's sentence gets (288; `w_72`).
 pub const EMPTY_TEXT: Rems = rems(18.);
 
