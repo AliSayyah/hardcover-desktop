@@ -22,19 +22,28 @@
 //!    unpacked, with plain relative paths and a total size cap. An `AppImage`
 //!    must carry the `AppImage` type 2 magic bytes.
 //!
-//! Tarball files are staged inside the prefix and renamed into place, the
-//! binary last, so every file is replaced atomically. An `AppImage` is written
-//! next to the running one and renamed over it, keeping its path (and so its
-//! name, launchers and the restart path). Replacing a running executable or a
-//! mounted `AppImage` is safe on Linux; the new version runs after a restart.
+//! Installing holds the same `flock` that `install.sh` takes, on the prefix
+//! (or the `AppImage`'s directory), so two installs never interleave. Every
+//! file is first written beside its destination, in the destination's own
+//! directory, so the rename that replaces it stays on one filesystem even when
+//! `bin/` or `share/` is a link to another one; only once all of them are
+//! written are they renamed into place, the binary last, and the directories
+//! synced. A failure before then changes nothing. The temporary files share a
+//! name prefix and are made only under the lock, so the next install removes
+//! any that a crash left behind. An `AppImage` is replaced the same way,
+//! keeping its path (and so its name, launchers and the restart path).
+//! Replacing a running executable or a mounted `AppImage` is safe on Linux;
+//! the new version runs after a restart.
 
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::io::{Read, Write as _};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
@@ -62,12 +71,20 @@ const BINARY: &str = "hardcover-desktop";
 const MAX_TARBALL_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_APPIMAGE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 512 * 1024 * 1024;
-const STAGING_DIR: &str = ".hardcover-desktop-update";
+/// The name prefix of the files an install writes beside their destinations.
+/// `install.sh` uses it too, and both make such files only under the lock.
+const TEMP_PREFIX: &str = ".hardcover-desktop-update-";
+/// How long an install waits for another one (or `install.sh`) to finish.
+const LOCK_WAIT: Duration = Duration::from_secs(60);
 
 // ----- versions -----
 
 /// A `major.minor.patch` version with an optional pre-release suffix, which
 /// sorts before the release it precedes. Build metadata is ignored.
+///
+/// Pre-releases order as Semantic Versioning says: identifier by identifier,
+/// numeric ones as numbers (`rc.2` before `rc.10`) and before alphanumeric
+/// ones, and a longer list after a shorter one it starts with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Version {
     pub major: u64,
@@ -83,7 +100,9 @@ impl Version {
         let s = s.trim().strip_prefix('v').unwrap_or(s.trim());
         let s = s.split('+').next()?;
         let (core, pre) = match s.split_once('-') {
-            Some((core, pre)) if !pre.is_empty() => (core, Some(pre.to_owned())),
+            Some((core, pre)) if pre.split('.').all(is_pre_identifier) => {
+                (core, Some(pre.to_owned()))
+            }
             Some(_) => return None,
             None => (s, None),
         };
@@ -124,8 +143,39 @@ impl Ord for Version {
                 (None, None) => Ordering::Equal,
                 (None, Some(_)) => Ordering::Greater,
                 (Some(_), None) => Ordering::Less,
-                (Some(a), Some(b)) => a.cmp(b),
+                (Some(a), Some(b)) => a
+                    .split('.')
+                    .map(PreIdentifier::of)
+                    .cmp(b.split('.').map(PreIdentifier::of)),
             })
+    }
+}
+
+/// A pre-release identifier: ASCII letters, digits and `-`, not empty, and
+/// without a leading zero when numeric. Leading zeros are refused so that
+/// equal versions are also equal strings (`rc.01` is not `rc.1`).
+fn is_pre_identifier(id: &str) -> bool {
+    !id.is_empty()
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        && !(id.len() > 1 && id.starts_with('0') && id.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// One pre-release identifier, ordered as Semantic Versioning says: numeric
+/// identifiers by value (compared by length, then digits, so any length
+/// works), before every alphanumeric one, which compare as ASCII.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum PreIdentifier<'a> {
+    Numeric(usize, &'a str),
+    Alphanumeric(&'a str),
+}
+
+impl<'a> PreIdentifier<'a> {
+    fn of(id: &'a str) -> Self {
+        if id.bytes().all(|b| b.is_ascii_digit()) {
+            Self::Numeric(id.len(), id)
+        } else {
+            Self::Alphanumeric(id)
+        }
     }
 }
 
@@ -473,11 +523,8 @@ impl Updater {
                     MAX_TARBALL_BYTES,
                 )?;
                 let top = expected_name.trim_end_matches(".tar.gz");
-                let staging = prefix.join(STAGING_DIR);
-                let result = unpack(&tarball, top, &staging)
-                    .and_then(|files| place(&staging, prefix, &files));
-                let _ = fs::remove_dir_all(&staging);
-                result
+                let _lock = lock_dir(prefix)?;
+                stage_tarball(&tarball, top, prefix)?.commit()
             }
             InstallKind::AppImage { path } => {
                 let image = self.fetch_verified(
@@ -488,7 +535,13 @@ impl Updater {
                 if !is_appimage(&image) {
                     return Err(update_error("the update is not an AppImage"));
                 }
-                replace_file(path, &image)
+                let dir = path
+                    .parent()
+                    .ok_or_else(|| update_error("the AppImage has no directory"))?;
+                let _lock = lock_dir(dir)?;
+                let mut staged = Staged::default();
+                staged.write(path, 0o755, &mut image.as_slice())?;
+                staged.commit()
             }
             InstallKind::Other => Err(update_error("this copy can't update itself")),
         }
@@ -556,15 +609,36 @@ fn verify(public_key: &str, data: &[u8], signature: &[u8], file_name: &str) -> R
     Ok(())
 }
 
-/// Unpacks the allowed files under `top/` into `staging`, returning their
-/// paths relative to the prefix.
-fn unpack(tarball: &[u8], top: &str, staging: &Path) -> Result<Vec<PathBuf>> {
-    let _ = fs::remove_dir_all(staging);
-    fs::create_dir_all(staging).map_err(io_error)?;
+/// Takes the exclusive `flock` on `dir` that `install.sh` takes on the prefix,
+/// waiting up to [`LOCK_WAIT`] for another install to finish. The lock lasts
+/// as long as the returned file is open.
+fn lock_dir(dir: &Path) -> Result<fs::File> {
+    let file = fs::File::open(dir).map_err(io_error)?;
+    let deadline = Instant::now() + LOCK_WAIT;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(fs::TryLockError::WouldBlock) => {
+                return Err(update_error(
+                    "another installation of Hardcover Desktop is still running",
+                ));
+            }
+            Err(fs::TryLockError::Error(e)) => return Err(io_error(e)),
+        }
+    }
+}
+
+/// Writes the allowed files under `top/` beside their destinations in
+/// `prefix`, ready to be renamed into place with the binary last.
+fn stage_tarball(tarball: &[u8], top: &str, prefix: &Path) -> Result<Staged> {
     let corrupt = |what: &str| update_error(&format!("the update archive is not valid: {what}"));
+    let binary = Path::new("bin").join(BINARY);
 
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(tarball));
-    let mut files = Vec::new();
+    let mut staged = Staged::default();
     let mut total: u64 = 0;
     for entry in archive.entries().map_err(|_| corrupt("unreadable"))? {
         let mut entry = entry.map_err(|_| corrupt("unreadable entry"))?;
@@ -588,69 +662,123 @@ fn unpack(tarball: &[u8], top: &str, staging: &Path) -> Result<Vec<PathBuf>> {
         if !kind.is_file() {
             return Err(corrupt("links and special files are not allowed"));
         }
-        if rel != Path::new("bin").join(BINARY) && !rel.starts_with("share") {
+        if rel != binary && !rel.starts_with("share") {
             return Err(corrupt("unexpected file"));
         }
         total = total.saturating_add(entry.size());
         if total > MAX_UNPACKED_BYTES {
             return Err(corrupt("too large"));
         }
-
-        let dest = staging.join(&rel);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(io_error)?;
-        }
-        let mut out = fs::File::create(&dest).map_err(io_error)?;
-        let mut buf = Vec::new();
-        entry
-            .read_to_end(&mut buf)
-            .map_err(|_| corrupt("truncated"))?;
-        out.write_all(&buf).map_err(io_error)?;
-        out.sync_all().map_err(io_error)?;
-        let mode = if rel.starts_with("bin") { 0o755 } else { 0o644 };
-        set_mode(&dest, mode)?;
-        files.push(rel);
+        let mode = if rel == binary { 0o755 } else { 0o644 };
+        staged.write(&prefix.join(&rel), mode, &mut entry)?;
     }
-    if !files.iter().any(|f| f == &Path::new("bin").join(BINARY)) {
+    let binary = prefix.join(binary);
+    if !staged.files.iter().any(|(_, dest)| *dest == binary) {
         return Err(corrupt("no executable"));
     }
-    Ok(files)
+    // A stable sort: the binary last, everything else in archive order.
+    staged.files.sort_by_key(|(_, dest)| *dest == binary);
+    Ok(staged)
 }
 
-/// Renames each staged file over its destination, the executable last.
-fn place(staging: &Path, prefix: &Path, files: &[PathBuf]) -> Result<()> {
-    let binary = Path::new("bin").join(BINARY);
-    let ordered = files
-        .iter()
-        .filter(|f| **f != binary)
-        .chain(files.iter().filter(|f| **f == binary));
-    for rel in ordered {
-        let dest = prefix.join(rel);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(io_error)?;
+/// Files written beside their destinations, waiting to be renamed over them.
+/// Dropping it removes every file not renamed yet.
+#[derive(Default)]
+struct Staged {
+    /// `(temporary file, destination)`, in the order they are renamed.
+    files: Vec<(PathBuf, PathBuf)>,
+    /// The destination directories, each swept once and synced at the end.
+    dirs: BTreeSet<PathBuf>,
+}
+
+impl Staged {
+    /// Copies `data` into a new file beside `dest`, with `mode`. The first
+    /// file in a directory first removes what a crashed install left there.
+    fn write(&mut self, dest: &Path, mode: u32, data: &mut dyn Read) -> Result<()> {
+        let dir = dest
+            .parent()
+            .ok_or_else(|| update_error("installing the update failed: no directory"))?;
+        fs::create_dir_all(dir).map_err(io_error)?;
+        if self.dirs.insert(dir.to_owned()) {
+            remove_leftovers(dir);
         }
-        fs::rename(staging.join(rel), &dest).map_err(io_error)?;
+        let (temp, mut out) = create_temp(dir)?;
+        self.files.push((temp.clone(), dest.to_owned()));
+        let mut buf = vec![0; 64 * 1024];
+        loop {
+            let n = data
+                .read(&mut buf)
+                .map_err(|_| update_error("the update archive is not valid: truncated"))?;
+            if n == 0 {
+                break;
+            }
+            out.write_all(&buf[..n]).map_err(io_error)?;
+        }
+        out.sync_all().map_err(io_error)?;
+        set_mode(&temp, mode)
     }
-    Ok(())
+
+    /// Renames every file over its destination, in order, then syncs their
+    /// directories so the renames survive a crash.
+    fn commit(mut self) -> Result<()> {
+        while !self.files.is_empty() {
+            let (temp, dest) = &self.files[0];
+            fs::rename(temp, dest).map_err(io_error)?;
+            self.files.remove(0);
+        }
+        for dir in &self.dirs {
+            // Best effort: the files are in place by now, and a filesystem
+            // that can't sync a directory has nothing more to offer.
+            if let Ok(dir) = fs::File::open(dir) {
+                let _ = dir.sync_all();
+            }
+        }
+        Ok(())
+    }
 }
 
-/// Writes `data` next to `path` and renames it over `path`, executable.
-fn replace_file(path: &Path, data: &[u8]) -> Result<()> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| update_error("the AppImage has no directory"))?;
-    let temp = dir.join(format!("{STAGING_DIR}-{}", std::process::id()));
-    let result = (|| {
-        let mut out = fs::File::create(&temp).map_err(io_error)?;
-        out.write_all(data).map_err(io_error)?;
-        out.sync_all().map_err(io_error)?;
-        set_mode(&temp, 0o755)?;
-        fs::rename(&temp, path).map_err(io_error)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
+impl Drop for Staged {
+    fn drop(&mut self) {
+        for (temp, _) in &self.files {
+            let _ = fs::remove_file(temp);
+        }
     }
-    result
+}
+
+/// A new file in `dir` named with [`TEMP_PREFIX`].
+fn create_temp(dir: &Path) -> Result<(PathBuf, fs::File)> {
+    static SERIAL: AtomicU64 = AtomicU64::new(0);
+    loop {
+        let serial = SERIAL.fetch_add(1, AtomicOrdering::Relaxed);
+        let path = dir.join(format!("{TEMP_PREFIX}{}-{serial}", std::process::id()));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => return Ok((path, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(io_error(e)),
+        }
+    }
+}
+
+/// Removes the temporary files a crashed install left in `dir`. Run under the
+/// lock, where no other install can be writing one.
+fn remove_leftovers(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let ours = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|n| n.starts_with(TEMP_PREFIX));
+        // Not through a link, and never a directory.
+        if ours && entry.file_type().is_ok_and(|t| t.is_file()) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 #[cfg(unix)]

@@ -173,7 +173,7 @@ bump level:
 release-pr level:
     scripts/release.sh pr "$1"
 
-# Only tag: tag origin/master with its version once CI passed there, push the tag, follow the release build
+# Only tag: tag the commit on origin/master that bumped to its version, once CI passed on it; push the tag, follow the release build
 [group('release')]
 release-tag *args:
     scripts/release.sh tag "$@"

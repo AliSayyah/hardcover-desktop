@@ -208,7 +208,7 @@ fn cover_quality_matches_reference() {
     let mut failures = Vec::new();
     let mut checked = 0;
     for path in &paths {
-        for h in [144, 288, 480] {
+        for h in [144, 288, 600] {
             if check(path, h, &mut failures) {
                 checked += 1;
             }
