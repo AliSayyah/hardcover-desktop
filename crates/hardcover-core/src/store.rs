@@ -898,6 +898,26 @@ mod tests {
         assert_eq!(c.load_library(UserId::new(1)).unwrap().len(), 1);
     }
 
+    /// A cache made before the companions table gets it at the next open,
+    /// keeping its library: no version bump needed.
+    #[test]
+    fn a_cache_without_companions_gains_them_and_keeps_its_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        let me = UserId::new(1);
+        {
+            let c = LibraryCache::open(&path).unwrap();
+            c.replace_library(me, &[entry(1, 1, ReadingStatus::Read)])
+                .unwrap();
+            c.conn().execute_batch("DROP TABLE companions").unwrap();
+        }
+        let c = LibraryCache::open(&path).unwrap();
+        assert_eq!(c.load_library(me).unwrap().len(), 1);
+        c.save_companion("goals", "", &vec![1, 2]).unwrap();
+        let goals: Vec<(String, Vec<i32>)> = c.load_companions("goals").unwrap();
+        assert_eq!(goals, [(String::new(), vec![1, 2])]);
+    }
+
     #[test]
     fn companions_round_trip_by_kind_and_key() {
         let c = LibraryCache::open_in_memory().unwrap();

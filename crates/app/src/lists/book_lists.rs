@@ -22,7 +22,8 @@ use crate::design::{TypeRoles as _, size};
 use crate::format::{count_text, needs_permission};
 use crate::notify::{notify_failure, notify_outcome};
 use crate::session;
-use crate::ui::kit::{SmallControl as _, open_alert_dialog};
+use crate::ui::LoadFailed;
+use crate::ui::kit::open_alert_dialog;
 
 /// The model, when the session can read lists.
 fn readable(cx: &App) -> Option<Entity<ListsModel>> {
@@ -258,10 +259,9 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
     // Adding goes through `edition_owned` (write:library); taking it off is
     // a list change (write:lists).
     let (allowed, reason): (bool, Option<SharedString>) = match (&rows, owned) {
-        (None, _) => match &failure {
-            Some(_) => (false, Some("Couldn't check your Owned list.".into())),
-            None => (false, Some("Checking your Owned list…".into())),
-        },
+        // A failure is said by `LoadFailed`, below.
+        (None, _) if failure.is_some() => (false, None),
+        (None, _) => (false, Some("Checking your Owned list…".into())),
         (Some(_), true) if !session::has_scope(cx, WRITE_LISTS) => {
             (false, Some(needs_permission(WRITE_LISTS).into()))
         }
@@ -279,14 +279,13 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
             .map(|_| "Another edition is on your Owned list".into()),
         _ => None,
     };
-    let retry = failure.map(|message| {
+    let failed = failure.map(|message| {
         let lists = lists.clone();
-        Button::new("book-owned-retry")
-            .ghost()
-            .small_control()
-            .label("Try again")
-            .tooltip(message)
-            .on_click(move |_, _, cx| lists.update(cx, |m, cx| m.retry_book(book, cx)))
+        LoadFailed::new(
+            "book-owned-retry",
+            format!("Couldn't check your Owned list. {message}"),
+        )
+        .on_retry(move |_, _, cx| lists.update(cx, |m, cx| m.retry_book(book, cx)))
     });
     let entry = entry.clone();
     // The hint is a caption beside the switch, wrapping under it where the
@@ -322,7 +321,7 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
                     .caption(cx)
                     .child(note)
             }))
-            .children(retry)
+            .children(failed)
             .into_any_element(),
     )
 }

@@ -116,6 +116,11 @@ where
         self.resource.invalidate(key);
     }
 
+    /// [`Self::invalidate`] for every key.
+    pub fn invalidate_all(&mut self) {
+        self.resource.invalidate_all_but(|_| false);
+    }
+
     pub fn remove(&mut self, key: &K, cx: &mut Context<Self>) {
         self.resource.remove(key);
         cx.emit(SharedChanged(key.clone()));

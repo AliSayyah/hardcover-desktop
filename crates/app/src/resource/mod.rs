@@ -915,6 +915,41 @@ mod tests {
         assert!(!ask(&owner, Demand::Active, Ok(1), cx));
     }
 
+    /// A list row taken off while its next page is on its way: the page was
+    /// asked for at the old offset, so it is dropped, and the next one asked
+    /// for starts where the rows now end.
+    #[gpui_kit::test]
+    fn more_asked_for_before_a_write_is_dropped(cx: &mut TestAppContext) {
+        let owner = owner(cx);
+        ask(&owner, Demand::Shown, Ok(10), cx);
+        cx.run_until_parked();
+        let sent = owner.update(cx, |o, cx| {
+            let sent = o
+                .numbers
+                .extend(1, |_| Ok(5), |v, more| v + more, bind(), cx);
+            // The write: one row off.
+            o.numbers.update(&1, |v| *v -= 1);
+            sent
+        });
+        assert!(sent);
+        cx.run_until_parked();
+        owner.read_with(cx, |o, _| {
+            assert_eq!(o.numbers.value(&1).map(|v| **v), Some(9), "not merged");
+            assert_eq!(o.landings.last(), Some(&(1, Landing::Dropped)));
+            assert!(!o.numbers.is_loading(&1));
+        });
+        // Asked again, it goes out from the new value.
+        let sent = owner.update(cx, |o, cx| {
+            o.numbers
+                .extend(1, |_| Ok(5), |v, more| v + more, bind(), cx)
+        });
+        assert!(sent);
+        cx.run_until_parked();
+        owner.read_with(cx, |o, _| {
+            assert_eq!(o.numbers.value(&1).map(|v| **v), Some(14))
+        });
+    }
+
     #[gpui_kit::test]
     fn a_failure_keeps_the_value_and_waits_to_be_shown(cx: &mut TestAppContext) {
         let owner = owner(cx);

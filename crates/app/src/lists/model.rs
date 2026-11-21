@@ -348,25 +348,40 @@ impl ListsModel {
         }
     }
 
-    /// Reloads the lists, and the index if a book page has needed it
-    /// (Refresh, or a new grant). The old index answers until the new one
-    /// arrives; this also retries one that failed.
+    /// Reloads what is stale or failed: the lists, and the index if a book
+    /// page has needed it (Refresh, which made them stale, or a new grant).
+    /// The old index answers until the new one arrives.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
+        self.reload_with(Demand::Shown, cx);
+    }
+
+    /// Reloads the lists, the index and the book shown, however fresh: a
+    /// write changed them in ways its result doesn't say. List pages load
+    /// their books again too (`ListsEvent::Reloaded`).
+    fn reload_with(&mut self, demand: Demand, cx: &mut Context<Self>) {
         if !self.session.allows(READ_LISTS) {
             return;
         }
-        self.request_lists(Demand::Shown, cx);
+        self.request_lists(demand, cx);
         if self.plan_reload() {
-            self.request_index(Demand::Shown, cx);
+            self.request_index(demand, cx);
+        }
+        // Without an index on its way, the books waiting on it are looked
+        // up now.
+        if !self.index.is_loading(&()) {
+            for book in self.take_lookups() {
+                self.look_up(book, demand, cx);
+            }
         }
         cx.emit(ListsEvent::Reloaded);
     }
 
-    /// Forgets the books looked up alone, queueing the one shown to be looked
-    /// up again. Whether the index should load again: only if it was loaded
-    /// or wanted, so a Refresh with no book page opened costs no index load.
+    /// Marks the books looked up alone to be looked up again (their rows
+    /// answer meanwhile), queueing the one shown. Whether the index should
+    /// load again: only if it was loaded or wanted, so a Refresh with no
+    /// book page opened costs no index load.
     fn plan_reload(&mut self) -> bool {
-        self.book_rows.retain(|_| false);
+        self.book_rows.invalidate_all_but(|_| false);
         if let Some(book) = self.shown_book {
             self.pending_books.insert(book);
         }
@@ -406,7 +421,10 @@ impl ListsModel {
 
     /// The waiting books that need a lookup of their own, now that an index
     /// load has finished. Without any index they keep waiting (Refresh
-    /// retries); a complete index answers for them all.
+    /// retries); a complete index answers for them all. One looked up
+    /// already is asked for again only if its rows are stale (`look_up`'s
+    /// demand decides).
+    #[must_use]
     fn take_lookups(&mut self) -> Vec<BookId> {
         let Some(index) = self.index.value(&()) else {
             return Vec::new();
@@ -418,7 +436,7 @@ impl ListsModel {
         }
         books
             .into_iter()
-            .filter(|b| self.book_rows.value(b).is_none() && !self.book_rows.is_loading(b))
+            .filter(|b| !self.book_rows.is_loading(b))
             .collect()
     }
 
@@ -800,7 +818,7 @@ impl ListsModel {
                         }
                     }
                     // `Reloaded` also has the Owned list's page load again.
-                    None => this.reload(cx),
+                    None => this.reload_with(Demand::Now, cx),
                 }
                 Ok(())
             },
@@ -972,8 +990,9 @@ mod tests {
         assert_eq!(m.pending_books.len(), 2);
 
         m.index.hydrate((), index(Vec::new(), false));
-        m.book_rows.hydrate(b, Vec::new());
-        assert_eq!(m.take_lookups(), [a]);
+        let mut books = m.take_lookups();
+        books.sort();
+        assert_eq!(books, [a, b]);
         assert!(m.pending_books.is_empty());
 
         // A complete index answers for every book.
@@ -993,7 +1012,8 @@ mod tests {
         m.index.hydrate((), index(Vec::new(), false));
         m.book_rows.hydrate(book, vec![row(100, 2, 10)]);
         assert!(m.plan_reload());
-        assert!(m.book_rows.value(&book).is_none());
+        // Still answering until it is looked up again.
+        assert!(m.book_rows.value(&book).is_some());
         assert!(m.pending_books.contains(&book));
     }
 
@@ -1061,6 +1081,27 @@ mod tests {
             assert_eq!(m.lists.started(), 2);
             assert_eq!(m.index.started(), 2);
         });
+    }
+
+    /// A reload a write asks for (the Owned list changed in ways its result
+    /// doesn't say) goes out however fresh the lists; one for a new grant
+    /// only fetches what is stale.
+    #[gpui_kit::test]
+    fn a_write_reloads_however_fresh(cx: &mut gpui_kit::TestAppContext) {
+        let model = cx.new(|_| ListsModel::new(session()));
+        model.update(cx, |m, cx| {
+            m.load(cx);
+            m.ensure_book(BookId::new(10), cx);
+        });
+        cx.run_until_parked();
+        let asked = |cx: &mut gpui_kit::TestAppContext| {
+            model.read_with(cx, |m, _| (m.lists.started(), m.index.started()))
+        };
+        let before = asked(cx);
+        model.update(cx, |m, cx| m.reload(cx));
+        assert_eq!(asked(cx), before, "fresh: nothing");
+        model.update(cx, |m, cx| m.reload_with(Demand::Now, cx));
+        assert_eq!(asked(cx), (before.0 + 1, before.1 + 1));
     }
 
     /// B7: offline, the lists and the index of the last launch show.

@@ -433,9 +433,10 @@ impl ListView {
                     .update(cx, |s, cx| s.update(list, |p| p.remove(*row), cx));
             }
             ListsEvent::Deleted(id) => catalog.list_books.update(cx, |s, cx| s.remove(id, cx)),
-            // Refresh made them stale (the shell revalidates the page);
-            // a new grant may make them readable.
+            // Refresh, a new grant, or a write whose effect on the lists'
+            // books isn't known: every list's books load again when shown.
             ListsEvent::Reloaded => {
+                catalog.list_books.update(cx, |s, _| s.invalidate_all());
                 if let Some(id) = current {
                     catalog.request_list_books(id, Demand::Shown, cx);
                 }
