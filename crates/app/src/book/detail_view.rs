@@ -52,7 +52,6 @@ use std::time::Duration;
 
 use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::ButtonVariant;
-use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{ElementExt as _, IconName, WindowExt as _, v_flex};
@@ -67,6 +66,7 @@ use hardcover_core::{
 };
 
 use self::community_reviews::CommunityReviews;
+use self::notes::Notes;
 use self::review_section::ReviewEditor;
 use self::similar_books::{SideGrid, SimilarBooks};
 use super::edition_picker::{EditionChosen, EditionPicker};
@@ -90,6 +90,7 @@ use crate::ui::{
 mod catalog_sections;
 mod community_reviews;
 mod header;
+mod notes;
 mod review_section;
 mod similar_books;
 mod your_book;
@@ -146,11 +147,6 @@ impl Shown {
             privacy: entry.privacy,
         }
     }
-}
-
-/// The notes field's text compared with the entry's saved notes.
-fn notes_differ(text: &str, saved: Option<&str>) -> bool {
-    text.trim() != saved.unwrap_or("").trim()
 }
 
 /// Whether a book pane `width` wide takes the page's rail: inside its inset,
@@ -228,16 +224,6 @@ pub struct BookDetailView {
     /// Asks for what the book shows, a step at a time ([`SETTLE`]).
     settle: Option<Task<()>>,
     privacy: Entity<SelectState<Vec<PrivacyOption>>>,
-    notes: Entity<TextareaState>,
-    /// The entry and saved notes the notes field was last filled from.
-    notes_base: Option<(UserBookId, Option<String>)>,
-    /// Unsaved notes of entries no longer shown, restored when they are.
-    notes_drafts: HashMap<UserBookId, String>,
-    /// The entry whose notes were just saved, until the field changes again.
-    notes_saved: Option<UserBookId>,
-    /// The entry whose notes editor was opened ("Add a note…", "Edit"). An
-    /// unsaved draft keeps it open too.
-    notes_editing: Option<UserBookId>,
     /// One picker per book, so editions are fetched once per run.
     edition_pickers: HashMap<BookId, (Entity<EditionPicker>, Subscription)>,
     read_dialog: Option<(Entity<ReadDialog>, Subscription)>,
@@ -260,6 +246,10 @@ pub struct BookDetailView {
     /// view hands it as it lays the blocks out.
     similar_books: Entity<SimilarBooks>,
     similar_side: Rc<Cell<Option<SideGrid>>>,
+    /// Notes, a view of their own, and whether the view lays them out in
+    /// the rail.
+    notes: Entity<Notes>,
+    notes_in_rail: Rc<Cell<bool>>,
     /// Ratings asked for and not yet saved.
     ratings: Entity<Ratings>,
     /// The status menu's trigger, which its commands and their
@@ -271,45 +261,29 @@ pub struct BookDetailView {
 impl BookDetailView {
     pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let privacy = cx.new(|cx| SelectState::new(privacy_options(), None, window, cx));
-        let notes = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Only you can see these notes")
-                .auto_grow(3, 10)
-        });
 
         let (review, review_subscriptions) = ReviewEditor::new(window, cx);
         let ratings = cx.new(|cx| Ratings::new(model.clone(), window, cx));
         let community_reviews = cx.new(|cx| CommunityReviews::new(model.clone(), cx));
         let similar_side = Rc::new(Cell::new(None));
+        let notes_in_rail = Rc::new(Cell::new(false));
+        let notes = cx.new(|cx| Notes::new(model.clone(), notes_in_rail.clone(), window, cx));
         let similar_books = cx.new(|cx| SimilarBooks::new(similar_side.clone(), window, cx));
-        let mut subscriptions =
-            vec![
-                cx.observe_in(&model, window, |this, _, window, cx| {
-                    this.sync_controls(window, cx);
-                    cx.notify();
-                }),
-                cx.subscribe_in(
-                    &privacy,
-                    window,
-                    |this, _, event: &SelectEvent<Vec<PrivacyOption>>, window, cx| {
-                        if let SelectEvent::Confirm(Some(privacy)) = event {
-                            this.change_privacy(*privacy, window, cx);
-                        }
-                    },
-                ),
-                cx.subscribe_in(&notes, window, |this, _, event: &InputEvent, window, cx| {
-                    match event {
-                        InputEvent::PressEnter {
-                            secondary: true, ..
-                        } => this.save_notes(window, cx),
-                        InputEvent::Change => {
-                            this.notes_saved = None;
-                            cx.notify();
-                        }
-                        _ => {}
+        let mut subscriptions = vec![
+            cx.observe_in(&model, window, |this, _, window, cx| {
+                this.sync_controls(window, cx);
+                cx.notify();
+            }),
+            cx.subscribe_in(
+                &privacy,
+                window,
+                |this, _, event: &SelectEvent<Vec<PrivacyOption>>, window, cx| {
+                    if let SelectEvent::Confirm(Some(privacy)) = event {
+                        this.change_privacy(*privacy, window, cx);
                     }
-                }),
-            ];
+                },
+            ),
+        ];
         subscriptions.extend(review_subscriptions);
         subscriptions.push(cx.observe(&ratings, |_, _, cx| cx.notify()));
         // The Reviews block shows only with `read:social`.
@@ -336,10 +310,7 @@ impl BookDetailView {
             settle: None,
             privacy,
             notes,
-            notes_base: None,
-            notes_drafts: HashMap::new(),
-            notes_saved: None,
-            notes_editing: None,
+            notes_in_rail,
             edition_pickers: HashMap::new(),
             read_dialog: None,
             shown: None,
@@ -538,10 +509,10 @@ impl BookDetailView {
             .update(cx, |reviews, cx| reviews.set_book(book, cx));
         self.similar_books
             .update(cx, |similar, cx| similar.set_book(book, cx));
-        let entry = self.entry(self.model.read(cx));
-        let notes = entry.map(|e| (e.user_book_id, e.private_notes.clone()));
-        let next = entry.map(Shown::of);
-        self.sync_notes(notes, window, cx);
+        let entry = self.entry(self.model.read(cx)).map(|e| e.user_book_id);
+        self.notes
+            .update(cx, |notes, cx| notes.set_entry(entry, window, cx));
+        let next = self.entry(self.model.read(cx)).map(Shown::of);
         self.sync_review(window, cx);
         let Some(next) = next else {
             self.shown = None;
@@ -555,55 +526,6 @@ impl BookDetailView {
             Some(p) => s.set_selected_value(p, window, cx),
             None => s.set_selected_index(None, window, cx),
         });
-    }
-
-    /// Fills the notes field from `next` (entry id and saved notes) unless the
-    /// field holds an unsaved draft for that entry. A draft for another entry is
-    /// set aside and restored when that entry is shown again.
-    fn sync_notes(
-        &mut self,
-        next: Option<(UserBookId, Option<String>)>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.notes_base == next {
-            return;
-        }
-        let text = self.notes.read(cx).value().to_string();
-        let same_entry =
-            self.notes_base.as_ref().map(|(id, _)| *id) == next.as_ref().map(|(id, _)| *id);
-        if let Some((id, saved)) = &self.notes_base
-            && notes_differ(&text, saved.as_deref())
-        {
-            if same_entry {
-                // The saved notes changed under a draft (or a save made them
-                // equal): keep the text, and compare it with the new value.
-                self.notes_base = next;
-                return;
-            }
-            self.notes_drafts.insert(*id, text);
-        }
-        let Some((id, saved)) = next.clone() else {
-            self.notes_base = None;
-            return;
-        };
-        let value = self
-            .notes_drafts
-            .remove(&id)
-            .unwrap_or_else(|| saved.unwrap_or_default());
-        if *self.notes.read(cx).value() != *value {
-            self.notes
-                .update(cx, |s, cx| s.set_value(value, window, cx));
-        }
-        self.notes_base = next;
-        self.notes_saved = None;
-    }
-
-    /// Unsaved notes in the field for the entry shown.
-    fn notes_dirty(&self, cx: &App) -> bool {
-        self.notes_base
-            .as_ref()
-            .is_some_and(|(_, saved)| notes_differ(&self.notes.read(cx).value(), saved.as_deref()))
     }
 
     /// Resets the controls to the model after a rejected or failed change.
@@ -649,13 +571,6 @@ impl BookDetailView {
                 WriteOutcome::Saved(written) => {
                     if let Some((title, message)) = warning(&written) {
                         window.push_notification(Notification::warning(message).title(title), cx);
-                    }
-                    if kind == WriteKind::Notes {
-                        this.notes_saved = Some(id);
-                        if this.notes_editing == Some(id) {
-                            this.notes_editing = None;
-                        }
-                        cx.notify();
                     }
                     if kind == WriteKind::Review {
                         this.review_written(id, cx);
@@ -724,65 +639,16 @@ impl BookDetailView {
         );
     }
 
-    fn save_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(entry) = self.current_entry(cx) else {
-            return;
-        };
-        if !self.notes_dirty(cx) {
-            return;
-        }
-        let id = entry.user_book_id;
-        let text = self.notes.read(cx).value().to_string();
-        self.run_write(
-            LibraryWrite::entry(
-                id,
-                WriteKind::Notes,
-                "Couldn't save your notes",
-                move |client| client.set_private_notes(id, &text),
-            ),
-            |_| None,
-            window,
-            cx,
-        );
-    }
-
-    fn discard_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let saved = self
-            .notes_base
-            .as_ref()
-            .and_then(|(_, saved)| saved.clone())
-            .unwrap_or_default();
-        self.notes
-            .update(cx, |s, cx| s.set_value(saved, window, cx));
-        self.notes_editing = None;
-        cx.notify();
-    }
-
-    /// Opens the notes editor on the entry shown, with the cursor at the end
-    /// of the notes, ready to add a line.
-    fn edit_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(entry) = self.current_entry(cx) else {
-            return;
-        };
-        self.notes_editing = Some(entry.user_book_id);
-        self.notes_saved = None;
-        self.notes.update(cx, |s, cx| {
-            let end = s.value().len();
-            s.set_selected_range(end..end, cx);
-            s.focus(window, cx);
-        });
-        cx.notify();
-    }
-
     /// Whether this view holds words not saved: in the notes or review
     /// editor, or set aside for another book (`crate::drafts`).
     pub fn has_unsaved_drafts(&self, cx: &App) -> bool {
-        self.notes_dirty(cx) || !self.notes_drafts.is_empty() || self.review_unsaved(cx)
+        self.notes.read(cx).has_unsaved(cx) || self.review_unsaved(cx)
     }
 
-    /// Whether the notes editor shows for `id`: opened, or holding a draft.
-    fn notes_open(&self, id: UserBookId, cx: &App) -> bool {
-        self.notes_editing == Some(id) || self.notes_dirty(cx)
+    /// Notes, as a rail section or a block.
+    fn render_notes(&self, in_rail: bool) -> AnyElement {
+        self.notes_in_rail.set(in_rail);
+        self.notes.clone().into_any_element()
     }
 
     fn open_edition_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1070,8 +936,8 @@ impl BookDetailView {
     ) -> AnyElement {
         let header = self.render_header(book, entry, details, false, window, cx);
         let mut column: Vec<AnyElement> = Vec::new();
-        if let Some(entry) = entry {
-            column.push(self.render_notes(entry, false, cx));
+        if entry.is_some() {
+            column.push(self.render_notes(false));
         }
         column.push(self.render_about(book, cx));
         column.extend(self.render_tags(details, cx));
@@ -1163,7 +1029,7 @@ impl BookDetailView {
         if let Some(entry) = entry {
             rail.push(self.render_details(entry, true, cx));
             rail.push(self.render_reads(entry, true, cx));
-            rail.push(self.render_notes(entry, true, cx));
+            rail.push(self.render_notes(true));
         }
 
         let main = v_flex()

@@ -4,14 +4,13 @@
 //! - The one panel under the header: progress (Currently reading, Paused)
 //!   or Not started (Want to read).
 //! - Details: a property list of Edition, Owned, Privacy and Added.
-//! - Notes: the notes, with an editor opened in place.
 //! - Reads: every read of the book, each with its menu, and "Add a past
 //!   read…".
 //!
-//! Each is a block in the pane and a rail section on the page.
+//! Each is a block in the pane and a rail section on the page. Notes, beside
+//! them, are `notes.rs`.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::Textarea;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::select::Select;
 use gpui_kit::component::{Disableable as _, Icon, IconName, h_flex, v_flex};
@@ -24,7 +23,6 @@ use hardcover_core::{Date, LibraryEntry, ReadSession, ReadingStatus};
 
 use super::BookDetailView;
 use super::header::saving;
-use crate::bidi::WrappingText;
 use crate::book::progress_dialog::open_progress;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{
@@ -237,124 +235,6 @@ impl BookDetailView {
         } else {
             Block::new("Details").child(list).into_any_element()
         }
-    }
-
-    /// Notes: the saved notes with "Edit…", or "No notes" with "Add a
-    /// note…"; the editor in place once opened, or while it holds a draft.
-    pub(super) fn render_notes(
-        &self,
-        entry: &LibraryEntry,
-        in_rail: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let id = entry.user_book_id;
-        let pending = self.model.read(cx).pending_write(id);
-        let can_write = Self::can_write(cx);
-        let muted = colors(cx).fg_muted;
-        let saved_text = entry
-            .private_notes
-            .as_deref()
-            .map(str::trim)
-            .filter(|n| !n.is_empty());
-        let editing = self.notes_open(id, cx);
-        let (body, action): (AnyElement, Option<AnyElement>) = if editing {
-            (self.render_notes_editor(entry, cx), None)
-        } else {
-            let saved = self.notes_saved == Some(id);
-            let edit = |id: &'static str, label: &'static str| {
-                Button::new(id)
-                    .small_control()
-                    .label(label)
-                    .disabled(pending.is_some() || !can_write)
-                    .when(!can_write, |this| {
-                        this.tooltip(needs_permission(WRITE_LIBRARY))
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| this.edit_notes(window, cx)))
-            };
-            match saved_text {
-                Some(text) => (
-                    v_flex()
-                        .gap_2()
-                        .max_w(size::PROSE)
-                        .reader()
-                        .children(paragraphs(text).map(WrappingText::new))
-                        .when(saved, |this| this.child(saved_note(cx)))
-                        .into_any_element(),
-                    Some(edit("edit-notes", "Edit…").ghost().into_any_element()),
-                ),
-                None => (
-                    v_flex()
-                        .items_start()
-                        .gap_3()
-                        .child(div().body().text_color(muted).child("No notes"))
-                        .child(edit("add-notes", "Add a note…"))
-                        .into_any_element(),
-                    None,
-                ),
-            }
-        };
-        if in_rail {
-            RailSection::new("Notes")
-                .when_some(action, crate::ui::RailSection::action)
-                .child(body)
-                .into_any_element()
-        } else {
-            Block::new("Notes")
-                .when_some(action, crate::ui::Block::action)
-                .child(body)
-                .into_any_element()
-        }
-    }
-
-    fn render_notes_editor(&self, entry: &LibraryEntry, cx: &mut Context<Self>) -> AnyElement {
-        let pending = self.model.read(cx).pending_write(entry.user_book_id);
-        let saving_notes = pending == Some(WriteKind::Notes);
-        let dirty = self.notes_dirty(cx);
-        let can_write = Self::can_write(cx);
-        v_flex()
-            .w_full()
-            .gap_2()
-            .child(
-                Textarea::new(&self.notes)
-                    .disabled(saving_notes)
-                    .raised_field(saving_notes, cx),
-            )
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Button::new("save-notes")
-                            .primary()
-                            .small_control()
-                            .label("Save")
-                            .tooltip(if can_write {
-                                "Ctrl+Enter".to_owned()
-                            } else {
-                                needs_permission(WRITE_LIBRARY)
-                            })
-                            .loading(saving_notes)
-                            .disabled(!dirty || pending.is_some() || !can_write)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.save_notes(window, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("discard-notes")
-                            .ghost()
-                            .small_control()
-                            .label(if dirty { "Discard" } else { "Cancel" })
-                            .disabled(saving_notes)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.discard_notes(window, cx)),
-                            ),
-                    )
-                    .when(dirty && !saving_notes, |this| {
-                        this.child(div().caption(cx).child("Not saved"))
-                    }),
-            )
-            .into_any_element()
     }
 
     /// Every read of the book: the current one first, then the others, each
