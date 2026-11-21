@@ -38,7 +38,10 @@ use wire::{
 pub const GRAPHQL_ENDPOINT: &str = "https://api.hardcover.app/v1/graphql";
 
 /// Library page size. One request per page; each costs one rate-limit token.
-const LIBRARY_PAGE_SIZE: u32 = 100;
+/// Measured live on 834 entries (2026-11-21): 100 a page took 9 requests and
+/// 3.6 s, 500 took 2 requests and 1.3 s, 1,000 one request of 3.2 s. Every
+/// size returned all 834, so Hardcover doesn't cap the rows below 1,000.
+const LIBRARY_PAGE_SIZE: u32 = 500;
 /// Search results per page.
 pub const SEARCH_PER_PAGE: u32 = 25;
 /// Editions per page in [`Client::book_editions`].
