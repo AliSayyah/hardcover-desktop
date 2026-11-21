@@ -353,13 +353,6 @@ where
 
 /// What to tell the user when a request fails, with a recovery hint.
 pub fn error_message(error: &Error) -> String {
-    // The demo refuses every write; trying again can't help.
-    #[cfg(feature = "demo")]
-    if let Error::Api(msg) = error
-        && msg == hardcover_core::demo::READ_ONLY
-    {
-        return msg.clone();
-    }
     match error {
         Error::RateLimited { .. } => {
             "Hardcover's rate limit was reached. Try again in a minute.".to_owned()
@@ -911,13 +904,6 @@ mod tests {
             relative_time(&now, &(now + Duration::minutes(3))),
             "just now"
         );
-    }
-
-    #[cfg(feature = "demo")]
-    #[test]
-    fn the_demo_says_only_that_it_is_read_only() {
-        let refused = Error::Api(hardcover_core::demo::READ_ONLY.into());
-        assert_eq!(error_message(&refused), hardcover_core::demo::READ_ONLY);
     }
 
     #[test]

@@ -20,12 +20,45 @@
         "Space",
         "Adventure"
       ],
+      "series": [],
       "description": "A schoolteacher wakes up alone on a spaceship light-years from home, with no memory of how he got there, and slowly realises he may be Earth's last chance against a microbe that is dimming the sun.",
       "cover": {
         "height": 1500,
         "url": "https://assets.hardcover.app/editions/3274049/8741341047797682-91mYu67RfUL._SL1500_.jpg",
         "width": 994
-      }
+      },
+      "editions": [
+        {
+          "id": 3274049,
+          "format": "Hardcover",
+          "reading_format": 1,
+          "pages": 476,
+          "release_date": "2021-05-04",
+          "isbn_13": "9780593135204",
+          "publisher": "Ballantine Books",
+          "language": "English",
+          "cover": {
+            "height": 1500,
+            "url": "https://assets.hardcover.app/editions/3274049/8741341047797682-91mYu67RfUL._SL1500_.jpg",
+            "width": 994
+          }
+        },
+        {
+          "id": 31878554,
+          "format": "Audible",
+          "reading_format": 2,
+          "audio_seconds": 58253,
+          "release_date": "2021-05-04",
+          "isbn_13": "9781603935470",
+          "publisher": "Audible Studios",
+          "language": "English",
+          "cover": {
+            "height": 2400,
+            "url": "https://assets.hardcover.app/edition/31878554/3cad1901-bbbf-4f45-b300-1c8a4e0eea10.jpg",
+            "width": 2400
+          }
+        }
+      ]
     },
     {
       "id": 386446,
@@ -42,10 +75,13 @@
         "Science Fiction & Fantasy",
         "High Fantasy"
       ],
-      "series": {
-        "name": "The Stormlight Archive",
-        "position": 1.0
-      },
+      "series": [
+        {
+          "name": "The Stormlight Archive",
+          "position": 1.0,
+          "featured": true
+        }
+      ],
       "description": "On a storm-scoured world, a slave soldier, a scholar with a secret and a highprince haunted by visions are drawn toward a war older than any of them know. The first book of the Stormlight Archive.",
       "cover": {
         "height": 500,
@@ -69,12 +105,44 @@
         "Psychology",
         "Business"
       ],
+      "series": [],
       "description": "A practical guide to how small, steady changes compound, and how to shape your surroundings so good habits are easy and bad ones are hard.",
       "cover": {
         "height": 1500,
         "url": "https://assets.hardcover.app/edition/12605395/629717fe-df46-40b8-8529-dca0323bf699.jpg",
         "width": 994
-      }
+      },
+      "editions": [
+        {
+          "id": 12605395,
+          "format": "Hardcover",
+          "reading_format": 1,
+          "pages": 305,
+          "release_date": "2018-01-01",
+          "isbn_13": "9780735211292",
+          "publisher": "Avery",
+          "language": "English",
+          "cover": {
+            "height": 1500,
+            "url": "https://assets.hardcover.app/edition/12605395/629717fe-df46-40b8-8529-dca0323bf699.jpg",
+            "width": 994
+          }
+        },
+        {
+          "id": 30858044,
+          "reading_format": 2,
+          "audio_seconds": 20117,
+          "release_date": "2018-10-16",
+          "isbn_13": "9781524779276",
+          "publisher": "Penguin Random House Audio",
+          "language": "English",
+          "cover": {
+            "height": 450,
+            "url": "https://assets.hardcover.app/edition/30858044/ddcb817f-f5f7-4e18-87d9-8501dc55d509.jpg",
+            "width": 450
+          }
+        }
+      ]
     },
     {
       "id": 427393,
@@ -89,10 +157,13 @@
       "genres": [
         "Science Fiction"
       ],
-      "series": {
-        "name": "Dune",
-        "position": 2.0
-      },
+      "series": [
+        {
+          "name": "Dune",
+          "position": 2.0,
+          "featured": true
+        }
+      ],
       "description": "Twelve years after taking the throne, Paul Atreides rules an empire waging holy war in his name, and the conspirators gathering around him know exactly how much he can foresee.",
       "cover": {
         "height": 500,
@@ -115,10 +186,13 @@
         "Romance",
         "Romantasy"
       ],
-      "series": {
-        "name": "The Empyrean",
-        "position": 1.0
-      },
+      "series": [
+        {
+          "name": "The Empyrean",
+          "position": 1.0,
+          "featured": true
+        }
+      ],
       "description": "Violet Sorrengail was meant to be a scribe. Instead she is sent to the war college where dragon riders are made, and where most candidates don't survive the first year.",
       "cover": {
         "height": 1000,
@@ -141,6 +215,7 @@
         "Contemporary",
         "Romance"
       ],
+      "series": [],
       "description": "Two friends who met as children in a hospital games room make video games together across three decades of success, rivalry and a love that never quite lines up.",
       "cover": {
         "height": 500,
@@ -163,10 +238,13 @@
         "Science Fiction",
         "Magical Realism"
       ],
-      "series": {
-        "name": "The Midnight World",
-        "position": 1.0
-      },
+      "series": [
+        {
+          "name": "The Midnight World",
+          "position": 1.0,
+          "featured": true
+        }
+      ],
       "description": "Between life and death, Nora Seed finds a library whose books each hold a life she could have lived, and gets the chance to try them.",
       "cover": {
         "height": 500,
@@ -189,6 +267,7 @@
         "Dystopian",
         "Sci-fi"
       ],
+      "series": [],
       "description": "Klara, an Artificial Friend who learns about the world from a shop window, is chosen by a sick girl and sets out to understand the people she has come to love.",
       "cover": {
         "height": 1000,
@@ -211,6 +290,7 @@
         "Historical Fiction",
         "Mythology"
       ],
+      "series": [],
       "description": "The witch of Aiaia tells her own story: an unloved daughter of the sun god, exiled to an island, who learns the power of transformation and stands against gods and men.",
       "cover": {
         "height": 1500,
@@ -233,6 +313,7 @@
         "Historical Fiction",
         "Literary Fiction"
       ],
+      "series": [],
       "description": "In the 1960s, chemist Elizabeth Zott is pushed out of her lab and ends up hosting a television cooking show, which she teaches as chemistry, to the network's alarm.",
       "cover": {
         "height": 2200,
@@ -253,10 +334,13 @@
       "genres": [
         "Science Fiction"
       ],
-      "series": {
-        "name": "Dune",
-        "position": 1.0
-      },
+      "series": [
+        {
+          "name": "Dune",
+          "position": 1.0,
+          "featured": true
+        }
+      ],
       "description": "On the desert planet Arrakis, the only source of the most valuable substance in the universe, young Paul Atreides' family is handed a trap disguised as a fief.",
       "cover": {
         "height": 2560,
@@ -280,10 +364,13 @@
         "Classics",
         "Adventure"
       ],
-      "series": {
-        "name": "Middle Earth",
-        "position": 1.0
-      },
+      "series": [
+        {
+          "name": "Middle Earth",
+          "position": 1.0,
+          "featured": true
+        }
+      ],
       "description": "Bilbo Baggins, a comfortable hobbit, is swept off by a wizard and thirteen dwarves on a quest to reclaim a treasure guarded by a dragon.",
       "cover": {
         "height": 2400,
@@ -305,6 +392,7 @@
         "Classics",
         "Dystopian"
       ],
+      "series": [],
       "description": "Winston Smith rewrites history for the Ministry of Truth in a state that watches everything, and begins, dangerously, to keep a diary.",
       "cover": {
         "height": 475,
@@ -327,6 +415,7 @@
         "Romance",
         "Historical Fiction"
       ],
+      "series": [],
       "description": "Elizabeth Bennet and Mr Darcy take an instant dislike to each other, and spend the rest of the novel finding out how wrong first impressions can be.",
       "cover": {
         "height": 400,
@@ -349,6 +438,7 @@
         "Literary Fiction",
         "Romance"
       ],
+      "series": [],
       "description": "Nick Carraway spends a summer on Long Island beside his mysterious neighbour Jay Gatsby, whose lavish parties are all aimed at one woman across the bay.",
       "cover": {
         "height": 2133,
@@ -371,10 +461,13 @@
         "Adventure",
         "Young Adult"
       ],
-      "series": {
-        "name": "The Mistborn Saga: The Original Trilogy",
-        "position": 1.0
-      },
+      "series": [
+        {
+          "name": "The Mistborn Saga: The Original Trilogy",
+          "position": 1.0,
+          "featured": true
+        }
+      ],
       "description": "In a world of ash and mist ruled by an immortal emperor, a street thief discovers she can burn metals for power and joins a crew planning an impossible heist.",
       "cover": {
         "height": 500,
@@ -397,10 +490,13 @@
         "LGBTQ",
         "Historical Fiction"
       ],
-      "series": {
-        "name": "Reidverse",
-        "position": 1.0
-      },
+      "series": [
+        {
+          "name": "Reidverse",
+          "position": 1.0,
+          "featured": true
+        }
+      ],
       "description": "A reclusive Hollywood icon chooses an unknown journalist to write her life story, including the truth about her seven marriages.",
       "cover": {
         "height": 500,
@@ -424,6 +520,7 @@
         "Women",
         "religious"
       ],
+      "series": [],
       "description": "A memoir of growing up in a survivalist family in rural Idaho, never going to school, and of the education that took Tara Westover to Cambridge and away from home.",
       "cover": {
         "height": 500,
@@ -446,10 +543,13 @@
         "Adventure",
         "Space"
       ],
-      "series": {
-        "name": "The Martian",
-        "position": 1.0
-      },
+      "series": [
+        {
+          "name": "The Martian",
+          "position": 1.0,
+          "featured": true
+        }
+      ],
       "description": "Left for dead on Mars when his crew evacuates, astronaut Mark Watney has to engineer his way to survival with limited food and a lot of duct tape.",
       "cover": {
         "height": 1200,
@@ -472,6 +572,7 @@
         "Classics",
         "General"
       ],
+      "series": [],
       "description": "Set at a tennis academy and a halfway house in a near-future North America, a sprawling novel about addiction, entertainment and a film so engaging that its viewers lose the will to do anything else.",
       "cover": {
         "height": 2600,
@@ -494,6 +595,7 @@
         "General",
         "Literary Fiction"
       ],
+      "series": [],
       "description": "One day in Dublin, 16 June 1904, following Leopold Bloom and Stephen Dedalus through the city in a novel that changes its style with every chapter.",
       "cover": {
         "height": 500,
@@ -516,6 +618,7 @@
         "Adventure",
         "Literary Fiction"
       ],
+      "series": [],
       "description": "Ishmael signs on to the whaler Pequod, whose captain, Ahab, is set on hunting down the white whale that took his leg.",
       "cover": {
         "height": 1500,
@@ -536,10 +639,13 @@
       "genres": [
         "Science Fiction"
       ],
-      "series": {
-        "name": "Dune",
-        "position": 3.0
-      },
+      "series": [
+        {
+          "name": "Dune",
+          "position": 3.0,
+          "featured": true
+        }
+      ],
       "description": "Paul's twin children, born with the memories of their ancestors, inherit an empire held in trust by their aunt and a desert planet that is turning green.",
       "cover": {
         "height": 1600,
@@ -562,14 +668,198 @@
         "Fantasy",
         "Classics"
       ],
-      "series": {
-        "name": "Dune",
-        "position": 4.0
-      },
+      "series": [
+        {
+          "name": "Dune",
+          "position": 4.0,
+          "featured": true
+        }
+      ],
       "description": "Thousands of years later, Leto II rules as a tyrant slowly becoming a sandworm, holding humanity to a path that only he can see.",
       "cover": {
         "height": 500,
         "url": "https://assets.hardcover.app/external_data/30542666/b90d2d32426e5bf180573b4e97421db3307c93e0.jpeg",
+        "width": 333
+      }
+    },
+    {
+      "id": 98065,
+      "title": "The Cruel Prince",
+      "subtitle": "Collector's Edition",
+      "author": "Holly Black",
+      "pages": null,
+      "audio_seconds": 50940,
+      "release_date": "2018-01-02",
+      "rating": 3.87,
+      "ratings_count": 1597,
+      "users_count": 3929,
+      "editions_count": 58,
+      "genres": [
+        "Fantasy",
+        "Romance",
+        "Young Adult"
+      ],
+      "series": [
+        {
+          "name": "The Folk of the Air",
+          "position": 1.0,
+          "featured": false
+        },
+        {
+          "name": "Elfhame",
+          "position": 1.0,
+          "featured": false
+        }
+      ],
+      "description": "Stolen away to the High Court of Faerie as a child, a mortal girl decides that if she can't be safe among the fey, she can at least be dangerous, and is drawn into a plot against the crown.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/external_data/43188318/6bc821e0bdc3de2d6287ec023ef5cafc425ebdd0.jpeg",
+        "width": 333
+      },
+      "editions": [
+        {
+          "id": 30399824,
+          "format": "Hardcover",
+          "reading_format": 1,
+          "pages": 370,
+          "release_date": "2018-01-01",
+          "isbn_13": "9780316310277",
+          "publisher": "Little, Brown Books for Young Readers",
+          "language": "English",
+          "cover": {
+            "height": 600,
+            "url": "https://assets.hardcover.app/edition/30399824/ef838832-eb3c-4aa2-bceb-e2dbab9d86f0.jpg",
+            "width": 400
+          }
+        },
+        {
+          "id": 31476259,
+          "format": "Audiobook",
+          "reading_format": 2,
+          "audio_seconds": 45360,
+          "release_date": "2018-01-02",
+          "isbn_13": "9781478923749",
+          "publisher": "Little, Brown Young Readers",
+          "language": "English",
+          "cover": {
+            "height": 353,
+            "url": "https://assets.hardcover.app/editions/31476259/4375729925514609.jpg",
+            "width": 353
+          }
+        },
+        {
+          "id": 5751956,
+          "format": "Audio CD",
+          "reading_format": 2,
+          "release_date": "2018-01-02",
+          "isbn_13": "9781549140075",
+          "publisher": "Little, Brown Young Readers",
+          "cover": {
+            "height": 500,
+            "url": "https://assets.hardcover.app/edition/5751956/f341d602491fd85be63921847f296877232b8216.jpeg",
+            "width": 453
+          }
+        }
+      ]
+    },
+    {
+      "id": 427544,
+      "title": "Edgedancer",
+      "author": "Brandon Sanderson",
+      "pages": 269,
+      "release_date": "2016-11-08",
+      "rating": 4.04,
+      "ratings_count": 1736,
+      "users_count": 3599,
+      "editions_count": 19,
+      "genres": [
+        "Fantasy",
+        "Young Adult",
+        "Science Fiction"
+      ],
+      "series": [
+        {
+          "name": "The Stormlight Archive",
+          "position": 2.5,
+          "featured": true
+        }
+      ],
+      "description": "A short novel between the second and third Stormlight books: a restless young thief with a gift for slipping through the world chases a rumour across a continent, and learns what it costs to listen.",
+      "cover": {
+        "height": 2100,
+        "url": "https://assets.hardcover.app/editions/31450038/7628632503626287.jpg",
+        "width": 1321
+      }
+    },
+    {
+      "id": 139773,
+      "title": "The Fellowship of the Ring",
+      "subtitle": "The Lord of the Rings: Part One",
+      "author": "J.R.R. Tolkien",
+      "pages": 407,
+      "release_date": "1937-09-21",
+      "rating": 4.42,
+      "ratings_count": 5854,
+      "users_count": 11133,
+      "editions_count": 325,
+      "genres": [
+        "Fantasy",
+        "Classics",
+        "Adventure"
+      ],
+      "series": [
+        {
+          "name": "The Lord of the Rings",
+          "position": 1.0,
+          "featured": true
+        },
+        {
+          "name": "Middle Earth",
+          "position": 2.0,
+          "featured": false
+        }
+      ],
+      "description": "A quiet hobbit inherits a plain gold ring and learns it is the one thing a dark lord needs, so he leaves home with a few friends on a long walk to destroy it.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/edition/29029601/6d64b05efec0ccb215640b38d8c6bc4c712da0f5.jpeg",
+        "width": 333
+      }
+    },
+    {
+      "id": 377938,
+      "title": "The Lord of the Rings",
+      "subtitle": "The Fellowship of the Ring, The Two Towers, The Return of the King",
+      "author": "J.R.R. Tolkien",
+      "pages": 1178,
+      "release_date": "1955-10-20",
+      "rating": 4.56,
+      "ratings_count": 2178,
+      "users_count": 5375,
+      "editions_count": 237,
+      "genres": [
+        "Fantasy",
+        "Classics"
+      ],
+      "series": [
+        {
+          "name": "The Lord of the Rings",
+          "position": 1.0,
+          "featured": true,
+          "compilation": true
+        },
+        {
+          "name": "Middle Earth",
+          "position": 2.0,
+          "featured": false,
+          "compilation": true
+        }
+      ],
+      "description": "All three parts of the story in one volume: the fellowship's journey south, its breaking, and the war that decides whether the ring can be unmade.",
+      "cover": {
+        "height": 500,
+        "url": "https://assets.hardcover.app/external_data/41547254/141872f0e71efe38f937b72879a5dea52e502db5.jpeg",
         "width": 333
       }
     }
@@ -579,13 +869,15 @@
       "id": 501,
       "book": 427578,
       "status": 2,
-      "date_added": "2026-09-02",
-      "updated_at": "2026-11-18T21:40:00+00:00",
+      "added": -80,
+      "updated": -1,
+      "edition": 3274049,
       "reads": [
         {
           "id": 801,
-          "started_at": "2026-11-01",
-          "progress_pages": 312
+          "started": -20,
+          "progress_pages": 312,
+          "edition": 3274049
         }
       ],
       "private_notes": "Borrowed from the library, due back on the 30th.",
@@ -595,12 +887,12 @@
       "id": 502,
       "book": 386446,
       "status": 2,
-      "date_added": "2026-10-10",
-      "updated_at": "2026-11-17T08:15:00+00:00",
+      "added": -42,
+      "updated": -4,
       "reads": [
         {
           "id": 802,
-          "started_at": "2026-10-20",
+          "started": -32,
           "progress_pages": 418
         }
       ]
@@ -609,13 +901,31 @@
       "id": 503,
       "book": 428023,
       "status": 2,
-      "date_added": "2026-08-21",
-      "updated_at": "2026-11-12T19:05:00+00:00",
+      "added": -92,
+      "updated": -12,
+      "edition": 30858044,
       "reads": [
         {
           "id": 803,
-          "started_at": "2026-10-03",
-          "progress_pages": 121
+          "started": -49,
+          "progress_seconds": 7800,
+          "edition": 30858044
+        }
+      ]
+    },
+    {
+      "id": 504,
+      "book": 98065,
+      "status": 2,
+      "added": -9,
+      "updated": 0,
+      "edition": 30399824,
+      "reads": [
+        {
+          "id": 804,
+          "started": -6,
+          "progress_pages": 96,
+          "edition": 30399824
         }
       ]
     },
@@ -623,76 +933,90 @@
       "id": 511,
       "book": 427393,
       "status": 1,
-      "date_added": "2026-11-15",
-      "updated_at": "2026-11-15T20:00:00+00:00"
+      "added": -6,
+      "updated": -6
     },
     {
       "id": 512,
       "book": 714600,
       "status": 1,
-      "date_added": "2026-11-02",
-      "updated_at": "2026-11-02T20:00:00+00:00"
+      "added": -19,
+      "updated": -19
     },
     {
       "id": 513,
       "book": 479910,
       "status": 1,
-      "date_added": "2026-10-19",
-      "updated_at": "2026-10-19T20:00:00+00:00"
+      "added": -33,
+      "updated": -33
     },
     {
       "id": 514,
       "book": 428018,
       "status": 1,
-      "date_added": "2026-09-30",
-      "updated_at": "2026-09-30T20:00:00+00:00"
+      "added": -52,
+      "updated": -52
     },
     {
       "id": 515,
       "book": 266607,
       "status": 1,
-      "date_added": "2026-09-14",
-      "updated_at": "2026-09-14T20:00:00+00:00"
+      "added": -68,
+      "updated": -68
     },
     {
       "id": 516,
       "book": 383598,
       "status": 1,
-      "date_added": "2026-08-05",
-      "updated_at": "2026-08-05T20:00:00+00:00"
+      "added": -108,
+      "updated": -108
     },
     {
       "id": 517,
       "book": 490300,
       "status": 1,
-      "date_added": "2026-07-22",
-      "updated_at": "2026-07-22T20:00:00+00:00"
+      "added": -122,
+      "updated": -122
+    },
+    {
+      "id": 518,
+      "book": 427544,
+      "status": 1,
+      "added": -15,
+      "updated": -15
+    },
+    {
+      "id": 519,
+      "book": 139773,
+      "status": 1,
+      "added": -520,
+      "updated": -520
     },
     {
       "id": 521,
       "book": 312460,
       "status": 3,
       "rating": 5,
-      "date_added": "2026-06-01",
-      "updated_at": "2026-10-12T20:00:00+00:00",
+      "added": -173,
+      "updated": -40,
       "reads": [
         {
           "id": 821,
-          "started_at": "2026-09-20",
-          "finished_at": "2026-10-12",
+          "started": -62,
+          "finished": -40,
           "progress_pages": 528
         },
         {
           "id": 851,
-          "started_at": "2019-01-05",
-          "finished_at": "2019-02-10",
+          "started": -2877,
+          "finished": -2841,
           "progress_pages": 528
         }
       ],
       "private_notes": "Second time through. Read it again before the next film.",
       "review": {
         "markdown": "Better the second time. The opening is slow, but once the politics, the desert and the spice start to fit together I couldn't put it down.\n\nWhat stood out on this read:\n\n- how much is left unsaid between the characters\n- the appendices, which I skipped the first time\n\nOn to *Dune Messiah*.",
-        "reviewed_at": "2026-10-13"
+        "reviewed": -39
       }
     },
     {
@@ -700,24 +1024,18 @@
       "book": 2459845,
       "status": 3,
       "rating": 4.5,
-      "date_added": "2026-05-10",
-      "updated_at": "2026-09-02T20:00:00+00:00",
+      "added": -1960,
+      "updated": -540,
       "reads": [
         {
-          "id": 822,
-          "started_at": "2026-08-24",
-          "finished_at": "2026-09-02",
-          "progress_pages": 287
-        },
-        {
           "id": 852,
-          "started_at": "2012-12-01",
-          "finished_at": "2012-12-20",
+          "started": -5103,
+          "finished": -5084,
           "progress_pages": 287
         },
         {
           "id": 853,
-          "finished_at": "2001-06-01"
+          "finished": -9304
         }
       ]
     },
@@ -725,14 +1043,13 @@
       "id": 523,
       "book": 292354,
       "status": 3,
-      "rating": 4,
-      "date_added": "2026-04-18",
-      "updated_at": "2026-08-14T20:00:00+00:00",
+      "added": -217,
+      "updated": -9,
       "reads": [
         {
           "id": 823,
-          "started_at": "2026-08-05",
-          "finished_at": "2026-08-14",
+          "started": -18,
+          "finished": -9,
           "progress_pages": 385
         }
       ]
@@ -742,13 +1059,13 @@
       "book": 369692,
       "status": 3,
       "rating": 4.5,
-      "date_added": "2026-03-02",
-      "updated_at": "2026-07-25T20:00:00+00:00",
+      "added": -264,
+      "updated": -119,
       "reads": [
         {
           "id": 824,
-          "started_at": "2026-07-08",
-          "finished_at": "2026-07-25",
+          "started": -136,
+          "finished": -119,
           "progress_pages": 541
         }
       ]
@@ -758,13 +1075,13 @@
       "book": 379760,
       "status": 3,
       "rating": 4.5,
-      "date_added": "2026-02-11",
-      "updated_at": "2026-06-30T20:00:00+00:00",
+      "added": -283,
+      "updated": -144,
       "reads": [
         {
           "id": 825,
-          "started_at": "2026-06-21",
-          "finished_at": "2026-06-30",
+          "started": -153,
+          "finished": -144,
           "progress_pages": 336
         }
       ]
@@ -774,13 +1091,13 @@
       "book": 340654,
       "status": 3,
       "rating": 4,
-      "date_added": "2026-01-20",
-      "updated_at": "2026-06-08T20:00:00+00:00",
+      "added": -305,
+      "updated": -166,
       "reads": [
         {
           "id": 826,
-          "started_at": "2026-05-30",
-          "finished_at": "2026-06-08",
+          "started": -175,
+          "finished": -166,
           "progress_pages": 389
         }
       ]
@@ -789,14 +1106,13 @@
       "id": 527,
       "book": 44186,
       "status": 3,
-      "rating": 4.5,
-      "date_added": "2026-01-05",
-      "updated_at": "2026-05-11T20:00:00+00:00",
+      "added": -320,
+      "updated": 0,
       "reads": [
         {
           "id": 827,
-          "started_at": "2026-04-28",
-          "finished_at": "2026-05-11",
+          "started": -11,
+          "finished": 0,
           "progress_pages": 352
         }
       ]
@@ -806,13 +1122,13 @@
       "book": 379647,
       "status": 3,
       "rating": 4,
-      "date_added": "2025-12-14",
-      "updated_at": "2026-04-02T20:00:00+00:00",
+      "added": -342,
+      "updated": -233,
       "reads": [
         {
           "id": 828,
-          "started_at": "2026-03-18",
-          "finished_at": "2026-04-02",
+          "started": -248,
+          "finished": -233,
           "progress_pages": 480
         }
       ]
@@ -822,27 +1138,19 @@
       "book": 377193,
       "status": 3,
       "rating": 3.5,
-      "date_added": "2025-11-30",
-      "updated_at": "2026-03-01T20:00:00+00:00",
-      "reads": [
-        {
-          "id": 829,
-          "started_at": "2026-02-24",
-          "finished_at": "2026-03-01",
-          "progress_pages": 180
-        }
-      ]
+      "added": -356,
+      "updated": -356
     },
     {
       "id": 531,
       "book": 89871,
       "status": 4,
-      "date_added": "2026-05-02",
-      "updated_at": "2026-10-01T20:00:00+00:00",
+      "added": -203,
+      "updated": -51,
       "reads": [
         {
           "id": 831,
-          "started_at": "2026-09-15",
+          "started": -67,
           "progress_pages": 230
         }
       ],
@@ -852,12 +1160,12 @@
       "id": 541,
       "book": 427513,
       "status": 5,
-      "date_added": "2026-04-01",
-      "updated_at": "2026-08-09T20:00:00+00:00",
+      "added": -234,
+      "updated": -104,
       "reads": [
         {
           "id": 841,
-          "started_at": "2026-07-30",
+          "started": -114,
           "progress_pages": 88
         }
       ]
@@ -867,26 +1175,26 @@
       "book": 1788666,
       "status": 5,
       "rating": 2.5,
-      "date_added": "2026-03-14",
-      "updated_at": "2026-05-02T20:00:00+00:00",
+      "added": -252,
+      "updated": -203,
       "reads": [
         {
           "id": 842,
-          "started_at": "2026-04-25",
+          "started": -210,
           "progress_pages": 140
         }
       ],
       "review": {
         "markdown": "I gave up at page 140. I enjoyed the chapters at sea, but the long detours into whale anatomy lost me. I'd like to try again some winter, maybe as an audiobook.",
-        "reviewed_at": "2026-05-02"
+        "reviewed": -203
       }
     },
     {
       "id": 551,
       "book": 427363,
       "status": 6,
-      "date_added": "2026-06-12",
-      "updated_at": "2026-06-12T20:00:00+00:00"
+      "added": -162,
+      "updated": -162
     }
   ],
   "goals": [
@@ -909,7 +1217,11 @@
         2459845,
         386446,
         369692,
-        379647
+        379647,
+        {
+          "book": 428023,
+          "edition": 30858044
+        }
       ]
     },
     {

@@ -25,6 +25,11 @@ run *args:
 demo theme="":
     if [[ -n "$1" ]]; then export HARDCOVER_THEME="$1"; fi; cargo run -p {{ app }} --features demo
 
+# Demo build with injected faults (HARDCOVER_DEMO_FAULTS), e.g. `just demo-faults latency=800ms,500,error-rate=0.2`
+[group('run')]
+demo-faults faults theme="":
+    if [[ -n "$2" ]]; then export HARDCOVER_THEME="$2"; fi; HARDCOVER_DEMO_FAULTS="$1" cargo run -p {{ app }} --features demo
+
 # The shared components' gallery (demo build). Theme: light or dark (default: Settings)
 [group('run')]
 gallery theme="":
@@ -65,10 +70,11 @@ fmt:
 fmt-check:
     cargo fmt --all --check
 
-# Clippy over every target, warnings as errors, as CI runs it
+# Clippy over every target, warnings as errors, as CI runs it, then the demo build too
 [group('check')]
 clippy:
     cargo clippy --workspace --all-targets --locked -- -D warnings
+    cargo clippy -p {{ app }} --all-targets --features demo --locked -- -D warnings
 
 # Apply clippy's suggestions, then format
 [group('check')]
