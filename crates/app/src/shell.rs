@@ -34,7 +34,6 @@ use crate::catalog::series_view::SeriesView;
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{SIDEBAR_SHELVES, count_text, relative_time, status_label};
-use crate::freshness;
 use crate::goals::model::GoalsModel;
 use crate::goals::sidebar::GoalsSection;
 use crate::home::home_view::HomeView;
@@ -44,6 +43,7 @@ use crate::library::model::{LibraryModel, SyncStatus};
 use crate::lists::list_view::ListView;
 use crate::lists::model::{ListsEvent, ListsModel};
 use crate::lists::sidebar::lists_section;
+use crate::resource::{self, Catalog};
 use crate::search::search_view::SearchView;
 use crate::series::model::SeriesModel;
 use crate::series::tracker_view::SeriesTrackerView;
@@ -163,6 +163,7 @@ impl Shell {
     ) {
         SessionScope::uninstall(cx);
         ListsModel::release(cx);
+        Catalog::release(cx);
         let sign_in = cx.new(|cx| {
             if keyring_unavailable {
                 SignInView::keyring_unavailable(window, cx)
@@ -285,7 +286,9 @@ impl Focusable for Workspace {
 impl Workspace {
     fn new(session: SessionScope, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let model = cx.new(|_| LibraryModel::new(session.clone()));
-        // Before the views: the book page finds the lists through the global.
+        // Before the views: they find the catalogue and the lists through
+        // their globals.
+        Catalog::init(&session, cx);
         let lists = ListsModel::init(session.clone(), cx);
         let list_page = cx.new(|cx| ListView::new(lists.clone(), model.clone(), window, cx));
         let library = cx.new(|cx| LibraryView::new(model.clone(), window, cx));
@@ -371,8 +374,17 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let updates = Updates::global(cx).clone();
+        let mut syncing = false;
         self.subscriptions = vec![
-            cx.observe(&self.model, |_, _, cx| cx.notify()),
+            cx.observe_in(&self.model, window, move |this, model, window, cx| {
+                // A sync that ended made the own reviews stale: the one shown
+                // is fetched again, the hidden ones when next shown.
+                let now = *model.read(cx).sync_status() == SyncStatus::Syncing;
+                if std::mem::replace(&mut syncing, now) && !now {
+                    this.revalidate_visible(false, window, cx);
+                }
+                cx.notify();
+            }),
             // Coming back to the window catches up with changes made on the
             // website or another device, once the last sync is old enough.
             cx.observe_window_activation(window, |this, window, cx| {
@@ -486,11 +498,11 @@ impl Workspace {
     }
 
     /// Asks the views on screen to fetch again what they show that is stale
-    /// ([`crate::freshness`]): the top page (and its book pane), else the
+    /// ([`crate::resource`]): the top page (and its book pane), else the
     /// destination's catalogue content. Views can't tell whether they are
     /// shown, so only these are asked, on Refresh, when the window becomes
-    /// active, and when a page or destination is shown again
-    /// (`shown_again`).
+    /// active, when a sync ends (it makes the reader's own reviews stale),
+    /// and when a page or destination is shown again (`shown_again`).
     fn revalidate_visible(
         &mut self,
         shown_again: bool,
@@ -500,10 +512,10 @@ impl Workspace {
         match self.pages.current() {
             Some(Page::Series(_)) => self
                 .series_page
-                .update(cx, |p, cx| p.revalidate(shown_again, window, cx)),
+                .update(cx, |p, cx| p.revalidate(shown_again, cx)),
             Some(Page::Author(_)) => self
                 .author_page
-                .update(cx, |p, cx| p.revalidate(shown_again, window, cx)),
+                .update(cx, |p, cx| p.revalidate(shown_again, cx)),
             Some(Page::Book(_)) => self
                 .book_page
                 .update(cx, |p, cx| p.revalidate(shown_again, cx)),
@@ -515,7 +527,7 @@ impl Workspace {
                     .update(cx, |s, cx| s.revalidate(shown_again, cx)),
                 Destination::Discover => self
                     .discover
-                    .update(cx, |d, cx| d.revalidate(shown_again, window, cx)),
+                    .update(cx, |d, cx| d.revalidate(shown_again, cx)),
                 Destination::Shelf(_) => self
                     .library
                     .update(cx, |l, cx| l.revalidate(shown_again, cx)),
@@ -644,12 +656,12 @@ impl Workspace {
             Page::Series(id) => self
                 .series_page
                 .read(cx)
-                .name(*id)
+                .name(*id, cx)
                 .map_or(BackTo::Unnamed, BackTo::Named),
             Page::Author(id) => self
                 .author_page
                 .read(cx)
-                .name(*id)
+                .name(*id, cx)
                 .map_or(BackTo::Unnamed, BackTo::Named),
         });
         back_label(previous, &destination)
@@ -670,7 +682,7 @@ impl Workspace {
     }
 
     fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        freshness::refresh_all(cx);
+        resource::refresh_all(cx);
         self.revalidate_visible(true, window, cx);
         self.model.update(cx, LibraryModel::sync);
         self.goals.update(cx, GoalsModel::load);

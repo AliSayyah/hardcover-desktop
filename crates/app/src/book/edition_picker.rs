@@ -1,8 +1,10 @@
 //! The edition picker: a book's editions, fetched a page at a time when the
-//! picker first opens, kept for the rest of the run.
+//! picker opens, from the session's catalogue (`resource::Catalog`), so
+//! every view's picker for the book shares them.
 //!
-//! One picker exists per book, so a response can never land on another book.
-//! Choosing an edition emits [`EditionChosen`]; the detail view makes the write.
+//! One picker exists per book and view; it keeps only which edition is the
+//! entry's. Choosing an edition emits [`EditionChosen`]; the view that opened
+//! it makes the write.
 
 use crate::ui::Skeleton;
 use crate::ui::reveal::RevealScroll as _;
@@ -11,16 +13,15 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::{Disableable as _, Icon, IconName, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, Context, ElementId, Entity, EventEmitter, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Task, Window, div,
+    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Window, div,
     prelude::FluentBuilder as _,
 };
-use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookId, EditionId, EditionSummary};
 
 use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::edition_text;
-use crate::session::{self, SessionScope};
+use crate::resource::{Catalog, Demand, SharedChanged};
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_dialog;
 
@@ -30,36 +31,37 @@ pub struct EditionChosen(pub EditionSummary);
 pub struct EditionPicker {
     book: BookId,
     book_title: SharedString,
-    editions: Vec<EditionSummary>,
+    catalog: Option<Catalog>,
     /// The entry's edition, marked in the list.
     current: Option<EditionId>,
-    /// More pages may follow the ones fetched.
-    has_more: bool,
-    /// Where the next page starts: the rows Hardcover sent so far, which
-    /// the de-duplicated `editions` may be fewer than.
-    next_offset: u32,
-    loading: bool,
-    error: Option<SharedString>,
-    fetch: Option<Task<()>>,
+    _subscription: Option<Subscription>,
 }
 
 impl EventEmitter<EditionChosen> for EditionPicker {}
 
 impl EditionPicker {
     pub fn new(book: BookId, book_title: SharedString, cx: &mut Context<Self>) -> Self {
-        let mut this = Self {
+        let catalog = Catalog::global(cx);
+        let subscription = catalog.as_ref().map(|catalog| {
+            cx.subscribe(
+                &catalog.editions,
+                move |_, _, SharedChanged(id): &SharedChanged<BookId>, cx| {
+                    if *id == book {
+                        cx.notify();
+                    }
+                },
+            )
+        });
+        if let Some(catalog) = &catalog {
+            catalog.request_editions(book, Demand::Shown, cx);
+        }
+        Self {
             book,
             book_title,
-            editions: Vec::new(),
+            catalog,
             current: None,
-            has_more: true,
-            next_offset: 0,
-            loading: false,
-            error: None,
-            fetch: None,
-        };
-        this.fetch_more(cx);
-        this
+            _subscription: subscription,
+        }
     }
 
     pub fn set_current(&mut self, current: Option<EditionId>, cx: &mut Context<Self>) {
@@ -69,45 +71,22 @@ impl EditionPicker {
         }
     }
 
-    /// Fetches the next page, or retries after a failure.
+    /// Fetches the next page, or the first again after it failed.
     fn fetch_more(&mut self, cx: &mut Context<Self>) {
-        if self.loading || !self.has_more {
-            return;
-        }
-        let Some(session) = SessionScope::current(cx) else {
+        let Some(catalog) = self.catalog.clone() else {
             return;
         };
-        let book = self.book;
-        let offset = self.next_offset;
-        let page = session.interactive(move |client| client.book_editions(book, offset));
-        self.loading = true;
-        self.error = None;
-        cx.notify();
-        self.fetch = Some(cx.spawn(async move |this, cx| {
-            let Some(result) = page.await else {
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.loading = false;
-                match result {
-                    Ok(page) => {
-                        this.has_more = page.has_more;
-                        this.next_offset = page.next_offset;
-                        // Offset paging can repeat a row if the order shifted between pages.
-                        for edition in page.items {
-                            if !this.editions.iter().any(|e| e.id == edition.id) {
-                                this.editions.push(edition);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        this.error =
-                            Some(session::error_message(&e, Some(READ_CATALOG), cx).into());
-                    }
-                }
-                cx.notify();
-            });
-        }));
+        let loaded = catalog
+            .editions
+            .read(cx)
+            .resource()
+            .value(&self.book)
+            .is_some();
+        if loaded {
+            catalog.more_editions(self.book, cx);
+        } else {
+            catalog.request_editions(self.book, Demand::Now, cx);
+        }
     }
 
     /// Opens `view` in a dialog.
@@ -184,12 +163,21 @@ impl EditionPicker {
 impl Render for EditionPicker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = colors(cx).fg_muted;
-        let rows: Vec<AnyElement> = self
-            .editions
-            .iter()
-            .map(|e| self.render_row(e, cx))
-            .collect();
-        let empty = rows.is_empty() && !self.loading && self.error.is_none();
+        let store = self
+            .catalog
+            .as_ref()
+            .map(|c| c.editions.read(cx).resource());
+        let paged = store.and_then(|s| s.value(&self.book)).cloned();
+        let loading = store.is_some_and(|s| s.is_loading(&self.book));
+        let error = store.and_then(|s| {
+            s.error(&self.book)
+                .or_else(|| s.more_error(&self.book))
+                .cloned()
+        });
+        let has_more = paged.as_ref().is_some_and(|p| p.has_more);
+        let editions: &[EditionSummary] = paged.as_deref().map_or(&[], |p| p.items.as_slice());
+        let rows: Vec<AnyElement> = editions.iter().map(|e| self.render_row(e, cx)).collect();
+        let empty = rows.is_empty() && !loading && error.is_none();
         v_flex()
             .gap_3()
             .child(
@@ -199,7 +187,7 @@ impl Render for EditionPicker {
                     .scroll_y_revealing_focus()
                     .gap_0p5()
                     .children(rows)
-                    .when(self.loading && self.editions.is_empty(), |this| {
+                    .when(loading && editions.is_empty(), |this| {
                         this.children((0..4).map(|_| {
                             v_flex()
                                 .gap_1()
@@ -217,7 +205,7 @@ impl Render for EditionPicker {
                         .child("Hardcover lists no editions for this book."),
                 )
             })
-            .when_some(self.error.clone(), |this, error| {
+            .when_some(error.clone(), |this, error| {
                 this.child(
                     h_flex()
                         .gap_2()
@@ -232,15 +220,15 @@ impl Render for EditionPicker {
                 )
             })
             .when(
-                self.has_more && self.error.is_none() && !self.editions.is_empty(),
+                has_more && error.is_none() && !editions.is_empty(),
                 |this| {
                     this.child(
                         div().child(
                             Button::new("more-editions")
                                 .small_control()
                                 .label("Show more")
-                                .loading(self.loading)
-                                .disabled(self.loading)
+                                .loading(loading)
+                                .disabled(loading)
                                 .on_click(cx.listener(|this, _, _, cx| this.fetch_more(cx))),
                         ),
                     )

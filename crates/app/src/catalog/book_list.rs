@@ -29,16 +29,19 @@
 //! (`size::PAGE_LIST_MIN`).
 
 use std::cell::Cell;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::{IconName, IndexPath, h_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Div, ElementId, Entity, FocusHandle,
-    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, ScrollHandle, ScrollStrategy,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
 };
-use hardcover_core::{BookSummary, ReadingStatus};
+use hardcover_core::{BookId, BookSummary, ReadingStatus};
 
 use super::navigation::{self, Page};
 use crate::book::detail_view::{BookDetailView, Subject};
@@ -46,6 +49,7 @@ use crate::design::{colors, size};
 use crate::format::average_rating_text;
 use crate::library::book_row::{BookRow, loading_rows};
 use crate::library::model::LibraryModel;
+use crate::resource::Demand;
 use crate::ui::reveal::RevealScroll as _;
 use crate::ui::{
     ListRow as _, RowFocus, empty_state, on_keyboard_entry, region_width, select_first_row,
@@ -187,7 +191,7 @@ impl ListPane {
         });
     }
 
-    /// Fetches the pane's book again if it is stale ([`crate::freshness`]),
+    /// Fetches the pane's book again if it is stale (`resource`),
     /// when the pane is beside the list. `shown_again` allows changes that
     /// move what the reader is looking at (see [`BookDetailView::revalidate`]).
     pub fn revalidate(&self, shown_again: bool, cx: &mut App) {
@@ -311,6 +315,117 @@ pub fn replace_rows(
         list.set_selected_index(row.map(IndexPath::new), window, cx);
         cx.notify();
     });
+}
+
+/// What revalidating a page asks for: shown again (Refresh, Back) tries a
+/// failed page again; the window becoming active doesn't.
+pub fn demand(shown_again: bool) -> Demand {
+    if shown_again {
+        Demand::Shown
+    } else {
+        Demand::Active
+    }
+}
+
+/// Which page's rows a catalogue page's list holds, and the book selected
+/// on each page shown before, so Back finds it selected again. One view
+/// serves every author (or series, or Discover period): the rows of the
+/// page left never stay beside the next page's header.
+pub struct PageRows<Id, V> {
+    /// The page the list holds, and the value its rows were made from.
+    listed: Option<(Id, Arc<V>)>,
+    selected: HashMap<Id, BookId>,
+}
+
+impl<Id, V> Default for PageRows<Id, V> {
+    fn default() -> Self {
+        Self {
+            listed: None,
+            selected: HashMap::new(),
+        }
+    }
+}
+
+impl<Id: Copy + Eq + Hash, V> PageRows<Id, V> {
+    /// Shows page `id` in `list`, from its value once it is in (`rows`
+    /// makes its rows). Until then the list is empty, so neither the rows
+    /// nor the book pane of the page left stay. Another page starts at the
+    /// top, with the book selected when it was last shown selected again;
+    /// the same page with a new value (fetched again, or `reorder`ed)
+    /// keeps the selected book ([`replace_rows`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn show(
+        &mut self,
+        id: Id,
+        value: Option<&Arc<V>>,
+        rows: impl FnOnce(&V) -> Vec<CatalogRow>,
+        reorder: bool,
+        list: &Entity<ListState<CatalogBooks>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let same_page = self
+            .listed
+            .as_ref()
+            .is_some_and(|(listed, _)| *listed == id);
+        if same_page {
+            match value {
+                Some(value) => {
+                    let unchanged = self
+                        .listed
+                        .as_ref()
+                        .is_some_and(|(_, listed)| Arc::ptr_eq(listed, value));
+                    if unchanged && !reorder {
+                        return;
+                    }
+                    replace_rows(list, rows(value), window, cx);
+                    self.listed = Some((id, value.clone()));
+                }
+                None => self.clear(list, window, cx),
+            }
+            return;
+        }
+        // Remember where the reader was on the page left.
+        if let Some((left, _)) = &self.listed {
+            let list = list.read(cx);
+            match list
+                .selected_index()
+                .and_then(|ix| list.delegate().rows.get(ix.row))
+            {
+                Some(row) => self.selected.insert(*left, row.book.id),
+                None => self.selected.remove(left),
+            };
+        }
+        let Some(value) = value else {
+            self.clear(list, window, cx);
+            return;
+        };
+        let rows = rows(value);
+        let selected = self
+            .selected
+            .get(&id)
+            .and_then(|book| rows.iter().position(|r| r.book.id == *book));
+        self.listed = Some((id, value.clone()));
+        list.update(cx, |list, cx| {
+            list.delegate_mut().set_rows(rows);
+            list.set_selected_index(selected.map(IndexPath::new), window, cx);
+            match selected {
+                Some(_) => list.scroll_to_selected_item(window, cx),
+                None => list.scroll_to_item(IndexPath::new(0), ScrollStrategy::Top, window, cx),
+            }
+            cx.notify();
+        });
+    }
+
+    /// Empties the list until a page is in.
+    fn clear(&mut self, list: &Entity<ListState<CatalogBooks>>, window: &mut Window, cx: &mut App) {
+        self.listed = None;
+        list.update(cx, |list, cx| {
+            list.delegate_mut().set_rows(Vec::new());
+            list.set_selected_index(None, window, cx);
+            cx.notify();
+        });
+    }
 }
 
 /// One book and its secondary line.

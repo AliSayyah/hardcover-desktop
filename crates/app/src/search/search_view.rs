@@ -614,10 +614,13 @@ impl SearchView {
         cx.notify();
     }
 
-    /// Fetches the pane's book again where it is stale ([`crate::freshness`]).
+    /// Fetches the pane's book again where it is stale ([`crate::resource`]).
     pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
-        self.detail
-            .update(cx, |detail, cx| detail.revalidate(shown_again, cx));
+        // The pane shows only on the Books tab.
+        if self.kind == SearchKind::Books {
+            self.detail
+                .update(cx, |detail, cx| detail.revalidate(shown_again, cx));
+        }
     }
 
     pub fn focus_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -671,6 +674,8 @@ impl SearchView {
             SearchKind::Authors => self.search_if_stale::<AuthorHit>(query, window, cx),
             SearchKind::Series => self.search_if_stale::<SeriesHit>(query, window, cx),
         }
+        // The book pane is shown again.
+        self.revalidate(true, cx);
         // Keep the query as typed: the next key edits it rather than replacing it.
         self.input.update(cx, |input, cx| input.focus(window, cx));
         cx.notify();

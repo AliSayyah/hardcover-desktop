@@ -1,31 +1,23 @@
-//! How long catalogue data fetched during a run stays current: book details,
-//! similar books, other readers' reviews, series and author pages, Discover.
-//!
-//! Each is kept per id for the run, as a [`Fetched`] value. One older than
-//! [`STALE_AFTER`], or fetched before the last Refresh ([`refresh_all`]), is
-//! stale: the next time it is asked for, it is fetched again while the old
-//! value stays on screen. A refetch that fails keeps the old value and shows
-//! nothing, and counts as a try, so being offline doesn't send a request on
-//! every trigger; Refresh tries again.
-//!
-//! Views can't tell whether they are on screen, so the shell asks the visible
-//! ones to revalidate: on Refresh, when the window becomes active, and when a
-//! page or destination is shown again (`Workspace::revalidate_visible`).
+//! How long fetched data stays current. A value is stale once it is older
+//! than [`STALE_AFTER`], or was asked for before the last Refresh
+//! ([`refresh_all`]). Its age counts from when its request *started*, so a
+//! request that was in flight when Refresh was pressed doesn't count as
+//! fresh when it lands.
 
 use std::time::{Duration, SystemTime};
 
 use gpui_kit::{App, Global};
 
-/// How long a value fetched this run is shown before it is fetched again.
+/// How long a value is shown before it is fetched again.
 pub const STALE_AFTER: Duration = Duration::from_mins(30);
 
-/// Bumped by Refresh: everything fetched before it is stale.
+/// Bumped by Refresh: everything asked for before it is stale.
 #[derive(Default)]
 struct RefreshGeneration(u64);
 
 impl Global for RefreshGeneration {}
 
-fn generation(cx: &App) -> u64 {
+pub(super) fn generation(cx: &App) -> u64 {
     cx.try_global::<RefreshGeneration>().map_or(0, |g| g.0)
 }
 
@@ -35,10 +27,10 @@ pub fn refresh_all(cx: &mut App) {
     cx.set_global(RefreshGeneration(next));
 }
 
-/// When a value was last fetched or tried, and in which Refresh generation.
-/// Wall-clock time, not `Instant`: on Linux that stops while the computer
-/// sleeps, so a laptop opened in the morning would find everything fresh.
-#[derive(Debug, Clone, Copy)]
+/// When a request started, and in which Refresh generation. Wall-clock
+/// time, not `Instant`: on Linux that stops while the computer sleeps, so a
+/// laptop opened in the morning would find everything fresh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stamp {
     at: SystemTime,
     generation: u64,
@@ -52,55 +44,28 @@ impl Stamp {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn at(at: SystemTime, generation: u64) -> Self {
+        Self { at, generation }
+    }
+
     pub fn is_stale(self, cx: &App) -> bool {
         self.is_stale_at(SystemTime::now(), generation(cx))
     }
 
+    /// Asked for before the Refresh generation `generation`.
+    pub(super) fn predates(self, generation: u64) -> bool {
+        self.generation != generation
+    }
+
     /// A clock set back since the stamp counts as stale: how old the value
     /// is can't be known.
-    fn is_stale_at(self, now: SystemTime, generation: u64) -> bool {
-        self.generation != generation
+    pub(super) fn is_stale_at(self, now: SystemTime, generation: u64) -> bool {
+        self.predates(generation)
             || now
                 .duration_since(self.at)
                 .is_ok_and(|age| age >= STALE_AFTER)
             || now < self.at
-    }
-}
-
-/// A value fetched this run, with when it was last fetched or tried.
-#[derive(Debug, Clone)]
-pub struct Fetched<T> {
-    value: T,
-    stamp: Stamp,
-}
-
-impl<T: PartialEq> Fetched<T> {
-    pub fn new(value: T, cx: &App) -> Self {
-        Self {
-            value,
-            stamp: Stamp::now(cx),
-        }
-    }
-
-    pub fn value(&self) -> &T {
-        &self.value
-    }
-
-    pub fn is_stale(&self, cx: &App) -> bool {
-        self.stamp.is_stale(cx)
-    }
-
-    /// Applies a refetch: a different value replaces this one, an equal one
-    /// or a failure only counts as a try. True if the value changed.
-    pub fn refetched<E>(&mut self, result: Result<T, E>, cx: &App) -> bool {
-        self.stamp = Stamp::now(cx);
-        match result {
-            Ok(value) if value != self.value => {
-                self.value = value;
-                true
-            }
-            Ok(_) | Err(_) => false,
-        }
     }
 }
 
@@ -120,27 +85,5 @@ mod tests {
             stamp.is_stale_at(at - Duration::from_secs(1), 3),
             "the clock was set back"
         );
-    }
-
-    #[gpui_kit::test]
-    fn a_refetch_replaces_only_a_different_value(cx: &mut gpui_kit::TestAppContext) {
-        cx.update(|cx| {
-            let mut fetched = Fetched::new(1, cx);
-            assert!(!fetched.is_stale(cx));
-            refresh_all(cx);
-            assert!(fetched.is_stale(cx));
-
-            assert!(!fetched.refetched(Ok::<_, ()>(1), cx));
-            assert!(!fetched.is_stale(cx), "an equal value counts as fresh");
-
-            refresh_all(cx);
-            assert!(!fetched.refetched(Err("offline"), cx));
-            assert_eq!(*fetched.value(), 1, "a failure keeps the value");
-            assert!(!fetched.is_stale(cx), "and counts as a try");
-
-            refresh_all(cx);
-            assert!(fetched.refetched(Ok::<_, ()>(2), cx));
-            assert_eq!(*fetched.value(), 2);
-        });
     }
 }

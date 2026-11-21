@@ -294,7 +294,7 @@ impl LibraryView {
         cx.notify();
     }
 
-    /// Fetches the pane's book again where it is stale ([`crate::freshness`]).
+    /// Fetches the pane's book again where it is stale ([`crate::resource`]).
     pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
         self.detail
             .update(cx, |detail, cx| detail.revalidate(shown_again, cx));

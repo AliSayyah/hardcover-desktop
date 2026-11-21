@@ -25,6 +25,7 @@ use hardcover_core::{Client, Error};
 
 use crate::format;
 use crate::io::{self, IoPool, Priority};
+use crate::library::cache_worker::CacheWorker;
 
 /// One sign-in's services and lifetime. Cheap to clone; clones share the
 /// grant and the alive flag.
@@ -40,6 +41,10 @@ struct Inner {
     /// `None` if the cache could not be opened; the app then works online
     /// only.
     cache: Option<Arc<LibraryCache>>,
+    /// The cache's own thread, which every write to it goes through, in
+    /// order; `None` without a cache, and once it was cleared on signing
+    /// out ([`SessionScope::clear_cache`]).
+    cache_worker: RefCell<Option<Rc<CacheWorker>>>,
     /// False once signed out. Read on the I/O threads.
     alive: Arc<AtomicBool>,
     io: Io,
@@ -94,11 +99,16 @@ impl SessionScope {
         scopes: GrantedScopes,
         io: Io,
     ) -> Self {
+        let cache_worker = cache
+            .clone()
+            .and_then(|cache| CacheWorker::start(cache, io))
+            .map(Rc::new);
         Self {
             inner: Rc::new(Inner {
                 client,
                 auth,
                 cache,
+                cache_worker: RefCell::new(cache_worker),
                 alive: Arc::new(AtomicBool::new(true)),
                 io,
                 grant: RefCell::new(Grant {
@@ -152,8 +162,39 @@ impl SessionScope {
         self.inner.cache.as_ref()
     }
 
-    pub(crate) fn io(&self) -> Io {
-        self.inner.io
+    /// The cache's worker, which runs reads and writes in the order they
+    /// were sent; `None` without a cache, and once cleared on signing out.
+    pub fn cache_worker(&self) -> Option<Rc<CacheWorker>> {
+        self.inner.cache_worker.borrow().clone()
+    }
+
+    /// Writes to the cache after everything sent to it before; nothing once
+    /// it was cleared on signing out.
+    pub fn cache_write(
+        &self,
+        write: impl FnOnce(&LibraryCache) -> hardcover_core::Result<()> + Send + 'static,
+    ) {
+        if let Some(worker) = self.cache_worker() {
+            worker.write(write);
+        }
+    }
+
+    /// Clears the cache after every write already sent to it, and takes the
+    /// worker away so nothing more is written (signing out). Resolves once
+    /// it is cleared.
+    pub fn clear_cache(&self) -> impl Future<Output = ()> + use<> {
+        let cleared = self.inner.cache_worker.borrow_mut().take().map(|worker| {
+            worker.ask(|cache| {
+                if let Err(e) = cache.clear() {
+                    eprintln!("hardcover: could not clear the library cache: {e}");
+                }
+            })
+        });
+        async move {
+            if let Some(cleared) = cleared {
+                cleared.await;
+            }
+        }
     }
 
     /// Runs `call` with the session's client on the I/O threads, its reads
