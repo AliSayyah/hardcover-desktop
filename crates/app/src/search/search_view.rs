@@ -45,7 +45,6 @@ use gpui_kit::{
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{AuthorHit, BookId, BookSummary, Client, SearchHits, SeriesHit};
 
-use crate::app_state::Services;
 use crate::book::detail_view::{BookDetailView, Subject};
 use crate::catalog::navigation::{self, Page};
 use crate::design::{TypeRoles as _, colors, size};
@@ -54,6 +53,7 @@ use crate::library::book_row::{BookRow, loading_rows};
 use crate::library::model::LibraryModel;
 use crate::search::library_matches::{counts_as_shelved, library_matches};
 use crate::search::results::{Hit, Phase, SearchResults};
+use crate::session::{self, SessionScope};
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::gutter_list;
@@ -675,15 +675,20 @@ impl SearchView {
             self.tasks[slot] = None;
             return;
         };
-        let client = Services::global(cx).client().clone();
+        let Some(session) = SessionScope::current(cx).cloned() else {
+            return;
+        };
         self.tasks[slot] = Some(cx.spawn_in(window, async move |this, cx| {
             if debounce {
                 cx.background_executor().timer(DEBOUNCE).await;
             }
             let q = query.to_string();
-            let result = cx
-                .background_spawn(async move { T::fetch(&client, &q, 1) })
-                .await;
+            let Some(result) = session
+                .interactive(move |client| T::fetch(client, &q, 1))
+                .await
+            else {
+                return;
+            };
             let _ = this.update_in(cx, |this, window, cx| {
                 this.receive(revision, result, window, cx);
             });
@@ -699,11 +704,14 @@ impl SearchView {
         let Some((revision, query, page)) = request else {
             return;
         };
-        let client = Services::global(cx).client().clone();
+        let Some(session) = SessionScope::current(cx) else {
+            return;
+        };
+        let hits = session.interactive(move |client| T::fetch(client, &query, page));
         self.tasks[T::KIND.index()] = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { T::fetch(&client, &query, page) })
-                .await;
+            let Some(result) = hits.await else {
+                return;
+            };
             let _ = this.update_in(cx, |this, window, cx| {
                 this.receive(revision, result, window, cx);
             });
@@ -717,7 +725,7 @@ impl SearchView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = result.map_err(|e| Services::error_message(&e, Some(READ_CATALOG), cx));
+        let result = result.map_err(|e| session::error_message(&e, Some(READ_CATALOG), cx));
         T::list(self).update(cx, |list, cx| {
             if list.delegate_mut().results.receive(revision, result) {
                 cx.notify();

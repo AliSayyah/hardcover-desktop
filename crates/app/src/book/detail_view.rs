@@ -49,10 +49,10 @@ use gpui_kit::{
     ParentElement as _, Pixels, Render, RenderImage, SharedString, Styled as _, Subscription, Task,
     Window, div,
 };
-use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY};
+use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{
-    BookDetails, BookId, BookSummary, Client, Error, LibraryEntry, Privacy, Rating, ReadId,
-    ReadSession, ReadingStatus, Review, ReviewedEntry, UserBookId,
+    BookDetails, BookId, BookSummary, LibraryEntry, Privacy, Rating, ReadId, ReadSession,
+    ReadingStatus, UserBookId,
 };
 
 use self::catalog_sections::Similar;
@@ -60,14 +60,17 @@ use self::community_reviews::CommunityReviews;
 use self::review_section::ReviewEditor;
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
-use crate::app_state::{Services, release_cover_medium};
+use crate::app_state::release_cover_medium;
 use crate::design::size;
 use crate::format::read_dates_text;
 use crate::freshness::Fetched;
-use crate::library::model::{LibraryModel, WriteKind};
+use crate::library::model::{
+    LibraryModel, LibraryWrite, Removed, WriteKind, WriteOutcome, WriteTarget, Written,
+};
 use crate::library::writes;
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
+use crate::session::{self, SessionScope};
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, EmptyState, ObjectBar, ObjectTools, Tier, blocks, folds, main_column_width,
@@ -504,13 +507,15 @@ impl BookDetailView {
         if self.details_loading == Some(book.id) {
             return;
         }
+        let Some(session) = SessionScope::current(cx).cloned() else {
+            return;
+        };
         // Stale details stay on screen while they are fetched again.
         if !revalidating {
             self.details.remove(&book.id);
         }
         self.details_loading = Some(book.id);
         self.details_fetching = None;
-        let client = Services::global(cx).client().clone();
         let id = book.id;
         // Replacing the task cancels a fetch for a book no longer shown.
         self.details_task = Some(cx.spawn(async move |this, cx| {
@@ -522,9 +527,12 @@ impl BookDetailView {
             if fetching.is_err() {
                 return;
             }
-            let result = cx
-                .background_spawn(async move { client.book_details(id) })
-                .await;
+            let Some(result) = session
+                .interactive(move |client| client.book_details(id))
+                .await
+            else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 if this.details_loading == Some(id) {
                     this.details_loading = None;
@@ -538,7 +546,7 @@ impl BookDetailView {
                     // records a refused scope.
                     (Some(Details::Loaded(fetched)), result) => {
                         if let Err(e) = &result {
-                            Services::error_message(e, Some(READ_CATALOG), cx);
+                            session::error_message(e, Some(READ_CATALOG), cx);
                         }
                         fetched.refetched(result, cx);
                     }
@@ -547,7 +555,7 @@ impl BookDetailView {
                             .insert(id, Details::Loaded(Fetched::new(details, cx)));
                     }
                     (_, Err(e)) => {
-                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        let message = session::error_message(&e, Some(READ_CATALOG), cx);
                         this.details.insert(id, Details::Failed(message.into()));
                     }
                 }
@@ -569,72 +577,31 @@ impl BookDetailView {
 
     // ----- writes -----
 
-    /// Runs one write on `id` in the background. The model applies the result
-    /// whether or not this view still shows the book.
-    fn run_write<W: Into<Written> + Send + 'static>(
+    /// Runs one write on an entry through the library model, which applies the
+    /// result whether or not this view still shows the book, and shows a
+    /// failure. `warning` names what to say despite success.
+    fn run_write<T: Written>(
         &mut self,
-        id: UserBookId,
-        kind: WriteKind,
-        failure_title: &'static str,
-        op: impl FnOnce(&Client) -> Result<W, Error> + Send + 'static,
+        mut write: LibraryWrite<T>,
+        warning: impl FnOnce(&T) -> Option<(&'static str, &'static str)> + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let model = self.model.clone();
-        if !model.update(cx, |m, cx| m.begin_write(id, kind, cx)) {
-            let title = match kind {
-                WriteKind::Notes => Some("Notes not saved yet"),
-                WriteKind::Review => Some("Review not saved yet"),
-                _ => None,
-            };
-            if let Some(title) = title {
-                window.push_notification(
-                    Notification::info(
-                        "Another change to this book is still being saved. Try again in a moment.",
-                    )
-                    .title(title),
-                    cx,
-                );
-            }
-            self.revert_controls(window, cx);
+        let (kind, target) = (write.kind(), write.target());
+        let WriteTarget::Entry(id) = target else {
             return;
+        };
+        // A review write needs write:reviews and, for its status,
+        // write:library: an unnamed refusal can't be pinned on either.
+        if kind == WriteKind::Review {
+            write = write.any_scope();
         }
-        let client = Services::global(cx).client().clone();
+        let outcome = self.model.update(cx, |m, cx| m.write(write, window, cx));
         cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { op(&client).map(Into::into) })
-                .await;
-            model.update(cx, |m, cx| {
-                m.end_write(id, cx);
-                match &result {
-                    // A review write never removes the entry: without one,
-                    // the entry shown stays.
-                    Ok(Written {
-                        entry,
-                        review: Some(review),
-                        ..
-                    }) => {
-                        if let Some(entry) = entry {
-                            m.apply_written(entry.clone(), cx);
-                        }
-                        m.apply_review(id, review.clone(), cx);
-                    }
-                    Ok(Written {
-                        entry: Some(entry),
-                        review: None,
-                        ..
-                    }) => m.apply_written(entry.clone(), cx),
-                    Ok(Written {
-                        entry: None,
-                        review: None,
-                        ..
-                    }) => m.apply_removed(id, cx),
-                    Err(_) => {}
-                }
-            });
-            let _ = this.update_in(cx, |this, window, cx| match result {
-                Ok(written) => {
-                    if let Some((title, message)) = written.warning {
+            let outcome = outcome.await;
+            let _ = this.update_in(cx, |this, window, cx| match outcome {
+                WriteOutcome::Saved(written) => {
+                    if let Some((title, message)) = warning(&written) {
                         window.push_notification(Notification::warning(message).title(title), cx);
                     }
                     if kind == WriteKind::Notes {
@@ -648,24 +615,10 @@ impl BookDetailView {
                         this.review_written(id, cx);
                     }
                 }
-                Err(error) => {
-                    window.push_notification(
-                        Notification::error(Services::error_message(
-                            &error,
-                            // A review write needs write:reviews and, for its
-                            // status, write:library: an unnamed refusal can't
-                            // be pinned on either.
-                            match kind {
-                                WriteKind::Review => None,
-                                _ => Some(WRITE_LIBRARY),
-                            },
-                            cx,
-                        ))
-                        .title(failure_title),
-                        cx,
-                    );
+                WriteOutcome::Failed { .. } | WriteOutcome::Busy => {
                     this.revert_controls(window, cx);
                 }
+                WriteOutcome::InLibrary | WriteOutcome::Ended => {}
             });
         })
         .detach();
@@ -689,10 +642,13 @@ impl BookDetailView {
         }
         let id = entry.user_book_id;
         self.run_write(
-            id,
-            WriteKind::Status,
-            "Couldn't change the status",
-            move |client| client.set_status(id, status).map(Some),
+            LibraryWrite::entry(
+                id,
+                WriteKind::Status,
+                "Couldn't change the status",
+                move |client| client.set_status(id, status),
+            ),
+            |_| None,
             window,
             cx,
         );
@@ -716,10 +672,13 @@ impl BookDetailView {
         // Sending the shown status keeps Hardcover from marking the book Read.
         let keep = entry.status;
         self.run_write(
-            id,
-            WriteKind::Rating,
-            "Couldn't save the rating",
-            move |client| client.set_rating(id, rating, keep).map(Some),
+            LibraryWrite::entry(
+                id,
+                WriteKind::Rating,
+                "Couldn't save the rating",
+                move |client| client.set_rating(id, rating, keep),
+            ),
+            |_| None,
             window,
             cx,
         );
@@ -734,10 +693,13 @@ impl BookDetailView {
         }
         let id = entry.user_book_id;
         self.run_write(
-            id,
-            WriteKind::Privacy,
-            "Couldn't change who can see this book",
-            move |client| client.set_privacy(id, privacy).map(Some),
+            LibraryWrite::entry(
+                id,
+                WriteKind::Privacy,
+                "Couldn't change who can see this book",
+                move |client| client.set_privacy(id, privacy),
+            ),
+            |_| None,
             window,
             cx,
         );
@@ -753,10 +715,13 @@ impl BookDetailView {
         let id = entry.user_book_id;
         let text = self.notes.read(cx).value().to_string();
         self.run_write(
-            id,
-            WriteKind::Notes,
-            "Couldn't save your notes",
-            move |client| client.set_private_notes(id, &text).map(Some),
+            LibraryWrite::entry(
+                id,
+                WriteKind::Notes,
+                "Couldn't save your notes",
+                move |client| client.set_private_notes(id, &text),
+            ),
+            |_| None,
             window,
             cx,
         );
@@ -833,7 +798,7 @@ impl BookDetailView {
         if entry.edition.as_ref().map(|e| e.id) == Some(edition) {
             return;
         }
-        writes::set_edition(self.model.clone(), entry.user_book_id, edition, window, cx);
+        writes::set_edition(&self.model, entry.user_book_id, edition, window, cx);
     }
 
     /// Opens the read dialog to add a read (`None`) or change `read`'s dates.
@@ -873,10 +838,13 @@ impl BookDetailView {
                 };
                 let edition = entry.edition.as_ref().map(|e| e.id);
                 self.run_write(
-                    id,
-                    WriteKind::Reads,
-                    "Couldn't add the read",
-                    move |client| client.add_read(id, started, finished, edition).map(Some),
+                    LibraryWrite::entry(
+                        id,
+                        WriteKind::Reads,
+                        "Couldn't add the read",
+                        move |client| client.add_read(id, started, finished, edition),
+                    ),
+                    |_| None,
                     window,
                     cx,
                 );
@@ -889,10 +857,13 @@ impl BookDetailView {
                     return;
                 }
                 self.run_write(
-                    id,
-                    WriteKind::Dates,
-                    "Couldn't change the dates",
-                    move |client| client.set_read_dates(read, started, finished).map(Some),
+                    LibraryWrite::entry(
+                        id,
+                        WriteKind::Dates,
+                        "Couldn't change the dates",
+                        move |client| client.set_read_dates(read, started, finished),
+                    ),
+                    |_| None,
                     window,
                     cx,
                 );
@@ -926,10 +897,13 @@ impl BookDetailView {
                 .on_ok(move |_, window, cx| {
                     let _ = view.update(cx, |this, cx| {
                         this.run_write(
-                            id,
-                            WriteKind::Reads,
-                            "Couldn't delete the read",
-                            move |client| client.delete_read(id, read).map(Some),
+                            LibraryWrite::entry(
+                                id,
+                                WriteKind::Reads,
+                                "Couldn't delete the read",
+                                move |client| client.delete_read(id, read),
+                            ),
+                            |_| None,
                             window,
                             cx,
                         );
@@ -966,10 +940,13 @@ impl BookDetailView {
 
     fn remove(&mut self, id: UserBookId, window: &mut Window, cx: &mut Context<Self>) {
         self.run_write(
-            id,
-            WriteKind::Remove,
-            "Couldn't remove the book",
-            move |client| client.remove_from_library(id).map(|()| None),
+            LibraryWrite::entry(
+                id,
+                WriteKind::Remove,
+                "Couldn't remove the book",
+                move |client| client.remove_from_library(id).map(|()| Removed),
+            ),
+            |_| None,
             window,
             cx,
         );
@@ -984,37 +961,7 @@ impl BookDetailView {
         let Some(Subject::Book(book)) = self.subject.clone() else {
             return;
         };
-        writes::add_to_library(self.model.clone(), book.id, status, window, cx);
-    }
-}
-
-/// The outcome of a write, for [`BookDetailView::run_write`]: the entry to
-/// apply, its review if the write was a review write, and a warning to show
-/// despite success. No entry means it was removed, except after a review
-/// write, which leaves the entry shown as it is.
-struct Written {
-    entry: Option<LibraryEntry>,
-    review: Option<Review>,
-    warning: Option<(&'static str, String)>,
-}
-
-impl From<Option<LibraryEntry>> for Written {
-    fn from(entry: Option<LibraryEntry>) -> Self {
-        Self {
-            entry,
-            review: None,
-            warning: None,
-        }
-    }
-}
-
-impl From<ReviewedEntry> for Written {
-    fn from(written: ReviewedEntry) -> Self {
-        Self {
-            entry: written.entry,
-            review: Some(written.review),
-            warning: None,
-        }
+        writes::add_to_library(&self.model, book.id, status, window, cx);
     }
 }
 
@@ -1279,7 +1226,6 @@ impl Render for BookDetailView {
 mod tests {
     use super::*;
     use gpui_kit::{TestAppContext, VisualTestContext, px};
-    use hardcover_core::auth::GrantedScopes;
     use hardcover_core::store::LibraryCache;
 
     /// Project Hail Mary in the demo catalogue: more than a page of reviews.
@@ -1290,13 +1236,13 @@ mod tests {
     pub(super) fn demo_pane(
         cx: &mut TestAppContext,
     ) -> (Entity<BookDetailView>, &mut VisualTestContext) {
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
         cx.update(|cx| {
             gpui_kit::init(cx);
-            let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
-            let client = hardcover_core::demo::client();
-            cx.set_global(Services::new(client, None, cache, GrantedScopes::all()));
+            session.install(cx);
         });
-        let model = cx.new(|_| LibraryModel::new());
+        let model = cx.new(|_| LibraryModel::new(session));
         let (view, cx) = cx.add_window_view(|window, cx| BookDetailView::new(model, window, cx));
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {

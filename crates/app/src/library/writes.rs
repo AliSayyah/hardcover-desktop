@@ -1,136 +1,77 @@
-//! Shared library write operations used by rows and the book page.
+//! Library writes several views make, through [`LibraryModel::write`].
 
 use gpui_kit::component::{WindowExt as _, notification::Notification};
-use gpui_kit::{App, AppContext as _, Entity, Window};
+use gpui_kit::{App, Entity, Window};
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{BookId, EditionId, ReadingStatus, UserBookId};
 
-use super::model::LibraryModel;
-use crate::app_state::Services;
-use crate::format::error_message;
+use super::model::{LibraryModel, LibraryWrite, WriteKind, WriteOutcome};
+use crate::session;
 
-/// Adds a book with `status` in the background and applies the returned entry.
+/// Adds a book with `status`.
 pub(crate) fn add_to_library(
-    library: Entity<LibraryModel>,
+    library: &Entity<LibraryModel>,
     book: BookId,
     status: ReadingStatus,
     window: &mut Window,
     cx: &mut App,
 ) {
-    if !library.update(cx, |model, cx| model.begin_add(book, cx)) {
-        return;
-    }
-    let client = Services::global(cx).client().clone();
-    window
-        .spawn(cx, async move |cx| {
-            let result = cx
-                .background_spawn(async move { client.add_to_library(book, status) })
-                .await;
-            library.update(cx, |model, cx| {
-                model.end_add(book, cx);
-                if let Ok(entry) = &result {
-                    model.apply_written(entry.clone(), cx);
-                }
-            });
-            if let Err(error) = result {
-                let _ = cx.update(|window, cx| {
-                    let message = Services::error_message(&error, Some(WRITE_LIBRARY), cx);
-                    window.push_notification(
-                        Notification::error(message).title("Couldn't add the book"),
-                        cx,
-                    );
-                });
-            }
-        })
-        .detach();
+    let write = LibraryWrite::add(book, "Couldn't add the book", move |client| {
+        client.add_to_library(book, status)
+    });
+    drop(library.update(cx, |model, cx| model.write(write, window, cx)));
 }
 
-/// Changes an entry's status in the background and applies the returned entry.
+/// Changes an entry's status.
 pub(crate) fn set_status(
-    library: Entity<LibraryModel>,
+    library: &Entity<LibraryModel>,
     id: UserBookId,
     status: ReadingStatus,
     window: &mut Window,
     cx: &mut App,
 ) {
-    if !library.update(cx, |model, cx| {
-        model.begin_write(id, super::model::WriteKind::Status, cx)
-    }) {
-        return;
-    }
-    let client = Services::global(cx).client().clone();
-    window
-        .spawn(cx, async move |cx| {
-            let result = cx
-                .background_spawn(async move { client.set_status(id, status) })
-                .await;
-            library.update(cx, |model, cx| {
-                model.end_write(id, cx);
-                if let Ok(entry) = &result {
-                    model.apply_written(entry.clone(), cx);
-                }
-            });
-            if let Err(error) = result {
-                let _ = cx.update(|window, cx| {
-                    let message = Services::error_message(&error, Some(WRITE_LIBRARY), cx);
-                    window.push_notification(
-                        Notification::error(message).title("Couldn't change the status"),
-                        cx,
-                    );
-                });
-            }
-        })
-        .detach();
+    let write = LibraryWrite::entry(
+        id,
+        WriteKind::Status,
+        "Couldn't change the status",
+        move |client| client.set_status(id, status),
+    );
+    drop(library.update(cx, |model, cx| model.write(write, window, cx)));
 }
 
-/// Moves an entry to `edition` in the background, its open read with it
-/// ([`hardcover_core::Client::set_edition`]), and applies the returned entry.
-/// Says so when the read stays on the old edition.
+/// Moves an entry to `edition`, its open read with it
+/// ([`hardcover_core::Client::set_edition`]). Says so when the read stays on
+/// the old edition.
 pub(crate) fn set_edition(
-    library: Entity<LibraryModel>,
+    library: &Entity<LibraryModel>,
     id: UserBookId,
     edition: EditionId,
     window: &mut Window,
     cx: &mut App,
 ) {
-    if !library.update(cx, |model, cx| {
-        model.begin_write(id, super::model::WriteKind::Edition, cx)
-    }) {
-        return;
-    }
-    let client = Services::global(cx).client().clone();
+    let write = LibraryWrite::entry(
+        id,
+        WriteKind::Edition,
+        "Couldn't change the edition",
+        move |client| client.set_edition(id, edition),
+    );
+    let outcome = library.update(cx, |model, cx| model.write(write, window, cx));
     window
         .spawn(cx, async move |cx| {
-            let result = cx
-                .background_spawn(async move { client.set_edition(id, edition) })
-                .await;
-            library.update(cx, |model, cx| {
-                model.end_write(id, cx);
-                if let Ok(change) = &result {
-                    model.apply_written(change.entry.clone(), cx);
-                }
-            });
-            let _ = cx.update(|window, cx| match result {
-                Ok(change) => {
-                    if let Some(error) = change.read_left_behind {
-                        window.push_notification(
-                            Notification::warning(format!(
-                                "Your current read still counts progress against the old edition. {}",
-                                error_message(&error)
-                            ))
-                            .title("Edition changed, progress not moved"),
-                            cx,
-                        );
-                    }
-                }
-                Err(error) => {
-                    let message = Services::error_message(&error, Some(WRITE_LIBRARY), cx);
+            if let WriteOutcome::Saved(change) = outcome.await
+                && let Some(error) = change.read_left_behind
+            {
+                let _ = cx.update(|window, cx| {
+                    let message = session::error_message(&error, Some(WRITE_LIBRARY), cx);
                     window.push_notification(
-                        Notification::error(message).title("Couldn't change the edition"),
+                        Notification::warning(format!(
+                            "Your current read still counts progress against the old edition. {message}"
+                        ))
+                        .title("Edition changed, progress not moved"),
                         cx,
                     );
-                }
-            });
+                });
+            }
         })
         .detach();
 }

@@ -23,13 +23,13 @@ use gpui_kit::{
 use hardcover_core::auth::scopes::WRITE_REVIEWS;
 use hardcover_core::{Date, LibraryEntry, Review, UserBookId};
 
+use super::BookDetailView;
 use super::your_book::{paragraphs, saved_note};
-use super::{BookDetailView, Written};
-use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{date_text, needs_permission};
-use crate::library::model::WriteKind;
+use crate::library::model::{LibraryWrite, WriteKind};
+use crate::session;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
@@ -322,7 +322,7 @@ impl BookDetailView {
         let id = entry.user_book_id;
         if self.review.editing.as_ref().map(|(e, _)| *e) != Some(id)
             || !self.review_dirty(cx)
-            || !Services::global(cx).has_scope(WRITE_REVIEWS)
+            || !session::has_scope(cx, WRITE_REVIEWS)
             || !editable_here(self.saved_review(id, cx).as_ref())
         {
             return;
@@ -335,25 +335,17 @@ impl BookDetailView {
         let keep = entry.status;
         self.review.writing = Some(ReviewWrite::Save);
         self.run_write(
-            id,
-            WriteKind::Review,
-            "Couldn't save your review",
-            move |client| {
-                client
-                    .set_review(id, &draft.text, draft.spoilers, draft.date, keep)
-                    .map(|written| {
-                        let kept = written.review.text().is_some();
-                        let mut written = Written::from(written);
-                        if !kept {
-                            written.warning = Some((
-                                "Review not saved",
-                                "Hardcover didn't keep your review. It is still in the \
-                                 editor; try again."
-                                    .to_owned(),
-                            ));
-                        }
-                        written
-                    })
+            LibraryWrite::entry(
+                id,
+                WriteKind::Review,
+                "Couldn't save your review",
+                move |client| client.set_review(id, &draft.text, draft.spoilers, draft.date, keep),
+            ),
+            |written| {
+                written.review.text().is_none().then_some((
+                    "Review not saved",
+                    "Hardcover didn't keep your review. It is still in the editor; try again.",
+                ))
             },
             window,
             cx,
@@ -386,25 +378,20 @@ impl BookDetailView {
                     let _ = view.update(cx, |this, cx| {
                         this.review.writing = Some(ReviewWrite::Delete);
                         this.run_write(
-                            id,
-                            WriteKind::Review,
-                            "Couldn't delete your review",
-                            move |client| {
-                                client.delete_review(id, keep).map(|written| {
-                                    // Plain text left behind is Hardcover's
-                                    // own copy; only Markdown is the app's.
-                                    let kept = written.review.markdown.is_some();
-                                    let mut written = Written::from(written);
-                                    if kept {
-                                        written.warning = Some((
-                                            "Review not deleted",
-                                            "Hardcover still has your review. Try again, \
-                                             or delete it on the Hardcover website."
-                                                .to_owned(),
-                                        ));
-                                    }
-                                    written
-                                })
+                            LibraryWrite::entry(
+                                id,
+                                WriteKind::Review,
+                                "Couldn't delete your review",
+                                move |client| client.delete_review(id, keep),
+                            ),
+                            // Plain text left behind is Hardcover's own copy;
+                            // only Markdown is the app's.
+                            |written| {
+                                written.review.markdown.is_some().then_some((
+                                    "Review not deleted",
+                                    "Hardcover still has your review. Try again, or delete \
+                                     it on the Hardcover website.",
+                                ))
                             },
                             window,
                             cx,
@@ -445,7 +432,7 @@ impl BookDetailView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let id = entry.user_book_id;
-        let can_write = Services::global(cx).has_scope(WRITE_REVIEWS);
+        let can_write = session::has_scope(cx, WRITE_REVIEWS);
         let muted = colors(cx).fg_muted;
         let model = self.model.read(cx);
         let slot = model.review(id);

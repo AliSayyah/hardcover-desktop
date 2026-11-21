@@ -12,8 +12,8 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Disableable as _, Icon, IconName, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
-    AppContext as _, ClipboardItem, Context, Entity, EventEmitter, IntoElement, ParentElement as _,
-    Render, SharedString, Styled as _, Task, Window, div, prelude::FluentBuilder as _,
+    ClipboardItem, Context, Entity, EventEmitter, IntoElement, ParentElement as _, Render,
+    SharedString, Styled as _, Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::{
     CancelHandle, GrantedScopes, KeyringTokenStore, OAuthConfig, PendingSignIn, Session,
@@ -23,10 +23,11 @@ use hardcover_core::{Client, Error, UserId};
 
 use super::KEYRING_UNAVAILABLE;
 use super::sign_in_view::SIGN_IN_TIMEOUT;
-use crate::app_state::Services;
 use crate::design::{TypeRoles as _, colors};
 use crate::format::permissions_message;
+use crate::io;
 use crate::library::model::LibraryModel;
+use crate::session::SessionScope;
 use crate::ui::kit::SmallControl as _;
 
 /// Emitted once the session holds the new grant.
@@ -59,6 +60,7 @@ impl From<Error> for Failure {
 }
 
 pub struct Reauthorize {
+    session: SessionScope,
     /// Whose library is shown: only that account may replace the session.
     library: Entity<LibraryModel>,
     state: State,
@@ -70,8 +72,9 @@ pub struct Reauthorize {
 impl EventEmitter<Reauthorized> for Reauthorize {}
 
 impl Reauthorize {
-    pub fn new(library: Entity<LibraryModel>) -> Self {
+    pub fn new(session: SessionScope, library: Entity<LibraryModel>) -> Self {
         Self {
+            session,
             library,
             state: State::Idle { error: None },
             dismissed: false,
@@ -81,8 +84,10 @@ impl Reauthorize {
 
     /// True while the notice should show: a session that lacks scopes, and
     /// the user hasn't put it off.
-    pub fn is_needed(&self, services: &Services) -> bool {
-        !self.dismissed && services.session().is_some() && !services.missing_scopes().is_empty()
+    pub fn is_needed(&self) -> bool {
+        !self.dismissed
+            && self.session.auth().is_some()
+            && !self.session.missing_scopes().is_empty()
     }
 
     /// Signs in in the browser and replaces the session's tokens.
@@ -90,12 +95,15 @@ impl Reauthorize {
         if !matches!(self.state, State::Idle { .. }) {
             return;
         }
-        let user = self.library.read(cx).user().map(|u| u.id);
-        let services = Services::global(cx);
-        let Some(session) = services.session().cloned() else {
+        // Only the signed-in account's own id: a cached one may be another's.
+        let user = self.library.read(cx).verified_user_id();
+        if !self.session.is_alive() {
+            return;
+        }
+        let Some(session) = self.session.auth().cloned() else {
             return;
         };
-        let client = services.client().clone();
+        let scope = self.session.clone();
         self.state = State::Starting;
         cx.notify();
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -103,11 +111,11 @@ impl Reauthorize {
             // Whose session this is, before the browser opens: before the
             // first sync the library doesn't know yet, and only the same
             // account may replace it.
-            let pending = cx
-                .background_spawn({
+            let pending = scope
+                .interactive({
                     let config = config.clone();
                     let session = session.clone();
-                    async move {
+                    move |client| {
                         // Signed out meanwhile, or the session expired: there
                         // is nothing to replace.
                         if !session.is_signed_in() {
@@ -124,6 +132,10 @@ impl Reauthorize {
                     }
                 })
                 .await;
+            // The session ended meanwhile: there is nothing to replace.
+            let Some(pending) = pending else {
+                return;
+            };
             let (user, pending) = match pending {
                 Ok(p) => p,
                 Err(e) => {
@@ -146,9 +158,15 @@ impl Reauthorize {
                 cancel.cancel();
                 return;
             }
-            let result = cx
-                .background_spawn(async move { replace_tokens(&session, pending, user, &cancel) })
-                .await;
+            // The browser may take minutes: a thread of its own, not one of
+            // the I/O threads.
+            let Some(result) = io::run_on_own_thread("sign-in-again", move || {
+                replace_tokens(&session, pending, user, &cancel)
+            })
+            .await
+            else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| match result {
                 Ok(scopes) => {
                     this.state = State::Idle { error: None };
@@ -172,7 +190,7 @@ impl Reauthorize {
                 eprintln!("hardcover: signing in again: {detail}");
                 KEYRING_UNAVAILABLE.to_owned()
             }
-            Failure::Core(e) => Services::error_message(&e, None, cx),
+            Failure::Core(e) => self.session.error_message(&e, None, cx),
             Failure::OtherAccount(username) => format!(
                 "You approved as @{username}, not the account shown here. To switch accounts, sign out first."
             ),
@@ -286,8 +304,7 @@ fn adopt(
 impl Render for Reauthorize {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = colors(cx);
-        let message: SharedString =
-            permissions_message(&Services::global(cx).missing_scopes()).into();
+        let message: SharedString = permissions_message(&self.session.missing_scopes()).into();
         let sign_in = |loading: bool| {
             Button::new("reauthorize")
                 .small_control()

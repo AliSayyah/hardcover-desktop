@@ -11,8 +11,8 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window,
+    AnyElement, Context, Entity, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookSummary, TrendingPeriod};
@@ -21,10 +21,10 @@ use super::book_list::{
     CatalogBooks, CatalogRow, ListPane, follow_list, load_failed, new_list, page_body, page_header,
     page_list, page_loading, replace_rows, row_details,
 };
-use crate::app_state::Services;
 use crate::format::authors_text;
 use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
+use crate::session::{self, SessionScope};
 use crate::ui::PageHeader;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::small_tab;
@@ -178,12 +178,15 @@ impl DiscoverView {
         }
         self.loading = Some(period);
         self.refreshing = again;
-        let client = Services::global(cx).client().clone();
+        let Some(session) = SessionScope::current(cx) else {
+            return;
+        };
+        let books = session.interactive(move |client| client.trending_books(period));
         // Replacing the task drops the fetch for a period no longer shown.
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { client.trending_books(period) })
-                .await;
+            let Some(result) = books.await else {
+                return;
+            };
             let _ = this.update_in(cx, |this, window, cx| {
                 if this.loading == Some(period) {
                     this.loading = None;
@@ -196,7 +199,7 @@ impl DiscoverView {
                     (Some(Loaded::Ready(fetched)), Err(e)) => {
                         fetched.refetched(Err(()), cx);
                         // Records a refused scope even when nothing is said.
-                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        let message = session::error_message(&e, Some(READ_CATALOG), cx);
                         if asked {
                             window.push_notification(
                                 Notification::error(message).title("Couldn't refresh Discover"),
@@ -221,7 +224,7 @@ impl DiscoverView {
                         this.periods.insert(
                             period,
                             Loaded::Failed(
-                                Services::error_message(&e, Some(READ_CATALOG), cx).into(),
+                                session::error_message(&e, Some(READ_CATALOG), cx).into(),
                             ),
                         );
                     }

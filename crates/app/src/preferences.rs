@@ -93,14 +93,13 @@ impl PreferencesModel {
         *lock(&self.unsaved) = self.preferences.clone();
         let unsaved = self.unsaved.clone();
         let write_lock = self.write_lock.clone();
-        cx.background_spawn(async move {
+        crate::io::spawn(crate::io::Priority::Background, move || {
             let _writing = lock(&write_lock);
             let preferences = lock(&unsaved).clone();
             if let Err(e) = preferences.save(&path) {
                 eprintln!("hardcover: could not save preferences: {e}");
             }
-        })
-        .detach();
+        });
     }
 }
 

@@ -23,6 +23,7 @@ use hardcover_core::update::{InstallKind, Release, Updater, Version};
 use hardcover_core::Error;
 
 use crate::format::error_message;
+use crate::io::{self, Priority};
 use crate::preferences::AppPreferences;
 
 /// First automatic check, after startup work has settled.
@@ -193,16 +194,17 @@ impl UpdateModel {
         let current = self.current.clone();
         // Worked out once, with the first check.
         let detect = self.install.is_none().then(|| self.exe.clone());
+        let checked = io::run(Priority::Background, move || {
+            let install = detect.map(|exe| {
+                exe.as_deref()
+                    .map_or(InstallKind::Other, InstallKind::detect)
+            });
+            (install, updater.check(&current))
+        });
         self.check_task = Some(cx.spawn(async move |this, cx| {
-            let (install, result) = cx
-                .background_spawn(async move {
-                    let install = detect.map(|exe| {
-                        exe.as_deref()
-                            .map_or(InstallKind::Other, InstallKind::detect)
-                    });
-                    (install, updater.check(&current))
-                })
-                .await;
+            let Some((install, result)) = checked.await else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 if let Some(install) = install {
                     // An AppImage restarts from its file: the executable
@@ -256,11 +258,16 @@ impl UpdateModel {
         cx.notify();
         let updater = self.updater.clone();
         let current = self.current.clone();
+        let target = release.clone();
+        // A download of tens of megabytes: a thread of its own, not one of
+        // the I/O threads.
+        let installed = io::run_on_own_thread("update-install", move || {
+            updater.install(&target, &current, &install)
+        });
         self.install_task = Some(cx.spawn(async move |this, cx| {
-            let target = release.clone();
-            let result = cx
-                .background_spawn(async move { updater.install(&target, &current, &install) })
-                .await;
+            let result = installed
+                .await
+                .unwrap_or_else(|| Err(Error::Storage("the install stopped unexpectedly".into())));
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(()) => this.state = UpdateState::Installed(release.version.clone()),

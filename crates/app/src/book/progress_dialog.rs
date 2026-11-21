@@ -18,8 +18,8 @@
 //! edition change moves the read, and the field switches to time when it
 //! lands.
 //!
-//! The dialog makes the write itself, with `begin_write`/`end_write` on the
-//! entry, and stays open with what was typed and the reason when it fails.
+//! The dialog writes through `LibraryModel::write`, reporting failures
+//! itself: it stays open with what was typed and the reason next to it.
 
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -38,11 +38,11 @@ use hardcover_core::{Error, LibraryEntry, Measure, ProgressChange, ProgressUpdat
 
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::progress_input::{Filled, InputUnit, percent_text, position_of, preview};
-use crate::app_state::Services;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{needs_permission, progress_summary};
-use crate::library::model::{LibraryModel, WriteKind};
+use crate::library::model::{LibraryModel, LibraryWrite, STILL_SAVING, WriteKind, WriteOutcome};
 use crate::library::writes;
+use crate::session;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_dialog;
@@ -247,7 +247,7 @@ impl ProgressDialog {
                         .entry(this.id)
                         .and_then(|e| e.edition.as_ref().map(|e| e.id));
                     if current != Some(edition.id) {
-                        writes::set_edition(this.model.clone(), this.id, edition.id, window, cx);
+                        writes::set_edition(&this.model, this.id, edition.id, window, cx);
                     }
                 },
             );
@@ -260,7 +260,7 @@ impl ProgressDialog {
     }
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !Services::global(cx).has_scope(WRITE_LIBRARY) {
+        if !session::has_scope(cx, WRITE_LIBRARY) {
             return;
         }
         let Some(entry) = self.model.read(cx).entry(self.id).cloned() else {
@@ -275,63 +275,55 @@ impl ProgressDialog {
             }
         };
         let id = self.id;
-        let model = self.model.clone();
-        if !model.update(cx, |m, cx| m.begin_write(id, WriteKind::Progress, cx)) {
-            self.error = Some(
-                "Another change to this book is still being saved. Try again in a moment.".into(),
-            );
-            cx.notify();
-            return;
-        }
         let read = entry.open_read().map(|r| r.id);
-        let client = Services::global(cx).client().clone();
+        let write = LibraryWrite::entry(
+            id,
+            WriteKind::Progress,
+            "Couldn't update progress",
+            move |client| client.update_progress(id, read, update),
+        )
+        .reported_by_caller();
+        let outcome = self.model.update(cx, |m, cx| m.write(write, window, cx));
         cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { client.update_progress(id, read, update) })
-                .await;
-            model.update(cx, |m, cx| {
-                m.end_write(id, cx);
-                // Whatever went through is shown, even if the progress didn't.
-                if let Ok(change) = &result {
-                    m.apply_written(change.entry.clone(), cx);
-                }
-            });
+            let outcome = outcome.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                let message = |error: &Error, cx: &mut App| {
-                    Services::error_message(error, Some(WRITE_LIBRARY), cx)
-                };
                 // The dialog stays open with what was typed, and says why
                 // next to it. Saving again goes on the read the move started.
-                this.error = match result {
-                    Ok(ProgressChange {
+                this.error = match outcome {
+                    WriteOutcome::Saved(ProgressChange {
                         progress_left_out: None,
                         ..
                     }) => {
                         window.close_dialog(cx);
                         return;
                     }
-                    Ok(ProgressChange {
+                    WriteOutcome::Saved(ProgressChange {
                         progress_left_out: Some(Error::OutcomeUnknown),
                         ..
                     }) => Some(
                         "Moved to Currently reading. Hardcover didn't confirm the progress, so it may have been saved. Refresh to check before trying again."
                             .into(),
                     ),
-                    Ok(ProgressChange {
+                    WriteOutcome::Saved(ProgressChange {
                         progress_left_out: Some(error),
                         ..
                     }) => Some(
                         format!(
                             "Moved to Currently reading, but the progress wasn't saved. {}",
-                            message(&error, cx)
+                            session::error_message(&error, Some(WRITE_LIBRARY), cx)
                         )
                         .into(),
                     ),
                     // Not a failure: the message says it may have been saved.
-                    Err(error @ Error::OutcomeUnknown) => Some(message(&error, cx).into()),
-                    Err(error) => {
-                        Some(format!("Couldn't update progress. {}", message(&error, cx)).into())
+                    WriteOutcome::Failed {
+                        error: Error::OutcomeUnknown,
+                        message,
+                    } => Some(message),
+                    WriteOutcome::Failed { message, .. } => {
+                        Some(format!("Couldn't update progress. {message}").into())
                     }
+                    WriteOutcome::Busy => Some(STILL_SAVING.into()),
+                    WriteOutcome::InLibrary | WriteOutcome::Ended => return,
                 };
                 cx.notify();
             });
@@ -365,7 +357,7 @@ impl Render for ProgressDialog {
         let title = entry.map(|e| e.book.title.clone());
         let offer_audiobook =
             entry.is_some_and(|e| !e.is_audio() && e.book_audio_seconds.is_some());
-        let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
+        let can_write = session::has_scope(cx, WRITE_LIBRARY);
         let percent = has_length(measure);
         let muted = colors(cx).fg_muted;
         let unit = self.unit.get();

@@ -1,8 +1,9 @@
 //! Pure collection logic for the library: shelf counts, the local filter, sort
-//! orders and merging a full sync with writes made while it ran.
+//! orders and merging a full sync with the writes it may not have seen.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::time::{Duration, SystemTime};
 
 use hardcover_core::{LibraryEntry, ReadingStatus, UserBookId};
 
@@ -123,15 +124,57 @@ pub fn shelf_rows(
     rows
 }
 
-/// A write made while a full sync was running.
+/// A library write the app made, as a sync may need to re-apply it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LocalChange {
     Upserted(Box<LibraryEntry>),
     Removed(UserBookId),
+    /// The entry's review was written (reviews aren't part of the sync).
+    Reviewed(UserBookId),
 }
 
-/// The synced library with writes made during the sync applied on top, so a
-/// sync that started before a write cannot undo it.
+/// How long before a sync starts a write still counts as one the sync may
+/// not see: Hardcover can answer a read right after a write with the row as
+/// it was before.
+pub const REAPPLY_WINDOW: Duration = Duration::from_secs(30);
+
+/// The writes of the last moments, for [`merge_sync`]. Wall-clock times, as
+/// the sync's own start.
+#[derive(Debug, Default)]
+pub struct RecentWrites {
+    log: Vec<(SystemTime, LocalChange)>,
+}
+
+impl RecentWrites {
+    pub fn record(&mut self, at: SystemTime, change: LocalChange) {
+        self.log.push((at, change));
+    }
+
+    /// The writes a sync that started at `started` may not have seen: those
+    /// made during it, and in the [`REAPPLY_WINDOW`] before it.
+    pub fn since_before(&self, started: SystemTime) -> Vec<LocalChange> {
+        let from = started.checked_sub(REAPPLY_WINDOW).unwrap_or(started);
+        self.log
+            .iter()
+            .filter(|(at, _)| *at >= from)
+            .map(|(_, change)| change.clone())
+            .collect()
+    }
+
+    /// Forgets writes no sync starting at `now` or later could need.
+    pub fn prune(&mut self, now: SystemTime) {
+        let from = now.checked_sub(REAPPLY_WINDOW).unwrap_or(now);
+        self.log.retain(|(at, _)| *at >= from);
+    }
+
+    pub fn clear(&mut self) {
+        self.log.clear();
+    }
+}
+
+/// The synced library with recent writes applied on top, so a sync that
+/// read rows from before a write cannot undo it. A synced row changed after
+/// the write (a later `updated_at`) is newer than it, and stays.
 pub fn merge_sync(mut synced: Vec<LibraryEntry>, changes: &[LocalChange]) -> Vec<LibraryEntry> {
     for change in changes {
         match change {
@@ -140,14 +183,22 @@ pub fn merge_sync(mut synced: Vec<LibraryEntry>, changes: &[LocalChange]) -> Vec
                     .iter_mut()
                     .find(|e| e.user_book_id == entry.user_book_id)
                 {
+                    Some(slot) if changed_after(slot, entry) => {}
                     Some(slot) => *slot = (**entry).clone(),
                     None => synced.push((**entry).clone()),
                 }
             }
             LocalChange::Removed(id) => synced.retain(|e| e.user_book_id != *id),
+            LocalChange::Reviewed(_) => {}
         }
     }
     synced
+}
+
+/// True if `synced` was changed after `written` was: on Hardcover, by
+/// another device or the website.
+fn changed_after(synced: &LibraryEntry, written: &LibraryEntry) -> bool {
+    matches!((synced.updated_at, written.updated_at), (Some(s), Some(w)) if s > w)
 }
 
 /// True if `a` and `b` hold the same entries, in any order: a sync that
@@ -306,5 +357,47 @@ mod tests {
         let ids: Vec<i64> = merged.iter().map(|e| e.user_book_id.get()).collect();
         assert_eq!(ids, [1, 3]);
         assert_eq!(merged[0].status, ReadingStatus::CurrentlyReading);
+    }
+
+    #[test]
+    fn a_synced_row_changed_after_the_write_stays() {
+        let at = |h| Utc.with_ymd_and_hms(2026, 5, 1, h, 0, 0).unwrap();
+        let mut written = entry(1, "A", "", ReadingStatus::Read);
+        written.updated_at = Some(at(10));
+        // Stale: read from before the write.
+        let mut stale = entry(1, "A", "", ReadingStatus::WantToRead);
+        stale.updated_at = Some(at(9));
+        let changes = [LocalChange::Upserted(Box::new(written.clone()))];
+        assert_eq!(
+            merge_sync(vec![stale], &changes)[0].status,
+            ReadingStatus::Read
+        );
+        // The same version: the write's own copy.
+        let mut same = written.clone();
+        same.status = ReadingStatus::Paused;
+        assert_eq!(
+            merge_sync(vec![same], &changes)[0].status,
+            ReadingStatus::Read
+        );
+        // Changed on the website after the write.
+        let mut later = entry(1, "A", "", ReadingStatus::Paused);
+        later.updated_at = Some(at(11));
+        assert_eq!(
+            merge_sync(vec![later], &changes)[0].status,
+            ReadingStatus::Paused
+        );
+    }
+
+    #[test]
+    fn writes_shortly_before_a_sync_are_reapplied_and_older_ones_are_not() {
+        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let mut recent = RecentWrites::default();
+        let change = |id| LocalChange::Removed(UserBookId::new(id));
+        recent.record(start - REAPPLY_WINDOW - Duration::from_secs(1), change(1));
+        recent.record(start - Duration::from_secs(5), change(2));
+        recent.record(start + Duration::from_secs(1), change(3));
+        assert_eq!(recent.since_before(start), [change(2), change(3)]);
+        recent.prune(start + REAPPLY_WINDOW);
+        assert_eq!(recent.since_before(start), [change(3)]);
     }
 }

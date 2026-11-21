@@ -429,7 +429,7 @@ pub fn error_message(error: &Error) -> String {
         }
         Error::Unauthorized => "Your session has expired. Sign out and sign in again.".to_owned(),
         // Where the permissions notice can offer to sign in again, the caller
-        // says so instead (`Services::error_message`).
+        // says so instead (`session::error_message`).
         Error::InsufficientScope { .. } => {
             "Hardcover didn't grant this app permission for this. Sign out and sign in again to grant it."
                 .to_owned()

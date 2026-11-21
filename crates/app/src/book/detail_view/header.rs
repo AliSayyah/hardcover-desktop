@@ -25,7 +25,7 @@ use hardcover_core::{
 use std::fmt::Write as _;
 
 use super::BookDetailView;
-use crate::app_state::{Services, release_cover_image};
+use crate::app_state::release_cover_image;
 use crate::bidi::{WrappingText, is_rtl};
 use crate::book::star_rating::StarRating;
 use crate::catalog::navigation::Page;
@@ -39,6 +39,7 @@ use crate::format::{
 use crate::library::model::WriteKind;
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
+use crate::session;
 use crate::ui::TextButton;
 use crate::ui::kit::{SmallIconButton as _, danger_menu_item};
 
@@ -68,7 +69,7 @@ impl BookDetailView {
 
     /// The session may change the library entry.
     pub(super) fn can_write(cx: &App) -> bool {
-        Services::global(cx).has_scope(WRITE_LIBRARY)
+        session::has_scope(cx, WRITE_LIBRARY)
     }
 
     /// The header. `with_rail`: the page's rail beside it holds Hardcover's
