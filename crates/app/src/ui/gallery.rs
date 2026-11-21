@@ -69,8 +69,11 @@ impl Gallery {
         // The covers and avatars below load through the app's cover
         // pipeline, which the shell would otherwise open.
         if cx.try_global::<CoverService>().is_none() {
+            let opened = crate::io::run(crate::io::Priority::Interactive, CoverService::open);
             cx.spawn(async move |this, cx| {
-                let covers = cx.background_spawn(async { CoverService::open() }).await;
+                let Some(covers) = opened.await else {
+                    return;
+                };
                 let _ = this.update(cx, |_, cx| {
                     cx.set_global(covers);
                     cx.notify();
