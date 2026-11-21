@@ -13,7 +13,7 @@ use gpui_kit::{
 };
 use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LIBRARY, WRITE_LISTS};
 use hardcover_core::{
-    BookId, Client, EditionId, Error, ListBookId, ListDraft, ListId, ListMembership,
+    BookId, Client, EditionId, Error, ListBookId, ListDraft, ListEdit, ListId, ListMembership,
     ListMemberships, OWNED_LIST_SLUG, UserList,
 };
 
@@ -553,18 +553,21 @@ impl ListsModel {
         )
     }
 
-    /// Saves the draft over one of the model's lists.
+    /// Saves what the draft changes about one of the model's lists. Only
+    /// those fields are written; the rest is kept as Hardcover has it at the
+    /// time of the write, so changes made elsewhere since it was loaded stay.
     pub fn update(
         &mut self,
         id: ListId,
         draft: ListDraft,
         cx: &mut Context<Self>,
     ) -> Task<Result<(), SharedString>> {
-        let Some(list) = self.list(id).cloned() else {
+        let Some(list) = self.list(id) else {
             return Task::ready(Err("This list no longer exists.".into()));
         };
+        let edit = ListEdit::between(list, &draft);
         self.write_list(
-            move |client| client.update_list(&list, &draft),
+            move |client| client.update_list(id, &edit),
             |this, saved, _| {
                 match this.lists.iter_mut().find(|l| l.id == saved.id) {
                     Some(l) => *l = saved,

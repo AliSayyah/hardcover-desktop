@@ -231,10 +231,17 @@ impl GoalsModel {
         )
     }
 
-    /// Saves an edited copy of one of the model's goals.
-    pub fn update(&mut self, goal: Goal, cx: &mut Context<Self>) -> Task<Result<(), SharedString>> {
+    /// Changes goal `id` with `edit`, applied to the goal as Hardcover has
+    /// it at the time of the write, so changes made elsewhere since it was
+    /// loaded stay.
+    pub fn update(
+        &mut self,
+        id: GoalId,
+        edit: impl FnOnce(&mut Goal) + Send + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<(), SharedString>> {
         self.write(
-            move |client| client.update_goal(&goal),
+            move |client| client.update_goal(id, edit),
             |this, saved| {
                 match this.goals.iter_mut().find(|g| g.id == saved.id) {
                     Some(g) => *g = saved,

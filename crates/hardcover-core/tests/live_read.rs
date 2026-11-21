@@ -22,7 +22,12 @@ fn me_library_and_lookups() {
         return;
     };
     let me = c.me().unwrap();
-    let lib = c.library(me.id).unwrap();
+    let sync = c.library(me.id).unwrap();
+    assert!(
+        matches!(sync.coverage, hardcover_core::Coverage::Complete { .. }),
+        "the library pages to the end"
+    );
+    let lib = sync.entries;
     assert!(lib.iter().all(|e| e.user_id == me.id));
     let mut ids: Vec<_> = lib.iter().map(|e| e.user_book_id).collect();
     ids.dedup();

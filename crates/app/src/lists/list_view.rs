@@ -25,7 +25,7 @@ use gpui_kit::{
     prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LISTS};
-use hardcover_core::{LIST_BOOKS_PER_PAGE, ListBook, ListBookId, ListId, UserList};
+use hardcover_core::{ListBook, ListBookId, ListId, OffsetPage, UserList};
 
 use super::list_dialog::open_edit_list;
 use super::model::{ListsEvent, ListsModel};
@@ -55,8 +55,12 @@ pub const KEY_CONTEXT: &str = "ListPage";
 #[derive(Default)]
 struct BooksPage {
     books: Vec<ListBook>,
-    /// The last page fetched was full, so there may be more.
+    /// Hardcover has more rows after the ones fetched.
     more: bool,
+    /// Where the next page starts: the rows Hardcover has sent, less the
+    /// ones taken off since. Rows whose book didn't resolve count too, so
+    /// this can be more than `books.len()`.
+    next_offset: u32,
     loading: bool,
     error: Option<SharedString>,
 }
@@ -68,12 +72,24 @@ impl BooksPage {
         self.books.is_empty() || self.error.is_some()
     }
 
+    /// Adds a fetched page.
+    fn receive(&mut self, page: OffsetPage<ListBook>) {
+        self.more = page.has_more;
+        self.next_offset = page.next_offset;
+        self.books.extend(page.items);
+    }
+
     /// Takes one row off. True if a fetch in flight must start again: it
     /// asked from an offset that now skips a book.
     fn remove(&mut self, row: ListBookId) -> bool {
         let before = self.books.len();
         self.books.retain(|b| b.id != row);
-        let restart = self.loading && self.books.len() != before;
+        let removed = self.books.len() != before;
+        if removed {
+            // The rows after it moved up one on Hardcover.
+            self.next_offset = self.next_offset.saturating_sub(1);
+        }
+        let restart = self.loading && removed;
         if restart {
             self.loading = false;
         }
@@ -117,11 +133,7 @@ impl ListBooks {
         if page.loading || !page.more {
             return;
         }
-        let Ok(offset) = u32::try_from(page.books.len()) else {
-            page.more = false;
-            cx.notify();
-            return;
-        };
+        let offset = page.next_offset;
         page.loading = true;
         page.error = None;
         let client = Services::global(cx).client().clone();
@@ -142,10 +154,7 @@ impl ListBooks {
                 };
                 page.loading = false;
                 match result {
-                    Ok(books) => {
-                        page.more = books.len() >= LIST_BOOKS_PER_PAGE as usize;
-                        page.books.extend(books);
-                    }
+                    Ok(books) => page.receive(books),
                     Err(_) => page.error = message,
                 }
                 cx.notify();
@@ -695,11 +704,33 @@ mod tests {
         assert!(page.needs_fetch());
     }
 
+    /// D7: a row whose book didn't resolve neither ends the list nor
+    /// shifts the next page, and a removal moves the next page back one.
+    #[test]
+    fn the_next_page_starts_after_every_row_hardcover_sent() {
+        let mut page = BooksPage::default();
+        // 100 rows sent, one of them unresolved.
+        let mut first = OffsetPage::default();
+        first.items = (1..=99).map(book).collect();
+        first.next_offset = 100;
+        first.has_more = true;
+        page.receive(first);
+        assert_eq!((page.books.len(), page.next_offset), (99, 100));
+        assert!(page.more);
+        // Taking a loaded row off moves the rest up one on Hardcover.
+        page.remove(ListBookId::new(5));
+        assert_eq!(page.next_offset, 99);
+        // A row not loaded here changes nothing.
+        page.remove(ListBookId::new(500));
+        assert_eq!(page.next_offset, 99);
+    }
+
     #[test]
     fn removing_a_row_restarts_a_fetch_in_flight() {
         let mut page = BooksPage {
             books: vec![book(1), book(2)],
             more: true,
+            next_offset: 2,
             loading: false,
             error: None,
         };

@@ -34,7 +34,7 @@ use gpui_kit::{
     SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
-use hardcover_core::{LibraryEntry, Measure, ProgressUpdate, UserBookId};
+use hardcover_core::{Error, LibraryEntry, Measure, ProgressChange, ProgressUpdate, UserBookId};
 
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::progress_input::{Filled, InputUnit, percent_text, position_of, preview};
@@ -290,19 +290,40 @@ impl ProgressDialog {
                 .await;
             model.update(cx, |m, cx| {
                 m.end_write(id, cx);
-                if let Ok(entry) = &result {
-                    m.apply_written(entry.clone(), cx);
+                // Whatever went through is shown, even if the progress didn't.
+                if let Ok(change) = &result {
+                    m.apply_written(change.entry.clone(), cx);
                 }
             });
-            let _ = this.update_in(cx, |this, window, cx| match result {
-                Ok(_) => window.close_dialog(cx),
+            let _ = this.update_in(cx, |this, window, cx| {
+                let message = |error: &Error, cx: &mut App| {
+                    Services::error_message(error, Some(WRITE_LIBRARY), cx)
+                };
                 // The dialog stays open with what was typed, and says why
-                // next to it.
-                Err(error) => {
-                    let message = Services::error_message(&error, Some(WRITE_LIBRARY), cx);
-                    this.error = Some(format!("Couldn't update progress. {message}").into());
-                    cx.notify();
-                }
+                // next to it. Saving again goes on the read the move started.
+                this.error = match result {
+                    Ok(ProgressChange {
+                        progress_left_out: None,
+                        ..
+                    }) => {
+                        window.close_dialog(cx);
+                        return;
+                    }
+                    Ok(ProgressChange {
+                        progress_left_out: Some(error),
+                        ..
+                    }) => Some(
+                        format!(
+                            "Moved to Currently reading, but the progress wasn't saved. {}",
+                            message(&error, cx)
+                        )
+                        .into(),
+                    ),
+                    Err(error) => {
+                        Some(format!("Couldn't update progress. {}", message(&error, cx)).into())
+                    }
+                };
+                cx.notify();
             });
         })
         .detach();

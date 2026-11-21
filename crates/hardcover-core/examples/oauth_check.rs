@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let me = client.me()?;
     let library = client.library(me.id)?;
-    println!("library entries: {}", library.len());
+    println!("library entries: {}", library.entries.len());
     let search = client.search_books("dune", 1)?;
     println!("search hits on page 1: {}", search.books.len());
     let details = client.book_details(book)?;
@@ -54,7 +54,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let e = client.set_rating(e.user_book_id, Rating::new(4.0), e.status)?;
         println!("rating: {:?} status kept: {:?}", e.rating, e.status);
         let read = e.current_read().map(|r| r.id);
-        let e = client.update_progress(e.user_book_id, read, ProgressUpdate::Pages(10))?;
+        let e = client
+            .update_progress(e.user_book_id, read, ProgressUpdate::Pages(10))?
+            .entry;
         println!(
             "progress pages: {:?}",
             e.current_read().and_then(|r| r.progress_pages)

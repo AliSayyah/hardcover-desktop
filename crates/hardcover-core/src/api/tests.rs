@@ -115,18 +115,29 @@ fn library_paginates_by_keyset() {
         {"position": null, "featured": false, "series": {"id": 32, "name": "Omnibus", "slug": null}},
         {"position": 7.0, "featured": false, "series": {"id": 31, "name": "Synthetic Saga", "slug": "synthetic-saga"}}
     ]);
-    // Second page holds one shelf entry and one with a status id we don't know.
-    let second = vec![user_book(full + 50, 3), user_book(full + 51, 42)];
+    // Second page holds one shelf entry, one with a status id we don't know
+    // and one whose book didn't resolve: those two are dropped, not the page.
+    let mut no_book = user_book(full + 52, 1);
+    no_book["book"] = Value::Null;
+    let second = vec![user_book(full + 50, 3), user_book(full + 51, 42), no_book];
     http.push(200, &data(json!({ "user_books": first })));
     http.push(200, &data(json!({ "user_books": second })));
+    http.push(200, &data(json!({ "user_books": [] })));
     let mut pages = Vec::new();
-    let lib = c
+    let sync = c
         .library_with_progress(UserId::new(77), |p| pages.push(p.len()))
         .unwrap();
+    assert_eq!(
+        sync.coverage,
+        Coverage::Complete {
+            unreadable: vec![UserBookId::new(full + 51), UserBookId::new(full + 52)]
+        }
+    );
+    let lib = sync.entries;
     assert_eq!(lib.len(), LIBRARY_PAGE_SIZE as usize + 1);
     assert_eq!(pages, vec![LIBRARY_PAGE_SIZE as usize, 1]);
     let reqs = http.requests();
-    assert_eq!(reqs.len(), 2);
+    assert_eq!(reqs.len(), 3, "only an empty page ends it");
     let v0 = &reqs[0].json.as_ref().unwrap()["variables"];
     let v1 = &reqs[1].json.as_ref().unwrap()["variables"];
     assert_eq!(
@@ -179,8 +190,55 @@ fn library_paginates_by_keyset() {
 fn library_stops_on_empty_first_page() {
     let (c, http) = client(TestTokens::new(false));
     http.push(200, &data(json!({ "user_books": [] })));
-    assert_eq!(c.library(UserId::new(1)).unwrap(), []);
+    let sync = c.library(UserId::new(1)).unwrap();
+    assert_eq!(sync.entries, []);
+    assert_eq!(sync.coverage, Coverage::Complete { unreadable: vec![] });
     assert_eq!(http.requests().len(), 1);
+}
+
+/// D9: a page shorter than asked for is not the end (Hardcover caps some
+/// tables at the page sizes used); only an empty page is.
+#[test]
+fn a_short_library_page_is_not_taken_as_the_last() {
+    let (c, http) = client(TestTokens::new(false));
+    // A server cap of 2 rows a page, 5 entries in all.
+    http.push(
+        200,
+        &data(json!({ "user_books": [user_book(1, 1), user_book(2, 1)] })),
+    );
+    http.push(
+        200,
+        &data(json!({ "user_books": [user_book(3, 1), user_book(4, 1)] })),
+    );
+    http.push(200, &data(json!({ "user_books": [user_book(9, 1)] })));
+    http.push(200, &data(json!({ "user_books": [] })));
+    let sync = c.library(UserId::new(1)).unwrap();
+    let ids: Vec<i64> = sync.entries.iter().map(|e| e.user_book_id.get()).collect();
+    assert_eq!(ids, [1, 2, 3, 4, 9]);
+    assert!(matches!(sync.coverage, Coverage::Complete { .. }));
+    let afters: Vec<i64> = http
+        .requests()
+        .iter()
+        .map(|r| {
+            r.json.as_ref().unwrap()["variables"]["afterId"]
+                .as_i64()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(afters, [0, 2, 4, 9]);
+}
+
+/// D9: paging that can't move forward stops, and the sync says it's
+/// partial, so nothing may be deleted on its strength.
+#[test]
+fn a_library_that_stops_paging_forward_is_partial() {
+    let (c, http) = client(TestTokens::new(false));
+    // The server ignores the cursor and sends the same rows again.
+    http.push(200, &data(json!({ "user_books": [user_book(1, 1)] })));
+    http.push(200, &data(json!({ "user_books": [user_book(1, 1)] })));
+    let sync = c.library(UserId::new(1)).unwrap();
+    assert_eq!(sync.coverage, Coverage::Partial);
+    assert_eq!(http.remaining(), 0);
 }
 
 #[test]
@@ -786,9 +844,8 @@ fn writes_searches_and_their_reads_are_interactive() {
             .nth(1)
             .and_then(|w| w.split(['(', '{']).next())
             .unwrap();
-        let interactive = is_mutation(doc)
-            || op.starts_with("Search")
-            || WRITE_STEP_READS.contains(&op);
+        let interactive =
+            is_mutation(doc) || op.starts_with("Search") || WRITE_STEP_READS.contains(&op);
         let expected = if interactive {
             Priority::Interactive
         } else {
@@ -900,9 +957,10 @@ fn add_and_update_use_payload_entry_or_refetch() {
         .unwrap();
     assert_eq!(e.status, ReadingStatus::CurrentlyReading);
     let reqs = http.requests();
+    let today = chrono::Local::now().date_naive().to_string();
     assert_eq!(
         reqs[1].json.as_ref().unwrap()["variables"],
-        json!({"id": 3, "object": {"status_id": 2}})
+        json!({"id": 3, "object": {"status_id": 2, "user_date": today}})
     );
     assert_eq!(
         reqs[2].json.as_ref().unwrap()["operationName"],
@@ -1090,7 +1148,7 @@ fn read_write_prefers_payload_entry_over_refetch() {
         1,
         "no refetch when the payload has the entry"
     );
-    let r = e.current_read().unwrap().clone();
+    let r = e.entry.current_read().unwrap().clone();
     assert_eq!(
         (r.id, r.progress_pages, r.progress_percent),
         (ReadId::new(91), Some(200), Some(50.0))
@@ -1132,6 +1190,99 @@ fn progress_without_open_read_moves_to_currently_reading_first() {
     assert_eq!(
         reqs[2].json.as_ref().unwrap()["variables"],
         json!({"id": 9003, "read": {"progress_pages": 12}})
+    );
+}
+
+/// D21: the move to Currently Reading went through, so the entry it left is
+/// what to show, with the progress's failure beside it.
+#[test]
+fn progress_that_fails_after_the_move_returns_the_moved_entry() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(200, &data(json!({"user_books": [{"id": 3, "status_id": 1, "book": {"pages": 300, "audio_seconds": null}, "edition": null, "user_book_reads": []}]})));
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": null, "id": 3, "user_book": user_book(3, 2)}})),
+    );
+    http.push_err(Error::Timeout);
+    let change = c
+        .update_progress(UserBookId::new(3), None, ProgressUpdate::Pages(12))
+        .unwrap();
+    assert_eq!(change.entry.status, ReadingStatus::CurrentlyReading);
+    assert_eq!(change.progress_left_out, Some(Error::OutcomeUnknown));
+    // Without a move there's nothing to show: the failure is the result.
+    http.push_err(Error::Network("reset".into()));
+    assert!(matches!(
+        c.update_progress(
+            UserBookId::new(3),
+            Some(ReadId::new(91)),
+            ProgressUpdate::Pages(5)
+        ),
+        Err(Error::Network(_))
+    ));
+}
+
+/// The progress context picks the read `LibraryEntry::open_read` picks: the
+/// newest by date, not by id (a past read added later has the higher id).
+#[test]
+fn progress_goes_on_the_read_the_entry_calls_open() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"user_books": [{"id": 3, "status_id": 2,
+        "book": {"pages": 300, "audio_seconds": null}, "edition": null,
+        "user_book_reads": [
+            {"id": 95, "started_at": "2019-03-01", "finished_at": null, "edition": null},
+            {"id": 91, "started_at": "2026-11-01", "finished_at": null, "edition": null}
+        ]}]})),
+    );
+    http.push(200, &data(json!({"update_user_book_read": {"error": null, "id": 91, "user_book_read": {"id": 91, "user_book_id": 3}}})));
+    http.push(200, &data(json!({"user_books_by_pk": user_book(3, 2)})));
+    c.update_progress(UserBookId::new(3), None, ProgressUpdate::Pages(12))
+        .unwrap();
+    assert_eq!(
+        vars(&http, 1),
+        json!({"id": 91, "read": {"progress_pages": 12}})
+    );
+}
+
+/// D20: the read a status change starts or finishes is dated today here,
+/// not in the account's time zone.
+#[test]
+fn status_changes_that_date_a_read_send_todays_date() {
+    let (c, http) = client(TestTokens::new(false));
+    let today = chrono::Local::now().date_naive().to_string();
+    for _ in 0..4 {
+        http.push(
+            200,
+            &data(
+                json!({"update_user_book": {"error": null, "id": 3, "user_book": user_book(3, 2)}}),
+            ),
+        );
+    }
+    http.push(
+        200,
+        &data(json!({"insert_user_book": {"error": null, "id": 3, "user_book": user_book(3, 3)}})),
+    );
+    let id = UserBookId::new(3);
+    c.set_status(id, ReadingStatus::CurrentlyReading).unwrap();
+    c.set_status(id, ReadingStatus::Read).unwrap();
+    c.set_status(id, ReadingStatus::Paused).unwrap();
+    c.set_status(id, ReadingStatus::WantToRead).unwrap();
+    c.add_to_library(BookId::new(1003), ReadingStatus::Read)
+        .unwrap();
+    assert_eq!(
+        vars(&http, 0)["object"],
+        json!({"status_id": 2, "user_date": today})
+    );
+    assert_eq!(
+        vars(&http, 1)["object"],
+        json!({"status_id": 3, "user_date": today})
+    );
+    assert_eq!(vars(&http, 2)["object"], json!({"status_id": 4}));
+    assert_eq!(vars(&http, 3)["object"], json!({"status_id": 1}));
+    assert_eq!(
+        vars(&http, 4)["object"],
+        json!({"book_id": 1003, "status_id": 3, "user_date": today})
     );
 }
 
@@ -1196,7 +1347,8 @@ fn library_page_asks_for_ignored_too() {
         200,
         &data(json!({"user_books": [user_book(1, 6), user_book(2, 1)]})),
     );
-    let lib = c.library(UserId::new(77)).unwrap();
+    http.push(200, &data(json!({"user_books": []})));
+    let lib = c.library(UserId::new(77)).unwrap().entries;
     assert_eq!(lib[0].status, ReadingStatus::Ignored);
 }
 
@@ -1214,11 +1366,15 @@ fn book_editions_pages_by_offset() {
              "publisher": null, "language": null}
         ]})),
     );
-    let editions = c.book_editions(BookId::new(1001), 50).unwrap();
+    let page = c.book_editions(BookId::new(1001), 50).unwrap();
+    // One row more than a page, so the last page is never a guess.
     assert_eq!(
         vars(&http, 0),
-        json!({"bookId": 1001, "limit": EDITIONS_PER_PAGE, "offset": 50})
+        json!({"bookId": 1001, "limit": EDITIONS_PER_PAGE + 1, "offset": 50})
     );
+    assert!(!page.has_more);
+    assert_eq!(page.next_offset, 52);
+    let editions = page.items;
     assert_eq!(editions.len(), 2);
     assert_eq!(editions[0].format.as_deref(), Some("Paperback"));
     assert_eq!(editions[0].publisher.as_deref(), Some("Synthetic House"));
@@ -1275,6 +1431,29 @@ fn set_edition_moves_the_open_read_at_the_same_percentage() {
     let read = e.open_read().unwrap();
     assert_eq!(read.edition_id, Some(EditionId::new(6000)));
     assert_eq!(e.length(), Some(Length::Seconds(36000)));
+}
+
+/// An open read at 100% moves one unit short of the new edition's end:
+/// progress at the end would finish the read.
+#[test]
+fn set_edition_never_moves_a_read_to_the_end() {
+    let (c, http) = client(TestTokens::new(false));
+    let audio = json!({"id": 6000, "title": "Synthetic Audio", "pages": null, "audio_seconds": 36000,
+        "edition_format": "Audiobook", "reading_format_id": 2, "cached_image": {}});
+    let mut entry = moved_entry(audio);
+    entry["user_book_reads"][0]["progress"] = json!(100.0);
+    http.push(
+        200,
+        &data(json!({"update_user_book": {"error": null, "id": 3, "user_book": entry}})),
+    );
+    http.push(200, &data(json!({"update_user_book_read": {"error": null, "id": 9003, "user_book_read": {"id": 9003, "user_book_id": 3}}})));
+    http.push(200, &data(json!({"user_books_by_pk": user_book(3, 2)})));
+    c.set_edition(UserBookId::new(3), EditionId::new(6000))
+        .unwrap();
+    assert_eq!(
+        vars(&http, 1)["read"],
+        json!({"edition_id": 6000, "progress_pages": null, "progress_seconds": 35999})
+    );
 }
 
 #[test]
@@ -1660,56 +1839,69 @@ fn create_goal_sends_a_whole_goal_input() {
     );
 }
 
+/// D19: the goal is read just before writing, so the edit changes only
+/// what the user edited and everything else goes back as Hardcover has it
+/// now, not as the app loaded it.
 #[test]
-fn update_goal_resends_everything_and_refetches_when_needed() {
+fn update_goal_reads_the_goal_and_changes_only_the_edit() {
     let (c, http) = client(TestTokens::new(false));
-    let mut row = goal_row(5, "page", 9000, &json!(1200));
-    row["conditions"] = json!({"readingFormatId": 1, "authorBipoc": null});
+    // Changed on the website since the app loaded it: description,
+    // conditions and privacy.
+    let mut fresh = goal_row(5, "page", 9000, &json!(1200));
+    fresh["description"] = json!("Renamed on the website");
+    fresh["conditions"] = json!({"readingFormatId": 1, "authorBipoc": null});
+    fresh["privacy_setting_id"] = json!(3);
+    http.push(200, &data(json!({"goals_by_pk": fresh})));
     // A payload without the goal: re-read by id.
     http.push(
         200,
         &data(json!({"update_goal": {"errors": [], "id": 5, "goal": null}})),
     );
-    http.push(200, &data(json!({"goals_by_pk": row})));
-    let mut goal = RawGoal::deserialize(goal_row(5, "page", 9000, &json!(1200)))
-        .unwrap()
-        .into_goal()
-        .unwrap();
-    goal.conditions = GoalConditions(json!({"readingFormatId": 1, "authorBipoc": null}));
-    goal.target = 10000;
-    let saved = c.update_goal(&goal).unwrap();
+    http.push(200, &data(json!({"goals_by_pk": fresh})));
+    let saved = c.update_goal(GoalId::new(5), |g| g.target = 10000).unwrap();
     assert_eq!(saved.id, GoalId::new(5));
-    let reqs = http.requests();
+    assert_eq!(ops(&http), ["GoalById", "UpdateGoal", "GoalById"]);
     assert_eq!(
-        reqs[0].json.as_ref().unwrap()["variables"],
+        vars(&http, 1),
         json!({"id": 5, "object": {
             "metric": "page",
             "goal": 10000,
-            "description": "9000 pages in 2030",
+            "description": "Renamed on the website",
             "start_date": "2030-01-01",
             "end_date": "2030-12-31",
             "conditions": {"readingFormatId": 1},
             "archived": false,
-            "privacy_setting_id": 2,
+            "privacy_setting_id": 3,
         }})
     );
-    assert_eq!(reqs[1].json.as_ref().unwrap()["operationName"], "GoalById");
+}
 
-    // Conditions it can't send back block the update before any request.
-    let conditions = std::mem::replace(
-        &mut goal.conditions,
-        GoalConditions(json!({"genre": "poetry"})),
-    );
-    assert!(matches!(c.update_goal(&goal), Err(Error::InvalidInput(_))));
-    assert_eq!(http.requests().len(), 2);
-    goal.conditions = conditions;
-
+#[test]
+fn update_goal_checks_the_goal_as_read_before_writing() {
+    let (c, http) = client(TestTokens::new(false));
+    // Conditions it can't send back block the update after the read.
+    let mut row = goal_row(5, "page", 9000, &json!(1200));
+    row["conditions"] = json!({"genre": "poetry"});
+    http.push(200, &data(json!({"goals_by_pk": row})));
+    assert!(matches!(
+        c.update_goal(GoalId::new(5), |g| g.target = 10),
+        Err(Error::InvalidInput(_))
+    ));
     // So does a missing description, which Hardcover requires.
-    for description in [None, Some("  ".to_owned())] {
-        goal.description = description;
-        assert!(matches!(c.update_goal(&goal), Err(Error::InvalidInput(_))));
-    }
-    assert_eq!(http.requests().len(), 2);
+    let mut row = goal_row(5, "page", 9000, &json!(1200));
+    row["description"] = json!("  ");
+    http.push(200, &data(json!({"goals_by_pk": row})));
+    assert!(matches!(
+        c.update_goal(GoalId::new(5), |g| g.target = 10),
+        Err(Error::InvalidInput(_))
+    ));
+    // A goal deleted meanwhile.
+    http.push(200, &data(json!({"goals_by_pk": null})));
+    assert!(matches!(
+        c.update_goal(GoalId::new(5), |g| g.target = 10),
+        Err(Error::Api(_))
+    ));
+    assert_eq!(ops(&http), ["GoalById", "GoalById", "GoalById"]);
 }
 
 #[test]
@@ -1717,21 +1909,18 @@ fn update_goal_keeps_a_privacy_setting_it_does_not_know() {
     let (c, http) = client(TestTokens::new(false));
     let mut row = goal_row(5, "book", 30, &json!(3));
     row["privacy_setting_id"] = json!(7);
-    let mut goal = RawGoal::deserialize(row.clone())
+    let goal = RawGoal::deserialize(row.clone())
         .unwrap()
         .into_goal()
         .unwrap();
     assert_eq!((goal.privacy_id, goal.privacy()), (Some(7), None));
+    http.push(200, &data(json!({"goals_by_pk": row})));
     http.push(
         200,
         &data(json!({"update_goal": {"errors": [], "id": 5, "goal": row}})),
     );
-    goal.target = 40;
-    c.update_goal(&goal).unwrap();
-    assert_eq!(
-        http.requests()[0].json.as_ref().unwrap()["variables"]["object"]["privacy_setting_id"],
-        7
-    );
+    c.update_goal(GoalId::new(5), |g| g.target = 40).unwrap();
+    assert_eq!(vars(&http, 1)["object"]["privacy_setting_id"], 7);
 }
 
 #[test]
@@ -2038,9 +2227,10 @@ fn lists_page_by_keyset_and_find_owned() {
         200,
         &data(json!({ "lists": [list_row(300, "Owned", "owned"), {"id": 301, "name": null}] })),
     );
+    http.push(200, &data(json!({ "lists": [] })));
     let lists = c.lists().unwrap();
     assert_eq!(lists.len(), 102);
-    assert_eq!(ops(&http), ["Me", "Lists", "Lists"]);
+    assert_eq!(ops(&http), ["Me", "Lists", "Lists", "Lists"]);
     assert_eq!(
         vars(&http, 1),
         json!({"userId": 77, "afterId": 0, "limit": 100})
@@ -2060,6 +2250,11 @@ fn lists_page_by_keyset_and_find_owned() {
     // Missing fields fall back instead of failing the page.
     assert_eq!(lists[101].name, "Untitled list");
     assert_eq!(lists[101].books_count, 0);
+
+    // Paging that can't move forward is an error, not a short list.
+    http.push(200, &data(json!({ "lists": [list_row(1, "One", "one")] })));
+    http.push(200, &data(json!({ "lists": [list_row(1, "One", "one")] })));
+    assert!(matches!(c.lists(), Err(Error::Decode(_))));
 }
 
 #[test]
@@ -2078,11 +2273,12 @@ fn memberships_stop_after_five_pages_and_say_so() {
     assert_eq!(http.remaining(), 0);
     assert_eq!(vars(&http, 5)["afterId"], 4000);
 
-    // A short page ends it.
+    // An empty page ends it; a short one before it doesn't.
     http.push(
         200,
         &data(json!({ "list_books": [membership(9, 40, 1003, Some(5003))] })),
     );
+    http.push(200, &data(json!({ "list_books": [] })));
     let all = c.list_memberships().unwrap();
     assert!(all.complete);
     assert_eq!(
@@ -2122,16 +2318,37 @@ fn list_books_page_by_offset_and_skip_missing_books() {
             {"id": 3, "position": null, "edition_id": null, "book": book(1003, "Third")},
         ]})),
     );
-    let books = c.list_books(ListId::new(40), 100).unwrap();
+    let page = c.list_books(ListId::new(40), 100).unwrap();
     assert_eq!(
         vars(&http, 0),
-        json!({"listId": 40, "limit": 100, "offset": 100})
+        json!({"listId": 40, "limit": 101, "offset": 100})
     );
+    assert!(!page.has_more);
+    // The unresolved row still counts towards the offset.
+    assert_eq!(page.next_offset, 103);
+    let books = page.items;
     let titles: Vec<&str> = books.iter().map(|b| b.book.title.as_str()).collect();
     assert_eq!(titles, ["First", "Third"]);
     assert_eq!(books[0].position, Some(1));
     assert_eq!(books[1].id, ListBookId::new(3));
     assert_eq!(books[0].book.authors, ["Jane Quill"]);
+}
+
+/// D7: an unresolved row on a full page neither ends the list nor shifts
+/// the next page's offset.
+#[test]
+fn an_unresolved_list_row_does_not_cut_the_list_short() {
+    let (c, http) = client(TestTokens::new(false));
+    let mut rows: Vec<Value> = (1..=101)
+        .map(|i| json!({"id": i, "position": i, "edition_id": null, "book": book(1000 + i, "Synthetic")}))
+        .collect();
+    rows[4]["book"] = Value::Null;
+    http.push(200, &data(json!({ "list_books": rows })));
+    let page = c.list_books(ListId::new(40), 0).unwrap();
+    assert_eq!(page.items.len(), 99);
+    assert!(page.has_more);
+    assert_eq!(page.next_offset, 100);
+    assert_eq!(page.items.last().unwrap().id, ListBookId::new(100));
 }
 
 #[test]
@@ -2182,10 +2399,12 @@ fn create_list_sends_the_draft_and_reports_errors() {
     assert_eq!(http.requests().len(), before);
 }
 
+/// D19: the list is read just before writing; only the fields the user
+/// edited change, and the rest goes back as Hardcover has it now.
 #[test]
-fn update_list_resends_the_list_as_read() {
+fn update_list_reads_the_list_and_changes_only_the_edit() {
     let (c, http) = client(TestTokens::new(false));
-    let mut list = RawList {
+    let shown = RawList {
         id: 50,
         name: Some("Old name".into()),
         slug: Some("old-name".into()),
@@ -2198,44 +2417,72 @@ fn update_list_resends_the_list_as_read() {
         url: Some("https://example.com/synthetic".into()),
     }
     .into_list();
+    // The user renamed it; nothing else in the dialog changed.
     let draft = ListDraft {
         name: "New name".into(),
-        description: String::new(),
-        privacy: Some(Privacy::Private),
-        ranked: true,
+        description: "Old".into(),
+        privacy: shown.privacy(),
+        ranked: false,
     };
+    let edit = ListEdit::between(&shown, &draft);
+    assert_eq!(
+        edit,
+        ListEdit {
+            name: Some("New name".into()),
+            ..ListEdit::default()
+        }
+    );
+    // Meanwhile, on the website: a description, ranking, view and privacy
+    // (one this version doesn't know).
+    let mut fresh = list_row(50, "Old name", "old-name");
+    fresh["description"] = json!("Written on the website");
+    fresh["privacy_setting_id"] = json!(9);
+    fresh["ranked"] = json!(true);
+    fresh["default_view"] = json!("list");
+    http.push(200, &data(json!({"lists_by_pk": fresh})));
     http.push(
         200,
         &data(json!({"update_list": {"errors": [], "id": 50, "list": list_row(50, "New name", "new-name")}})),
     );
-    let saved = c.update_list(&list, &draft).unwrap();
+    let saved = c.update_list(ListId::new(50), &edit).unwrap();
     assert_eq!(saved.name, "New name");
+    assert_eq!(ops(&http), ["ListById", "UpdateList"]);
     assert_eq!(
-        vars(&http, 0),
+        vars(&http, 1),
         json!({"id": 50, "object": {
-            "name": "New name", "description": "", "ranked": true, "privacy_setting_id": 3,
-            "default_view": "grid", "featured_profile": true, "url": "https://example.com/synthetic",
+            "name": "New name", "description": "Written on the website", "ranked": true,
+            "privacy_setting_id": 9, "default_view": "list", "featured_profile": false,
         }})
     );
-    // Privacy left alone goes back as read, even an id this version doesn't know.
-    list.privacy_id = Some(9);
+    // An edit that clears the description and picks a privacy.
+    let clear = ListEdit::between(
+        &shown,
+        &ListDraft {
+            description: " ".into(),
+            privacy: Some(Privacy::Private),
+            ..draft.clone()
+        },
+    );
+    assert_eq!(clear.description.as_deref(), Some(""));
+    assert_eq!(clear.privacy, Some(Privacy::Private));
+    http.push(200, &data(json!({"lists_by_pk": fresh})));
     http.push(
         200,
         &data(json!({"update_list": {"errors": [], "id": 50, "list": list_row(50, "New name", "new-name")}})),
     );
-    let unchanged = ListDraft {
-        privacy: None,
-        ..draft.clone()
-    };
-    c.update_list(&list, &unchanged).unwrap();
-    assert_eq!(vars(&http, 1)["object"]["privacy_setting_id"], 9);
-    // The Owned list is the server's: no request.
-    list.slug = Some(OWNED_LIST_SLUG.into());
+    c.update_list(ListId::new(50), &clear).unwrap();
+    assert_eq!(vars(&http, 3)["object"]["description"], "");
+    assert_eq!(vars(&http, 3)["object"]["privacy_setting_id"], 3);
+    // The Owned list, as read, is the server's: no write.
+    http.push(
+        200,
+        &data(json!({"lists_by_pk": list_row(51, "Owned", OWNED_LIST_SLUG)})),
+    );
     assert!(matches!(
-        c.update_list(&list, &draft),
+        c.update_list(ListId::new(51), &edit),
         Err(Error::InvalidInput(_))
     ));
-    assert_eq!(http.requests().len(), 2);
+    assert_eq!(http.requests().len(), 5);
 }
 
 #[test]
@@ -2480,10 +2727,32 @@ fn upcoming_in_series_merges_books_and_names_every_series() {
     );
 }
 
+/// One failed batch doesn't throw away the series the others loaded.
+#[test]
+fn a_failed_series_batch_keeps_the_others() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(503, r#"{"error":"Service temporarily unavailable"}"#);
+    http.push(
+        200,
+        &data(
+            json!({ "series": [{ "id": 78, "name": "Synthetic", "slug": null,
+            "primary_books_count": null, "is_completed": null, "author": null,
+            "book_series": [] }]}),
+        ),
+    );
+    let ids: Vec<SeriesId> = (1..=26).map(|i| SeriesId::new(i * 3)).collect();
+    let load = c.tracked_series(&ids);
+    assert_eq!(load.series.len(), 1);
+    assert_eq!(load.series[0].id, SeriesId::new(78));
+    assert_eq!(load.missing, ids[..25]);
+    assert!(matches!(load.error, Some(Error::Network(_))));
+}
+
 #[test]
 fn tracked_series_batches_ids_and_keeps_every_candidate() {
     let (c, http) = client(TestTokens::new(false));
-    assert_eq!(c.tracked_series(&[]).unwrap(), []);
+    let none = c.tracked_series(&[]);
+    assert!(none.series.is_empty() && none.error.is_none());
     assert_eq!(http.requests().len(), 0, "no ids, no request");
 
     let row = |position: Option<f64>, compilation: bool, book: Value| json!({ "position": position, "compilation": compilation, "book": book });
@@ -2524,7 +2793,9 @@ fn tracked_series_batches_ids_and_keeps_every_candidate() {
             "book_series": [] }]})),
     );
     let ids: Vec<SeriesId> = (1..=26).rev().map(|i| SeriesId::new(i * 3)).collect();
-    let series = c.tracked_series(&ids).unwrap();
+    let load = c.tracked_series(&ids);
+    assert!(load.error.is_none() && load.missing.is_empty());
+    let series = load.series;
 
     let reqs = http.requests();
     assert_eq!(reqs.len(), 2);

@@ -168,10 +168,16 @@ impl GoalView {
         if target == goal.target {
             return;
         }
-        let mut edited = goal.clone();
-        edited.target = target;
-        edited.description = Some(retargeted_description(&goal, target));
-        let task = self.goals.update(cx, |m, cx| m.update(edited, cx));
+        let task = self.goals.update(cx, |m, cx| {
+            m.update(
+                goal.id,
+                move |g| {
+                    g.description = Some(retargeted_description(g, target));
+                    g.target = target;
+                },
+                cx,
+            )
+        });
         cx.spawn_in(window, async move |this, cx| {
             if let Err(message) = task.await {
                 let _ = this.update(cx, |this, cx| {

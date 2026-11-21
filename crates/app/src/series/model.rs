@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use gpui_kit::{App, AppContext as _, Context, Entity, SharedString, Subscription, Task};
 use hardcover_core::auth::scopes::READ_CATALOG;
-use hardcover_core::{BookId, Date, SeriesId, TrackedSeries};
+use hardcover_core::{BookId, Date, SeriesId, TrackedSeries, TrackedSeriesLoad};
 
 use super::progress::{SeriesSummary, started_series, summaries};
 use crate::app_state::Services;
@@ -151,21 +151,18 @@ impl SeriesModel {
         // Replacing the task drops a load still running: its series are older.
         // A load that lands after signing out finds the model gone.
         self.load_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx
+            let load = cx
                 .background_spawn(async move { client.tracked_series(&ids) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                match result {
-                    Ok(series) => {
-                        this.series = series;
-                        this.revision += 1;
-                        this.status = SeriesStatus::Loaded;
-                    }
-                    Err(e) => {
-                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
-                        this.status = SeriesStatus::Failed(message.into());
-                    }
+                let failed = load.error.as_ref().map(|e| {
+                    SharedString::from(Services::error_message(e, Some(READ_CATALOG), cx))
+                });
+                if let Some(series) = merge_load(&this.series, load) {
+                    this.series = series;
+                    this.revision += 1;
                 }
+                this.status = failed.map_or(SeriesStatus::Loaded, SeriesStatus::Failed);
                 cx.notify();
             });
         }));
@@ -176,5 +173,64 @@ impl SeriesModel {
             cx.background_executor().timer(RELOAD_DELAY).await;
             let _ = this.update(cx, SeriesModel::load);
         }));
+    }
+}
+
+/// The series to show after a load: what loaded, plus the previous copy of
+/// each series in a batch that failed, so a failure doesn't make a series
+/// vanish. `None` when nothing loaded and a batch failed: keep what's shown.
+fn merge_load(previous: &[TrackedSeries], load: TrackedSeriesLoad) -> Option<Vec<TrackedSeries>> {
+    if load.error.is_some() && load.series.is_empty() {
+        return None;
+    }
+    let mut series = load.series;
+    series.extend(
+        previous
+            .iter()
+            .filter(|s| load.missing.contains(&s.id))
+            .cloned(),
+    );
+    Some(series)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hardcover_core::Error;
+
+    fn tracked(id: i64) -> TrackedSeries {
+        TrackedSeries::new(SeriesId::new(id), format!("Series {id}"))
+    }
+
+    fn load(series: &[i64], missing: &[i64], failed: bool) -> TrackedSeriesLoad {
+        let mut l = TrackedSeriesLoad::default();
+        l.series = series.iter().copied().map(tracked).collect();
+        l.missing = missing.iter().copied().map(SeriesId::new).collect();
+        l.error = failed.then_some(Error::Timeout);
+        l
+    }
+
+    fn ids(series: Option<Vec<TrackedSeries>>) -> Option<Vec<i64>> {
+        series.map(|s| s.iter().map(|s| s.id.get()).collect())
+    }
+
+    /// One failed batch doesn't make its series vanish from the tracker.
+    #[test]
+    fn a_failed_batch_keeps_its_series_previous_copies() {
+        let previous = [tracked(1), tracked(2), tracked(3)];
+        assert_eq!(
+            ids(merge_load(&previous, load(&[1, 4], &[2, 5], true))),
+            Some(vec![1, 4, 2])
+        );
+        // A clean load replaces everything: 2 and 3 are no longer started.
+        assert_eq!(
+            ids(merge_load(&previous, load(&[1], &[], false))),
+            Some(vec![1])
+        );
+        // Nothing loaded: keep what's shown.
+        assert_eq!(
+            ids(merge_load(&previous, load(&[], &[1, 2, 3], true))),
+            None
+        );
     }
 }

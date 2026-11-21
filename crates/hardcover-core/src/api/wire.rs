@@ -637,7 +637,9 @@ pub(crate) struct RawUserBook {
     pub updated_at: Option<String>,
     pub privacy_setting_id: Option<i64>,
     pub private_notes: Option<String>,
-    pub book: RawUserBookBook,
+    /// Null when the book doesn't resolve (removed or hidden from the
+    /// catalogue): the row is dropped, not the page.
+    pub book: Option<RawUserBookBook>,
     pub edition: Option<RawEdition>,
     #[serde(default)]
     pub user_book_reads: Vec<RawRead>,
@@ -656,17 +658,19 @@ pub(crate) struct RawUserBookBook {
 }
 
 impl RawUserBook {
-    /// `None` when the status id is unknown to [`ReadingStatus`].
+    /// `None` when the status id is unknown to [`ReadingStatus`] or the book
+    /// didn't resolve.
     pub fn into_entry(self) -> Option<LibraryEntry> {
         let status = ReadingStatus::from_id(self.status_id)?;
+        let book = self.book?;
         let mut e = LibraryEntry::new(
             UserBookId::new(self.id),
             UserId::new(self.user_id),
-            self.book.book.into_summary(),
+            book.book.into_summary(),
             status,
         );
-        e.series = series_refs(self.book.book_series);
-        e.book_audio_seconds = opt_u32(self.book.audio_seconds).filter(|s| *s > 0);
+        e.series = series_refs(book.book_series);
+        e.book_audio_seconds = opt_u32(book.audio_seconds).filter(|s| *s > 0);
         e.rating = self
             .rating
             .as_ref()
@@ -684,6 +688,23 @@ impl RawUserBook {
         e.private_notes = self.private_notes.filter(|n| !n.trim().is_empty());
         e.privacy = self.privacy_setting_id.and_then(Privacy::from_id);
         Some(e)
+    }
+}
+
+/// `<table>_aggregate { aggregate { count } }`.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct RawAggregate {
+    pub aggregate: Option<RawCount>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawCount {
+    pub count: Option<u64>,
+}
+
+impl RawAggregate {
+    pub fn count(&self) -> Option<u64> {
+        self.aggregate.as_ref().and_then(|a| a.count)
     }
 }
 
@@ -1157,7 +1178,20 @@ pub(crate) struct Lengths {
 #[derive(Debug, Deserialize)]
 pub(crate) struct ContextRead {
     pub id: i64,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub finished_at: Option<String>,
     pub edition: Option<Lengths>,
+}
+
+impl ContextRead {
+    fn session(&self) -> ReadSession {
+        let mut r = ReadSession::new(ReadId::new(self.id));
+        r.started_at = self.started_at.as_deref().and_then(parse_date);
+        r.finished_at = self.finished_at.as_deref().and_then(parse_date);
+        r
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1180,6 +1214,24 @@ impl Lengths {
 }
 
 impl ProgressContext {
+    /// Puts the reads in [`read_order`], the order [`LibraryEntry::reads`]
+    /// keeps, so the first is the read [`LibraryEntry::open_read`] picks:
+    /// the newest by date, not by id (a past read added later has the
+    /// highest id).
+    pub fn sort_reads(&mut self) {
+        self.user_book_reads
+            .sort_by(|a, b| read_order(&a.session(), &b.session()));
+    }
+
+    /// The read progress goes on when no read is named: the first unfinished
+    /// one in [`read_order`] (call [`Self::sort_reads`] first).
+    pub fn open_read(&self) -> Option<ReadId> {
+        self.user_book_reads
+            .first()
+            .filter(|r| r.finished_at.is_none())
+            .map(|r| ReadId::new(r.id))
+    }
+
     /// The length of the read's edition, else the entry's edition, else the
     /// book's page count, decided as [`LibraryEntry::measure`] decides it: an
     /// audiobook counts time even though the book has a page count, and an

@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("signed in: ok");
 
     let mut pages = 0;
-    let library = client.library_with_progress(me.id, |_| pages += 1)?;
+    let library = client.library_with_progress(me.id, |_| pages += 1)?.entries;
     let mut counts: BTreeMap<i64, (ReadingStatus, usize)> = BTreeMap::new();
     for e in &library {
         counts.entry(e.status.id()).or_insert((e.status, 0)).1 += 1;

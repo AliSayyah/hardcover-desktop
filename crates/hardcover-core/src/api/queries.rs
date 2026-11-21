@@ -286,8 +286,8 @@ pub(crate) const PROGRESS_CONTEXT: &str =
     id status_id
     book { pages audio_seconds }
     edition { pages audio_seconds reading_format_id }
-    user_book_reads(where: $reads, order_by: {id: desc}, limit: 1) {
-      id edition { pages audio_seconds reading_format_id }
+    user_book_reads(where: $reads, order_by: {id: desc}) {
+      id started_at finished_at edition { pages audio_seconds reading_format_id }
     }
   }
 }
