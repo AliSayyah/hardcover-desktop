@@ -263,9 +263,7 @@ pub const GENRES: &[Genre] = &[
     genre(
         "LGBTQ",
         IconName::Rainbow,
-        &[
-            "lgbtq", "lgbt", "lgbtqia", "lgbtq+", "queer", "gay", "lesbian",
-        ],
+        &["lgbtq", "lgbt", "lgbtqia", "queer", "gay", "lesbian"],
     ),
     genre(
         "Young Adult",
@@ -298,23 +296,35 @@ pub const GENRES: &[Genre] = &[
 
 /// The icon for a genre's chip, or none when the name matches no genre.
 pub fn genre_icon(name: &str) -> Option<IconName> {
-    let words = normalise(name);
-    let words: Vec<&str> = words.split_whitespace().collect();
-    if words.is_empty() {
+    // The name's words, one space apart, with a space at each end, so a
+    // genre's name (already in that form) matches only whole words.
+    let mut padded = String::with_capacity(name.len() + 2);
+    padded.push(' ');
+    for word in normalise(name).split_whitespace() {
+        padded.push_str(word);
+        padded.push(' ');
+    }
+    let whole = padded.trim();
+    if whole.is_empty() {
         return None;
     }
-    let phrases = || {
-        GENRES.iter().flat_map(|genre| {
-            genre
-                .names
-                .iter()
-                .map(move |name| (genre.icon, name.split_whitespace().collect::<Vec<_>>()))
-        })
+    let names = || {
+        GENRES
+            .iter()
+            .flat_map(|genre| genre.names.iter().map(move |name| (genre.icon, *name)))
     };
-    phrases()
-        .find(|(_, phrase)| *phrase == words)
-        .or_else(|| phrases().find(|(_, phrase)| words.windows(phrase.len()).any(|w| w == phrase)))
+    names()
+        .find(|(_, name)| *name == whole)
+        .or_else(|| names().find(|(_, name)| contains_words(&padded, name)))
         .map(|(icon, _)| icon)
+}
+
+/// Whether `phrase` appears in `padded` (words one space apart, a space at
+/// each end) as whole words.
+fn contains_words(padded: &str, phrase: &str) -> bool {
+    padded
+        .match_indices(phrase)
+        .any(|(at, _)| padded[..at].ends_with(' ') && padded[at + phrase.len()..].starts_with(' '))
 }
 
 /// Lowercase words separated by single spaces: `&` reads "and",
@@ -365,11 +375,9 @@ mod tests {
     fn names_are_already_normalised() {
         for genre in GENRES {
             for name in genre.names {
-                // "lgbtq+" is the one name that normalises to another
-                // ("lgbtq"); it is harmless and documents the spelling.
-                if *name != "lgbtq+" {
-                    assert_eq!(normalise(name).trim(), *name);
-                }
+                let normalised = normalise(name);
+                let words: Vec<&str> = normalised.split_whitespace().collect();
+                assert_eq!(words.join(" "), *name);
             }
         }
     }
@@ -400,6 +408,7 @@ mod tests {
             ("LGBTQ", IconName::Rainbow),
             ("LGBT", IconName::Rainbow),
             ("LGBTQ+", IconName::Rainbow),
+            ("LGBTQIA+", IconName::Rainbow),
             ("Self Help", IconName::Sprout),
             ("Self-Help", IconName::Sprout),
             ("Biography", IconName::BookUser),
