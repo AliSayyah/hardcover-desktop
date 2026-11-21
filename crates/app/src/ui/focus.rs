@@ -451,4 +451,52 @@ mod tests {
         redraw(cx);
         assert!(!ring(cx), "after the pointer moved");
     }
+
+    /// Back gives focus to the control that opened the page, though the
+    /// page's cover dropped the control's state while it was hidden.
+    #[gpui_kit::test]
+    fn back_returns_focus_to_what_opened_the_page(cx: &mut gpui_kit::TestAppContext) {
+        use crate::ui::NavRow;
+        use crate::ui::test_support::{has_focus, host, redraw, tab};
+        use gpui_kit::component::IconName;
+        use gpui_kit::component::button::Button;
+        use gpui_kit::{IntoElement as _, ParentElement as _};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let page = Rc::new(Cell::new(false));
+        let cx = host(cx, {
+            let page = page.clone();
+            move |_, _| {
+                if page.get() {
+                    div().child(Button::new("on-the-page").label("On the page"))
+                } else {
+                    div().child(NavRow::new("opener", IconName::BookOpen, "Opener"))
+                }
+                .into_any_element()
+            }
+        });
+        let back = |cx: &mut gpui_kit::VisualTestContext, returning: bool| {
+            tab(cx);
+            let from = cx.update(|window, cx| remember_focus(window, cx));
+            assert!(
+                matches!(from, Some(FocusReturn::Keyed(_))),
+                "a keyed control"
+            );
+            page.set(true);
+            redraw(cx);
+            tab(cx);
+            page.set(false);
+            if returning {
+                let from = from.expect("focus was remembered");
+                cx.update(|window, cx| return_focus(from, window, cx));
+            }
+            redraw(cx);
+            cx.run_until_parked();
+            redraw(cx);
+            has_focus(cx)
+        };
+        assert!(!back(cx, false), "without it, focus is lost with the page");
+        assert!(back(cx, true), "with it, the opener has focus again");
+    }
 }

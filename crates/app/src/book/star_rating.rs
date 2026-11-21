@@ -40,6 +40,21 @@ pub const KEY_CONTEXT: &str = "StarRating";
 
 actions!(star_rating, [IncreaseRating, DecreaseRating, ClearRating]);
 
+/// The control's keys: Right and Up add half a star, Left and Down take one
+/// off, Backspace and Delete clear. `main` binds them.
+pub fn key_bindings() -> [gpui_kit::KeyBinding; 6] {
+    use gpui_kit::KeyBinding;
+    let context = Some(KEY_CONTEXT);
+    [
+        KeyBinding::new("right", IncreaseRating, context),
+        KeyBinding::new("up", IncreaseRating, context),
+        KeyBinding::new("left", DecreaseRating, context),
+        KeyBinding::new("down", DecreaseRating, context),
+        KeyBinding::new("backspace", ClearRating, context),
+        KeyBinding::new("delete", ClearRating, context),
+    ]
+}
+
 const STARS: u8 = 5;
 
 /// How much of one star is filled.
@@ -314,5 +329,39 @@ mod tests {
         assert_eq!(stepped_value(r(3.0), false), r(2.5));
         assert_eq!(stepped_value(r(0.5), false), None);
         assert_eq!(stepped_value(None, false), None);
+    }
+
+    /// The arrows step the rating by half a star; Delete clears it.
+    #[gpui_kit::test]
+    fn the_keys_step_by_half_a_star_and_delete_clears(cx: &mut gpui_kit::TestAppContext) {
+        use crate::ui::test_support::{host, press, redraw, tab};
+        use gpui_kit::IntoElement as _;
+        use std::cell::Cell;
+
+        let value = Rc::new(Cell::new(r(3.0)));
+        let cx = host(cx, {
+            let value = value.clone();
+            move |_, _| {
+                let set = value.clone();
+                StarRating::new("stars")
+                    .value(value.get())
+                    .on_change(move |rating, _, _| set.set(*rating))
+                    .into_any_element()
+            }
+        });
+        cx.update(|_, cx| cx.bind_keys(key_bindings()));
+        tab(cx);
+        let mut key = |name: &str| {
+            press(cx, name);
+            redraw(cx);
+            value.get()
+        };
+        assert_eq!(key("right"), r(3.5));
+        assert_eq!(key("up"), r(4.0));
+        assert_eq!(key("left"), r(3.5));
+        assert_eq!(key("down"), r(3.0));
+        assert_eq!(key("delete"), None);
+        assert_eq!(key("up"), r(0.5));
+        assert_eq!(key("backspace"), None);
     }
 }

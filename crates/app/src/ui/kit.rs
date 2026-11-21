@@ -595,6 +595,52 @@ mod tests {
         assert!(dialog_open(cx));
     }
 
+    gpui_kit::actions!(kit_test, [ConfirmRow]);
+
+    /// Enter on a row's own button presses it; without `row_action` the
+    /// list around it would take Enter as confirming the row.
+    #[gpui_kit::test]
+    fn enter_on_a_rows_own_button_presses_it(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{counter, host, tab};
+        use gpui_kit::{InteractiveElement as _, KeyBinding};
+
+        let run = |cx: &mut TestAppContext, wrapped: bool| {
+            let (pressed, on_click) = counter();
+            let confirmed = Rc::new(Cell::new(0));
+            let cx = host(cx, {
+                let confirmed = confirmed.clone();
+                move |_, _| {
+                    let confirmed = confirmed.clone();
+                    let button = Button::new("remove")
+                        .label("Remove")
+                        .on_click(on_click.clone());
+                    div()
+                        .key_context("TestList")
+                        .on_action(move |_: &ConfirmRow, _, _| {
+                            confirmed.set(confirmed.get() + 1);
+                        })
+                        .map(|this| {
+                            if wrapped {
+                                this.child(row_action(button))
+                            } else {
+                                this.child(button)
+                            }
+                        })
+                        .into_any_element()
+                }
+            });
+            cx.update(|_, cx| {
+                cx.bind_keys([KeyBinding::new("enter", ConfirmRow, Some("TestList"))]);
+            });
+            tab(cx);
+            press(cx, "enter");
+            redraw(cx);
+            (pressed.get(), confirmed.get())
+        };
+        assert_eq!(run(cx, false), (0, 1), "the list takes Enter");
+        assert_eq!(run(cx, true), (1, 0), "the row's button takes Enter");
+    }
+
     /// Opens an alert whose result counts in `confirmed`, settles it and
     /// presses Enter on whatever it opened on.
     fn confirm_with_enter(

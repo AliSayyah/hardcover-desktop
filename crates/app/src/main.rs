@@ -102,37 +102,8 @@ fn bind_keys(cx: &mut App) {
             RemoveFromList,
             Some(lists::list_view::KEY_CONTEXT),
         ),
-        KeyBinding::new(
-            "right",
-            star_rating::IncreaseRating,
-            Some(star_rating::KEY_CONTEXT),
-        ),
-        KeyBinding::new(
-            "up",
-            star_rating::IncreaseRating,
-            Some(star_rating::KEY_CONTEXT),
-        ),
-        KeyBinding::new(
-            "left",
-            star_rating::DecreaseRating,
-            Some(star_rating::KEY_CONTEXT),
-        ),
-        KeyBinding::new(
-            "down",
-            star_rating::DecreaseRating,
-            Some(star_rating::KEY_CONTEXT),
-        ),
-        KeyBinding::new(
-            "backspace",
-            star_rating::ClearRating,
-            Some(star_rating::KEY_CONTEXT),
-        ),
-        KeyBinding::new(
-            "delete",
-            star_rating::ClearRating,
-            Some(star_rating::KEY_CONTEXT),
-        ),
     ]);
+    cx.bind_keys(star_rating::key_bindings());
     cx.on_action(|_: &Quit, cx| cx.quit());
 }
 
