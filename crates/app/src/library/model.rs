@@ -13,7 +13,8 @@ use gpui_kit::{AppContext as _, Context, SharedString, Task};
 use hardcover_core::auth::scopes::READ_LIBRARY;
 use hardcover_core::store::LibraryCache;
 use hardcover_core::{
-    BookId, Error, LibraryEntry, ReadingStatus, Review, Timestamp, User, UserBookId,
+    BookId, Coverage, Error, LibraryEntry, LibrarySync, ReadingStatus, Review, Timestamp, User,
+    UserBookId,
 };
 
 use super::collection::{LocalChange, merge_sync, same_entries, status_counts};
@@ -284,10 +285,10 @@ impl LibraryModel {
             let (pages_tx, pages_rx) = async_channel::unbounded::<Vec<LibraryEntry>>();
             let fetch = cx.background_spawn(async move {
                 let user = client.me()?;
-                let entries = client.library_with_progress(user.id, |page| {
+                let sync = client.library_with_progress(user.id, |page| {
                     let _ = pages_tx.send_blocking(page.to_vec());
                 })?;
-                Ok::<_, Error>((user, entries))
+                Ok::<_, Error>((user, sync))
             });
             // The sender is dropped when the fetch ends, which ends this loop.
             while let Ok(page) = pages_rx.recv().await {
@@ -300,14 +301,15 @@ impl LibraryModel {
             }
             let fetched = fetch.await;
             let saved = this.update(cx, |this, cx| this.finish_sync(fetched, cx));
-            if let Ok(Some((user, entries))) = saved
+            if let Ok(Some((user, entries, write))) = saved
                 && let Some(cache) = services.cache().cloned()
             {
                 cx.background_spawn(async move {
-                    if let Err(e) = cache
-                        .save_user(&user)
-                        .and_then(|()| cache.replace_library(user.id, &entries))
-                    {
+                    let saved = cache.save_user(&user).and_then(|()| match write {
+                        CacheWrite::Replace => cache.replace_library(user.id, &entries),
+                        CacheWrite::Upsert => entries.iter().try_for_each(|e| cache.upsert(e)),
+                    });
+                    if let Err(e) = saved {
                         eprintln!("hardcover: could not update the library cache: {e}");
                     }
                 })
@@ -344,15 +346,21 @@ impl LibraryModel {
         cx.notify();
     }
 
-    /// Applies a sync result. Returns what to write to the cache.
+    /// Applies a sync result. Returns what to write to the cache, and how.
     fn finish_sync(
         &mut self,
-        fetched: Result<(User, Vec<LibraryEntry>), Error>,
+        fetched: Result<(User, LibrarySync), Error>,
         cx: &mut Context<Self>,
-    ) -> Option<(User, Vec<LibraryEntry>)> {
+    ) -> Option<(User, Vec<LibraryEntry>, CacheWrite)> {
         let changes = self.changes_during_sync.take().unwrap_or_default();
         match fetched {
-            Ok((user, synced)) => {
+            Ok((user, sync)) => {
+                let write = match sync.coverage {
+                    Coverage::Complete { .. } => CacheWrite::Replace,
+                    Coverage::Partial => CacheWrite::Upsert,
+                };
+                // Entries the sync couldn't read or reach keep their copies.
+                let synced = sync.merged_with(&self.entries);
                 let merged = merge_sync(synced, &changes);
                 self.user = Some(user.clone());
                 // Nothing new keeps the revision, so nothing worked out from
@@ -374,7 +382,7 @@ impl LibraryModel {
                 }
                 CoverService::retry_failed(cx);
                 cx.notify();
-                Some((user, merged))
+                Some((user, merged, write))
             }
             Err(error) => {
                 let offline = matches!(error, Error::Network(_) | Error::Timeout);
@@ -537,6 +545,15 @@ fn load_cached(cache: &Arc<LibraryCache>) -> Option<Cached> {
 }
 
 /// Runs a cache write in the background; failures are logged, not shown.
+/// How a finished sync is saved. A complete one replaces the cached
+/// library, which drops entries that are gone from Hardcover; one that
+/// stopped early only adds and updates, so nothing is deleted on its
+/// strength.
+enum CacheWrite {
+    Replace,
+    Upsert,
+}
+
 fn persist(
     cx: &mut Context<LibraryModel>,
     write: impl FnOnce() -> hardcover_core::Result<()> + Send + 'static,

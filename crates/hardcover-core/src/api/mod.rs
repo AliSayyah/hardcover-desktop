@@ -6,8 +6,8 @@ mod queries;
 pub(crate) mod sdl;
 mod wire;
 
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -21,26 +21,29 @@ pub use model::*;
 pub const DOCUMENTS: &[(&str, &str)] = queries::ALL;
 
 use crate::http::{HttpRequest, HttpResponse, HttpTransport, Method, UreqTransport};
+pub use crate::ratelimit::Priority;
 use crate::ratelimit::TokenBucket;
 use crate::{Error, Result};
 pub(crate) use wire::as_i64 as wire_i64;
 use wire::{
     DeletePayload, DeleteReadPayload, GoalPayload, ListBookDeletePayload, ListBookPayload,
-    ListDeletePayload, ListPayload, ProgressContext, RawAuthorPage, RawBook, RawBookDetails,
-    RawCommunityReview, RawEdition, RawGoal, RawList, RawListBook, RawListMembership, RawReview,
-    RawSearch, RawSeriesPage, RawTrackedSeries, RawTrending, RawUpcomingRow, RawUser, RawUserBook,
-    ReadIdPayload, ReadRef, ReviewedUserBookPayload, UserBookIdPayload,
-    author_from_search_document, search_hits, search_page, series_from_search_document,
-    upcoming_books,
+    ListDeletePayload, ListPayload, ProgressContext, RawAggregate, RawAuthorPage, RawBook,
+    RawBookDetails, RawCommunityReview, RawEdition, RawGoal, RawList, RawListBook,
+    RawListMembership, RawReview, RawSearch, RawSeriesPage, RawTrackedSeries, RawTrending,
+    RawUpcomingRow, RawUser, RawUserBook, ReadIdPayload, ReadRef, ReviewedUserBookPayload,
+    UserBookIdPayload, author_from_search_document, search_hits, search_page,
+    series_from_search_document, upcoming_books,
 };
 
 /// GraphQL endpoint.
 pub const GRAPHQL_ENDPOINT: &str = "https://api.hardcover.app/v1/graphql";
 
-/// Library page size. One request per page; each costs one rate-limit token.
-/// Measured live on 834 entries (2026-11-21): 100 a page took 9 requests and
-/// 3.6 s, 500 took 2 requests and 1.3 s, 1,000 one request of 3.2 s. Every
-/// size returned all 834, so Hardcover doesn't cap the rows below 1,000.
+/// Library page size. One request per page, plus the empty one that ends
+/// the sync; each costs one rate-limit token. Measured live on 834 entries
+/// (2026-11-21, before the closing empty request): 100 a page took 9
+/// requests and 3.6 s, 500 took 2 requests and 1.3 s, 1,000 one request of
+/// 3.2 s. Every size returned all 834, so Hardcover doesn't cap the rows
+/// below 1,000.
 const LIBRARY_PAGE_SIZE: u32 = 500;
 /// Search results per page.
 pub const SEARCH_PER_PAGE: u32 = 25;
@@ -58,13 +61,12 @@ pub const BOOKS_BY_IDS_LIMIT: usize = 25;
 pub const TRENDING_LIMIT: usize = BOOKS_BY_IDS_LIMIT;
 /// Lists per request: Hardcover returns at most 100 `lists` rows.
 const LISTS_PAGE_SIZE: u32 = 100;
-/// Most list requests [`Client::lists`] makes: 1,000 lists.
-const LISTS_MAX_PAGES: usize = 10;
 /// List memberships per request: Hardcover returns at most 1,000 `list_books` rows.
 const MEMBERSHIPS_PAGE_SIZE: u32 = 1_000;
 /// Most requests [`Client::list_memberships`] makes, so a huge collection
-/// can't spend a minute of the rate limit at once.
-const MEMBERSHIPS_MAX_PAGES: usize = 5;
+/// can't spend a minute of the rate limit at once: five pages of rows and
+/// the (empty) request that finds the end.
+const MEMBERSHIPS_MAX_PAGES: usize = 6;
 /// Books per page in [`Client::list_books`].
 pub const LIST_BOOKS_PER_PAGE: u32 = 100;
 /// Reviews per page in [`Client::book_reviews`].
@@ -82,8 +84,13 @@ const TRACKED_SERIES_ROWS: u32 = 200;
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
-/// A 429 asking us to wait at most this long is retried once (after waiting).
-const MAX_AUTO_RETRY_AFTER: Duration = Duration::from_secs(15);
+/// A 429 is retried once if the retry can go out within this long: the
+/// whole wait, the server's block and the queue for the rate limit both.
+const MAX_AUTO_RETRY_WAIT: Duration = Duration::from_secs(15);
+
+/// Reads that are a step of a write (the context it needs, a read-back of
+/// what it wrote, the row it edits): the user waits on them as on the write.
+const WRITE_STEP_READS: &[&str] = &["ProgressContext", "UserBookById", "GoalById", "ListById"];
 
 /// Supplies bearer tokens to the [`Client`].
 pub trait TokenSource: Send + Sync {
@@ -112,9 +119,16 @@ pub trait TokenSource: Send + Sync {
 ///
 /// Every method blocks (including while waiting for the client-side rate limiter)
 /// and must run off the UI thread.
+///
+/// Requests that wait for the rate limit go in two lanes (see [`Priority`]).
+/// Every write, every search and every read that is a step of a write is
+/// [`Priority::Interactive`] whatever the client's priority, so no call
+/// site can forget it; the rest goes at the client's own priority,
+/// [`Priority::Background`] unless [`Client::with_priority`] says otherwise.
 #[derive(Clone)]
 pub struct Client {
     inner: Arc<Inner>,
+    priority: Priority,
 }
 
 struct Inner {
@@ -123,6 +137,12 @@ struct Inner {
     bucket: TokenBucket,
     endpoint: String,
     me_id: OnceLock<UserId>,
+    /// Held while `me` is fetched for [`Client::my_id`], so concurrent
+    /// callers wait for one request instead of each sending their own.
+    me_fetch: Mutex<()>,
+    /// The date the tests pin "today" to, so dated writes are reproducible.
+    #[cfg(test)]
+    today: OnceLock<Date>,
 }
 
 impl std::fmt::Debug for Client {
@@ -154,8 +174,44 @@ impl Client {
                 bucket,
                 endpoint: GRAPHQL_ENDPOINT.to_owned(),
                 me_id: OnceLock::new(),
+                me_fetch: Mutex::new(()),
+                #[cfg(test)]
+                today: OnceLock::new(),
             }),
+            priority: Priority::Background,
         }
+    }
+
+    /// A clone whose reads wait for the rate limit at `priority`. Writes,
+    /// searches and the reads that are steps of a write are always
+    /// [`Priority::Interactive`].
+    #[must_use]
+    /// Today on this computer: the date a read started or finished here gets.
+    fn today(&self) -> Date {
+        #[cfg(test)]
+        if let Some(day) = self.inner.today.get() {
+            return *day;
+        }
+        chrono::Local::now().date_naive()
+    }
+
+    /// Pins [`Client::today`] for a test.
+    #[cfg(test)]
+    pub(crate) fn pin_today(&self, day: Date) {
+        let _ = self.inner.today.set(day);
+    }
+
+    pub fn with_priority(&self, priority: Priority) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            priority,
+        }
+    }
+
+    /// The priority this client's reads wait at.
+    #[must_use]
+    pub fn priority(&self) -> Priority {
+        self.priority
     }
 
     // ----- reads -----
@@ -182,7 +238,17 @@ impl Client {
         Ok(user)
     }
 
+    /// The signed-in user's id, fetched once. Concurrent first callers share
+    /// one request; a failure isn't remembered, so the next call tries again.
     fn my_id(&self) -> Result<UserId> {
+        if let Some(id) = self.inner.me_id.get() {
+            return Ok(*id);
+        }
+        let _one_at_a_time = self
+            .inner
+            .me_fetch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         match self.inner.me_id.get() {
             Some(id) => Ok(*id),
             None => Ok(self.me()?.id),
@@ -190,12 +256,14 @@ impl Client {
     }
 
     /// The user's whole library, Ignored entries included, ordered by
-    /// `user_book_id`. Pages of 100, one request each, with every read nested.
+    /// `user_book_id`. Pages of [`LIBRARY_PAGE_SIZE`], one request each,
+    /// with every read nested. See [`LibrarySync::coverage`] for what the
+    /// result vouches for.
     ///
     /// # Errors
     ///
     /// Returns an error if any library page cannot be fetched or decoded.
-    pub fn library(&self, user: UserId) -> Result<Vec<LibraryEntry>> {
+    pub fn library(&self, user: UserId) -> Result<LibrarySync> {
         self.library_with_progress(user, |_| {})
     }
 
@@ -209,34 +277,46 @@ impl Client {
         &self,
         user: UserId,
         mut on_page: impl FnMut(&[LibraryEntry]),
-    ) -> Result<Vec<LibraryEntry>> {
+    ) -> Result<LibrarySync> {
         #[derive(Deserialize)]
         struct Data {
             user_books: Vec<RawUserBook>,
         }
-        let mut all = Vec::new();
-        let mut after = 0_i64;
-        loop {
-            let data: Data = self.query(
-                "LibraryPage",
-                queries::LIBRARY_PAGE,
-                json!({ "userId": user.get(), "afterId": after, "limit": LIBRARY_PAGE_SIZE }),
-                QUERY_TIMEOUT,
-            )?;
-            let fetched = data.user_books.len();
-            let mut page = Vec::with_capacity(fetched);
-            for raw in data.user_books {
-                after = after.max(raw.id);
-                if let Some(entry) = raw.into_entry() {
-                    page.push(entry);
+        let mut entries = Vec::new();
+        let mut unreadable = Vec::new();
+        let complete = keyset_pages(
+            None,
+            |after| {
+                let data: Data = self.query(
+                    "LibraryPage",
+                    queries::LIBRARY_PAGE,
+                    json!({ "userId": user.get(), "afterId": after, "limit": LIBRARY_PAGE_SIZE }),
+                    QUERY_TIMEOUT,
+                )?;
+                Ok(data.user_books)
+            },
+            |raw| raw.id,
+            |rows| {
+                let mut page = Vec::with_capacity(rows.len());
+                for raw in rows {
+                    let id = UserBookId::new(raw.id);
+                    match raw.into_entry() {
+                        Some(entry) => page.push(entry),
+                        None => unreadable.push(id),
+                    }
                 }
-            }
-            on_page(&page);
-            all.extend(page);
-            if fetched < LIBRARY_PAGE_SIZE as usize {
-                return Ok(all);
-            }
-        }
+                on_page(&page);
+                entries.extend(page);
+            },
+        )?;
+        Ok(LibrarySync {
+            entries,
+            coverage: if complete {
+                Coverage::Complete { unreadable }
+            } else {
+                Coverage::Partial
+            },
+        })
     }
 
     /// One of the signed-in user's entries. `None` if it does not exist or belongs
@@ -434,14 +514,14 @@ impl Client {
             .ok_or_else(|| Error::Api(format!("book {id} not found")))
     }
 
-    /// One page of `book`'s editions, most read first. `offset` counts editions
-    /// already fetched; a page shorter than [`EDITIONS_PER_PAGE`] is the last.
+    /// One page of `book`'s editions, most read first. `offset` is the
+    /// previous page's [`OffsetPage::next_offset`], 0 for the first.
     ///
     /// # Errors
     ///
     /// Returns an error if the catalogue request fails or its response cannot be
     /// decoded.
-    pub fn book_editions(&self, book: BookId, offset: u32) -> Result<Vec<EditionSummary>> {
+    pub fn book_editions(&self, book: BookId, offset: u32) -> Result<OffsetPage<EditionSummary>> {
         #[derive(Deserialize)]
         struct Data {
             editions: Vec<RawEdition>,
@@ -449,14 +529,12 @@ impl Client {
         let data: Data = self.query(
             "BookEditions",
             queries::BOOK_EDITIONS,
-            json!({ "bookId": book.get(), "limit": EDITIONS_PER_PAGE, "offset": offset }),
+            json!({ "bookId": book.get(), "limit": EDITIONS_PER_PAGE + 1, "offset": offset }),
             QUERY_TIMEOUT,
         )?;
-        Ok(data
-            .editions
-            .into_iter()
-            .map(RawEdition::into_summary)
-            .collect())
+        Ok(offset_page(data.editions, offset, EDITIONS_PER_PAGE, |e| {
+            Some(e.into_summary())
+        }))
     }
 
     /// A series page in one request. `Error::Api` if the series does not exist.
@@ -577,11 +655,14 @@ impl Client {
     /// series per request, in the order Hardcover returns them. Ids Hardcover
     /// doesn't know are left out. No ids, no request.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if the catalogue request fails or its response cannot be
-    /// decoded.
-    pub fn tracked_series(&self, ids: &[SeriesId]) -> Result<Vec<TrackedSeries>> {
+    /// A batch that fails doesn't throw away the others: its ids are in
+    /// [`TrackedSeriesLoad::missing`], and the first failure in
+    /// [`TrackedSeriesLoad::error`]. Only a failure about that batch (an API
+    /// error, an unreadable answer) lets the rest go on; any other (network,
+    /// session, scope, rate limit) would repeat, so the batches not sent yet
+    /// are missing too.
+    #[must_use]
+    pub fn tracked_series(&self, ids: &[SeriesId]) -> TrackedSeriesLoad {
         #[derive(Deserialize)]
         struct Data {
             series: Vec<RawTrackedSeries>,
@@ -589,30 +670,57 @@ impl Client {
         let mut ids: Vec<i64> = ids.iter().map(|s| s.get()).collect();
         ids.sort_unstable();
         ids.dedup();
-        let mut out = Vec::with_capacity(ids.len());
-        for batch in ids.chunks(TRACKED_SERIES_BATCH) {
-            let data: Data = self.query(
+        let mut load = TrackedSeriesLoad::default();
+        let mut batches = ids.chunks(TRACKED_SERIES_BATCH);
+        while let Some(batch) = batches.next() {
+            let fetched: Result<Data> = self.query(
                 "SeriesOverview",
                 queries::SERIES_OVERVIEW,
                 json!({ "ids": batch, "limit": batch.len(), "rows": TRACKED_SERIES_ROWS }),
                 QUERY_TIMEOUT,
-            )?;
-            out.extend(data.series.into_iter().map(RawTrackedSeries::into_tracked));
+            );
+            match fetched {
+                Ok(data) => load
+                    .series
+                    .extend(data.series.into_iter().map(RawTrackedSeries::into_tracked)),
+                Err(e) => {
+                    // Only an answer about this batch is worth going on past;
+                    // a network, session, scope or rate-limit failure would
+                    // repeat for every batch, each at the cost of a request
+                    // or a timeout.
+                    let lasting = !matches!(e, Error::Api(_) | Error::Decode(_));
+                    load.missing
+                        .extend(batch.iter().copied().map(SeriesId::new));
+                    load.error.get_or_insert(e);
+                    if lasting {
+                        load.missing
+                            .extend(batches.flatten().copied().map(SeriesId::new));
+                        break;
+                    }
+                }
+            }
         }
-        Ok(out)
+        load
     }
 
     // ----- writes -----
 
-    /// Adds `book` with `status`, using the account's default privacy. The server
-    /// dates the status change today.
+    /// Adds `book` with `status`, using the account's default privacy. A
+    /// read it starts or finishes is dated today on this computer, as
+    /// [`Client::set_status`] dates it.
+    ///
+    /// Adding a book that already has an entry (an Ignored one, say)
+    /// changes that entry's status: Hardcover returns the same entry
+    /// (verified live).
     ///
     /// # Errors
     ///
     /// Returns an error if the library write fails or the updated entry cannot be
     /// retrieved.
     pub fn add_to_library(&self, book: BookId, status: ReadingStatus) -> Result<LibraryEntry> {
-        self.insert_user_book(&json!({ "book_id": book.get(), "status_id": status.id() }))
+        let mut object = status_fields(status, self.today());
+        object.insert("book_id".into(), json!(book.get()));
+        self.insert_user_book(&Value::Object(object))
     }
 
     /// Like [`Client::add_to_library`] with an explicit privacy for the entry.
@@ -627,11 +735,10 @@ impl Client {
         status: ReadingStatus,
         privacy: Privacy,
     ) -> Result<LibraryEntry> {
-        self.insert_user_book(&json!({
-            "book_id": book.get(),
-            "status_id": status.id(),
-            "privacy_setting_id": privacy.id(),
-        }))
+        let mut object = status_fields(status, self.today());
+        object.insert("book_id".into(), json!(book.get()));
+        object.insert("privacy_setting_id".into(), json!(privacy.id()));
+        self.insert_user_book(&Value::Object(object))
     }
 
     fn insert_user_book(&self, object: &Value) -> Result<LibraryEntry> {
@@ -649,14 +756,15 @@ impl Client {
     }
 
     /// Changes the status. Hardcover starts a read on Currently Reading and
-    /// finishes the open read on Read.
+    /// finishes the open read on Read; either is dated today on this
+    /// computer, not in the time zone of the account's settings.
     ///
     /// # Errors
     ///
     /// Returns an error if the library write fails or the updated entry cannot be
     /// retrieved.
     pub fn set_status(&self, id: UserBookId, status: ReadingStatus) -> Result<LibraryEntry> {
-        self.update_user_book(id, &json!({ "status_id": status.id() }))
+        self.update_user_book(id, &Value::Object(status_fields(status, self.today())))
     }
 
     /// Sets or (with `None`) clears the rating, keeping the entry at `keep_status`.
@@ -858,7 +966,7 @@ impl Client {
         let p = data
             .update_user_book
             .ok_or_else(|| Error::Api("`update_user_book` returned null".into()))?;
-        if let Some(e) = p.error.filter(|e| !e.is_empty()) {
+        if let Some(e) = p.error() {
             return Err(Error::Api(e));
         }
         if let Some(written) = p.user_book
@@ -898,18 +1006,9 @@ impl Client {
         payload: Option<UserBookIdPayload>,
         field: &str,
     ) -> Result<LibraryEntry> {
-        let p = payload.ok_or_else(|| Error::Api(format!("`{field}` returned null")))?;
-        if let Some(e) = p.error.filter(|e| !e.is_empty()) {
-            return Err(Error::Api(e));
-        }
-        if let Some(entry) = p.user_book.and_then(RawUserBook::into_entry) {
-            return Ok(entry);
-        }
-        let id = p.id.ok_or_else(|| {
-            Error::Decode(format!("`{field}` returned neither an entry nor an id"))
-        })?;
-        self.entry_by_id(id)?
-            .ok_or_else(|| Error::Decode(format!("entry {id} not found after `{field}`")))
+        written(payload, field, RawUserBook::into_entry, |id| {
+            self.entry_by_id(id)
+        })
     }
 
     /// Removes the book (and its reads) from the library.
@@ -958,7 +1057,7 @@ impl Client {
         id: UserBookId,
         read: Option<ReadId>,
         progress: ProgressUpdate,
-    ) -> Result<LibraryEntry> {
+    ) -> Result<ProgressChange> {
         if let ProgressUpdate::Percent(pct) = progress
             && !(0.0..=100.0).contains(&pct)
         {
@@ -973,28 +1072,40 @@ impl Client {
             None
         };
         let fields = progress_fields(progress, context.as_ref())?;
-        let target = read.or_else(|| {
-            context
-                .as_ref()
-                .and_then(|c| c.user_book_reads.first())
-                .map(|r| ReadId::new(r.id))
-        });
+        let target = read.or_else(|| context.as_ref().and_then(ProgressContext::open_read));
+        // The entry after a move to Currently Reading, which started the read.
+        let mut moved = None;
         let target = match (target, &context) {
             (None, Some(ctx)) if ctx.status_id != Some(ReadingStatus::CurrentlyReading.id()) => {
                 let entry = self.set_status(id, ReadingStatus::CurrentlyReading)?;
-                entry.open_read().map(|r| r.id)
+                let started = entry.open_read().map(|r| r.id);
+                moved = Some(entry);
+                started
             }
             (t, _) => t,
         };
-        let written = if let Some(read) = target {
-            self.update_read(read, &Value::Object(fields))?
-        } else {
-            let mut object = fields;
-            let today = chrono::Local::now().date_naive();
-            object.insert("started_at".into(), json!(today.to_string()));
-            self.insert_read(id, &Value::Object(object))?
+        let written = match target {
+            Some(read) => self.update_read(read, &Value::Object(fields)),
+            None => {
+                let mut object = fields;
+                object.insert("started_at".into(), json!(self.today().to_string()));
+                self.insert_read(id, &Value::Object(object))
+            }
         };
-        self.entry_after_read_write(written, "progress update")
+        match written.and_then(|w| self.entry_after_read_write(w, "progress update")) {
+            Ok(entry) => Ok(ProgressChange {
+                entry,
+                progress_left_out: None,
+            }),
+            // The move went through: show it, and say the progress didn't.
+            Err(e) => match moved {
+                Some(entry) => Ok(ProgressChange {
+                    entry,
+                    progress_left_out: Some(e),
+                }),
+                None => Err(e),
+            },
+        }
     }
 
     /// The entry from a read mutation's payload, or (if the server left it out)
@@ -1023,10 +1134,13 @@ impl Client {
             json!({ "id": id.get(), "reads": reads }),
             QUERY_TIMEOUT,
         )?;
-        data.user_books
+        let mut context = data
+            .user_books
             .into_iter()
             .next()
-            .ok_or_else(|| Error::Api(format!("library entry {id} not found")))
+            .ok_or_else(|| Error::Api(format!("library entry {id} not found")))?;
+        context.sort_reads();
+        Ok(context)
     }
 
     /// Sets both dates of a read exactly: `None` clears that date.
@@ -1109,7 +1223,7 @@ impl Client {
         let p = data
             .delete_user_book_read
             .ok_or_else(|| Error::Api("`delete_user_book_read` returned null".into()))?;
-        if let Some(e) = p.error.filter(|e| !e.is_empty()) {
+        if let Some(e) = p.error() {
             return Err(Error::Api(e));
         }
         if p.id.is_none() {
@@ -1208,20 +1322,27 @@ impl Client {
         self.goal_payload(data.insert_goal, "insert_goal")
     }
 
-    /// Saves `goal` as given: its metric, target, dates, description, privacy
-    /// and conditions. `update_goal` replaces the whole goal, so pass a goal
-    /// read from Hardcover with only the fields to change edited.
+    /// Changes goal `id`: reads it from Hardcover, lets `edit` change the
+    /// fields the user edited, and writes it back. `update_goal` replaces
+    /// the whole goal, so everything `edit` leaves alone is sent as
+    /// Hardcover has it now, not as the app last loaded it: a change made on
+    /// the website since then stays.
     ///
     /// # Errors
     ///
     /// `Error::InvalidInput` if the goal's conditions hold a field this
     /// version can't send back, which the update would drop, or if it has no
-    /// description, which Hardcover requires.
-    pub fn update_goal(&self, goal: &Goal) -> Result<Goal> {
+    /// description, which Hardcover requires; `Error::Api` if the goal is
+    /// gone.
+    pub fn update_goal(&self, id: GoalId, edit: impl FnOnce(&mut Goal)) -> Result<Goal> {
         #[derive(Deserialize)]
         struct Data {
             update_goal: Option<GoalPayload>,
         }
+        let mut goal = self
+            .goal_by_id(id.get())?
+            .ok_or_else(|| Error::Api(format!("goal {id} not found")))?;
+        edit(&mut goal);
         let conditions = goal.conditions.to_input().ok_or_else(|| {
             Error::InvalidInput(
                 "this goal has conditions the app can't keep; change it on hardcover.app".into(),
@@ -1246,7 +1367,7 @@ impl Client {
         let data: Data = self.query(
             "UpdateGoal",
             queries::UPDATE_GOAL,
-            json!({ "id": goal.id.get(), "object": object }),
+            json!({ "id": id.get(), "object": object }),
             QUERY_TIMEOUT,
         )?;
         self.goal_payload(data.update_goal, "update_goal")
@@ -1282,29 +1403,21 @@ impl Client {
 
     /// Uses the goal returned by the mutation, or re-reads it if the payload had none.
     fn goal_payload(&self, payload: Option<GoalPayload>, field: &str) -> Result<Goal> {
+        written(payload, field, RawGoal::into_goal, |id| self.goal_by_id(id))
+    }
+
+    fn goal_by_id(&self, id: i64) -> Result<Option<Goal>> {
         #[derive(Deserialize)]
         struct Data {
             goals_by_pk: Option<RawGoal>,
         }
-        let p = payload.ok_or_else(|| Error::Api(format!("`{field}` returned null")))?;
-        if let Some(e) = p.error() {
-            return Err(Error::Api(e));
-        }
-        if let Some(goal) = p.goal.and_then(RawGoal::into_goal) {
-            return Ok(goal);
-        }
-        let id = p
-            .id
-            .ok_or_else(|| Error::Decode(format!("`{field}` returned neither a goal nor an id")))?;
         let data: Data = self.query(
             "GoalById",
             queries::GOAL_BY_ID,
             json!({ "id": id }),
             QUERY_TIMEOUT,
         )?;
-        data.goals_by_pk
-            .and_then(RawGoal::into_goal)
-            .ok_or_else(|| Error::Decode(format!("goal {id} not found after `{field}`")))
+        Ok(data.goals_by_pk.and_then(RawGoal::into_goal))
     }
 
     // ----- lists -----
@@ -1322,57 +1435,57 @@ impl Client {
         }
         let me = self.my_id()?;
         let mut all = Vec::new();
-        let mut after = 0_i64;
-        for _ in 0..LISTS_MAX_PAGES {
-            let data: Data = self.query(
-                "Lists",
-                queries::LISTS,
-                json!({ "userId": me.get(), "afterId": after, "limit": LISTS_PAGE_SIZE }),
-                QUERY_TIMEOUT,
-            )?;
-            let fetched = data.lists.len();
-            for raw in data.lists {
-                after = after.max(raw.id);
-                all.push(raw.into_list());
-            }
-            if fetched < LISTS_PAGE_SIZE as usize {
-                break;
-            }
+        let complete = keyset_pages(
+            None,
+            |after| {
+                let data: Data = self.query(
+                    "Lists",
+                    queries::LISTS,
+                    json!({ "userId": me.get(), "afterId": after, "limit": LISTS_PAGE_SIZE }),
+                    QUERY_TIMEOUT,
+                )?;
+                Ok(data.lists)
+            },
+            |raw| raw.id,
+            |rows| all.extend(rows.into_iter().map(RawList::into_list)),
+        )?;
+        if !complete {
+            // Lists aren't cached, so a short result would quietly hide lists.
+            return Err(Error::Decode("the lists stopped paging forward".into()));
         }
         Ok(all)
     }
 
     /// Which of the user's books are on which of their lists, as one index:
-    /// one request per 1,000 rows, at most five. Past that the result is
-    /// marked incomplete; [`Client::book_list_memberships`] covers one book.
+    /// one request per 1,000 rows and one more to find the end, at most six.
+    /// Past that the result is marked incomplete;
+    /// [`Client::book_list_memberships`] covers one book.
     ///
     /// # Errors
     ///
     /// Returns an error if the request fails or its response cannot be decoded.
     pub fn list_memberships(&self) -> Result<ListMemberships> {
+        #[derive(Deserialize)]
+        struct Data {
+            list_books: Vec<RawListMembership>,
+        }
         let me = self.my_id()?;
         let mut rows = Vec::new();
-        let mut after = 0_i64;
-        for _ in 0..MEMBERSHIPS_MAX_PAGES {
-            let page = self.memberships(
-                "ListMemberships",
-                queries::LIST_MEMBERSHIPS,
-                json!({ "userId": me.get(), "afterId": after, "limit": MEMBERSHIPS_PAGE_SIZE }),
-            )?;
-            let fetched = page.len();
-            after = page.iter().map(|m| m.id.get()).fold(after, i64::max);
-            rows.extend(page);
-            if fetched < MEMBERSHIPS_PAGE_SIZE as usize {
-                return Ok(ListMemberships {
-                    rows,
-                    complete: true,
-                });
-            }
-        }
-        Ok(ListMemberships {
-            rows,
-            complete: false,
-        })
+        let complete = keyset_pages(
+            Some(MEMBERSHIPS_MAX_PAGES),
+            |after| {
+                let data: Data = self.query(
+                    "ListMemberships",
+                    queries::LIST_MEMBERSHIPS,
+                    json!({ "userId": me.get(), "afterId": after, "limit": MEMBERSHIPS_PAGE_SIZE }),
+                    QUERY_TIMEOUT,
+                )?;
+                Ok(data.list_books)
+            },
+            |raw| raw.id,
+            |page| rows.extend(page.into_iter().map(RawListMembership::into_membership)),
+        )?;
+        Ok(ListMemberships { rows, complete })
     }
 
     /// The user's lists that `book` is on, one row per list and edition.
@@ -1381,20 +1494,17 @@ impl Client {
     ///
     /// Returns an error if the request fails or its response cannot be decoded.
     pub fn book_list_memberships(&self, book: BookId) -> Result<Vec<ListMembership>> {
-        let me = self.my_id()?;
-        self.memberships(
-            "BookListMemberships",
-            queries::BOOK_LIST_MEMBERSHIPS,
-            json!({ "userId": me.get(), "bookId": book.get(), "limit": MEMBERSHIPS_PAGE_SIZE }),
-        )
-    }
-
-    fn memberships(&self, op: &str, doc: &str, vars: Value) -> Result<Vec<ListMembership>> {
         #[derive(Deserialize)]
         struct Data {
             list_books: Vec<RawListMembership>,
         }
-        let data: Data = self.query(op, doc, vars, QUERY_TIMEOUT)?;
+        let me = self.my_id()?;
+        let data: Data = self.query(
+            "BookListMemberships",
+            queries::BOOK_LIST_MEMBERSHIPS,
+            json!({ "userId": me.get(), "bookId": book.get(), "limit": MEMBERSHIPS_PAGE_SIZE }),
+            QUERY_TIMEOUT,
+        )?;
         Ok(data
             .list_books
             .into_iter()
@@ -1402,14 +1512,15 @@ impl Client {
             .collect())
     }
 
-    /// One page of a list's books in the list's order. `offset` counts the
-    /// rows already fetched; a page shorter than [`LIST_BOOKS_PER_PAGE`] is
-    /// the last. Rows whose book did not resolve are left out.
+    /// One page of a list's books in the list's order. `offset` is the
+    /// previous page's [`OffsetPage::next_offset`], 0 for the first. Rows
+    /// whose book did not resolve are left out of the items but still move
+    /// the offset on, so they neither end the list nor shift the next page.
     ///
     /// # Errors
     ///
     /// Returns an error if the request fails or its response cannot be decoded.
-    pub fn list_books(&self, list: ListId, offset: u32) -> Result<Vec<ListBook>> {
+    pub fn list_books(&self, list: ListId, offset: u32) -> Result<OffsetPage<ListBook>> {
         #[derive(Deserialize)]
         struct Data {
             list_books: Vec<RawListBook>,
@@ -1417,14 +1528,15 @@ impl Client {
         let data: Data = self.query(
             "ListBooks",
             queries::LIST_BOOKS,
-            json!({ "listId": list.get(), "limit": LIST_BOOKS_PER_PAGE, "offset": offset }),
+            json!({ "listId": list.get(), "limit": LIST_BOOKS_PER_PAGE + 1, "offset": offset }),
             QUERY_TIMEOUT,
         )?;
-        Ok(data
-            .list_books
-            .into_iter()
-            .filter_map(RawListBook::into_list_book)
-            .collect())
+        Ok(offset_page(
+            data.list_books,
+            offset,
+            LIST_BOOKS_PER_PAGE,
+            RawListBook::into_list_book,
+        ))
     }
 
     /// Creates a list. Needs `write:lists`.
@@ -1451,30 +1563,44 @@ impl Client {
         self.list_payload(data.insert_list, "insert_list")
     }
 
-    /// Saves `list` with the draft's name, description, privacy and ranking.
-    ///
-    /// The rest of the list (its default view, profile feature and link) is
-    /// sent back as read: whether `update_list` keeps fields left out is
-    /// unverified, and `update_goal` does not. Refuses the Owned list, which
-    /// Hardcover finds by its slug.
+    /// Changes list `id`: reads it from Hardcover and writes it back with
+    /// `edit`'s fields changed. Whether `update_list` keeps fields left out
+    /// is unverified (`update_goal` does not), so the rest (its default
+    /// view, profile feature, link, and the raw privacy) is sent as
+    /// Hardcover has it now, not as the app last loaded it. Refuses the
+    /// Owned list, which Hardcover finds by its slug.
     ///
     /// # Errors
     ///
-    /// Returns an error if the draft is invalid or the list cannot be saved.
-    pub fn update_list(&self, list: &UserList, draft: &ListDraft) -> Result<UserList> {
+    /// Returns an error if the list is gone or is the Owned list, the name
+    /// would be blank, or the list cannot be saved.
+    pub fn update_list(&self, id: ListId, edit: &ListEdit) -> Result<UserList> {
         #[derive(Deserialize)]
         struct Data {
             update_list: Option<ListPayload>,
         }
+        let list = self
+            .list_by_id(id.get())?
+            .ok_or_else(|| Error::Api(format!("list {id} not found")))?;
         if list.is_owned() {
             return Err(Error::InvalidInput(
                 "the Owned list can't be changed".into(),
             ));
         }
-        let name = list_name(&draft.name)?;
-        let mut object = list_draft_object(name, draft);
+        let name = list_name(edit.name.as_deref().unwrap_or(&list.name))?;
+        let description = edit
+            .description
+            .as_deref()
+            .or(list.description.as_deref())
+            .unwrap_or_default()
+            .trim();
+        let mut object = json!({
+            "name": name,
+            "description": description,
+            "ranked": edit.ranked.unwrap_or(list.ranked),
+        });
         // Sent back as read when unchanged, even an id this version doesn't know.
-        if let Some(privacy) = draft.privacy.map(Privacy::id).or(list.privacy_id) {
+        if let Some(privacy) = edit.privacy.map(Privacy::id).or(list.privacy_id) {
             object["privacy_setting_id"] = json!(privacy);
         }
         if let Some(view) = &list.default_view {
@@ -1489,7 +1615,7 @@ impl Client {
         let data: Data = self.query(
             "UpdateList",
             queries::UPDATE_LIST,
-            json!({ "id": list.id.get(), "object": object }),
+            json!({ "id": id.get(), "object": object }),
             QUERY_TIMEOUT,
         )?;
         self.list_payload(data.update_list, "update_list")
@@ -1624,29 +1750,26 @@ impl Client {
 
     /// Uses the list returned by the mutation, or re-reads it if the payload had none.
     fn list_payload(&self, payload: Option<ListPayload>, field: &str) -> Result<UserList> {
+        written(
+            payload,
+            field,
+            |raw| Some(RawList::into_list(raw)),
+            |id| self.list_by_id(id),
+        )
+    }
+
+    fn list_by_id(&self, id: i64) -> Result<Option<UserList>> {
         #[derive(Deserialize)]
         struct Data {
             lists_by_pk: Option<RawList>,
         }
-        let p = payload.ok_or_else(|| Error::Api(format!("`{field}` returned null")))?;
-        if let Some(e) = p.error() {
-            return Err(Error::Api(e));
-        }
-        if let Some(list) = p.list {
-            return Ok(list.into_list());
-        }
-        let id = p
-            .id
-            .ok_or_else(|| Error::Decode(format!("`{field}` returned neither a list nor an id")))?;
         let data: Data = self.query(
             "ListById",
             queries::LIST_BY_ID,
             json!({ "id": id }),
             QUERY_TIMEOUT,
         )?;
-        data.lists_by_pk
-            .map(RawList::into_list)
-            .ok_or_else(|| Error::Decode(format!("list {id} not found after `{field}`")))
+        Ok(data.lists_by_pk.map(RawList::into_list))
     }
 
     // ----- other readers' reviews -----
@@ -1654,7 +1777,8 @@ impl Client {
     /// A page of other readers' reviews of `book`, the most liked first, then
     /// the newest. `me` (the signed-in user) is left out. `offset` is the
     /// previous page's [`ReviewsPage::next_offset`], 0 for the first. Asks
-    /// for one row more than a page, so `has_more` is never a guess. Needs
+    /// for one row more than a page, so a full last page isn't taken for
+    /// more. Needs
     /// `read:social`.
     ///
     /// # Errors
@@ -1676,20 +1800,16 @@ impl Client {
             }),
             QUERY_TIMEOUT,
         )?;
-        let has_more = data.user_books.len() > REVIEWS_PER_PAGE as usize;
-        let rows: Vec<RawCommunityReview> = data
-            .user_books
-            .into_iter()
-            .take(REVIEWS_PER_PAGE as usize)
-            .collect();
-        let read = u32::try_from(rows.len()).unwrap_or(REVIEWS_PER_PAGE);
+        let page = offset_page(
+            data.user_books,
+            offset,
+            REVIEWS_PER_PAGE,
+            RawCommunityReview::into_review,
+        );
         Ok(ReviewsPage {
-            reviews: rows
-                .into_iter()
-                .filter_map(RawCommunityReview::into_review)
-                .collect(),
-            next_offset: offset + read,
-            has_more,
+            reviews: page.items,
+            next_offset: page.next_offset,
+            has_more: page.has_more,
         })
     }
 
@@ -1703,14 +1823,6 @@ impl Client {
         struct Data {
             user_books_aggregate: RawAggregate,
         }
-        #[derive(Deserialize)]
-        struct RawAggregate {
-            aggregate: Option<RawCount>,
-        }
-        #[derive(Deserialize)]
-        struct RawCount {
-            count: Option<u32>,
-        }
         let data: Data = self.query(
             "BookReviewsCount",
             queries::BOOK_REVIEWS_COUNT,
@@ -1719,12 +1831,24 @@ impl Client {
         )?;
         Ok(data
             .user_books_aggregate
-            .aggregate
-            .and_then(|a| a.count)
-            .unwrap_or(0))
+            .count()
+            .map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX)))
     }
 
     // ----- transport -----
+
+    /// The lane a request waits in for the rate limit.
+    fn priority_of(&self, op: &str, doc: &str) -> Priority {
+        if self.priority == Priority::Interactive
+            || is_mutation(doc)
+            || op.starts_with("Search")
+            || WRITE_STEP_READS.contains(&op)
+        {
+            Priority::Interactive
+        } else {
+            Priority::Background
+        }
+    }
 
     fn query<T: DeserializeOwned>(
         &self,
@@ -1735,32 +1859,45 @@ impl Client {
     ) -> Result<T> {
         let mut body = json!({ "operationName": op, "query": doc });
         body["variables"] = variables;
+        let priority = self.priority_of(op, doc);
+        let mutation = is_mutation(doc);
         let mut auth_retried = false;
-        let mut rate_retried = false;
+        // Set once a 429 is retried: the retry must get out by then.
+        let mut retry_deadline: Option<Instant> = None;
         loop {
             let token = self.inner.tokens.access_token()?;
-            self.inner.bucket.acquire(1);
+            self.inner.bucket.acquire(priority, retry_deadline)?;
             let req = HttpRequest::new(Method::Post, &self.inner.endpoint)
                 .header("authorization", format!("Bearer {token}"))
                 .header("accept", "application/json")
                 .json(&body)
                 .timeout(timeout);
-            let resp = self.inner.http.send(req)?;
+            let resp = match self.inner.http.send(req) {
+                Ok(resp) => resp,
+                // The request went out but no answer came back: a write may
+                // have been applied. Never retried.
+                Err(Error::Timeout) if mutation => return Err(Error::OutcomeUnknown),
+                Err(e) => return Err(e),
+            };
             if resp.status == 401 && !auth_retried && self.inner.tokens.on_unauthorized(&token)? {
                 auth_retried = true;
                 continue;
             }
+            if resp.status == 504 && mutation {
+                // The gateway gave up waiting; the write may still have run.
+                return Err(Error::OutcomeUnknown);
+            }
             if resp.status == 429 {
                 // Throttled requests are rejected before they run, so retrying is
-                // safe even for mutations. Retry once if the wait is short (the
-                // per-minute bucket); the daily limit's wait is hours.
-                // A long wait (daily limit) is not fed to the bucket: callers
-                // should fail fast with `RateLimited`, not block for hours.
+                // safe even for mutations. Every waiting caller now respects the
+                // block; a long one (the daily limit) is remembered and fails
+                // the calls that follow at once. One retry, if it can go out
+                // soon enough.
                 let wait = retry_after(&resp);
-                let short = wait.filter(|w| *w <= MAX_AUTO_RETRY_AFTER);
-                self.inner.bucket.penalize(short);
-                if !rate_retried && short.is_some() {
-                    rate_retried = true;
+                self.inner.bucket.penalize(wait);
+                let short = wait.is_none_or(|w| w <= MAX_AUTO_RETRY_WAIT);
+                if retry_deadline.is_none() && short {
+                    retry_deadline = Some(Instant::now() + MAX_AUTO_RETRY_WAIT);
                     continue;
                 }
             }
@@ -1769,18 +1906,200 @@ impl Client {
     }
 }
 
+/// Whether a document is a mutation (each holds one operation).
+fn is_mutation(doc: &str) -> bool {
+    doc.trim_start().starts_with("mutation")
+}
+
+/// Keyset paging over rows ordered by `id`, `after` the last id seen.
+///
+/// Paging stops only on an empty page. A page shorter than asked for is
+/// not taken as the last: Hardcover caps some tables' rows at the page sizes
+/// used, so a cap lowered later would otherwise end a list early, silently.
+/// (Asking for a count alongside each page would save the final empty
+/// request, but Hardcover charges a rate-limit token per top-level field,
+/// so it would cost more.) `take` gets every page, rows it may not be able
+/// to read included.
+///
+/// Returns whether it paged to the end: false if it stopped at `max_pages`
+/// or because the ids stopped growing.
+fn keyset_pages<R>(
+    max_pages: Option<usize>,
+    mut fetch: impl FnMut(i64) -> Result<Vec<R>>,
+    id: impl Fn(&R) -> i64,
+    mut take: impl FnMut(Vec<R>),
+) -> Result<bool> {
+    let mut after = 0_i64;
+    let mut pages = 0_usize;
+    loop {
+        if max_pages.is_some_and(|max| pages >= max) {
+            return Ok(false);
+        }
+        pages += 1;
+        let rows = fetch(after)?;
+        if rows.is_empty() {
+            return Ok(true);
+        }
+        let last = rows.iter().map(&id).fold(after, i64::max);
+        take(rows);
+        if last <= after {
+            // No progress: the same rows would come back forever.
+            return Ok(false);
+        }
+        after = last;
+    }
+}
+
+/// A page fetched by offset with `limit + 1` rows asked for, so a last page
+/// that happens to be full isn't taken for more (`has_more` would read false
+/// under a server cap below `limit + 1`; none is known). The offset moves on
+/// by the rows Hardcover sent, so a row `read` can't use (`None`) doesn't
+/// shift the next page.
+fn offset_page<R, T>(
+    mut rows: Vec<R>,
+    offset: u32,
+    limit: u32,
+    read: impl FnMut(R) -> Option<T>,
+) -> OffsetPage<T> {
+    let has_more = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
+    let sent = u32::try_from(rows.len()).unwrap_or(limit);
+    OffsetPage {
+        items: rows.into_iter().filter_map(read).collect(),
+        next_offset: offset + sent,
+        has_more,
+    }
+}
+
 fn read_payload(payload: Option<ReadIdPayload>, field: &str) -> Result<ReadRef> {
+    written(payload, field, Some, |id| {
+        Err(Error::Decode(format!(
+            "`{field}` returned no read (id {id})"
+        )))
+    })
+}
+
+/// A mutation's payload, whichever of the API's error shapes it has:
+/// `error: String` (the library and read mutations), `errors: [String]`
+/// (goals and lists), or none. The payloads with no error field and no row
+/// (the deletes) are matched where they are used.
+trait Payload {
+    /// The written row, as the payload nests it.
+    type Row;
+    /// The payload's error text, if it reports one.
+    fn error(&self) -> Option<String>;
+    /// The written row's id and the row, either of which may be missing.
+    fn into_written(self) -> (Option<i64>, Option<Self::Row>);
+}
+
+/// An `error: String` field, if it holds any text.
+fn error_text(error: Option<&String>) -> Option<String> {
+    error
+        .map(|e| e.trim())
+        .filter(|e| !e.is_empty())
+        .map(str::to_owned)
+}
+
+impl Payload for UserBookIdPayload {
+    type Row = RawUserBook;
+    fn error(&self) -> Option<String> {
+        error_text(self.error.as_ref())
+    }
+    fn into_written(self) -> (Option<i64>, Option<RawUserBook>) {
+        (self.id, self.user_book)
+    }
+}
+
+impl Payload for ReviewedUserBookPayload {
+    type Row = wire::RawReviewedUserBook;
+    fn error(&self) -> Option<String> {
+        error_text(self.error.as_ref())
+    }
+    fn into_written(self) -> (Option<i64>, Option<Self::Row>) {
+        (self.id, self.user_book)
+    }
+}
+
+impl Payload for ReadIdPayload {
+    type Row = ReadRef;
+    fn error(&self) -> Option<String> {
+        error_text(self.error.as_ref())
+    }
+    fn into_written(self) -> (Option<i64>, Option<ReadRef>) {
+        (self.id, self.user_book_read)
+    }
+}
+
+impl Payload for DeleteReadPayload {
+    type Row = ();
+    fn error(&self) -> Option<String> {
+        error_text(self.error.as_ref())
+    }
+    fn into_written(self) -> (Option<i64>, Option<()>) {
+        (self.id, None)
+    }
+}
+
+impl Payload for GoalPayload {
+    type Row = RawGoal;
+    fn error(&self) -> Option<String> {
+        GoalPayload::error(self)
+    }
+    fn into_written(self) -> (Option<i64>, Option<RawGoal>) {
+        (self.id, self.goal)
+    }
+}
+
+impl Payload for ListPayload {
+    type Row = RawList;
+    fn error(&self) -> Option<String> {
+        ListPayload::error(self)
+    }
+    fn into_written(self) -> (Option<i64>, Option<RawList>) {
+        (self.id, self.list)
+    }
+}
+
+/// What a mutation wrote: the row from its payload, else the row read back
+/// by the payload's id (a read right after a write can be stale, so the
+/// payload's own row wins). An error in the payload is the write's failure.
+fn written<P: Payload, T>(
+    payload: Option<P>,
+    field: &str,
+    read: impl FnOnce(P::Row) -> Option<T>,
+    read_back: impl FnOnce(i64) -> Result<Option<T>>,
+) -> Result<T> {
     let p = payload.ok_or_else(|| Error::Api(format!("`{field}` returned null")))?;
-    if let Some(e) = p.error.filter(|e| !e.is_empty()) {
+    if let Some(e) = p.error() {
         return Err(Error::Api(e));
     }
-    match p.user_book_read {
-        Some(r) => Ok(r),
-        None => Err(Error::Decode(format!(
-            "`{field}` returned no read (id {:?})",
-            p.id
-        ))),
+    let (id, row) = p.into_written();
+    if let Some(found) = row.and_then(read) {
+        return Ok(found);
     }
+    let id =
+        id.ok_or_else(|| Error::Decode(format!("`{field}` returned neither a row nor an id")))?;
+    read_back(id)?.ok_or_else(|| Error::Decode(format!("{id} not found after `{field}`")))
+}
+
+/// The `status_id` to send, with the date that dates the read the change
+/// starts (Currently Reading) or finishes (Read). Verified live
+/// (2026-11-21): `user_date` sets the new read's `started_at` on Currently
+/// Reading and the open read's `finished_at` on Read, on insert and update
+/// alike; left out, Hardcover uses today in the account's time zone (UTC
+/// without one), which needn't be this computer's. `user_start_date` must
+/// not be sent: it is ignored on Currently Reading and, with Read, leaves
+/// the read open.
+fn status_fields(status: ReadingStatus, today: Date) -> Map<String, Value> {
+    let mut m = Map::new();
+    m.insert("status_id".into(), json!(status.id()));
+    if matches!(
+        status,
+        ReadingStatus::CurrentlyReading | ReadingStatus::Read
+    ) {
+        m.insert("user_date".into(), json!(today.to_string()));
+    }
+    m
 }
 
 /// The `DatesReadInput` fields for a progress update.
@@ -1831,7 +2150,11 @@ fn moved_read_fields(
         .filter(|e| e.id == edition)
         .and_then(EditionSummary::length);
     if let (Some(pct), Some(length)) = (read.progress_percent, length) {
-        let units = length.units_at(f64::from(pct.clamp(0.0, 100.0)));
+        // Never the end, even from 100%: progress at the end finishes the
+        // read, which changing the edition must not do.
+        let units = length
+            .units_at(f64::from(pct.clamp(0.0, 100.0)))
+            .min(length.total().saturating_sub(1));
         let (pages, seconds) = match length {
             Length::Pages(_) => (Some(units), None),
             Length::Seconds(_) => (None, Some(units)),

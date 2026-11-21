@@ -1608,6 +1608,53 @@ mod tests {
         r
     }
 
+    fn entry(id: i64, status: ReadingStatus) -> LibraryEntry {
+        LibraryEntry::new(
+            UserBookId::new(id),
+            UserId::new(1),
+            BookSummary::new(BookId::new(id), "Synthetic"),
+            status,
+        )
+    }
+
+    /// D9: a sync keeps the old copy of every entry it can't vouch for.
+    #[test]
+    fn a_sync_keeps_what_it_could_not_read_or_reach() {
+        let previous = [
+            entry(1, ReadingStatus::Read),
+            entry(2, ReadingStatus::Read),
+            entry(3, ReadingStatus::Read),
+        ];
+        let ids = |v: Vec<LibraryEntry>| -> Vec<(i64, ReadingStatus)> {
+            v.iter().map(|e| (e.user_book_id.get(), e.status)).collect()
+        };
+        let synced = vec![entry(1, ReadingStatus::Paused)];
+        // Complete: 2 couldn't be read and stays; 3 is gone from Hardcover.
+        let complete = LibrarySync {
+            entries: synced.clone(),
+            coverage: Coverage::Complete {
+                unreadable: vec![UserBookId::new(2)],
+            },
+        };
+        assert_eq!(
+            ids(complete.merged_with(&previous)),
+            [(1, ReadingStatus::Paused), (2, ReadingStatus::Read)]
+        );
+        // Partial: everything it didn't return stays; what it did is new.
+        let partial = LibrarySync {
+            entries: synced,
+            coverage: Coverage::Partial,
+        };
+        assert_eq!(
+            ids(partial.merged_with(&previous)),
+            [
+                (1, ReadingStatus::Paused),
+                (2, ReadingStatus::Read),
+                (3, ReadingStatus::Read)
+            ]
+        );
+    }
+
     #[test]
     fn current_read_is_the_open_one_not_the_highest_id() {
         let mut e = LibraryEntry::new(
@@ -1918,6 +1965,130 @@ pub struct EditionChange {
     /// Why the open read could not move to the new edition, if it couldn't.
     /// The edition change itself went through.
     pub read_left_behind: Option<crate::Error>,
+}
+
+/// What [`crate::api::Client::update_progress`] did. The update can take
+/// two writes: moving the entry to Currently Reading (which starts a read),
+/// then the progress on that read.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct ProgressChange {
+    /// The entry as of the last write that went through: show this, whatever
+    /// `progress_left_out` says.
+    pub entry: LibraryEntry,
+    /// Why the progress wasn't saved, if the entry was moved to Currently
+    /// Reading but writing the progress then failed. It may be
+    /// [`crate::Error::OutcomeUnknown`]: saved or not, nobody knows.
+    pub progress_left_out: Option<crate::Error>,
+}
+
+/// The whole library, from [`crate::api::Client::library`].
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct LibrarySync {
+    pub entries: Vec<LibraryEntry>,
+    pub coverage: Coverage,
+}
+
+/// How much of the library a [`LibrarySync`] vouches for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Coverage {
+    /// Paged to the end. Entries it doesn't hold are gone from Hardcover,
+    /// except `unreadable`: rows that came back but couldn't be read (a book
+    /// that didn't resolve, a status this version doesn't know).
+    Complete { unreadable: Vec<UserBookId> },
+    /// Paging stopped before the end: any entry it doesn't hold may still
+    /// exist. Never delete anything on the strength of it.
+    Partial,
+}
+
+impl LibrarySync {
+    /// The library to keep: the synced entries, plus the copies in
+    /// `previous` of every entry the sync can't vouch for, so nothing is
+    /// dropped because of a row that couldn't be read or a page never
+    /// fetched.
+    #[must_use]
+    pub fn merged_with(self, previous: &[LibraryEntry]) -> Vec<LibraryEntry> {
+        let mut entries = self.entries;
+        let synced: std::collections::HashSet<UserBookId> =
+            entries.iter().map(|e| e.user_book_id).collect();
+        let keep = |e: &&LibraryEntry| match &self.coverage {
+            Coverage::Complete { unreadable } => unreadable.contains(&e.user_book_id),
+            Coverage::Partial => !synced.contains(&e.user_book_id),
+        };
+        entries.extend(previous.iter().filter(keep).cloned());
+        entries
+    }
+}
+
+/// A page of rows fetched by offset.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct OffsetPage<T> {
+    /// The rows that could be read. Rows that couldn't (a book that didn't
+    /// resolve) are left out, so this can be shorter than the page.
+    pub items: Vec<T>,
+    /// The offset of the next page: this page's offset plus the rows
+    /// Hardcover sent, read or not.
+    pub next_offset: u32,
+    /// True if Hardcover has more rows after this page.
+    pub has_more: bool,
+}
+
+impl<T> Default for OffsetPage<T> {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            next_offset: 0,
+            has_more: false,
+        }
+    }
+}
+
+/// What a list edit changes, from [`ListEdit::between`]. Only these fields
+/// are written; the rest of the list is sent back as Hardcover has it at the
+/// time of the write.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ListEdit {
+    pub name: Option<String>,
+    /// `Some("")` clears it.
+    pub description: Option<String>,
+    pub privacy: Option<Privacy>,
+    pub ranked: Option<bool>,
+}
+
+impl ListEdit {
+    /// The fields `draft` changes about `list` as the user saw it.
+    #[must_use]
+    pub fn between(list: &UserList, draft: &ListDraft) -> Self {
+        let name = draft.name.trim();
+        let description = draft.description.trim();
+        Self {
+            name: (name != list.name).then(|| name.to_owned()),
+            description: (description != list.description.as_deref().unwrap_or_default())
+                .then(|| description.to_owned()),
+            privacy: draft.privacy.filter(|p| Some(p.id()) != list.privacy_id),
+            ranked: (draft.ranked != list.ranked).then_some(draft.ranked),
+        }
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// What [`crate::api::Client::tracked_series`] loaded. One batch failing
+/// doesn't throw away the others.
+#[derive(Debug, Default)]
+#[non_exhaustive]
+pub struct TrackedSeriesLoad {
+    pub series: Vec<TrackedSeries>,
+    /// The ids asked for in batches that failed.
+    pub missing: Vec<SeriesId>,
+    /// The first batch's failure, if any failed.
+    pub error: Option<crate::Error>,
 }
 
 /// Another reader's review of a book, for the book page's "Reviews" section.

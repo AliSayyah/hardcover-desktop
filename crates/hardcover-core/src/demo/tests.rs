@@ -3,7 +3,7 @@ use chrono::{DateTime, Datelike, NaiveDate};
 use super::*;
 use crate::api::DOCUMENTS;
 use crate::{
-    BookId, EditionId, GoalMetric, ListDraft, NewGoal, Privacy, ProgressUpdate, Rating,
+    BookId, EditionId, GoalMetric, ListDraft, ListEdit, NewGoal, Privacy, ProgressUpdate, Rating,
     ReadingStatus, UserBookId,
 };
 
@@ -25,7 +25,7 @@ fn day(s: &str) -> NaiveDate {
 }
 
 fn library(client: &Client) -> Vec<crate::LibraryEntry> {
-    client.library(client.me().unwrap().id).unwrap()
+    client.library(client.me().unwrap().id).unwrap().entries
 }
 
 fn entry(client: &Client, id: i64) -> crate::LibraryEntry {
@@ -157,7 +157,7 @@ fn the_goal_is_this_years_dated_like_hardcovers() {
 fn books_have_their_editions_or_a_stand_in() {
     let client = client();
     for book in &CATALOGUE.books {
-        let editions = client.book_editions(BookId::new(book.id), 0).unwrap();
+        let editions = client.book_editions(BookId::new(book.id), 0).unwrap().items;
         if book.editions.is_empty() {
             assert_eq!(editions.len(), 1, "{}", book.title);
             assert_eq!(editions[0].id, EditionId::new(book.id));
@@ -169,7 +169,8 @@ fn books_have_their_editions_or_a_stand_in() {
     // A book with a page edition and an audiobook edition.
     let phm = client
         .book_editions(BookId::new(PROJECT_HAIL_MARY), 0)
-        .unwrap();
+        .unwrap()
+        .items;
     assert!(phm.iter().any(|e| e.pages.is_some()));
     assert!(
         phm.iter()
@@ -194,7 +195,10 @@ fn audiobooks_count_time() {
     assert!(!cruel.is_audio());
     assert_eq!(cruel.length(), Some(crate::api::Length::Pages(370)));
     // One of its audiobook editions lists no length.
-    let editions = client.book_editions(BookId::new(CRUEL_PRINCE), 0).unwrap();
+    let editions = client
+        .book_editions(BookId::new(CRUEL_PRINCE), 0)
+        .unwrap()
+        .items;
     assert!(
         editions
             .iter()
@@ -259,7 +263,7 @@ fn a_compilation_is_on_its_series_page_only() {
             .iter()
             .all(|b| b.book.title != "The Lord of the Rings")
     );
-    let overview = client.tracked_series(&[id]).unwrap();
+    let overview = client.tracked_series(&[id]).series;
     let titles: Vec<&str> = overview[0]
         .books
         .iter()
@@ -414,6 +418,34 @@ fn a_status_change_starts_and_finishes_reads() {
     assert_eq!(entry(&pinned(), 511).status, ReadingStatus::WantToRead);
 }
 
+/// The client sends this computer's date with the status (`user_date`), and
+/// the read takes it, not the server's own today.
+#[test]
+fn a_status_change_dates_its_read_with_the_day_sent() {
+    let client = Client::with_transport(
+        Arc::new(DemoToken),
+        Arc::new(ApiTransport {
+            state: Mutex::new(State::new(&CATALOGUE, at("2026-11-21T10:00:00+03:30"))),
+            faults: Faults::default(),
+        }),
+        TokenBucket::new(1_000, 1_000.0),
+    );
+    // Late on the 20th here, already the 21st where the server counts.
+    client.pin_today(day("2026-11-20"));
+    let started = client
+        .set_status(UserBookId::new(511), ReadingStatus::CurrentlyReading)
+        .unwrap();
+    assert_eq!(
+        started.open_read().unwrap().started_at,
+        Some(day("2026-11-20"))
+    );
+    // Children of Dune, not in the library.
+    let added = client
+        .add_to_library(BookId::new(427_314), ReadingStatus::Read)
+        .unwrap();
+    assert_eq!(added.reads[0].finished_at, Some(day("2026-11-20")));
+}
+
 #[test]
 fn a_rating_alone_means_read_and_a_kept_status_stays() {
     let client = client();
@@ -442,13 +474,15 @@ fn progress_to_the_end_finishes_the_read() {
     let read = entry(&client, 502).open_read().unwrap().id;
     let halfway = client
         .update_progress(id, Some(read), ProgressUpdate::Pages(500))
-        .unwrap();
+        .unwrap()
+        .entry;
     assert_eq!(halfway.open_read().unwrap().progress_pages, Some(500));
     let percent = halfway.open_read().unwrap().progress_percent.unwrap();
     assert!((percent - 49.65).abs() < 0.1, "{percent}");
     let done = client
         .update_progress(id, Some(read), ProgressUpdate::Pages(1007))
-        .unwrap();
+        .unwrap()
+        .entry;
     assert_eq!(done.status, ReadingStatus::Read);
     assert!(done.open_read().is_none());
     // An audiobook by percentage, in seconds.
@@ -458,7 +492,8 @@ fn progress_to_the_end_finishes_the_read() {
             None,
             ProgressUpdate::Percent(50.0),
         )
-        .unwrap();
+        .unwrap()
+        .entry;
     let read = habits.open_read().unwrap();
     assert_eq!(read.progress_pages, None);
     let half = crate::api::Length::Seconds(20_117).position_at(50.0);
@@ -472,6 +507,7 @@ fn progress_to_the_end_finishes_the_read() {
 fn reads_can_be_added_dated_and_deleted() {
     let client = client();
     let id = UserBookId::new(525);
+    // Children of Dune, not in the library.
     let added = client
         .add_read(id, Some(day("2015-03-01")), day("2015-03-20"), None)
         .unwrap();
@@ -550,6 +586,7 @@ fn notes_privacy_and_shelving_are_written() {
         .unwrap();
     assert_eq!(private.privacy, Some(Privacy::Private));
 
+    // Children of Dune, not in the library.
     let added = client
         .add_to_library(BookId::new(427_314), ReadingStatus::WantToRead)
         .unwrap();
@@ -594,26 +631,29 @@ fn lists_are_written() {
             .unwrap(),
         first
     );
-    let books = client.list_books(list.id, 0).unwrap();
+    let books = client.list_books(list.id, 0).unwrap().items;
     assert_eq!(
         books.iter().map(|b| b.position).collect::<Vec<_>>(),
         [Some(1), Some(2)]
     );
     client.remove_from_list(first.id).unwrap();
-    assert_eq!(client.list_books(list.id, 0).unwrap().len(), 1);
+    assert_eq!(client.list_books(list.id, 0).unwrap().items.len(), 1);
     assert!(client.list_memberships().unwrap().rows.contains(&second));
 
     let lists = client.lists().unwrap();
     let list = lists.iter().find(|l| l.id == list.id).unwrap();
     let renamed = client
         .update_list(
-            list,
-            &ListDraft {
-                name: "Summer".into(),
-                description: String::new(),
-                privacy: None,
-                ranked: true,
-            },
+            list.id,
+            &ListEdit::between(
+                list,
+                &ListDraft {
+                    name: "Summer".into(),
+                    description: String::new(),
+                    privacy: None,
+                    ranked: true,
+                },
+            ),
         )
         .unwrap();
     assert_eq!(renamed.name, "Summer");
@@ -672,9 +712,13 @@ fn goals_are_written() {
         "{}",
         goal.progress
     );
-    let mut edited = goal.clone();
-    edited.target = 1_000;
-    assert_eq!(client.update_goal(&edited).unwrap().target, 1_000);
+    let edited = client.update_goal(goal.id, |g| g.target = 1_000).unwrap();
+    assert_eq!(edited.target, 1_000);
+    assert_eq!(
+        edited.description.as_deref(),
+        Some("November pages"),
+        "the rest kept as read"
+    );
     assert_eq!(client.goals().unwrap().len(), 2);
     client.delete_goal(goal.id).unwrap();
     assert_eq!(client.goals().unwrap().len(), 1);
@@ -968,11 +1012,12 @@ fn the_reader_has_lists_and_an_owned_list() {
     let owned: Vec<_> = lists.iter().filter(|l| l.is_owned()).collect();
     assert_eq!(owned.len(), 1);
     let ranked = lists.iter().find(|l| l.ranked).expect("a ranked list");
-    let books = client.list_books(ranked.id, 0).unwrap();
+    let books = client.list_books(ranked.id, 0).unwrap().items;
     assert_eq!(books.len(), ranked.books_count as usize);
     let positions: Vec<Option<i32>> = books.iter().map(|b| b.position).collect();
     assert_eq!(positions[..2], [Some(1), Some(2)]);
-    assert_eq!(client.list_books(ranked.id, 100).unwrap(), []);
+    let past_the_end = client.list_books(ranked.id, 100).unwrap();
+    assert!(past_the_end.items.is_empty() && !past_the_end.has_more);
 
     let all = client.list_memberships().unwrap();
     assert!(all.complete);
@@ -1054,7 +1099,9 @@ fn the_series_overview_lists_catalogue_and_upcoming_books() {
         .into_iter()
         .map(|(id, _)| crate::SeriesId::new(id))
         .collect();
-    let series = client.tracked_series(&ids).unwrap();
+    let load = client.tracked_series(&ids);
+    assert!(load.error.is_none() && load.missing.is_empty());
+    let series = load.series;
     assert_eq!(series.len(), ids.len());
     let named = |name: &str| series.iter().find(|s| s.name == name).unwrap();
 
@@ -1082,7 +1129,7 @@ fn the_series_overview_lists_catalogue_and_upcoming_books() {
             .all(|s| { s.books.windows(2).all(|w| w[0].position <= w[1].position) })
     );
     // Only the series asked for.
-    let one = client.tracked_series(&ids[..1]).unwrap();
+    let one = client.tracked_series(&ids[..1]).series;
     assert_eq!(one.len(), 1);
     assert_eq!(one[0].id, ids[0]);
 }

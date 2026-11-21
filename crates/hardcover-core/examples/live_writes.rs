@@ -366,11 +366,22 @@ fn check(
     result.map_err(|e| format!("{label}: {e}"))
 }
 
+/// A progress update's entry, or its failure, whether or not a move to
+/// Currently Reading went through first.
+fn progress(
+    result: hardcover_core::Result<hardcover_core::ProgressChange>,
+) -> hardcover_core::Result<hardcover_core::LibraryEntry> {
+    result.and_then(|change| match change.progress_left_out {
+        Some(e) => Err(e),
+        None => Ok(change.entry),
+    })
+}
+
 fn check_read_progress(raw: &Raw, client: &Client, id: UserBookId) -> R<()> {
     let ub = id.get();
     let e = check(
         "update_progress(None, Pages(5)) without a read",
-        client.update_progress(id, None, ProgressUpdate::Pages(5)),
+        progress(client.update_progress(id, None, ProgressUpdate::Pages(5))),
     )?;
     println!(
         "update_progress with no read: status={} read_present={} pages={:?}",
@@ -393,7 +404,7 @@ fn check_read_progress(raw: &Raw, client: &Client, id: UserBookId) -> R<()> {
 
     let e = check(
         "update_progress(Some, Pages(10))",
-        client.update_progress(id, Some(r.id), ProgressUpdate::Pages(10)),
+        progress(client.update_progress(id, Some(r.id), ProgressUpdate::Pages(10))),
     )?;
     let r = e.current_read().cloned().ok_or("no read after progress")?;
     println!(
@@ -404,7 +415,7 @@ fn check_read_progress(raw: &Raw, client: &Client, id: UserBookId) -> R<()> {
 
     let e = check(
         "update_progress(Some, Percent(50))",
-        client.update_progress(id, Some(r.id), ProgressUpdate::Percent(50.0)),
+        progress(client.update_progress(id, Some(r.id), ProgressUpdate::Percent(50.0))),
     )?;
     let r2 = e
         .current_read()

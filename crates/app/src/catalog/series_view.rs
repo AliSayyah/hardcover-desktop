@@ -378,7 +378,7 @@ mod tests {
     fn demo_series() -> SeriesId {
         let client = hardcover_core::demo::client();
         let me = client.me().unwrap();
-        let entries = client.library_with_progress(me.id, |_| {}).unwrap();
+        let entries = client.library_with_progress(me.id, |_| {}).unwrap().entries;
         entries
             .iter()
             .flat_map(|e| e.series.iter().filter_map(|s| s.id))

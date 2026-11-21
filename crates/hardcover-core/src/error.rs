@@ -14,12 +14,19 @@ pub enum Error {
     /// HTTP 403 `insufficient_scope`: the token lacks a scope (`scope` names it when the server says).
     #[error("the token is missing a required scope{}", .scope.as_deref().map_or_default(|s| format!(" ({s})")))]
     InsufficientScope { scope: Option<String> },
-    /// HTTP 429. `retry_after` comes from the `Retry-After` header when present.
+    /// HTTP 429, or a block an earlier 429 asked for that hasn't ended.
+    /// `retry_after` is how long it still runs, when the server said.
     #[error("rate limited by Hardcover, try again later")]
     RateLimited { retry_after: Option<Duration> },
-    /// The request (or the server, HTTP 408) timed out.
+    /// The request (or the server, HTTP 408) timed out. For a write, only when
+    /// it is known not to have reached Hardcover; see [`Error::OutcomeUnknown`].
     #[error("the request timed out")]
     Timeout,
+    /// A write was sent, but no answer came back (it timed out, or the
+    /// gateway did, HTTP 504): Hardcover may or may not have applied it.
+    /// Never retried automatically; read the entry again to find out.
+    #[error("Hardcover didn't confirm the change; it may have been saved")]
+    OutcomeUnknown,
     /// Transport failure or a 5xx response.
     #[error("network error: {0}")]
     Network(String),

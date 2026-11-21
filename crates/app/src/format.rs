@@ -416,8 +416,13 @@ where
 /// What to tell the user when a request fails, with a recovery hint.
 pub fn error_message(error: &Error) -> String {
     match error {
-        Error::RateLimited { .. } => {
-            "Hardcover's rate limit was reached. Try again in a minute.".to_owned()
+        Error::RateLimited { retry_after } => format!(
+            "Hardcover's rate limit was reached. Try again {}.",
+            retry_wait(*retry_after)
+        ),
+        Error::OutcomeUnknown => {
+            "Hardcover didn't confirm the change, so it may have been saved. Refresh to check before trying again."
+                .to_owned()
         }
         Error::Network(_) | Error::Timeout => {
             "Couldn't reach Hardcover. Check your connection and try again.".to_owned()
@@ -445,6 +450,26 @@ pub fn error_message(error: &Error) -> String {
         ),
         Error::Decode(_) => "Hardcover sent an unexpected response. Try again later.".to_owned(),
         _ => format!("{}. Try again.", error.to_string().trim_end_matches('.')),
+    }
+}
+
+/// When to try again after a rate limit: "in a minute" for the per-minute
+/// window, else the block's length rounded up ("in 3 hours", for the daily
+/// limit).
+fn retry_wait(retry_after: Option<std::time::Duration>) -> String {
+    let secs = retry_after.map_or(0, |d| d.as_secs());
+    let minutes = secs.div_ceil(60);
+    match minutes {
+        0..=1 => "in a minute".to_owned(),
+        2..=59 => format!("in {minutes} minutes"),
+        _ => {
+            let hours = secs.div_ceil(3600);
+            if hours == 1 {
+                "in an hour".to_owned()
+            } else {
+                format!("in {hours} hours")
+            }
+        }
     }
 }
 
@@ -1014,8 +1039,30 @@ mod tests {
             "Hardcover's rate limit was reached. Try again in a minute."
         );
         assert_eq!(
+            error_message(&Error::RateLimited {
+                retry_after: Some(std::time::Duration::from_secs(45))
+            }),
+            "Hardcover's rate limit was reached. Try again in a minute."
+        );
+        assert_eq!(
+            error_message(&Error::RateLimited {
+                retry_after: Some(std::time::Duration::from_secs(10 * 60 + 1))
+            }),
+            "Hardcover's rate limit was reached. Try again in 11 minutes."
+        );
+        assert_eq!(
+            error_message(&Error::RateLimited {
+                retry_after: Some(std::time::Duration::from_secs(2 * 3600 + 5))
+            }),
+            "Hardcover's rate limit was reached. Try again in 3 hours."
+        );
+        assert_eq!(
             error_message(&Error::Timeout),
             "Couldn't reach Hardcover. Check your connection and try again."
+        );
+        assert_eq!(
+            error_message(&Error::OutcomeUnknown),
+            "Hardcover didn't confirm the change, so it may have been saved. Refresh to check before trying again."
         );
         assert_eq!(
             error_message(&Error::InvalidInput(

@@ -17,7 +17,7 @@ use gpui_kit::{
     Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
-use hardcover_core::{BookId, EDITIONS_PER_PAGE, EditionId, EditionSummary};
+use hardcover_core::{BookId, EditionId, EditionSummary};
 
 use crate::app_state::Services;
 use crate::design::{TypeRoles as _, colors, size};
@@ -36,6 +36,9 @@ pub struct EditionPicker {
     current: Option<EditionId>,
     /// More pages may follow the ones fetched.
     has_more: bool,
+    /// Where the next page starts: the rows Hardcover sent so far, which
+    /// the de-duplicated `editions` may be fewer than.
+    next_offset: u32,
     loading: bool,
     error: Option<SharedString>,
     fetch: Option<Task<()>>,
@@ -51,6 +54,7 @@ impl EditionPicker {
             editions: Vec::new(),
             current: None,
             has_more: true,
+            next_offset: 0,
             loading: false,
             error: None,
             fetch: None,
@@ -71,11 +75,7 @@ impl EditionPicker {
         if self.loading || !self.has_more {
             return;
         }
-        let Ok(offset) = u32::try_from(self.editions.len()) else {
-            self.has_more = false;
-            cx.notify();
-            return;
-        };
+        let offset = self.next_offset;
         self.loading = true;
         self.error = None;
         cx.notify();
@@ -89,9 +89,10 @@ impl EditionPicker {
                 this.loading = false;
                 match result {
                     Ok(page) => {
-                        this.has_more = page.len() >= EDITIONS_PER_PAGE as usize;
+                        this.has_more = page.has_more;
+                        this.next_offset = page.next_offset;
                         // Offset paging can repeat a row if the order shifted between pages.
-                        for edition in page {
+                        for edition in page.items {
                             if !this.editions.iter().any(|e| e.id == edition.id) {
                                 this.editions.push(edition);
                             }

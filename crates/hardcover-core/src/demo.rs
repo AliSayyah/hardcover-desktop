@@ -82,7 +82,7 @@ pub fn client_with(faults: &Faults) -> Client {
 }
 
 fn client_at(faults: &Faults, clock: Clock) -> Client {
-    Client::with_transport(
+    let client = Client::with_transport(
         Arc::new(DemoToken),
         Arc::new(ApiTransport {
             state: Mutex::new(State::new(&CATALOGUE, clock)),
@@ -90,7 +90,13 @@ fn client_at(faults: &Faults, clock: Clock) -> Client {
         }),
         // No rate limit to respect.
         TokenBucket::new(1_000, 1_000.0),
-    )
+    );
+    // The dates the client sends follow the demo's clock.
+    #[cfg(test)]
+    if let Clock::Fixed(_) = clock {
+        client.pin_today(clock.today());
+    }
+    client
 }
 
 /// The faults in `HARDCOVER_DEMO_FAULTS`, read once per run.
@@ -1230,14 +1236,23 @@ fn progress_context(state: &State, id: i64, vars: &Value) -> Value {
     let wanted = vars["reads"]["id"]["_eq"].as_i64();
     let found = state.entry(id).map(|e| {
         let book = CATALOGUE.book(e.book);
-        let read = e
+        // Every matching read: the client picks the open one by date.
+        let reads: Vec<Value> = e
             .reads
             .iter()
             .filter(|r| match wanted {
                 Some(id) => r.id == id,
                 None => r.finished.is_none(),
             })
-            .max_by_key(|r| r.id);
+            .map(|r| {
+                json!({
+                    "id": r.id,
+                    "started_at": r.started.map(|d| d.to_string()),
+                    "finished_at": r.finished.map(|d| d.to_string()),
+                    "edition": lengths(r.edition),
+                })
+            })
+            .collect();
         json!({
             "id": e.id,
             "status_id": e.status,
@@ -1246,9 +1261,7 @@ fn progress_context(state: &State, id: i64, vars: &Value) -> Value {
                 "audio_seconds": book.and_then(|b| b.audio_seconds),
             },
             "edition": lengths(e.edition),
-            "user_book_reads": read.map(|r| json!({ "id": r.id, "edition": lengths(r.edition) }))
-                .into_iter()
-                .collect::<Vec<_>>(),
+            "user_book_reads": reads,
         })
     });
     json!({ "user_books": found.into_iter().collect::<Vec<_>>() })

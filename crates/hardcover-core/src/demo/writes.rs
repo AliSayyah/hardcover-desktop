@@ -4,7 +4,8 @@
 //! The behaviour follows what CLAUDE.md records as verified: a resent status
 //! changes nothing; a rating without a status moves the book to Read; moving
 //! to Currently Reading starts a read and moving to Read finishes the open
-//! one; progress that reaches the end finishes the read and marks the book
+//! one, on the change's `user_date` if it has one (else today); progress
+//! that reaches the end finishes the read and marks the book
 //! Read; only an empty Slate document deletes a review, and `reviewed_at`
 //! stays; adding a book already on a list returns its row; an empty list
 //! description clears it; `delete_goal` answers with `id: null`.
@@ -131,7 +132,11 @@ fn refused(message: &str) -> Value {
 
 fn insert_user_book(state: &mut State, object: &Value) -> Result<Value, String> {
     let object = self::object(object)?;
-    only(object, &["book_id", "status_id", "privacy_setting_id"])?;
+    only(
+        object,
+        &["book_id", "status_id", "privacy_setting_id", "user_date"],
+    )?;
+    let day = user_date(object)?;
     let book = object
         .get("book_id")
         .and_then(Value::as_i64)
@@ -167,7 +172,7 @@ fn insert_user_book(state: &mut State, object: &Value) -> Result<Value, String> 
         review: Review::default(),
     };
     let read_id = state.new_id();
-    set_status(&mut entry, status, now.date_naive(), read_id);
+    set_status(&mut entry, status, day.unwrap_or(now.date_naive()), read_id);
     let payload = user_book_payload(&entry);
     state.library.push(entry);
     Ok(json!({ "insert_user_book": payload }))
@@ -183,15 +188,17 @@ fn update_user_book(state: &mut State, id: i64, object: &Value) -> Result<Value,
             "edition_id",
             "private_notes",
             "privacy_setting_id",
+            "user_date",
         ],
     )?;
+    let day = user_date(object)?;
     let read_id = state.new_id();
     let now = state.clock.now();
     let Some(entry) = state.entry_mut(id) else {
         return Ok(json!({ "update_user_book": refused("Library entry not found.") }));
     };
     if let Some(status) = object.get("status_id").and_then(Value::as_i64) {
-        set_status(entry, status, now.date_naive(), read_id);
+        set_status(entry, status, day.unwrap_or(now.date_naive()), read_id);
     }
     if let Some(rating) = object.get("rating") {
         entry.rating = rating.as_f64();
@@ -213,9 +220,21 @@ fn update_user_book(state: &mut State, id: i64, object: &Value) -> Result<Value,
     Ok(json!({ "update_user_book": user_book_payload(entry) }))
 }
 
-/// Moves `entry` to `status`. Currently Reading starts a read; Read finishes
-/// the open read, at its end, or adds one finished today. The same status
-/// changes nothing.
+/// A status change's `user_date`: the day of the read it starts or finishes.
+fn user_date(object: &Map<String, Value>) -> Result<Option<NaiveDate>, String> {
+    match object.get("user_date") {
+        None | Some(Value::Null) => Ok(None),
+        Some(day) => day
+            .as_str()
+            .and_then(|d| d.parse().ok())
+            .map(Some)
+            .ok_or_else(|| format!("`user_date` isn't a date: {day}")),
+    }
+}
+
+/// Moves `entry` to `status`. Currently Reading starts a read on `today`;
+/// Read finishes the open read on it, at its end, or adds one finished then.
+/// The same status changes nothing.
 fn set_status(entry: &mut Entry, status: i64, today: NaiveDate, new_read: i64) {
     if entry.status == status {
         return;
