@@ -54,6 +54,8 @@
 //! - **The kit's focus ring** is 3 px, not the system's 2: its width is a
 //!   private constant. The app's own rows, text buttons and components draw
 //!   2 (`ui::focus`).
+//! - **Chart labels** are a fixed 10 px: the kit's charts set their text size
+//!   in px, so they don't follow the interface scale (`ui_scale`).
 //! - **A disabled segment** of a segmented `TabBar` is painted with the
 //!   theme's `tab_bar` (paper), like the selected segment's indicator, so
 //!   it reads as chosen. Leave a segment out rather than disable it (the

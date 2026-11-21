@@ -106,7 +106,9 @@ impl Platform {
 }
 
 fn forced() -> Option<f64> {
-    let value = std::env::var(FORCE_ENV).ok()?;
+    let value = std::env::var(FORCE_ENV)
+        .ok()
+        .filter(|v| !v.trim().is_empty())?;
     let k = policy::parse_forced(&value);
     if k.is_none() {
         note_failure(&format!(
@@ -369,6 +371,9 @@ impl UiScale {
         let Some(ix) = chosen else {
             // An output added since the last read isn't known yet: read again,
             // once for this scale. Until then the factor stays.
+            if self.platform == Platform::X11 {
+                debug!("no monitor holds the window's centre {:?}", self.centre);
+            }
             let bits = window.scale_factor().to_bits();
             if self.platform == Platform::Wayland && self.reread_for != Some(bits) {
                 self.reread_for = Some(bits);

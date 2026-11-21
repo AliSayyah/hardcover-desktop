@@ -42,6 +42,13 @@ Tokens are the only source of values. In code:
 - sizes use GPUI's rem helpers, at a 16 px rem. The helpers exist for the
   Tailwind steps (`_0p5` to `_12`, then `_16`, `_20`, `_24`, `_32`, `_40`,
   `_48`, `_56`, `_64`, `_72`, `_80`, `_96`); any other size is `rems(..)`.
+- **Every size in this system is in design px.** On a large monitor the app
+  scales its rem (`ui_scale`): it draws the interface up to 1.5 times the
+  design, in eighths, so a logical pixel looks no smaller than on a 24"
+  1080p monitor at scale 1 (a 27" 4K monitor at 1.5 gets 1.25). Whatever is
+  built from rems follows; raw `px(...)` doesn't, so it is kept for what
+  must stay one device-independent pixel (see "Implementing in GPUI"). The
+  user can't set the factor; `HARDCOVER_UI_SCALE` forces one.
 
 The mapping to theme fields is under "Implementing in GPUI".
 
@@ -277,7 +284,9 @@ dust jacket.
   title (`h = 7; for each code point c: h = h * 31 + c (mod 2^32)`, index
   `h % 8`). The same book always gets the same cloth.
 - **Type:** cloth-ink, in Literata Text 600 for the title. Its size scales
-  with the cover: xs 10, sm 16, md 9, lg 11, xl 18, xxl 22 px. It stands in
+  with the cover: xs 10, sm 16, md 9, lg 11, xl 18, xxl 22 design px. The
+  padding, the frame's inset and the hinge are design px too, so the cloth
+  scales with the interface; the frame and the rules stay 1 px. It stands in
   for an image, so it is the one place off the type scale.
 - **Content by size:**
   - xs: the title's first letter, skipping a leading "The " or "Untitled "
@@ -586,7 +595,9 @@ covers as they widen. A 4K monitor at 1.5 gives about 2560 logical px; a
 layout that stops short of it leaves a blank strip that reads as a bug. The
 1200 × 800 default and the 800 × 560 minimum are where the README's
 screenshots are taken, and every screen lays out there exactly as it did
-before this rule.
+before this rule. They are design px: at an interface scale of 1.25 the
+window opens at 1500 × 1000 and can't be made smaller than 1000 × 700, so
+every width below (the tiers' thresholds included) is in design px too.
 
 - **Leading edge.** Content starts on the leading edge, on the same spine as
   Back. It is never centred in the window.
@@ -920,10 +931,10 @@ it when you wire it.
 | `skeleton` | `skeleton` |
 | `danger` | `danger` |
 | `warning` | `warning` |
-| `radius` | 6 |
-| `radius_lg` | 8 |
+| `radius` | 6, times the interface scale, rounded |
+| `radius_lg` | 8, times the interface scale, rounded |
 | `font_family` | Inter |
-| `font_size` | 16 |
+| `font_size` | 16, times the interface scale (the rem) |
 
 The app builds this as two theme configs (`design::theme`), so every mode
 change applies it. `ring` is the solid accent: the kit draws its ring at 50%
@@ -942,8 +953,14 @@ reach is listed under "Kit limits".
 - **Tabular figures:** `font_features` with `tnum`.
 - **Gradients and shadows:** the hinge is a `linear_gradient`; shadows are
   `BoxShadow`s.
-- **Raw `px(...)`** is allowed only for hairlines, cover geometry and the
-  window size. Everything else uses the rem helpers and tokens.
+- **Raw `px(...)`** doesn't follow the interface scale. It is allowed only
+  for hairlines (the cover's edge, the cloth's frame and rules), focus
+  rings, the scrollbar thumb, the pace tick and shadows. Everything else
+  uses the rem helpers and tokens, cover geometry included (`CoverSize`'s
+  sizes and radii are rems). A width handed to text layout
+  (`WrappingText::width`, `TextButton::wrap_width`) is a rem size converted
+  with `window.rem_size()`, never `px(design)`. The window's sizes come from
+  `ui_scale::policy`, in logical px at the interface scale.
 - **Fonts** are bundled with their OFL licences, which `package.sh`
   installs.
   - Literata Text (12 pt) at 400, 400 italic and 600, and Display (36 pt) at
@@ -991,3 +1008,6 @@ commit that fixes it.
 - The kit's controls (buttons, inputs, selects, switches) draw a 3 px focus
   ring, not 2: the width is a private constant of the kit. The app's own
   rows, text buttons and components draw 2.
+- A chart's labels (Stats, the goal's months) are a fixed 10 px: the kit's
+  charts set their text size in px, so they don't follow the interface
+  scale.

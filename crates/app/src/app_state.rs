@@ -231,7 +231,7 @@ const COVER_HEIGHT: u32 = 600;
 const SCALED_HEIGHTS: [u32; 3] = [THUMBNAIL_HEIGHT, MEDIUM_COVER_HEIGHT, COVER_HEIGHT];
 /// The most disk the cover cache may take. Past it, the copies used least
 /// recently are deleted at the next start, down to [`COVER_CACHE_TARGET`].
-/// A cover takes about 110 KB at all three sizes, so this holds some 2,300
+/// A cover takes about 135 KB at all three sizes, so this holds some 1,900
 /// covers.
 const COVER_CACHE_LIMIT: u64 = 256 * 1024 * 1024;
 const COVER_CACHE_TARGET: u64 = COVER_CACHE_LIMIT / 4 * 3;
@@ -636,7 +636,8 @@ fn scaled_size(src_width: u32, src_height: u32, max_height: u32) -> (u32, u32) {
 /// Scaled copies of covers live in `scaled/<version>/` under the cover cache.
 const SCALED_DIR: &str = "scaled";
 /// Bump whenever [`scale`] changes its output: copies made by an
-/// older build are then ignored, and deleted at the next start.
+/// older build are then ignored, and deleted at the next start. v2: the
+/// detail copy went from 480 to 600 px ([`COVER_HEIGHT`]).
 const SCALED_VERSION: &str = "v2";
 /// A temporary file older than this was left by a write that never finished.
 const STALE_TEMP_AGE: std::time::Duration = std::time::Duration::from_hours(1);
