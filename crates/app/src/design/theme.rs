@@ -30,7 +30,8 @@
 //!   ghost buttons hover at 5% as the system says, and menu items at 10%.
 //! - Danger buttons have no fill: danger text, the overlays on hover and
 //!   press.
-//! - `ring` is the solid accent: the kit draws the 3 px ring at 50% of it,
+//! - `ring` is the solid accent: the kit draws its 3 px ring at 50% of it
+//!   (the app's own is 2 px; the kit's width can't be set),
 //!   plus a 1 px accent edge, as the system's focus treatment asks.
 //! - `switch_thumb` is its own role: `raised` in light mode, `fg` in dark.
 //!

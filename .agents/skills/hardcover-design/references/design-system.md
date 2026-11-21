@@ -72,7 +72,7 @@ selected row.
 | `accent` | `#3B4A9C` | `#98A5F4` | Ink blue (details below the table) |
 | `accent-fg` | `#FFFFFF` | `#12142A` | Text on accent |
 | `accent-soft` | accent 10% | accent 14% | The avatar's fill |
-| `ring` | accent 50% | accent 50% | The 3 px focus ring |
+| `ring` | accent 50% | accent 50% | The 2 px focus ring |
 | `gold` | `#F59E0B` (amber 500) | `#FBBF24` (amber 400) | The user's own rating, nothing else |
 | `gold-preview` | gold 55% | gold 55% | The rating control's hover preview: the stars a click would set |
 | `star-empty` | ink 14% | ink 14% | An unfilled star |
@@ -524,7 +524,7 @@ Each state has one treatment, on every control. Hover is never the only cue.
 | Rest | As specified for the component |
 | Hover | The `hover` fill. A text button gains its underline. The rating control previews the stars a click would set in `gold-preview` |
 | Pressed, selected, open | The `selected` fill. A selected nav row also takes weight 500 and the accent icon. A menu button stays pressed while its menu is open |
-| Focus-visible | A 3 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
+| Focus-visible | A 2 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
 | Disabled | 50% opacity, with no hover or pressed response. When the reason isn't obvious, say it beside the control or in its tooltip (`format::needs_permission`) |
 | Loading | `skeleton` shapes where the content will be, pulsing between 100% and 50% opacity. Covers show a skeleton until the image lands. A button running its action keeps its label, shows its loading state and refuses repeat clicks. No spinner in a list |
 | Error | Say what happened and how to recover, next to the thing that failed (`Services::error_message`) |
@@ -861,8 +861,8 @@ it when you wire it.
 | `font_size` | 16 |
 
 The app builds this as two theme configs (`design::theme`), so every mode
-change applies it. `ring` is the solid accent: the kit draws the 3 px ring
-at 50% of it, plus a 1 px accent edge. What the kit doesn't let the theme
+change applies it. `ring` is the solid accent: the kit draws its ring at 50%
+of it, plus a 1 px accent edge. What the kit doesn't let the theme
 reach is listed under "Kit limits".
 
 **Notes:**
@@ -920,3 +920,6 @@ commit that fixes it.
   than disabled radios; a form's radios are disabled only while it saves.
 - The `DatePicker`'s field stays paper.
 - A dialog keeps the kit's shadow.
+- The kit's controls (buttons, inputs, selects, switches) draw a 3 px focus
+  ring, not 2: the width is a private constant of the kit. The app's own
+  rows, text buttons and components draw 2.

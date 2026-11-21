@@ -22,6 +22,11 @@
 //!   goes, never `.small()`.
 //! - [`OnTextSpine`]: a quiet button (ghost, or a danger label) that starts a
 //!   line puts its label, not its padding, on the content's leading edge.
+//! - [`gutter_list`] and [`gutter_scrollbar`]: a scrollbar that stays in the
+//!   8 inset beside a list's rows (the shelf and search lists, the sidebar).
+//!   The kit's thumb is 6 wide and 4 in from the edge, 8 wide on hover, so
+//!   it reaches 10 to 12 in and covers the trailing edge of a selected row;
+//!   this one is 4 wide and 1 in.
 //!
 //! What can't be fixed without patching the kit (the same list as the
 //! system's "Kit limits"):
@@ -46,14 +51,19 @@
 //!   reach, so it stays paper.
 //! - **A dialog's shadow** is set after its style is applied, so it keeps
 //!   the kit's.
+//! - **The kit's focus ring** is 3 px, not the system's 2: its width is a
+//!   private constant. The app's own rows, text buttons and components draw
+//!   2 (`ui::focus`).
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::dialog::{AlertDialog, Dialog};
+use gpui_kit::component::list::{List, ListDelegate, ListState};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarThumbStyle};
 use gpui_kit::component::select::{Select, SelectDelegate, SelectItem};
 use gpui_kit::component::{Icon, IconName, Sizable as _, WindowExt as _};
 use gpui_kit::{
-    App, Div, InteractiveElement as _, IntoElement, KeyBinding, NoAction, ParentElement as _,
-    Styled, Window, div, rems,
+    App, Div, ElementId, Entity, InteractiveElement as _, IntoElement, KeyBinding, NoAction,
+    ParentElement as _, Pixels, Styled, Window, div, px, rems,
 };
 
 use crate::design::{TypeRole, colors, size};
@@ -242,6 +252,46 @@ fn open_alert(
             }
         }
     });
+}
+
+/// The thumb of a [`gutter_scrollbar`]: 4 wide, 1 in from the edge, so it
+/// spans 1 to 5 in. A row inset 8 keeps clear of it, and so does its focus
+/// ring, drawn 3 outside the row.
+const GUTTER_THUMB_WIDTH: Pixels = px(4.);
+const GUTTER_THUMB_INSET: Pixels = px(1.);
+
+/// The kit's vertical scrollbar over a scroller whose rows sit 8 in from its
+/// trailing edge (the sidebar), kept in that inset: the thumb is 4 wide and
+/// 1 in, at rest, hovered and dragged, so it never covers a row's selection
+/// fill or its focus ring. Its colours stay the theme's. Add it as the scroller's last child,
+/// in place of `.vertical_scrollbar(&handle)`; `id` keeps its own state (two
+/// scrollbars drawn from this one place would share it otherwise).
+pub fn gutter_scrollbar<H: ScrollbarHandle + Clone>(
+    id: impl Into<ElementId>,
+    handle: &H,
+) -> impl IntoElement {
+    let thumb =
+        |style: ScrollbarThumbStyle| style.width(GUTTER_THUMB_WIDTH).inset(GUTTER_THUMB_INSET);
+    div().absolute().inset_0().child(
+        Scrollbar::vertical(handle)
+            .id(id)
+            .viewport_from_layout()
+            .styles(|styles| styles.thumb(thumb).thumb_hover(thumb).thumb_active(thumb)),
+    )
+}
+
+/// A list whose rows are inset 8 (`p_2`), filling its parent, with a
+/// [`gutter_scrollbar`] in place of the kit's own.
+pub fn gutter_list<D: ListDelegate>(
+    id: impl Into<ElementId>,
+    list: &Entity<ListState<D>>,
+    cx: &App,
+) -> Div {
+    div()
+        .relative()
+        .size_full()
+        .child(List::new(list).size_full().p_2().scrollbar_visible(false))
+        .child(gutter_scrollbar(id, list.read(cx).scroll_handle()))
 }
 
 #[cfg(test)]

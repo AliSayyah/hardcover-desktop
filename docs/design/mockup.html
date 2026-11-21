@@ -196,7 +196,7 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .nav.sel { font-weight: 500; }
 .nav.sel svg { color: var(--accent); }
 .nav.sel .n { color: var(--fg); }
-.nav.focus { box-shadow: 0 0 0 3px var(--ring), inset 0 0 0 1px var(--accent); }
+.nav.focus { box-shadow: 0 0 0 2px var(--ring), inset 0 0 0 1px var(--accent); }
 .sb .label { padding: var(--s-16) var(--s-8) var(--s-4); }
 /* The goal is a row like the others; its bar runs under the label, from the label spine to the count lane. */
 .goal-row { display: flex; flex-direction: column; justify-content: center; gap: var(--s-4); height: var(--h-row-l); padding: 0 var(--s-8); border-radius: var(--r-control); }
@@ -218,7 +218,7 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .btn.danger svg { color: inherit; }
 .btn.sm { height: var(--h-control-s); padding: 0 var(--s-8); font-size: var(--t-12); gap: var(--s-4); }
 .btn.icon { width: var(--h-control); padding: 0; justify-content: center; }
-.btn.focus, .input.focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+.btn.focus, .input.focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
 .dis { opacity: .5; }
 .input { height: var(--h-control); border: 1px solid var(--border-strong); background: var(--raised); border-radius: var(--r-control); display: flex; align-items: center; gap: var(--s-8); padding: 0 var(--s-8); color: var(--fg-faint); }
 .input svg { color: var(--fg-muted); }
@@ -335,7 +335,7 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .list-tools .select { width: var(--w-select); }
 .rows { padding: var(--s-8); display: flex; flex-direction: column; gap: var(--s-2); }
 .row { display: flex; align-items: center; gap: var(--s-12); padding: var(--s-8); border-radius: var(--r-box); }
-.row.focus { box-shadow: 0 0 0 3px var(--ring), inset 0 0 0 1px var(--accent); }
+.row.focus { box-shadow: 0 0 0 2px var(--ring), inset 0 0 0 1px var(--accent); }
 .row .t { font-weight: 500; }
 .row .trail { width: 48px; flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: var(--s-4); font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
 .row .trail .bar { width: 100%; }
@@ -914,7 +914,7 @@ function tokensTheme(theme, themeName) {
     </div></div>
     <div><h4>Ink: contrast is the lowest over bg, sidebar, surface and raised, each alone, hovered and selected</h4><div class="sw">
       ${ink("fg", "--fg", "text")}${ink("fg-muted", "--fg-muted", "secondary text, counts")}${ink("fg-faint", "--fg-faint", "placeholder, disabled only", plain(theme, "--bg", "--raised"))}${ink("accent", "--accent", "links, selected icon")}
-      ${sw("accent", "--accent", "progress, primary commit", "--accent-fg")}${sw("accent-soft", "--accent-soft", "the avatar")}${sw("ring", "--ring", "focus ring, 3 px")}${sw("gold", "--gold", "your rating only")}
+      ${sw("accent", "--accent", "progress, primary commit", "--accent-fg")}${sw("accent-soft", "--accent-soft", "the avatar")}${sw("ring", "--ring", "focus ring, 2 px")}${sw("gold", "--gold", "your rating only")}
       ${ink("danger", "--danger", "destructive", plain(theme, "--bg", "--raised"))}${ink("warning", "--warning", "content-warning icon", [over(theme, "--chip", "--bg")])}
     </div></div>
     <div><h4>Elevation: three levels</h4><div class="wrap" style="gap:var(--s-24)">

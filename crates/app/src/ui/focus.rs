@@ -1,4 +1,4 @@
-//! The focus treatment (`hardcover-design`, States → Focus-visible): a 3 px
+//! The focus treatment (`hardcover-design`, States → Focus-visible): a 2 px
 //! `ring` outside, plus a 1 px accent edge.
 //! - Controls take both ([`FocusTreatment::focus_ring`]).
 //! - Rows take the ring and an inset edge ([`FocusTreatment::focus_row`]).
@@ -8,7 +8,8 @@
 //!   both outside the text ([`FocusTreatment::focus_ring_around`]), so the
 //!   edge never touches a glyph.
 //!
-//! The kit's own controls draw this themselves from the theme. Use these for
+//! The kit's own controls draw this themselves from the theme, with a 3 px
+//! ring (its width is private to the kit). Use these for
 //! the app's components that track their own focus. Keeping the focused
 //! element in view is [`super::reveal`]'s, except in a virtual list, whose
 //! rows use [`reveal_when`].
@@ -132,7 +133,7 @@ fn edge(cx: &App) -> BoxShadow {
 
 /// The focus treatment, on any styled parent.
 pub trait FocusTreatment: Styled + ParentElement + Sized {
-    /// A control's focus: the 3 px ring outside and the 1 px accent edge.
+    /// A control's focus: the 2 px ring outside and the 1 px accent edge.
     /// `radius` is the element's own corner radius, so the ring follows it.
     /// The element must be positioned (`relative`, the default for the
     /// app's components), and nothing around it may clip.
@@ -157,7 +158,7 @@ pub trait FocusTreatment: Styled + ParentElement + Sized {
 
     /// The focus of bare text (a text button, a byline link): the 1 px
     /// accent edge just outside the text, standing in for the border it
-    /// doesn't have, and the 3 px ring outside that. The same conditions as
+    /// doesn't have, and the 2 px ring outside that. The same conditions as
     /// [`FocusTreatment::focus_ring`]; the element's box shadow is kept.
     fn focus_ring_around(self, radius: Pixels, cx: &App) -> Self {
         let edge = size::FOCUS_EDGE;
@@ -180,7 +181,7 @@ pub trait FocusTreatment: Styled + ParentElement + Sized {
         ))
     }
 
-    /// A row's focus: the 1 px accent edge inside the row and the 3 px ring
+    /// A row's focus: the 1 px accent edge inside the row and the 2 px ring
     /// outside it, drawn over the list that clips the row. Replaces the
     /// element's box shadow. The ring follows the row's own box, measured
     /// as it is laid out, so a row that puts its children in an inner box

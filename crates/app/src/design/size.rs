@@ -157,8 +157,12 @@ pub const DIALOG_FORM: Rems = rems(30.);
 
 /// The 1 px hairline.
 pub const HAIRLINE: Pixels = px(1.);
-/// The focus ring drawn outside a focused control (3; `ring`).
-pub const FOCUS_RING: Pixels = px(3.);
+/// The focus ring drawn outside a focused row, text or component of the
+/// app's own (2; `ring`). The kit's controls draw theirs at 3: its width is
+/// private to the kit (Kit limits).
+pub const FOCUS_RING: Pixels = px(2.);
+/// The ring the kit's own controls draw (3), wider than [`FOCUS_RING`].
+pub const KIT_FOCUS_RING: Pixels = px(3.);
 /// The 1 px accent edge of a focused control or row.
 pub const FOCUS_EDGE: Pixels = px(1.);
 

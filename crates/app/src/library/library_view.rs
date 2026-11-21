@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
+use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{
     Icon, IconName, IndexPath, h_flex, h_resizable, resizable_panel, v_flex,
@@ -30,6 +30,7 @@ use crate::chip::status_icon;
 use crate::design::{colors, size};
 use crate::format::status_label;
 use crate::ui::kit::RaisedField as _;
+use crate::ui::kit::gutter_list;
 use crate::ui::{ListRow as _, PageHeader, RowFocus, empty_state, on_keyboard_entry};
 
 #[derive(Clone)]
@@ -437,7 +438,7 @@ impl Render for ShelfPane {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .child(List::new(&self.list).size_full().p_2()),
+                    .child(gutter_list("shelf-scrollbar", &self.list, cx)),
             )
     }
 }
