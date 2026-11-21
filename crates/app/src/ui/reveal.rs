@@ -265,7 +265,9 @@ fn revealing_offset(
     offset: gpui_kit::Point<Pixels>,
     max: gpui_kit::Point<Pixels>,
 ) -> Option<gpui_kit::Point<Pixels>> {
-    let margin = size::FOCUS_RING + px(1.);
+    // The widest ring drawn outside a focused element (the kit's 3 px; the
+    // app's own is 2), and 1 more.
+    let margin = size::KIT_FOCUS_RING + px(1.);
     let top = target.top() - margin;
     let bottom = target.bottom() + margin;
     let shift = if bottom - top > viewport.size.height {
