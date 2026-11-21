@@ -73,6 +73,8 @@ jobs:
     continue-on-error: ${{ matrix.checks == 'advisories' && github.event_name == 'pull_request' }}
     env:
       CARGO_DENY_VERSION: "0.21.0"
+      # From the release's own .sha256 file. Update both together.
+      CARGO_DENY_SHA256: a2170b854ff697e79e39c4c538981c9c1bdd803addbae6719a4cb66b4585a903
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,9 +83,11 @@ jobs:
       - name: Install cargo-deny
         run: |
           name="cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl"
-          curl --proto '=https' --tlsv1.2 -sSfL \
-            "https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY_VERSION/$name.tar.gz" |
-            tar -xz -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP"
+          curl --proto '=https' --tlsv1.2 -sSfLO \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY_VERSION/$name.tar.gz"
+          echo "$CARGO_DENY_SHA256  $name.tar.gz" | sha256sum -c -
+          tar -xzf "$name.tar.gz"
           echo "$RUNNER_TEMP/$name" >>"$GITHUB_PATH"
       - run: cargo deny --locked check ${{ matrix.checks }}
 
@@ -117,7 +121,8 @@ jobs:
           # The one library the binary links that the runner image lacks.
           sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-0
           home="$RUNNER_TEMP/home"
-          # Through a pipe, as the README's one-liner runs it.
+          # This checkout's installer, through a pipe, as the README's
+          # one-liner runs the copy published with the latest release.
           HOME="$home" bash <install.sh
           test -f "$home/.local/share/applications/io.github.alisayyah.HardcoverDesktop.desktop"
           "$home/.local/bin/hardcover-desktop" --version
@@ -146,13 +151,19 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       ACTIONLINT_VERSION: "1.7.12"
+      # From the release's checksums.txt. Update both together.
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Run actionlint
         run: |
-          curl --proto '=https' --tlsv1.2 -sSfL \
-            "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" |
-            tar -xz -C "$RUNNER_TEMP" actionlint
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl --proto '=https' --tlsv1.2 -sSfLO \
+            "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/$archive"
+          echo "$ACTIONLINT_SHA256  $archive" | sha256sum -c -
+          tar -xzf "$archive" actionlint
+          cd "$GITHUB_WORKSPACE"
           "$RUNNER_TEMP/actionlint" -color

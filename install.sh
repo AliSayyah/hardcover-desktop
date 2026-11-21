@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs Hardcover Desktop under ~/.local, where it can update itself.
 #
-#   curl -fsSL https://raw.githubusercontent.com/AliSayyah/hardcover-desktop/master/install.sh | bash
+#   curl -fsSL https://github.com/AliSayyah/hardcover-desktop/releases/latest/download/install.sh | bash
 #   bash install.sh                 the latest stable release, from GitHub
 #   bash install.sh <tarball>       a release tarball, with its .minisig beside it
 #
@@ -21,9 +21,13 @@ main() {
     public_key=RWQmH1HvOAVP+8piXBk3ZC+nqzBVFZFcynEg8NUsgQDCSYYAkrSkPRXW
     work=$(mktemp -d)
     stage=
+    copies=() # files waiting beside their destinations, and where they go
+    dests=()
     cleanup() {
         rm -rf -- "$work"
         if [[ -n $stage ]]; then rm -rf -- "$stage"; fi
+        # The ones not renamed yet, if it stopped halfway.
+        rm -f -- "${copies[@]}"
     }
     trap cleanup EXIT
     fetch() { curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 "$@"; }
@@ -65,17 +69,37 @@ main() {
     tar -xzf "$work/$name" --no-same-owner -C "$stage"
     payload="$stage/${name%.tar.gz}"
     [[ -x $payload/bin/hardcover-desktop ]] || die "the archive is missing the app"
-    # Serialize installers and replace each file by rename, with the executable last.
+    # Serialize with other installers and the app's own updater, which takes
+    # the same lock. Each file is copied next to its destination first, so the
+    # rename that replaces it stays on one filesystem even when bin/ or share/
+    # links to another; then all are renamed, the executable last. Copies a
+    # crashed run left (the updater's name prefix, made only under this lock)
+    # are removed first.
     exec 9<"$prefix"
     flock 9
     cd "$payload"
-    find share -type f -print0 > "$stage/share-files"
+    temp=.hardcover-desktop-update-
+    declare -A swept=()
+    find share -type f -print0 > "$stage/files"
+    printf '%s\0' bin/hardcover-desktop >> "$stage/files"
     while IFS= read -r -d '' rel; do
-        mkdir -p -- "$prefix/${rel%/*}"
-        mv -fT -- "$rel" "$prefix/$rel"
-    done < "$stage/share-files"
-    mkdir -p -- "$prefix/bin"
-    mv -fT -- bin/hardcover-desktop "$prefix/bin/hardcover-desktop"
+        dir="$prefix/$(dirname -- "$rel")"
+        mkdir -p -- "$dir"
+        if [[ -z ${swept[$dir]:-} ]]; then
+            find -H "$dir" -maxdepth 1 -type f -name "$temp*" -delete
+            swept[$dir]=1
+        fi
+        copy=$(mktemp "$dir/${temp}XXXXXXXX")
+        copies+=("$copy")
+        dests+=("$prefix/$rel")
+        cp -- "$rel" "$copy"
+        chmod --reference="$rel" -- "$copy"
+    done < "$stage/files"
+    sync -- "${copies[@]}"
+    for i in "${!copies[@]}"; do
+        mv -fT -- "${copies[i]}" "${dests[i]}"
+    done
+    sync -- "${!swept[@]}"
     echo "Installed Hardcover Desktop. Open it from your app launcher, or run $prefix/bin/hardcover-desktop."
     # The desktop entry runs the binary by name, so the session needs it on PATH.
     # Some distributions add ~/.local/bin only if it existed when you logged in.

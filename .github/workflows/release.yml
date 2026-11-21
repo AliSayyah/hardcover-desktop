@@ -47,7 +47,6 @@ jobs:
           packaging/linux/package.sh "$version" target/dist/hardcover-desktop dist
           apt-get install -y --no-install-recommends file desktop-file-utils
           packaging/linux/package-appimage.sh dist/*.tar.gz
-          cp install.sh dist/
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -71,6 +70,14 @@ jobs:
         with:
           name: dist
           path: dist
+
+      # The installer is signed from this job's own checkout of the tag, not
+      # taken from the build job's artifact: the build runs every
+      # dependency's build script, and the one-liner pipes this file to bash.
+      - name: Add the installer
+        run: |
+          rm -f dist/install.sh dist/install.sh.minisig
+          cp install.sh dist/install.sh
 
       # Signing happens here, not in the build job: the build runs every
       # dependency's build script, and none of them should see the key.
