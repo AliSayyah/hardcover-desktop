@@ -41,7 +41,8 @@
 //! again as stale ([`Resource::hydrate`]).
 
 pub mod catalog;
-mod follow;
+pub mod follow;
+pub mod saved;
 mod stamp;
 
 use std::collections::HashMap;
@@ -733,13 +734,23 @@ where
 
     /// A value saved at an earlier launch: shown, but fetched again on the
     /// next request. Never replaces a value fetched or written this run.
-    pub fn hydrate(&mut self, key: K, value: V) {
+    /// True if it is shown.
+    pub fn hydrate(&mut self, key: K, value: V) -> bool {
         let slot = self.slots.entry(key).or_default();
-        if slot.value.is_none() {
-            slot.value = Some(Arc::new(value));
-            slot.stamp = None;
-            slot.from_disk = true;
+        if slot.value.is_some() {
+            return false;
         }
+        slot.value = Some(Arc::new(value));
+        slot.from_disk = true;
+        // A first fetch that failed meanwhile is now said beside the value.
+        if let Some(failure) = &mut slot.failure
+            && failure.kind == FailureKind::First
+        {
+            failure.kind = FailureKind::Revalidate;
+        } else if slot.flight.is_none() {
+            slot.stamp = None;
+        }
+        true
     }
 
     /// Forgets the values that came from the disk and nothing replaced: the

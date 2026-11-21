@@ -12,9 +12,10 @@ use hardcover_core::auth::scopes::{READ_GOALS, WRITE_GOALS};
 use hardcover_core::{Date, Goal};
 
 use super::goal_view::{open_goal, open_new_goal};
-use super::model::{GoalsModel, GoalsStatus};
+use super::model::GoalsModel;
 use crate::format::{goal_pace, goal_period, goal_progress, needs_permission};
 use crate::library::model::LibraryModel;
+use crate::resource::LoadStatus;
 use crate::session;
 use crate::ui::{GoalRow, NavRow, sidebar_label};
 
@@ -42,7 +43,7 @@ impl GoalsSection {
     pub fn is_visible(&self, cx: &App) -> bool {
         let model = self.goals.read(cx);
         session::has_scope(cx, READ_GOALS)
-            && !matches!(model.status(), GoalsStatus::Idle)
+            && !matches!(model.status(), LoadStatus::Idle)
             && model.has_loaded()
     }
 }
@@ -106,7 +107,7 @@ impl Render for GoalsSection {
         let count = rows.len();
         if rows.is_empty() {
             rows.push(match model.status() {
-                GoalsStatus::Failed(message) if model.goals().is_empty() => {
+                LoadStatus::Failed(message) if model.goals().is_empty() => {
                     let goals = goals.clone();
                     NavRow::new(
                         "goal-retry",
@@ -114,7 +115,7 @@ impl Render for GoalsSection {
                         "Try loading your goal again",
                     )
                     .tooltip(Some(format!("Couldn't load your reading goal. {message}")))
-                    .on_click(move |_, _, cx| goals.update(cx, GoalsModel::load))
+                    .on_click(move |_, _, cx| goals.update(cx, GoalsModel::retry))
                     .into_any_element()
                 }
                 _ => {

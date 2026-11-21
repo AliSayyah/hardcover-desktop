@@ -317,7 +317,6 @@ impl Workspace {
         let series_view = cx
             .new(|cx| SeriesTrackerView::new(series.clone(), model.clone(), &upcoming, window, cx));
         model.update(cx, LibraryModel::start);
-        goals.update(cx, GoalsModel::load);
         lists.update(cx, ListsModel::load);
         let clock = cx.spawn(async move |this, cx| {
             loop {
