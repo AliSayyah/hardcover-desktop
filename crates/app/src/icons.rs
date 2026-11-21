@@ -5,15 +5,66 @@
 //! (`gpui_kit::assets::Assets`). An icon from the rest of the Lucide
 //! catalogue is listed here, embedded from `gpui-kit-assets` (no copy of the
 //! SVG lives in this repository), and named through
-//! `gpui_kit::assets::IconName`. Add one to [`AppAssets`]'s list and give it
-//! a function below.
+//! `gpui_kit::assets::IconName`. Add one to [`ExtraIcons`]' list and give it
+//! a function below (or, for the genre icons, an entry in
+//! `chip::genre::GENRES`, whose test checks that each one loads).
+//!
+//! Lucide is under the ISC licence; its notice ships with `gpui-kit-assets`
+//! (`LICENSE-LUCIDE`), the crate the SVGs are embedded from.
 
 use std::borrow::Cow;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::{AssetSource, SharedString};
 
-gpui_kit::assets::icon_assets!(ExtraIcons, [Library, Clock]);
+gpui_kit::assets::icon_assets!(
+    ExtraIcons,
+    [
+        Library,
+        Clock,
+        // The genre icons (`chip::genre`); search, heart and palette are
+        // among the kit's defaults.
+        Backpack,
+        Blocks,
+        BookCopy,
+        BookImage,
+        BookMarked,
+        BookText,
+        BookUser,
+        Brain,
+        Briefcase,
+        Castle,
+        ChefHat,
+        Church,
+        Coffee,
+        Compass,
+        FaceGrinning,
+        Feather,
+        FingerprintPattern,
+        FlaskConical,
+        Ghost,
+        Hourglass,
+        Landmark,
+        Lightbulb,
+        Music,
+        Newspaper,
+        Orbit,
+        Plane,
+        Rainbow,
+        Rocket,
+        ScanEye,
+        ScrollText,
+        Siren,
+        Skull,
+        Sparkles,
+        Sprout,
+        Swords,
+        Theater,
+        Trophy,
+        Vote,
+        WandSparkles,
+    ]
+);
 
 /// The kit's default icons plus [`ExtraIcons`]. Registered in `main`.
 pub struct AppAssets;

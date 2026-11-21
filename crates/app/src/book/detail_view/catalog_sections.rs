@@ -22,7 +22,7 @@ use super::{BookDetailView, Details};
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::catalog::navigation::Page;
-use crate::chip::TagChip;
+use crate::chip::{TagChip, TagGroup, tag_groups};
 use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{average_rating_text, count_text};
@@ -153,20 +153,27 @@ impl BookDetailView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let details = details?;
-        // The label, the tags, and whether they are content warnings.
-        let groups: Vec<(&'static str, &[String], bool)> = [
-            ("Genres", details.genres.as_slice(), false),
-            ("Moods", details.moods.as_slice(), false),
+        /// Which chips a group's tags get.
+        #[derive(Clone, Copy, PartialEq)]
+        enum Group {
+            Genres,
+            Warnings,
+            Plain,
+        }
+        // The label, the tags, and which chips they get.
+        let groups: Vec<(&'static str, &[String], Group)> = [
+            ("Genres", details.genres.as_slice(), Group::Genres),
+            ("Moods", details.moods.as_slice(), Group::Plain),
             (
                 "Content warnings",
                 details.content_warnings.as_slice(),
-                true,
+                Group::Warnings,
             ),
-            ("Other tags", details.tags.as_slice(), false),
+            ("Other tags", details.tags.as_slice(), Group::Plain),
         ]
         .into_iter()
-        .filter(|(label, tags, _)| {
-            !tags.is_empty() && (*label != "Genres" || tags.len() > HEADER_GENRES)
+        .filter(|(_, tags, group)| {
+            !tags.is_empty() && (*group != Group::Genres || tags.len() > HEADER_GENRES)
         })
         .collect();
         if groups.is_empty() {
@@ -177,7 +184,6 @@ impl BookDetailView {
             .map(|(_, tags, _)| tags.len().saturating_sub(TAGS_SHOWN))
             .sum();
         let expanded = self.tags_expanded;
-        let muted = colors(cx).fg_muted;
         Some(
             Block::new("Tags")
                 .when(hidden > 0, |this| {
@@ -196,37 +202,21 @@ impl BookDetailView {
                             })),
                     )
                 })
-                .child(v_flex().gap_2().children(groups.into_iter().map(
-                    |(label, tags, warning)| {
-                        let shown = if expanded {
-                            tags.len()
-                        } else {
-                            tags.len().min(TAGS_SHOWN)
-                        };
-                        // The key column of a property list, and the
-                        // label on a chip's line, so it sits on the first
-                        // row of chips.
-                        h_flex()
-                            .items_start()
-                            .child(
-                                div()
-                                    .flex_shrink_0()
-                                    .w(size::KEY)
-                                    .pr_2()
-                                    .body()
-                                    .line_height(size::CHIP)
-                                    .text_color(muted)
-                                    .child(label),
-                            )
-                            .child(
-                                h_flex().flex_1().min_w_0().flex_wrap().gap_1().children(
-                                    tags[..shown]
-                                        .iter()
-                                        .map(|t| TagChip::new(t.clone()).warning(warning)),
-                                ),
-                            )
-                    },
-                )))
+                .child(tag_groups(groups.into_iter().map(|(label, tags, kind)| {
+                    let shown = if expanded {
+                        tags.len()
+                    } else {
+                        tags.len().min(TAGS_SHOWN)
+                    };
+                    TagGroup::new(
+                        label,
+                        tags[..shown].iter().map(|t| match kind {
+                            Group::Genres => TagChip::genre(t.clone()),
+                            Group::Warnings => TagChip::new(t.clone()).warning(true),
+                            Group::Plain => TagChip::new(t.clone()),
+                        }),
+                    )
+                })))
                 .into_any_element(),
         )
     }
