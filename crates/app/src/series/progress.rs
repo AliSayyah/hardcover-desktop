@@ -671,8 +671,8 @@ pub fn hidden_line(finished: usize) -> String {
 
 /// The books a strip with room for `capacity` slots shows, and how many
 /// after them it leaves out (its "+N"). A strip that can't show every book
-/// keeps the next one in view, with the book after it, and keeps a slot's
-/// room for the "+N".
+/// keeps the next one in view, with the book after it when there is room,
+/// and keeps a slot's room for the "+N". It always shows at least one book.
 pub fn strip_window(len: usize, next: Option<usize>, capacity: usize) -> (Range<usize>, usize) {
     let capacity = capacity.max(1);
     if len <= capacity {
@@ -683,7 +683,8 @@ pub fn strip_window(len: usize, next: Option<usize>, capacity: usize) -> (Range<
     if next < slots {
         return (0..slots, len - slots);
     }
-    let end = (next + 2).min(len);
+    // The next book, then the one after it if a slot is left for it.
+    let end = (next + 1 + usize::from(slots > 1)).min(len);
     if end == len {
         return (len - capacity..len, 0);
     }
@@ -1189,6 +1190,28 @@ mod tests {
         assert_eq!(strip_window(10, Some(8), 6), (4..10, 0));
         assert_eq!(strip_window(10, None, 6), (0..5, 5));
         assert_eq!(strip_window(3, Some(0), 0), (0..1, 2));
+        // Room for one book and the "+N": the next one, not the one after.
+        assert_eq!(strip_window(10, Some(5), 2), (5..6, 4));
+        assert_eq!(strip_window(10, Some(5), 1), (5..6, 4));
+    }
+
+    #[test]
+    fn every_strip_window_shows_the_next_book() {
+        for len in 1..12 {
+            for capacity in 0..14 {
+                for next in 0..len {
+                    let (shown, more) = strip_window(len, Some(next), capacity);
+                    let what = format!("len {len}, next {next}, capacity {capacity}");
+                    assert!(!shown.is_empty(), "{what}");
+                    assert!(shown.contains(&next), "{what}: {shown:?}");
+                    assert!(shown.end <= len, "{what}");
+                    assert_eq!(shown.end + more, len, "{what}");
+                    // The "+N" takes a slot of its own.
+                    let used = shown.len() + usize::from(more > 0);
+                    assert!(used <= capacity.max(2), "{what}: {shown:?} +{more}");
+                }
+            }
+        }
     }
 
     #[test]

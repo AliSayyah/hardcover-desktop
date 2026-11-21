@@ -61,7 +61,7 @@ pub const GENRES: &[Genre] = &[
             "graphic novels",
             "graphic novel",
             "comics",
-            "comic",
+            "comic book",
             "comic books",
             "manga",
         ],
@@ -85,16 +85,6 @@ pub const GENRES: &[Genre] = &[
             "personal development",
             "self improvement",
             "productivity",
-        ],
-    ),
-    genre(
-        "Literary Fiction",
-        IconName::BookMarked,
-        &[
-            "literary fiction",
-            "literary",
-            "literature and fiction",
-            "literature",
         ],
     ),
     genre(
@@ -282,6 +272,18 @@ pub const GENRES: &[Genre] = &[
             "juvenile",
         ],
     ),
+    // "Literature" is as broad as "fiction": a more specific genre in the
+    // name wins ("Children's Literature", "Fantasy Literature").
+    genre(
+        "Literary Fiction",
+        IconName::BookMarked,
+        &[
+            "literary fiction",
+            "literary",
+            "literature and fiction",
+            "literature",
+        ],
+    ),
     genre(
         "Contemporary",
         IconName::Coffee,
@@ -405,6 +407,13 @@ mod tests {
             ("Non-Fiction", IconName::Newspaper),
             ("Graphic Novels", IconName::BookImage),
             ("Comics", IconName::BookImage),
+            ("Comic Books", IconName::BookImage),
+            // "Comic" here is funny, not drawn.
+            ("Comic Fantasy", IconName::WandSparkles),
+            ("Children's Literature", IconName::Blocks),
+            ("Fantasy Literature", IconName::WandSparkles),
+            ("Russian Literature", IconName::BookMarked),
+            ("Literature", IconName::BookMarked),
             ("LGBTQ", IconName::Rainbow),
             ("LGBT", IconName::Rainbow),
             ("LGBTQ+", IconName::Rainbow),

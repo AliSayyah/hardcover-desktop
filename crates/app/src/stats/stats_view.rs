@@ -311,7 +311,10 @@ fn render_years(stats: &ReadingStats, count: usize, bar: Pixels, cx: &App) -> im
         let books = match stats.read_without_date {
             1 => "1 book on your Read shelf has no finish date, so no year counts it.".to_owned(),
             n => {
-                format!("{n} books on your Read shelf have no finish date, so no year counts them.")
+                format!(
+                    "{} books on your Read shelf have no finish date, so no year counts them.",
+                    count_text(n)
+                )
             }
         };
         notes.push(note(books, cx));
