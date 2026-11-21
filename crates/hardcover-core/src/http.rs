@@ -211,10 +211,14 @@ pub(crate) mod fake {
         }
     }
 
+    /// Runs as a request arrives, before its response is taken.
+    type Hook = Box<dyn Fn(&Recorded) + Send + Sync>;
+
     #[derive(Default)]
     pub struct FakeTransport {
         responses: Mutex<VecDeque<Result<HttpResponse>>>,
         pub requests: Mutex<Vec<Recorded>>,
+        hook: Mutex<Option<Hook>>,
     }
 
     impl FakeTransport {
@@ -258,6 +262,11 @@ pub(crate) mod fake {
         pub fn remaining(&self) -> usize {
             self.responses.lock().unwrap().len()
         }
+        /// Calls `hook` with every later request as it arrives, e.g. to act
+        /// as another process would while the request is in flight.
+        pub fn on_request(&self, hook: impl Fn(&Recorded) + Send + Sync + 'static) {
+            *self.hook.lock().unwrap() = Some(Box::new(hook));
+        }
     }
 
     impl HttpTransport for FakeTransport {
@@ -267,13 +276,17 @@ pub(crate) mod fake {
                 RequestBody::Json(b) => (Some(serde_json::from_slice(b).unwrap()), None),
                 RequestBody::Form(f) => (None, Some(f.clone())),
             };
-            self.requests.lock().unwrap().push(Recorded {
+            let recorded = Recorded {
                 method: req.method,
                 url: req.url.clone(),
                 headers: req.headers.clone(),
                 json,
                 form,
-            });
+            };
+            if let Some(hook) = &*self.hook.lock().unwrap() {
+                hook(&recorded);
+            }
+            self.requests.lock().unwrap().push(recorded);
             self.responses
                 .lock()
                 .unwrap()

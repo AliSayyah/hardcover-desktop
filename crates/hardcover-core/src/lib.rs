@@ -9,6 +9,8 @@
 //! - [`covers`]: on-disk cache of cover images.
 //! - [`prefs`]: the user's preferences, a small JSON file.
 //! - [`update`]: self-update from signed GitHub releases.
+//! - [`instance`]: one running app per data directory; a later launch shows it.
+//! - [`lock`]: advisory file locks between processes (the token refresh, the instance).
 //! - `demo` (with the `demo` feature): a sample library of popular books, served without an account.
 
 pub mod api;
@@ -17,6 +19,8 @@ pub mod covers;
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;
 pub mod error;
+pub mod instance;
+pub mod lock;
 pub mod prefs;
 pub mod store;
 pub mod update;

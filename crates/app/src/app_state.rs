@@ -145,6 +145,37 @@ pub enum Startup {
     SignedOut {
         cache: Option<Arc<LibraryCache>>,
     },
+    /// The keyring couldn't be read (no secret service, or a locked one), so
+    /// a saved session may be there: the sign-in screen offers to try again
+    /// ([`restore_session`]) rather than a new sign-in.
+    KeyringUnavailable {
+        cache: Option<Arc<LibraryCache>>,
+    },
+}
+
+/// A session restored from the keyring, with its client and grant.
+pub struct Restored {
+    pub client: Client,
+    pub session: Arc<Session>,
+    pub scopes: GrantedScopes,
+}
+
+/// Blocking: the session saved in the keyring, if any.
+///
+/// # Errors
+///
+/// The keyring's error if it can't be read, which may pass.
+pub fn restore_session() -> Result<Option<Restored>, Error> {
+    let config = OAuthConfig::default();
+    let store = KeyringTokenStore::for_client(config.client_id())?;
+    Ok(Session::restore(config, Arc::new(store))?.map(|session| {
+        let session = Arc::new(session);
+        Restored {
+            client: Client::new(session.clone()),
+            scopes: session.granted_scopes(),
+            session,
+        }
+    }))
 }
 
 /// Blocking: reads the environment, the keyring and opens the caches.
@@ -190,22 +221,21 @@ fn real_startup() -> Startup {
             scopes: GrantedScopes::all(),
         };
     }
-    let restored = KeyringTokenStore::new()
-        .and_then(|store| Session::restore(OAuthConfig::default(), Arc::new(store)));
-    match restored {
-        Ok(Some(session)) => {
-            let session = Arc::new(session);
-            Startup::SignedIn {
-                client: Client::new(session.clone()),
-                scopes: session.granted_scopes(),
-                session: Some(session),
-                cache,
-            }
-        }
+    match restore_session() {
+        Ok(Some(Restored {
+            client,
+            session,
+            scopes,
+        })) => Startup::SignedIn {
+            client,
+            session: Some(session),
+            cache,
+            scopes,
+        },
         Ok(None) => Startup::SignedOut { cache },
-        Err(e) => {
-            eprintln!("hardcover: could not restore the saved session: {e}");
-            Startup::SignedOut { cache }
+        Err(error) => {
+            eprintln!("hardcover: could not restore the saved session: {error}");
+            Startup::KeyringUnavailable { cache }
         }
     }
 }

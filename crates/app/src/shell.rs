@@ -112,7 +112,11 @@ impl Shell {
                     }
                     Startup::SignedOut { cache } => {
                         this.cache = cache;
-                        this.show_sign_in(window, cx);
+                        this.show_sign_in(false, window, cx);
+                    }
+                    Startup::KeyringUnavailable { cache } => {
+                        this.cache = cache;
+                        this.show_sign_in(true, window, cx);
                     }
                 }
             });
@@ -131,19 +135,32 @@ impl Shell {
         self.subscription = Some(cx.subscribe_in(
             &workspace,
             window,
-            |this, _, _: &SignedOut, window, cx| this.show_sign_in(window, cx),
+            |this, _, _: &SignedOut, window, cx| this.show_sign_in(false, window, cx),
         ));
         workspace.update(cx, |w, cx| w.focus_initial(window, cx));
         self.screen = Screen::Workspace(workspace);
         cx.notify();
     }
 
-    fn show_sign_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The sign-in screen; with `keyring_unavailable`, the keyring couldn't
+    /// be read at startup and the screen offers to try again.
+    fn show_sign_in(
+        &mut self,
+        keyring_unavailable: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if cx.has_global::<Services>() {
             cx.remove_global::<Services>();
         }
         ListsModel::release(cx);
-        let sign_in = cx.new(|cx| SignInView::new(window, cx));
+        let sign_in = cx.new(|cx| {
+            if keyring_unavailable {
+                SignInView::keyring_unavailable(window, cx)
+            } else {
+                SignInView::new(window, cx)
+            }
+        });
         self.subscription =
             Some(
                 cx.subscribe_in(&sign_in, window, |this, _, event: &SignedIn, window, cx| {
@@ -156,6 +173,7 @@ impl Shell {
                     this.enter_workspace(services, window, cx);
                 }),
             );
+        sign_in.update(cx, |view, cx| view.focus(window, cx));
         self.screen = Screen::SignIn(sign_in);
         cx.notify();
     }

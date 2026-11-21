@@ -252,6 +252,16 @@ impl fmt::Debug for Tokens {
     }
 }
 
+/// Revokes `tokens` at Hardcover (RFC 7009), e.g. those of a sign-in that
+/// was cancelled once the browser had approved it.
+///
+/// # Errors
+///
+/// Returns an error if the revocation request fails.
+pub fn revoke(cfg: &OAuthConfig, tokens: &Tokens) -> crate::Result<()> {
+    oauth::revoke(&crate::http::UreqTransport::new(), cfg, tokens)
+}
+
 /// Short random string for temp file names.
 pub(crate) fn random_suffix() -> String {
     pkce::random_urlsafe(6).unwrap_or_else(|_| std::process::id().to_string())

@@ -19,13 +19,37 @@ struct TokenResponse {
     scope: Option<String>,
 }
 
+/// OAuth error codes (RFC 6749 §5.2) that say the grant itself is dead: the
+/// code or refresh token was used, revoked or expired, or the client is
+/// unknown. Retrying can't help, and only these end a session.
+const DEAD_GRANT: [&str; 3] = ["invalid_grant", "invalid_client", "unauthorized_client"];
+
 /// Why a token request failed.
+#[derive(Debug)]
 pub(crate) enum TokenError {
-    /// The server rejected the grant (`invalid_grant`, `invalid_client`, ...): the
-    /// code or refresh token is dead and retrying cannot help.
-    Rejected(String),
-    /// Network trouble or a 5xx: the grant may or may not have been used.
+    /// The token endpoint answered with an OAuth error. `code` is its
+    /// `error`; `message` adds the `error_description`.
+    OAuth { code: String, message: String },
+    /// No OAuth answer: network trouble, a 5xx or 429, an unreadable success,
+    /// or a 4xx that isn't an OAuth error (a captive portal's or a proxy's
+    /// page). The grant may or may not have been used.
     Transient(Error),
+}
+
+impl TokenError {
+    /// True if the grant is dead for good ([`DEAD_GRANT`]). Any other
+    /// failure leaves the session as it was.
+    pub(crate) fn grant_is_dead(&self) -> bool {
+        matches!(self, Self::OAuth { code, .. } if DEAD_GRANT.contains(&code.as_str()))
+    }
+
+    /// The failure as a core error: an OAuth answer is `Auth`.
+    pub(crate) fn into_error(self) -> Error {
+        match self {
+            Self::OAuth { message, .. } => Error::Auth(message),
+            Self::Transient(e) => e,
+        }
+    }
 }
 
 /// The returned tokens always carry a scope: a response without one granted
@@ -101,21 +125,28 @@ pub(crate) fn parse_token_response(
         return Ok(Tokens::new(t.access_token, t.refresh_token, expires_at).with_scope(scope));
     }
     let body: Value = serde_json::from_slice(&resp.body).unwrap_or(Value::Null);
-    let field = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_owned);
-    let code = field("error");
-    let desc = field("error_description");
-    let msg = match (&code, &desc) {
-        (Some(c), Some(d)) => format!("{c}: {d}"),
-        (Some(c), None) => c.clone(),
-        (None, Some(d)) => d.clone(),
-        (None, None) => format!("HTTP {}", resp.status),
+    let field = |k: &str| {
+        body.get(k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
     };
-    if resp.status >= 500 || resp.status == 429 {
-        Err(TokenError::Transient(Error::Network(format!(
-            "token endpoint: {msg}"
-        ))))
-    } else {
-        Err(TokenError::Rejected(msg))
+    // Only a 4xx carrying an OAuth `error` is the server's verdict on the
+    // grant. A 5xx or 429 is the server's trouble, and a 4xx without one
+    // (an HTML page from a captive portal, a WAF or a CDN) never reached it.
+    match field("error") {
+        Some(code) if (400..500).contains(&resp.status) && resp.status != 429 => {
+            let message = match field("error_description") {
+                Some(d) => format!("{code}: {d}"),
+                None => code.clone(),
+            };
+            Err(TokenError::OAuth { code, message })
+        }
+        _ => Err(TokenError::Transient(Error::Network(format!(
+            "the token endpoint answered HTTP {}",
+            resp.status
+        )))),
     }
 }
 
@@ -204,21 +235,46 @@ mod tests {
         assert_eq!(t.scope(), Some("read:me"));
     }
 
+    fn failure(status: u16, body: &str) -> TokenError {
+        parse_token_response(&resp(status, body), chrono::Utc::now())
+            .err()
+            .unwrap()
+    }
+
     #[test]
     fn classifies_failures() {
-        let now = chrono::Utc::now();
+        let used = failure(
+            400,
+            r#"{"error":"invalid_grant","error_description":"used"}"#,
+        );
+        assert!(used.grant_is_dead());
+        assert!(
+            matches!(&used, TokenError::OAuth { message, .. } if message == "invalid_grant: used")
+        );
+        assert!(failure(401, r#"{"error":"invalid_client"}"#).grant_is_dead());
+        assert!(failure(400, r#"{"error":"unauthorized_client"}"#).grant_is_dead());
+        assert!(matches!(failure(503, "oops"), TokenError::Transient(_)));
         assert!(matches!(
-            parse_token_response(&resp(400, r#"{"error":"invalid_grant","error_description":"used"}"#), now),
-            Err(TokenError::Rejected(m)) if m == "invalid_grant: used"
-        ));
-        assert!(matches!(
-            parse_token_response(&resp(503, "oops"), now),
+            parse_token_response(&resp(200, "not json"), chrono::Utc::now()),
             Err(TokenError::Transient(_))
         ));
-        assert!(matches!(
-            parse_token_response(&resp(200, "not json"), now),
-            Err(TokenError::Transient(_))
-        ));
+    }
+
+    #[test]
+    fn only_a_dead_grant_counts_as_rejected() {
+        // A captive portal, a WAF or a CDN: no OAuth answer at all.
+        let portal = failure(403, "<html><body>Log in to the Wi-Fi</body></html>");
+        assert!(matches!(&portal, TokenError::Transient(Error::Network(_))));
+        assert!(!portal.grant_is_dead());
+        assert!(!failure(400, "").grant_is_dead());
+        assert!(!failure(404, r#"{"message":"not found"}"#).grant_is_dead());
+        // An OAuth answer that isn't about the grant.
+        let other = failure(400, r#"{"error":"invalid_request"}"#);
+        assert!(matches!(&other, TokenError::OAuth { code, .. } if code == "invalid_request"));
+        assert!(!other.grant_is_dead());
+        // The server's own trouble, even with an OAuth body.
+        assert!(!failure(429, r#"{"error":"invalid_grant"}"#).grant_is_dead());
+        assert!(!failure(500, r#"{"error":"invalid_grant"}"#).grant_is_dead());
     }
 
     #[test]

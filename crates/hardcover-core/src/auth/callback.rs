@@ -15,7 +15,12 @@ use crate::http::{HttpTransport, UreqTransport};
 use crate::{Error, Result};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
-const CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
+/// The whole time a connection has to send its request head. A browser
+/// sends it at once; a client that trickles bytes is dropped after this.
+const HEAD_TIMEOUT: Duration = Duration::from_secs(3);
+/// Reads wait this long at most before the cancel flag is checked again.
+const READ_SLICE: Duration = Duration::from_millis(50);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_REQUEST_HEAD: usize = 16 * 1024;
 
 /// Starts a sign-in: binds `127.0.0.1:<random port>`, makes a PKCE verifier and a
@@ -71,6 +76,7 @@ pub(crate) fn begin_sign_in_with(
         cfg: cfg.clone(),
         cancel: Arc::new(AtomicBool::new(false)),
         http,
+        head_timeout: HEAD_TIMEOUT,
     })
 }
 
@@ -84,6 +90,7 @@ pub struct PendingSignIn {
     cfg: OAuthConfig,
     cancel: Arc<AtomicBool>,
     http: Arc<dyn HttpTransport>,
+    head_timeout: Duration,
 }
 
 impl fmt::Debug for PendingSignIn {
@@ -134,16 +141,24 @@ impl PendingSignIn {
 
     /// Blocks until the browser hits the redirect URI, then exchanges the code.
     ///
+    /// Only a request carrying this sign-in's `state` ends the wait. Any
+    /// other is answered and ignored: requests to other paths (e.g.
+    /// `/favicon.ico`) with 404, and a callback without the right `state`
+    /// with 400, since any program on this computer, or a web page probing
+    /// loopback ports, can send one. Each connection has [`HEAD_TIMEOUT`] in
+    /// all to send its request, and the cancel flag is checked while it
+    /// does, so a slow client can't hold the wait past Cancel or the timeout.
+    ///
     /// # Errors
     ///
-    /// [`Error::Cancelled`] (cancel handle), [`Error::Timeout`],
-    /// [`Error::Auth`] (state or issuer mismatch, the user declined, or the code
-    /// exchange failed). Requests to other paths (e.g. `/favicon.ico`) are
-    /// answered with 404 and ignored.
+    /// [`Error::Cancelled`] (the cancel handle, also when it was used during
+    /// the code exchange: the new tokens are revoked then), [`Error::Timeout`],
+    /// [`Error::Auth`] (an issuer mismatch, the user declined, or the code
+    /// exchange was refused).
     pub fn wait(self, timeout: Duration) -> Result<Tokens> {
         let deadline = Instant::now() + timeout;
         loop {
-            if self.cancel.load(Ordering::SeqCst) {
+            if self.is_cancelled() {
                 return Err(Error::Cancelled);
             }
             if Instant::now() >= deadline {
@@ -151,7 +166,8 @@ impl PendingSignIn {
             }
             match self.listener.accept() {
                 Ok((stream, _)) => {
-                    if let Some(result) = self.handle_connection(stream) {
+                    let head_deadline = deadline.min(Instant::now() + self.head_timeout);
+                    if let Some(result) = self.handle_connection(stream, head_deadline) {
                         return result;
                     }
                 }
@@ -165,12 +181,25 @@ impl PendingSignIn {
         }
     }
 
+    fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_head_timeout(mut self, timeout: Duration) -> Self {
+        self.head_timeout = timeout;
+        self
+    }
+
     /// `None` if the connection was not the decisive callback.
-    fn handle_connection(&self, mut stream: TcpStream) -> Option<Result<Tokens>> {
+    fn handle_connection(
+        &self,
+        mut stream: TcpStream,
+        head_deadline: Instant,
+    ) -> Option<Result<Tokens>> {
         let _ = stream.set_nonblocking(false);
-        let _ = stream.set_read_timeout(Some(CONNECTION_TIMEOUT));
-        let _ = stream.set_write_timeout(Some(CONNECTION_TIMEOUT));
-        let head = read_request_head(&mut stream)?;
+        let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
+        let head = read_request_head(&mut stream, head_deadline, &self.cancel)?;
         let Some((method, target)) = parse_request_line(&head) else {
             respond(
                 &mut stream,
@@ -208,26 +237,30 @@ impl PendingSignIn {
             return None;
         }
         let params: Vec<(String, String)> = url.query_pairs().into_owned().collect();
-        let outcome = match evaluate_callback(&params, &self.state, &self.cfg.endpoints().issuer) {
-            Ok(code) => oauth::exchange_code(
-                &*self.http,
-                &self.cfg,
-                &code,
-                &self.redirect_uri,
-                &self.verifier,
-            )
-            .map_err(|e| match e {
-                TokenError::Rejected(m) => Error::Auth(format!("code exchange rejected ({m})")),
-                TokenError::Transient(e) => e,
-            }),
-            Err(e) => Err(e),
-        };
+        if !state_matches(&params, &self.state) {
+            // Not this sign-in's redirect: keep waiting for the real one.
+            respond(
+                &mut stream,
+                400,
+                "Not this sign-in",
+                "This link doesn't belong to the sign-in Hardcover Desktop is waiting for.",
+            );
+            return None;
+        }
+        let outcome = evaluate_callback(&params, &self.state, &self.cfg.endpoints().issuer)
+            .and_then(|code| self.exchange(&code));
         match &outcome {
             Ok(_) => respond(
                 &mut stream,
                 200,
                 "Signed in to Hardcover",
                 "You can close this tab and return to Hardcover Desktop.",
+            ),
+            Err(Error::Cancelled) => respond(
+                &mut stream,
+                400,
+                "Sign-in cancelled",
+                "The sign-in was cancelled in Hardcover Desktop. You can close this tab.",
             ),
             Err(e) => respond(
                 &mut stream,
@@ -238,6 +271,39 @@ impl PendingSignIn {
         }
         Some(outcome)
     }
+
+    /// Exchanges the code. If the sign-in was cancelled meanwhile, nobody
+    /// will use the new tokens: they are revoked, and the result is `Cancelled`.
+    fn exchange(&self, code: &str) -> Result<Tokens> {
+        let tokens = oauth::exchange_code(
+            &*self.http,
+            &self.cfg,
+            code,
+            &self.redirect_uri,
+            &self.verifier,
+        )
+        .map_err(|e| match e {
+            TokenError::OAuth { message, .. } => {
+                Error::Auth(format!("code exchange rejected ({message})"))
+            }
+            TokenError::Transient(e) => e,
+        })?;
+        if self.is_cancelled() {
+            if let Err(e) = oauth::revoke(&*self.http, &self.cfg, &tokens) {
+                eprintln!("hardcover: revoking a cancelled sign-in: {e}");
+            }
+            return Err(Error::Cancelled);
+        }
+        Ok(tokens)
+    }
+}
+
+/// True if the redirect carries `expected` as its `state`.
+fn state_matches(params: &[(String, String)], expected: &str) -> bool {
+    params
+        .iter()
+        .find(|(n, _)| n == "state")
+        .is_some_and(|(_, s)| constant_time_eq(s.as_bytes(), expected.as_bytes()))
 }
 
 /// Checks the redirect's query: `state` first (CSRF), then `error`, then `iss`
@@ -248,7 +314,7 @@ pub(crate) fn evaluate_callback(
     issuer: &str,
 ) -> Result<String> {
     let get = |k: &str| params.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
-    if !get("state").is_some_and(|s| constant_time_eq(s.as_bytes(), expected_state.as_bytes())) {
+    if !state_matches(params, expected_state) {
         return Err(Error::Auth(
             "the response did not match this sign-in attempt (state mismatch)".into(),
         ));
@@ -281,17 +347,32 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Reads up to the end of the request head. `None` for empty/slow/oversized requests.
-fn read_request_head(stream: &mut TcpStream) -> Option<String> {
+/// Reads up to the end of the request head. `None` for empty or oversized
+/// requests, one not complete by `deadline`, and once `cancel` is set.
+fn read_request_head(
+    stream: &mut TcpStream,
+    deadline: Instant,
+    cancel: &AtomicBool,
+) -> Option<String> {
     let mut buf = Vec::with_capacity(1024);
     let mut chunk = [0u8; 1024];
     while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
-        if buf.len() > MAX_REQUEST_HEAD {
+        if buf.len() > MAX_REQUEST_HEAD || cancel.load(Ordering::SeqCst) {
             return None;
         }
+        let left = deadline.checked_duration_since(Instant::now())?;
+        if left.is_zero() {
+            return None;
+        }
+        stream.set_read_timeout(Some(left.min(READ_SLICE))).ok()?;
         match stream.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+                ) => {}
             Err(_) => return None,
         }
     }
@@ -500,16 +581,102 @@ mod tests {
         assert!(http.requests().is_empty());
     }
 
+    const TOKENS: &str =
+        r#"{"access_token":"hc_at_new","refresh_token":"hc_rt_new","expires_in":3600}"#;
+
+    fn callback(state: &str) -> String {
+        format!(
+            "GET /callback?code=the-code&state={state}&iss=https%3A%2F%2Fapi.hardcover.app HTTP/1.1\r\n\r\n"
+        )
+    }
+
     #[test]
-    fn wrong_state_aborts() {
+    fn a_callback_without_this_state_is_refused_and_the_wait_goes_on() {
         let http = Arc::new(FakeTransport::new());
-        let (addr, _, _, handle, _) = start(http.clone());
-        send(
+        let (addr, state, _, handle, _) = start(http.clone());
+        let forged = send(&addr, &callback("forged"));
+        assert!(forged.starts_with("HTTP/1.1 400"), "{forged}");
+        let missing = send(
             &addr,
-            "GET /callback?code=x&state=forged&iss=https%3A%2F%2Fapi.hardcover.app HTTP/1.1\r\n\r\n",
+            "GET /callback?error=access_denied&iss=https%3A%2F%2Fapi.hardcover.app HTTP/1.1\r\n\r\n",
         );
-        assert!(matches!(handle.join().unwrap(), Err(Error::Auth(m)) if m.contains("state")));
+        assert!(missing.starts_with("HTTP/1.1 400"), "{missing}");
         assert!(http.requests().is_empty());
+        // The real redirect still signs in.
+        http.push(200, TOKENS);
+        let r = send(&addr, &callback(&state));
+        assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+        assert_eq!(handle.join().unwrap().unwrap().access_token(), "hc_at_new");
+    }
+
+    #[test]
+    fn a_slow_client_cannot_hold_the_wait() {
+        let http = Arc::new(FakeTransport::new());
+        let cfg = OAuthConfig::new("client-123");
+        let pending = begin_sign_in_with(&cfg, http.clone())
+            .unwrap()
+            .with_head_timeout(Duration::from_millis(300));
+        let addr = pending
+            .redirect_uri()
+            .trim_start_matches("http://")
+            .trim_end_matches("/callback")
+            .to_owned();
+        let state = pending.state().to_owned();
+        let handle = std::thread::spawn(move || pending.wait(Duration::from_secs(10)));
+        // A byte every 100 ms, forever (until the listener drops it).
+        let slow = {
+            let addr = addr.clone();
+            std::thread::spawn(move || {
+                let mut s = TcpStream::connect(&addr).unwrap();
+                for _ in 0..100 {
+                    if s.write_all(b"G").is_err() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            })
+        };
+        std::thread::sleep(Duration::from_millis(50));
+        http.push(200, TOKENS);
+        let started = Instant::now();
+        let r = send(&addr, &callback(&state));
+        assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(handle.join().unwrap().is_ok());
+        drop(slow);
+    }
+
+    #[test]
+    fn cancel_is_seen_while_a_slow_client_is_connected() {
+        let (addr, _, _, handle, cancel) = start(Arc::new(FakeTransport::new()));
+        let mut slow = TcpStream::connect(&addr).unwrap();
+        slow.write_all(b"GET /callback").unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        let started = Instant::now();
+        cancel.cancel();
+        assert_eq!(handle.join().unwrap(), Err(Error::Cancelled));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn cancel_during_the_code_exchange_revokes_the_new_tokens() {
+        let http = Arc::new(FakeTransport::new());
+        let (addr, state, _, handle, cancel) = start(http.clone());
+        // Cancel arrives while the code is being exchanged.
+        let on_exchange = cancel.clone();
+        http.on_request(move |r| {
+            if r.form_value("grant_type") == Some("authorization_code") {
+                on_exchange.cancel();
+            }
+        });
+        http.push(200, TOKENS);
+        http.push(200, "");
+        let r = send(&addr, &callback(&state));
+        assert!(r.contains("Sign-in cancelled"), "{r}");
+        assert_eq!(handle.join().unwrap(), Err(Error::Cancelled));
+        let revoke = &http.requests()[1];
+        assert_eq!(revoke.url, "https://api.hardcover.app/oauth2/revoke");
+        assert_eq!(revoke.form_value("token"), Some("hc_rt_new"));
     }
 
     #[test]
