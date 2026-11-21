@@ -299,7 +299,7 @@ dust jacket.
 | Danger | Danger text, no fill | Destructive commands; the confirm button of a destructive dialog |
 | Icon | 32 square, ghost | Familiar symbols only ("more"), with an accessible name and a tooltip |
 | Text button | Ink text, underline on hover only | In-app navigation inside content: an author, a series, a book title |
-| Link | Accent, underlined, a 12 px external-link icon | Only for things that open the browser: "Open on Hardcover" |
+| Link | Accent, underlined, a 12 px external-link icon | Only for things that open the browser: "Open on Hardcover" on a series, author or list page (a book's is in its "more" menu) |
 | Byline link | Ink, 14/500, underline on hover, pointing hand | A reviewer's name, which opens their Hardcover profile in the browser. It repeats on every review, so it stays quiet; a right-to-left name goes without the underline, which GPUI on Linux draws beside it |
 
 - **Sizes:** default 32 (padding 12, icon 16, gap 8); small 24 (padding 8,
@@ -608,7 +608,8 @@ out there exactly as it did before this rule.
 - **Book pane:**
   - **Object bar:** 56 high, no hairline. "Lists" (a ghost menu button with
     the gallery-vertical-end icon, the sidebar's list icon) and "more" (an
-    icon button) sit on the trailing edge, over the content: in a wide
+    icon button: "Open on Hardcover" for any book with a page there, then,
+    for a book in the library, its library commands) sit on the trailing edge, over the content: in a wide
     window the bar keeps to the content's width and inset.
     The book's tools live here, never over the title.
   - **Content:** inset 24, with 0 above.
@@ -652,7 +653,8 @@ out there exactly as it did before this rule.
     at most two lines.
 - **Rail:**
   - On Hardcover: the average as a `display-30` figure with muted 16 px
-    stars; "4,280 ratings · 10,144 readers"; the "Open on Hardcover" link;
+    stars; "4,280 ratings · 10,144 readers"; the ratings breakdown
+    ("Open on Hardcover" is in the "more" menu);
   - Details (key column 72);
   - Reads: a label, plus a small ghost "Add a past read…" on the trailing
     edge;
