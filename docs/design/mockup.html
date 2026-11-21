@@ -372,13 +372,12 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 
 /* ---------- Wide windows: rows and panels fill the width; reading text keeps its measure ---------- */
 .cols3 { display: flex; gap: var(--s-32); align-items: stretch; }
-.cols3 > .fill { flex: 1 1 0; max-width: 720px; }
+.cols3 > .fill { flex: 1 1 0; }
 .pane.wide { max-width: 1112px; }
 .pane.wide .cols { gap: var(--s-24); }
 /* Fluid: rows and panels fill the window; only reading text keeps its measure (640).
    What is left beside the text holds the secondary blocks, and cover shelves add covers. */
 .home.fluid { max-width: none; }
-.cols3.fluid > .fill { max-width: none; }
 .pane.fluid { max-width: none; }
 .split { display: flex; gap: var(--s-32); align-items: flex-start; }
 .split > .text { width: var(--w-prose); flex: none; }
@@ -866,7 +865,7 @@ function homeFluid() {
             <div class="row-c mt-24"><span class="section">Rate what you finished</span></div>
             <div class="col mt-8">${rateRow(B.kts, "Nov 2")}${rateRow(B.circe, "Oct 18")}</div>
             <div class="row-c mt-24"><span class="section">Newest on Want to read</span><span class="btn sm ghost push">See all 471</span></div>
-            <div class="shelf mt-12">${wtr.slice(0, 11).map(b => `<div class="it">${cover(b, "md")}<div class="tt clamp-2">${b.t}</div></div>`).join("")}</div>
+            <div class="shelf mt-12">${wtr.slice(0, 12).map(b => `<div class="it">${cover(b, "md")}<div class="tt clamp-2">${b.t}</div></div>`).join("")}</div>
           </div>
         </div>
       </div>
