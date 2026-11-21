@@ -140,6 +140,9 @@ struct Inner {
     /// Held while `me` is fetched for [`Client::my_id`], so concurrent
     /// callers wait for one request instead of each sending their own.
     me_fetch: Mutex<()>,
+    /// The date the tests pin "today" to, so dated writes are reproducible.
+    #[cfg(test)]
+    today: OnceLock<Date>,
 }
 
 impl std::fmt::Debug for Client {
@@ -172,6 +175,8 @@ impl Client {
                 endpoint: GRAPHQL_ENDPOINT.to_owned(),
                 me_id: OnceLock::new(),
                 me_fetch: Mutex::new(()),
+                #[cfg(test)]
+                today: OnceLock::new(),
             }),
             priority: Priority::Background,
         }
@@ -181,6 +186,21 @@ impl Client {
     /// searches and the reads that are steps of a write are always
     /// [`Priority::Interactive`].
     #[must_use]
+    /// Today on this computer: the date a read started or finished here gets.
+    fn today(&self) -> Date {
+        #[cfg(test)]
+        if let Some(day) = self.inner.today.get() {
+            return *day;
+        }
+        chrono::Local::now().date_naive()
+    }
+
+    /// Pins [`Client::today`] for a test.
+    #[cfg(test)]
+    pub(crate) fn pin_today(&self, day: Date) {
+        let _ = self.inner.today.set(day);
+    }
+
     pub fn with_priority(&self, priority: Priority) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -698,7 +718,7 @@ impl Client {
     /// Returns an error if the library write fails or the updated entry cannot be
     /// retrieved.
     pub fn add_to_library(&self, book: BookId, status: ReadingStatus) -> Result<LibraryEntry> {
-        let mut object = status_fields(status, today());
+        let mut object = status_fields(status, self.today());
         object.insert("book_id".into(), json!(book.get()));
         self.insert_user_book(&Value::Object(object))
     }
@@ -715,7 +735,7 @@ impl Client {
         status: ReadingStatus,
         privacy: Privacy,
     ) -> Result<LibraryEntry> {
-        let mut object = status_fields(status, today());
+        let mut object = status_fields(status, self.today());
         object.insert("book_id".into(), json!(book.get()));
         object.insert("privacy_setting_id".into(), json!(privacy.id()));
         self.insert_user_book(&Value::Object(object))
@@ -744,7 +764,7 @@ impl Client {
     /// Returns an error if the library write fails or the updated entry cannot be
     /// retrieved.
     pub fn set_status(&self, id: UserBookId, status: ReadingStatus) -> Result<LibraryEntry> {
-        self.update_user_book(id, &Value::Object(status_fields(status, today())))
+        self.update_user_book(id, &Value::Object(status_fields(status, self.today())))
     }
 
     /// Sets or (with `None`) clears the rating, keeping the entry at `keep_status`.
@@ -1068,7 +1088,7 @@ impl Client {
             Some(read) => self.update_read(read, &Value::Object(fields)),
             None => {
                 let mut object = fields;
-                object.insert("started_at".into(), json!(today().to_string()));
+                object.insert("started_at".into(), json!(self.today().to_string()));
                 self.insert_read(id, &Value::Object(object))
             }
         };
@@ -2060,11 +2080,6 @@ fn written<P: Payload, T>(
     let id =
         id.ok_or_else(|| Error::Decode(format!("`{field}` returned neither a row nor an id")))?;
     read_back(id)?.ok_or_else(|| Error::Decode(format!("{id} not found after `{field}`")))
-}
-
-/// Today on this computer: the date a read started or finished here gets.
-fn today() -> Date {
-    chrono::Local::now().date_naive()
 }
 
 /// The `status_id` to send, with the date that dates the read the change

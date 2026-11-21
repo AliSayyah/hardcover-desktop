@@ -82,7 +82,7 @@ pub fn client_with(faults: &Faults) -> Client {
 }
 
 fn client_at(faults: &Faults, clock: Clock) -> Client {
-    Client::with_transport(
+    let client = Client::with_transport(
         Arc::new(DemoToken),
         Arc::new(ApiTransport {
             state: Mutex::new(State::new(&CATALOGUE, clock)),
@@ -90,7 +90,13 @@ fn client_at(faults: &Faults, clock: Clock) -> Client {
         }),
         // No rate limit to respect.
         TokenBucket::new(1_000, 1_000.0),
-    )
+    );
+    // The dates the client sends follow the demo's clock.
+    #[cfg(test)]
+    if let Clock::Fixed(_) = clock {
+        client.pin_today(clock.today());
+    }
+    client
 }
 
 /// The faults in `HARDCOVER_DEMO_FAULTS`, read once per run.
