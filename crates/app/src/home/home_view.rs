@@ -74,6 +74,10 @@ use crate::ui::{
 use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
 
+/// What the goal's books per month are worked out from: the library
+/// revision and the goal's id and dates.
+type MonthsKey = (u64, GoalId, Date, Date);
+
 /// What Home shows, worked out once per change of the library, the
 /// upcoming books, the day, the books rated here or the write scope, so a
 /// frame only reads it: the digest, and the entries and upcoming books its
@@ -146,7 +150,7 @@ pub struct HomeView {
     computed: Option<(HomeKey, Rc<HomeData>)>,
     /// Books finished in each month of the goal shown, by library revision
     /// and the goal's id and dates.
-    months: Option<((u64, GoalId, Date, Date), Option<[u32; 12]>)>,
+    months: Option<(MonthsKey, Option<[u32; 12]>)>,
     /// Books rated on Home since it was last opened from the sidebar: their
     /// rows stay, so the rating can still be changed.
     rated_here: HashSet<UserBookId>,

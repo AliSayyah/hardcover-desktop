@@ -446,14 +446,13 @@ pub fn break_lines(
     lines
 }
 
+/// Whether a piece of text fits the line, measured with the given measure.
+type Fits<'a> = &'a dyn Fn(&str, &mut dyn FnMut(&str) -> f32) -> bool;
+
 /// `unit` cut short to fit a line with "…" after it, a grapheme cluster at a
 /// time, so a letter keeps its marks and an emoji its modifiers. Text that
 /// already ends in "…" (a word cut on an earlier line) is cut again.
-fn truncate_to_fit(
-    unit: &str,
-    fits: &dyn Fn(&str, &mut dyn FnMut(&str) -> f32) -> bool,
-    measure: &mut dyn FnMut(&str) -> f32,
-) -> String {
+fn truncate_to_fit(unit: &str, fits: Fits<'_>, measure: &mut dyn FnMut(&str) -> f32) -> String {
     let mut clusters: Vec<&str> = unit.graphemes(true).collect();
     loop {
         clusters.pop();
