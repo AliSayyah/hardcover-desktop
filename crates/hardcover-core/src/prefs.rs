@@ -2,9 +2,11 @@
 //! `$XDG_CONFIG_HOME/hardcover-desktop/settings.json` that survives signing out.
 //!
 //! Reading never fails: a missing, unreadable or garbled file gives the
-//! defaults, and fields a file lacks (an older version wrote it) take their
-//! default values. Writes go to a temporary file that is
-//! renamed into place, so a crash never leaves half a file.
+//! defaults. Each field is read on its own: one the file lacks (an older
+//! version wrote it) or holds a value this version doesn't know (a newer one
+//! did) takes its default, and the others keep theirs. Writes go to a
+//! temporary file that is renamed into place, so a crash never leaves half a
+//! file.
 
 use std::fs;
 use std::io::Write as _;
@@ -12,7 +14,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::{Map, Value};
 
 use crate::Result;
 
@@ -29,9 +32,9 @@ pub enum ThemePreference {
     Dark,
 }
 
-/// Choices made in the app's Settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+/// Choices made in the app's Settings. Deserialized field by field (see the
+/// module doc): add a new field to `Deserialize` below too.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Preferences {
     pub theme: ThemePreference,
     /// Check GitHub for new releases on start and every few hours.
@@ -45,6 +48,28 @@ impl Default for Preferences {
             automatic_update_checks: true,
         }
     }
+}
+
+impl<'de> Deserialize<'de> for Preferences {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let map = Map::<String, Value>::deserialize(deserializer)?;
+        let defaults = Self::default();
+        Ok(Self {
+            theme: field(&map, "theme", defaults.theme),
+            automatic_update_checks: field(
+                &map,
+                "automatic_update_checks",
+                defaults.automatic_update_checks,
+            ),
+        })
+    }
+}
+
+/// `name`'s value in `map`, or `default` if it is missing or not a `T`.
+fn field<T: DeserializeOwned>(map: &Map<String, Value>, name: &str, default: T) -> T {
+    map.get(name)
+        .and_then(|v| T::deserialize(v).ok())
+        .unwrap_or(default)
 }
 
 impl Preferences {
@@ -140,8 +165,40 @@ mod tests {
         let path = dir.path().join("settings.json");
         fs::write(&path, b"{ not json").unwrap();
         assert_eq!(Preferences::load(&path), Preferences::default());
-        fs::write(&path, br#"{"theme": "sepia"}"#).unwrap();
+        fs::write(&path, b"[1, 2]").unwrap();
         assert_eq!(Preferences::load(&path), Preferences::default());
+    }
+
+    /// A value this version doesn't know (a newer one wrote it) resets that
+    /// field only: automatic updates stay off.
+    #[test]
+    fn an_unknown_value_resets_only_its_own_field() {
+        let dir = temp();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            br#"{"theme": "sepia", "automatic_update_checks": false}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            Preferences::load(&path),
+            Preferences {
+                theme: ThemePreference::System,
+                automatic_update_checks: false,
+            }
+        );
+        fs::write(
+            &path,
+            br#"{"theme": "dark", "automatic_update_checks": "sometimes"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            Preferences::load(&path),
+            Preferences {
+                theme: ThemePreference::Dark,
+                automatic_update_checks: true,
+            }
+        );
     }
 
     #[test]
