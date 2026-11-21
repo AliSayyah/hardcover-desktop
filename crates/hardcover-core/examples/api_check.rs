@@ -155,10 +155,12 @@ fn token_source() -> Result<(Arc<dyn TokenSource>, &'static str), Error> {
     if let Some(token) = StaticToken::from_env() {
         return Ok((Arc::new(token), "HARDCOVER_TOKEN"));
     }
-    let session = Session::restore(OAuthConfig::default(), Arc::new(KeyringTokenStore::new()?))?
-        .ok_or(
-            "no token: set HARDCOVER_TOKEN or sign in with the app (or the oauth_login example)",
-        )?;
+    let cfg = OAuthConfig::default();
+    let session = Session::restore(
+        cfg.clone(),
+        Arc::new(KeyringTokenStore::for_client(cfg.client_id())?),
+    )?
+    .ok_or("no token: set HARDCOVER_TOKEN or sign in with the app (or the oauth_login example)")?;
     Ok((Arc::new(session), "the keyring session"))
 }
 

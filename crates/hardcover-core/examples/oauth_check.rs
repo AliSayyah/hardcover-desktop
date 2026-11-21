@@ -20,9 +20,13 @@ use hardcover_core::{
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let book = BookId::new(std::env::args().nth(1).ok_or("pass a book id")?.parse()?);
+    let cfg = OAuthConfig::default();
     let session = Arc::new(
-        Session::restore(OAuthConfig::default(), Arc::new(KeyringTokenStore::new()?))?
-            .ok_or("no stored session")?,
+        Session::restore(
+            cfg.clone(),
+            Arc::new(KeyringTokenStore::for_client(cfg.client_id())?),
+        )?
+        .ok_or("no stored session")?,
     );
     println!("scope: {:?}", session.scope());
     let client = Client::new(session.clone());
