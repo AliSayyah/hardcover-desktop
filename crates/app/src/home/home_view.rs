@@ -1117,7 +1117,8 @@ fn caption_facts(facts: Vec<String>, cx: &App) -> gpui_kit::Div {
         }))
 }
 
-/// The paused row's caption: "Paused at page 230 of 1,104 · since Oct 1".
+/// The paused row's caption: "Paused at page 230 of 1,104 · since Oct 1", or
+/// for an audiobook "Paused at 2h 5m of 10h 0m".
 pub fn paused_text(progress: &ProgressSummary, since: Option<Date>, today: Date) -> String {
     let mut text = match (progress.page, progress.total_pages, progress.percent) {
         (Some(page), Some(total), _) => {
@@ -1128,6 +1129,8 @@ pub fn paused_text(progress: &ProgressSummary, since: Option<Date>, today: Date)
             )
         }
         (Some(page), None, _) => format!("Paused at page {}", count_text(page)),
+        // An audiobook: "Paused at 2h 5m of 10h 0m".
+        (None, _, _) if progress.seconds.is_some() => format!("Paused at {}", progress.text()),
         (None, _, Some(pct)) => format!("Paused at {}", percent_text(pct)),
         (None, _, None) => "Paused".to_owned(),
     };
@@ -1245,6 +1248,7 @@ mod tests {
             seconds: None,
             total_seconds: None,
             percent,
+            audio: false,
         }
     }
 
@@ -1331,6 +1335,16 @@ mod tests {
         assert_eq!(
             paused_text(&progress(None, None, None), None, today),
             "Paused"
+        );
+        let audio = ProgressSummary {
+            seconds: Some(7_500),
+            total_seconds: Some(36_000),
+            audio: true,
+            ..progress(None, None, Some(20.8))
+        };
+        assert_eq!(
+            paused_text(&audio, None, today),
+            "Paused at 2h 5m of 10h 0m"
         );
     }
 
