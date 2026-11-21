@@ -46,7 +46,7 @@ impl PageHeader {
     }
 
     /// How many things the destination holds, beside the title.
-    pub fn count(mut self, count: impl std::fmt::Display) -> Self {
+    pub fn count(mut self, count: impl crate::format::Count) -> Self {
         self.count = Some(crate::format::count_text(count).into());
         self
     }

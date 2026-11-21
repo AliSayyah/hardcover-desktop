@@ -43,21 +43,24 @@ pub fn status_counts(entries: &[LibraryEntry]) -> HashMap<ReadingStatus, usize> 
     counts
 }
 
-/// True if every whitespace-separated word of `query` occurs (case-insensitively)
-/// in the title, subtitle or an author. A blank query matches everything.
+/// True if every whitespace-separated word of `query` occurs in the title,
+/// subtitle or an author, both folded (`crate::text::fold`: case, accents,
+/// Arabic and Persian letter forms, Persian digits). A non-joiner counts for
+/// nothing on either side. A blank query matches everything.
 pub fn matches_filter(entry: &LibraryEntry, query: &str) -> bool {
-    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    let key = |text: &str| crate::text::fold(text).replace('\u{200c}', "");
+    let words: Vec<String> = query.split_whitespace().map(key).collect();
     if words.is_empty() {
         return true;
     }
-    let mut haystack = entry.book.title.to_lowercase();
+    let mut haystack = key(&entry.book.title);
     if let Some(sub) = &entry.book.subtitle {
         haystack.push('\n');
-        haystack.push_str(&sub.to_lowercase());
+        haystack.push_str(&key(sub));
     }
     for author in &entry.book.authors {
         haystack.push('\n');
-        haystack.push_str(&author.to_lowercase());
+        haystack.push_str(&key(author));
     }
     words.iter().all(|w| haystack.contains(w.as_str()))
 }
@@ -225,6 +228,9 @@ mod tests {
         assert!(matches_filter(&e, "LEFT guin"));
         assert!(matches_filter(&e, "novel"));
         assert!(!matches_filter(&e, "darkness tolkien"));
+        let persian = entry(2, "كليدر", "Gabriel García Márquez", ReadingStatus::Read);
+        assert!(matches_filter(&persian, "کلیدر"), "Persian letter forms");
+        assert!(matches_filter(&persian, "garcia marquez"), "accents");
     }
 
     #[test]

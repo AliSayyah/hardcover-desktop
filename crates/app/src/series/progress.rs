@@ -30,9 +30,8 @@ use hardcover_core::{
     BookId, BookSummary, Date, LibraryEntry, ReadingStatus, SeriesId, TrackedSeries, UserBookId,
 };
 
-use crate::format::{ProgressSummary, count_text, series_position_text, short_date};
-use crate::home::home_view::position_text;
-use crate::search::library_matches::words;
+use crate::format::{ProgressSummary, count_text, percent_label, series_position_text, short_date};
+use crate::text::{indexed_words, search_words};
 
 /// A series not touched for longer than this is "Not touched in a year".
 const UNTOUCHED_DAYS: i64 = 365;
@@ -584,9 +583,9 @@ pub fn matches_query(series: &SeriesSummary, query: &[String]) -> bool {
     if query.is_empty() {
         return true;
     }
-    let mut haystack = words(&series.name);
+    let mut haystack = indexed_words(&series.name);
     if let Some(author) = &series.author {
-        haystack.extend(words(author));
+        haystack.extend(indexed_words(author));
     }
     query
         .iter()
@@ -611,7 +610,7 @@ impl Counts {
 }
 
 pub fn counts<'a>(series: impl IntoIterator<Item = &'a SeriesSummary>, query: &str) -> Counts {
-    let query = words(query);
+    let query = search_words(query);
     let mut counts = Counts::default();
     for s in series.into_iter().filter(|s| matches_query(s, &query)) {
         if s.group.is_finished() {
@@ -629,7 +628,7 @@ pub fn grouped<'a>(
     filter: Filter,
     query: &str,
 ) -> Vec<(Group, Vec<&'a SeriesSummary>)> {
-    let query = words(query);
+    let query = search_words(query);
     let mut groups: Vec<(Group, Vec<&SeriesSummary>)> = Vec::new();
     for s in series
         .iter()
@@ -688,8 +687,8 @@ pub fn lane_caption(kind: NextKind, position: f32) -> String {
 /// say.
 pub fn reading_line(progress: &ProgressSummary) -> Option<String> {
     let position =
-        (progress.page.is_some() || progress.seconds.is_some()).then(|| position_text(progress));
-    let percent = progress.percent.map(|p| format!("{}%", p.round().max(0.0)));
+        (progress.page.is_some() || progress.seconds.is_some()).then(|| progress.text());
+    let percent = progress.percent.map(percent_label);
     match (position, percent) {
         (Some(a), Some(b)) => Some(format!("{a} · {b}")),
         (a, b) => a.or(b),

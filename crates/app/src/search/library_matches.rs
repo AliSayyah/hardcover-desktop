@@ -3,10 +3,14 @@
 //!
 //! Every word of the query must start a word of the book's title, authors or
 //! series ("hail mar" finds Project Hail Mary; "art" doesn't find The
-//! Martian). Ignored books don't count as being in the library here: they
-//! stay with the Hardcover results, tagged Ignored.
+//! Martian). Words are compared folded (`crate::text`): Arabic and Persian
+//! letter forms, Persian digits, accents and the zero-width non-joiner don't
+//! keep a book from being found. Ignored books don't count as being in the
+//! library here: they stay with the Hardcover results, tagged Ignored.
 
 use hardcover_core::{BookSummary, LibraryEntry, ReadingStatus};
+
+use crate::text::{indexed_words, search_words};
 
 /// Library matches shown above the Hardcover results. More would push those
 /// down; the rest still appear among them, tagged with their shelf.
@@ -18,7 +22,7 @@ const MIN_QUERY_CHARS: usize = 2;
 /// The library's matches for `query`, best first, at most [`LIMIT`]. Each
 /// book carries the cover the library shows for it.
 pub fn library_matches(entries: &[LibraryEntry], query: &str) -> Vec<BookSummary> {
-    let query = words(query);
+    let query = search_words(query);
     if query.iter().map(|w| w.chars().count()).sum::<usize>() < MIN_QUERY_CHARS {
         return Vec::new();
     }
@@ -56,15 +60,17 @@ pub fn counts_as_shelved(status: ReadingStatus) -> bool {
 /// 0: the title starts with the query; 1: every word is in the title;
 /// 2: some are only in the authors or series. `None`: no match.
 fn rank(entry: &LibraryEntry, query: &[String]) -> Option<u8> {
-    let title = words(&entry.book.title);
+    // The title's words for "starts with", and with their parts for matching.
+    let title = search_words(&entry.book.title);
+    let title_parts = indexed_words(&entry.book.title);
     let mut rest = Vec::new();
     for author in &entry.book.authors {
-        rest.extend(words(author));
+        rest.extend(indexed_words(author));
     }
     for series in &entry.series {
-        rest.extend(words(&series.name));
+        rest.extend(indexed_words(&series.name));
     }
-    let in_title = |q: &String| title.iter().any(|w| w.starts_with(q.as_str()));
+    let in_title = |q: &String| title_parts.iter().any(|w| w.starts_with(q.as_str()));
     let in_rest = |q: &String| rest.iter().any(|w| w.starts_with(q.as_str()));
     if !query.iter().all(|q| in_title(q) || in_rest(q)) {
         return None;
@@ -84,17 +90,6 @@ fn rank(entry: &LibraryEntry, query: &[String]) -> Option<u8> {
     } else {
         2
     })
-}
-
-/// Lowercase words: runs of letters and digits. An apostrophe inside a word
-/// is dropped, so "ender's" and "enders" match.
-pub fn words(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .replace(['\'', '’'], "")
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(str::to_owned)
-        .collect()
 }
 
 #[cfg(test)]
@@ -174,6 +169,36 @@ mod tests {
         assert_eq!(titles(&library_matches(&lib, "MART")), ["The Martian"]);
         assert_eq!(titles(&library_matches(&lib, "enders")), ["Ender's Game"]);
         assert_eq!(titles(&library_matches(&lib, "سمفونی")), ["سمفونی مردگان"]);
+    }
+
+    #[test]
+    fn letter_forms_digits_accents_and_non_joiners_match() {
+        let lib = vec![
+            entry(1, "كليدر", &["محمود دولت‌آبادی"], ReadingStatus::Read),
+            entry(2, "Les Misérables", &["Victor Hugo"], ReadingStatus::Read),
+            entry(3, "۱۹۸۴", &["جورج اورول"], ReadingStatus::Read),
+            entry(4, "1984", &["George Orwell"], ReadingStatus::WantToRead),
+            entry(5, "کلیدر جلد دوم", &[], ReadingStatus::WantToRead),
+            entry(6, "نمی\u{200c}خوریم", &[], ReadingStatus::Read),
+        ];
+        // A title in Arabic letter forms, typed on a Persian keyboard, and
+        // the other way round.
+        let kelidar = ["كليدر", "کلیدر جلد دوم"];
+        assert_eq!(titles(&library_matches(&lib, "کلیدر")), kelidar);
+        assert_eq!(titles(&library_matches(&lib, "كليدر")), kelidar);
+        // Accents, either way.
+        assert_eq!(titles(&library_matches(&lib, "miserables")), ["Les Misérables"]);
+        assert_eq!(titles(&library_matches(&lib, "MISÉR")), ["Les Misérables"]);
+        // Persian digits and ASCII ones find each other.
+        assert_eq!(titles(&library_matches(&lib, "1984")), ["1984", "۱۹۸۴"]);
+        assert_eq!(titles(&library_matches(&lib, "۱۹۸۴")), ["1984", "۱۹۸۴"]);
+        // A word with a non-joiner, typed without it, with it or with a space.
+        for query in ["نمیخوریم", "نمی\u{200c}خوریم", "نمی خوریم", "خوریم"] {
+            let found = library_matches(&lib, query);
+            assert_eq!(titles(&found), ["نمی\u{200c}خوریم"], "{query}");
+        }
+        assert_eq!(titles(&library_matches(&lib, "دولت آبادی")), ["كليدر"]);
+        assert_eq!(titles(&library_matches(&lib, "دولتآبادی")), ["كليدر"]);
     }
 
     #[test]

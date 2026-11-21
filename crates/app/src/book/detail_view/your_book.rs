@@ -81,7 +81,7 @@ impl BookDetailView {
                             .min_w_0()
                             .body_strong()
                             .tabular()
-                            .child(position_text(&progress)),
+                            .child(progress.text()),
                     )
                     .when_some(progress.percent, |this, percent| {
                         this.child(
@@ -494,16 +494,6 @@ impl BookDetailView {
     }
 }
 
-/// "Page 312 of 476", with thousands separated; the time for an audiobook;
-/// "Not started" before any progress.
-fn position_text(progress: &ProgressSummary) -> String {
-    match (progress.page, progress.total_pages) {
-        (Some(page), Some(total)) => format!("Page {} of {}", count_text(page), count_text(total)),
-        (Some(page), None) => format!("Page {}", count_text(page)),
-        _ => progress.text(),
-    }
-}
-
 /// "page 418" or "2h 5m" for the current read's row.
 fn short_position(progress: &ProgressSummary) -> Option<String> {
     match (progress.page, progress.seconds) {
@@ -587,12 +577,12 @@ mod tests {
     #[test]
     fn the_position_separates_thousands() {
         assert_eq!(
-            position_text(&progress(Some(418), Some(1007), None)),
+            progress(Some(418), Some(1007), None).text(),
             "Page 418 of 1,007"
         );
-        assert_eq!(position_text(&progress(Some(12), None, None)), "Page 12");
+        assert_eq!(progress(Some(12), None, None).text(), "Page 12");
         assert_eq!(
-            position_text(&progress(None, None, None)),
+            progress(None, None, None).text(),
             "Not started",
             "nothing read yet"
         );
