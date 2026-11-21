@@ -297,7 +297,7 @@ impl Catalogue {
         others.sort_by_key(|(shared, b)| {
             (std::cmp::Reverse(*shared), std::cmp::Reverse(b.users_count))
         });
-        others.into_iter().take(10).map(|(_, b)| b.id).collect()
+        others.into_iter().take(16).map(|(_, b)| b.id).collect()
     }
 
     fn entry(&self, id: i64) -> Option<&Entry> {

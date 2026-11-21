@@ -18,8 +18,12 @@ const MIN_PACE_DAYS: u32 = 3;
 const MAX_ESTIMATE_DAYS: u64 = 365;
 /// A book being read but not updated for this many days says so.
 pub const IDLE_DAYS: i64 = 7;
-/// Want to Read books listed under Up next, besides the series pick.
-const UP_NEXT_ROWS: usize = 3;
+/// The newest Want to Read books kept, besides the series pick: as many as
+/// one row of md covers holds in Home's second column on a wide monitor
+/// (960 at 2560 holds 12). The rail shows [`UP_NEXT_IN_RAIL`] of them.
+const UP_NEXT_MAX: usize = 24;
+/// The newest Want to Read books the rail's shelf shows.
+pub const UP_NEXT_IN_RAIL: usize = 3;
 /// Read books finished at most this many days ago are offered for rating.
 /// Older ones were likely left unrated on purpose.
 pub const RATE_DAYS: i64 = 60;
@@ -34,7 +38,8 @@ pub struct Digest {
     pub paused: Option<UserBookId>,
     pub paused_count: usize,
     pub series_next: Option<SeriesNext>,
-    /// The most recently added Want to Read books, without the series pick.
+    /// The most recently added Want to Read books, without the series pick,
+    /// at most [`UP_NEXT_MAX`].
     pub up_next: Vec<UserBookId>,
     pub want_to_read: usize,
 }
@@ -114,7 +119,7 @@ pub fn compute(entries: &[LibraryEntry], today: Date, unreleased: &HashSet<BookI
         .iter()
         .filter(|e| series_next.as_ref().is_none_or(|n| n.id != e.user_book_id))
         .filter(|e| released(e))
-        .take(UP_NEXT_ROWS)
+        .take(UP_NEXT_MAX)
         .map(|e| e.user_book_id)
         .collect();
 
@@ -641,8 +646,15 @@ mod tests {
         .collect();
         let d = compute(&books, day("2026-11-20"), &HashSet::new());
         let ids = |v: &[UserBookId]| v.iter().map(|i| i.get()).collect::<Vec<_>>();
-        assert_eq!(ids(&d.up_next), [4, 2, 3]);
+        assert_eq!(ids(&d.up_next), [4, 2, 3, 1, 5]);
         assert_eq!(d.want_to_read, 5);
+
+        let many: Vec<LibraryEntry> = (1..=30)
+            .map(|id| entry(id, ReadingStatus::WantToRead, None))
+            .collect();
+        let d = compute(&many, day("2026-11-20"), &HashSet::new());
+        assert_eq!(d.up_next.len(), UP_NEXT_MAX);
+        assert_eq!(d.want_to_read, 30);
     }
 
     #[test]

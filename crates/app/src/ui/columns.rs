@@ -8,9 +8,9 @@
 //!   top. The gap is 24 on the book page and 32 on Home
 //!   ([`Columns::wide_gap`]).
 //! - **Three columns** ([`Columns::second`]): the main column and the second
-//!   share the surplus equally, each at most [`size::COLUMN_MAX`], then the
-//!   rail. Surplus width holds more content, never wider rows: the page's
-//!   own maximum stops the columns at 720.
+//!   share the surplus equally, then the rail. They fill the width they are
+//!   given; [`content_column_width`] says how wide each gets, for content
+//!   that adds items as it widens (Home's shelf of covers).
 //! - **Folded:** the second column (if any) follows the main one, then the
 //!   rail's sections, full width, under a hairline (the column gap above it,
 //!   24 below), separated by hairlines like the rail's (24 above and below).
@@ -73,8 +73,8 @@ impl Columns {
     }
 
     /// A second content column, between the main column and the rail. The
-    /// two share the width equally, each at most [`size::COLUMN_MAX`]. For
-    /// [`Tier::Three`]; folded, it follows the main column.
+    /// two share the width equally. For [`Tier::Three`]; folded, it follows
+    /// the main column.
     pub fn second(mut self, column: impl IntoElement) -> Self {
         self.second = Some(column.into_any_element());
         self
@@ -133,21 +133,38 @@ pub fn tier(width: Pixels, rem_size: Pixels, wide_gap: bool) -> Tier {
     }
 }
 
+/// How wide the main column is in columns `width` wide with a rail: beside
+/// it (less the gap and the rail), or the whole width when `folded`.
+pub fn main_column_width(width: Pixels, rem_size: Pixels, wide_gap: bool, folded: bool) -> Pixels {
+    if folded {
+        return width;
+    }
+    let gap = if wide_gap { WIDE_GAP } else { GAP }.to_pixels(rem_size);
+    (width - gap - size::RAIL.to_pixels(rem_size)).max(Pixels::ZERO)
+}
+
+/// How wide each of the two content columns is in [`Tier::Three`] columns
+/// `width` wide: they share what the rail (if `has_rail`) and the gaps leave.
+pub fn content_column_width(
+    width: Pixels,
+    rem_size: Pixels,
+    wide_gap: bool,
+    has_rail: bool,
+) -> Pixels {
+    let gap = if wide_gap { WIDE_GAP } else { GAP }.to_pixels(rem_size);
+    let beside = if has_rail {
+        gap + size::RAIL.to_pixels(rem_size)
+    } else {
+        Pixels::ZERO
+    };
+    ((width - gap - beside) / 2.).max(Pixels::ZERO)
+}
+
 impl RenderOnce for Columns {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let gap = if self.wide_gap { WIDE_GAP } else { GAP };
-        let paired = self.second.is_some() && !self.folded;
-        let content = |child: AnyElement| {
-            probe(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .when(paired, |this| this.max_w(size::COLUMN_MAX))
-                    .child(child),
-            )
-        };
+        let content =
+            |child: AnyElement| probe(div().flex().flex_col().flex_1().min_w_0().child(child));
         let main = content(self.main);
         let second = self.second.map(content);
         if self.rail.is_empty() && second.is_none() {
@@ -242,13 +259,22 @@ mod tests {
     }
 
     #[test]
-    fn home_at_its_widest_holds_two_full_columns_and_the_rail() {
+    fn the_main_column_takes_what_the_rail_leaves() {
         let rem = px(16.);
-        let content = size::HOME_WIDE_MAX.to_pixels(rem) - size::PAGE_INSET.to_pixels(rem) * 2.;
-        let columns = size::COLUMN_MAX.to_pixels(rem) * 2.
-            + WIDE_GAP.to_pixels(rem) * 2.
-            + size::RAIL.to_pixels(rem);
-        assert_eq!(content, columns);
-        assert_eq!(size::HOME_WIDE_MAX.to_pixels(rem), px(1840.));
+        // The book page in a 1600 window: 1600 - 240 - 64 = 1296, less 24 and 272.
+        assert_eq!(main_column_width(px(1296.), rem, false, false), px(1000.));
+        assert_eq!(main_column_width(px(1296.), rem, true, false), px(992.));
+        assert_eq!(main_column_width(px(600.), rem, false, true), px(600.));
+    }
+
+    #[test]
+    fn two_content_columns_share_what_the_rail_leaves() {
+        let rem = px(16.);
+        // A 2560 window: 2560 - 240 - 64 = 2256; (2256 - 32 - 32 - 272) / 2.
+        assert_eq!(content_column_width(px(2256.), rem, true, true), px(960.));
+        // At the three-column threshold each gets its minimum.
+        assert_eq!(content_column_width(px(1232.), rem, true, true), px(448.));
+        // With nothing in the rail, the rail and its gap go to the columns.
+        assert_eq!(content_column_width(px(2256.), rem, true, false), px(1112.));
     }
 }

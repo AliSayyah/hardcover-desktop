@@ -31,8 +31,8 @@ use super::{
     AccountRow, Avatar, Block, BylineLink, Columns, CoverShelf, CoverSlot, EmptyState,
     ExternalLink, GoalRow, Greeting, Lane, ListRow, Meter, MonthBars, NavRow, ObjectBar,
     PageHeader, PropertyList, Rail, RailSection, RowSpacing, SectionHeader, Sequence, SeriesStrip,
-    Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton, blocks, brand_row,
-    date_line, greeting, panel, see_all, sidebar_label,
+    Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton, blocks, books_that_fit,
+    brand_row, date_line, greeting, panel, see_all, sidebar_label,
 };
 use crate::bidi::WrappingText;
 use crate::chip::genre::GENRES;
@@ -866,33 +866,59 @@ fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
 }
 
 fn shelf_and_columns(cx: &App) -> AnyElement {
-    let shelf = || {
-        CoverShelf::new(CoverSize::Md).books(
-            [
-                "Fourth Wing",
-                "Tomorrow, and Tomorrow, and Tomorrow",
-                "ملت عشق (جلد اول)",
-            ]
+    const TITLES: [&str; 9] = [
+        "Fourth Wing",
+        "Tomorrow, and Tomorrow, and Tomorrow",
+        "ملت عشق (جلد اول)",
+        "The Midnight Library",
+        "Piranesi",
+        "The Left Hand of Darkness",
+        "Babel",
+        "Station Eleven",
+        "The Fifth Season",
+    ];
+    let books = |key: &'static str, size: CoverSize, count: usize| {
+        TITLES
             .into_iter()
+            .take(count)
             .enumerate()
-            .map(|(ix, title)| {
-                (
-                    Cover::new(CoverSize::Md, title),
-                    TextButton::new(("g-shelf", ix), title),
-                )
-            }),
-        )
+            .map(move |(ix, title)| (Cover::new(size, title), TextButton::new((key, ix), title)))
     };
+    let shelf = || CoverShelf::new(CoverSize::Md).books(books("g-shelf", CoverSize::Md, 3));
     let column = |text: &'static str| div().body().text_color(colors(cx).fg_muted).child(text);
     let main = || column("The main column");
     let section = || RailSection::new("Newest on Want to read").child(shelf());
+    // Home's second column: one row, as many as fit (here a 448 column).
+    let rem = px(16.);
+    let fit = books_that_fit(size::WIDE_COLUMN_MIN.to_pixels(rem), CoverSize::Md, rem);
+    let one_row = div()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .w(size::WIDE_COLUMN_MIN)
+        .child(SectionHeader::new("Newest on Want to read"))
+        .child(CoverShelf::new(CoverSize::Md).one_row().books(books(
+            "g-shelf-row",
+            CoverSize::Md,
+            fit,
+        )));
+    // Similar books beside the book's text: a grid of lg covers.
+    let grid = div().w(rems(30.)).child(
+        Block::new("Similar books").child(CoverShelf::new(CoverSize::Lg).grid().books(books(
+            "g-shelf-grid",
+            CoverSize::Lg,
+            9,
+        ))),
+    );
     specimen(
-        "Cover shelf; columns: three, beside the rail, folded",
+        "Cover shelf (wrapping, one row, grid); columns: three, beside the rail, folded",
         v_flex()
             .gap_8()
+            .child(one_row)
+            .child(grid)
             .child(
                 Columns::new(main())
-                    .second(column("The second column, each at most 720"))
+                    .second(column("The second column, sharing the width"))
                     .wide_gap()
                     .rail([section()]),
             )
