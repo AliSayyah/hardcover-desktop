@@ -747,7 +747,8 @@ every width below (the tiers' thresholds included) is in design px too.
   - Your review;
   - Reviews (other readers');
   - Similar books: lg covers with shadow, 16 apart, with titles at 12/500 in
-    at most two lines. Eight, wrapping.
+    at most two lines, broken between words; a word too long for the
+    line ends in "…", never split. Eight, wrapping.
 - **Wide main column:** when it holds the 640 text and a 320 side column,
   32 apart, the blocks under the panel split. The text column, exactly 640:
   About this book, Your review, Reviews. The side column, filling the rest:
