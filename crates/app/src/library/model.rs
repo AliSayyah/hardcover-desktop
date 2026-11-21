@@ -7,6 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use gpui_kit::{AppContext as _, Context, SharedString, Task};
 use hardcover_core::auth::scopes::READ_LIBRARY;
@@ -15,8 +16,12 @@ use hardcover_core::{
     BookId, Error, LibraryEntry, ReadingStatus, Review, Timestamp, User, UserBookId,
 };
 
-use super::collection::{LocalChange, merge_sync, status_counts};
+use super::collection::{LocalChange, merge_sync, same_entries, status_counts};
 use crate::app_state::{CoverService, Services};
+
+/// How old the last sync (or try) must be before coming back to the window
+/// syncs again. A sync is about ten requests, most of the rate limit's burst.
+const SYNC_AGAIN_AFTER: Duration = Duration::from_mins(15);
 
 /// What a write in flight changes, so only that control shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +127,8 @@ pub struct LibraryModel {
     revision: u64,
     sync: SyncStatus,
     last_synced_at: Option<Timestamp>,
+    /// When the last sync started, whether or not it succeeded.
+    sync_started: Option<Instant>,
     /// Entries received so far by the running sync.
     sync_fetched: usize,
     /// The running sync shows pages as they arrive (nothing was cached).
@@ -152,6 +159,7 @@ impl LibraryModel {
             revision: 0,
             sync: SyncStatus::Idle,
             last_synced_at: None,
+            sync_started: None,
             sync_fetched: 0,
             fill_during_sync: false,
             changes_during_sync: None,
@@ -262,6 +270,7 @@ impl LibraryModel {
             return;
         }
         self.sync = SyncStatus::Syncing;
+        self.sync_started = Some(Instant::now());
         self.sync_fetched = 0;
         self.fill_during_sync = self.entries.is_empty();
         self.changes_during_sync = Some(Vec::new());
@@ -306,6 +315,18 @@ impl LibraryModel {
         }));
     }
 
+    /// Syncs if the last sync started more than [`SYNC_AGAIN_AFTER`] ago,
+    /// so changes made on the website or another device show without
+    /// Refresh. Waits for the first sync, which [`Self::start`] runs.
+    pub fn sync_if_stale(&mut self, cx: &mut Context<Self>) {
+        let stale = self
+            .sync_started
+            .is_some_and(|started| started.elapsed() >= SYNC_AGAIN_AFTER);
+        if stale {
+            self.sync(cx);
+        }
+    }
+
     /// A page of a running sync. A first sync (nothing cached) shows pages as
     /// they arrive; otherwise the cached entries stay until the sync completes.
     fn receive_page(&mut self, page: Vec<LibraryEntry>, cx: &mut Context<Self>) {
@@ -330,7 +351,13 @@ impl LibraryModel {
             Ok((user, synced)) => {
                 let merged = merge_sync(synced, &changes);
                 self.user = Some(user.clone());
-                self.set_entries(merged.clone());
+                // Nothing new keeps the revision, so nothing worked out from
+                // the library is redone and the goals aren't fetched again.
+                // The cache is still written: a first sync filled the entries
+                // page by page, so they match, but nothing was saved yet.
+                if !same_entries(&self.entries, &merged) {
+                    self.set_entries(merged.clone());
+                }
                 self.loaded = true;
                 self.sync = SyncStatus::Synced;
                 self.last_synced_at = Some(chrono::Utc::now());
@@ -514,6 +541,7 @@ fn persist(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui_kit::Entity;
 
     fn review(text: &str) -> Review {
         Review::new(text, false, None)
@@ -537,6 +565,50 @@ mod tests {
         slot.finish_fetch(3, Err("offline".into()));
         assert_eq!(slot.error, None);
         assert_eq!(slot.review, Some(review("Newer.")));
+    }
+
+    /// A model over the demo client, with an empty cache in memory.
+    fn demo_model(cx: &mut gpui_kit::TestAppContext) -> (Entity<LibraryModel>, Arc<LibraryCache>) {
+        let cache = Arc::new(LibraryCache::open_in_memory().unwrap());
+        let services = Services::new(
+            hardcover_core::demo::client(),
+            None,
+            Some(cache.clone()),
+            hardcover_core::auth::GrantedScopes::all(),
+        );
+        cx.update(|cx| cx.set_global(services));
+        (cx.new(|_| LibraryModel::new()), cache)
+    }
+
+    #[gpui_kit::test]
+    fn a_first_sync_is_saved_and_an_unchanged_one_keeps_the_revision(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        let (model, cache) = demo_model(cx);
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let (user, revision, shown) = model.read_with(cx, |m, _| {
+            assert_eq!(*m.sync_status(), SyncStatus::Synced);
+            (m.user().unwrap().id, m.revision(), m.entries().to_vec())
+        });
+        // The entries were filled page by page, so the result matched them:
+        // it must be saved all the same.
+        let saved = cache.load_library(user).unwrap();
+        assert!(!saved.is_empty());
+        assert!(same_entries(&saved, &shown));
+
+        model.update(cx, LibraryModel::sync);
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| {
+            assert_eq!(*m.sync_status(), SyncStatus::Synced);
+            assert_eq!(m.revision(), revision, "nothing new: same revision");
+        });
+
+        // Just synced: coming back to the window doesn't sync again.
+        model.update(cx, |m, cx| {
+            m.sync_if_stale(cx);
+            assert_eq!(*m.sync_status(), SyncStatus::Synced);
+        });
     }
 
     #[test]

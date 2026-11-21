@@ -1,5 +1,6 @@
 //! The book's catalogue parts: About this book, the tags, other titles, On
-//! Hardcover (the average, the ratings breakdown and "Open on Hardcover"),
+//! Hardcover (the average and the ratings breakdown; "Open on Hardcover" is
+//! in the book's "more" menu, `header.rs`),
 //! and similar books (`hardcover-design`, Shelf → Book pane, and Full book
 //! page).
 
@@ -28,8 +29,7 @@ use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{average_rating_text, count_text};
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{
-    Block, CoverShelf, ExternalLink, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars,
-    TextButton,
+    Block, CoverShelf, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars, TextButton,
 };
 
 /// Similar books fetched for one book.
@@ -252,7 +252,7 @@ impl BookDetailView {
         )
     }
 
-    /// On Hardcover: the ratings breakdown and "Open on Hardcover". The
+    /// On Hardcover: the counts and the ratings breakdown. The
     /// page's rail leads with the average as a figure; the pane has the
     /// average in its header.
     pub(super) fn render_on_hardcover(
@@ -283,10 +283,6 @@ impl BookDetailView {
         let breakdown = details
             .filter(|d| !d.ratings_distribution.is_empty())
             .map(|d| render_breakdown(d, cx));
-        let link = book
-            .web_url()
-            .map(|url| ExternalLink::new("open-on-hardcover", "Open on Hardcover", url));
-
         if in_rail {
             let figure = average.map(|average| {
                 let text = average_rating_text(average);
@@ -305,7 +301,7 @@ impl BookDetailView {
                             ),
                     )
             });
-            if figure.is_none() && breakdown.is_none() && link.is_none() {
+            if figure.is_none() && breakdown.is_none() && counts.is_empty() {
                 return None;
             }
             return Some(
@@ -321,20 +317,18 @@ impl BookDetailView {
                         )
                     })
                     .children(breakdown.map(|b| div().pt_2().child(b)))
-                    .children(link.map(|link| div().pt_2().child(link)))
                     .into_any_element(),
             );
         }
-        if breakdown.is_none() && link.is_none() {
-            return None;
-        }
+        // Without a spread there is nothing the header's average doesn't
+        // say. "Open on Hardcover" is in the book's "more" menu.
+        breakdown.as_ref()?;
         Some(
             Block::new("On Hardcover")
                 .when(!counts.is_empty(), |this| {
                     this.action(div().caption(cx).tabular().child(counts.join(" · ")))
                 })
                 .children(breakdown)
-                .children(link)
                 .into_any_element(),
         )
     }

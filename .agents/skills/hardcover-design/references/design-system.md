@@ -72,7 +72,7 @@ selected row.
 | `accent` | `#3B4A9C` | `#98A5F4` | Ink blue (details below the table) |
 | `accent-fg` | `#FFFFFF` | `#12142A` | Text on accent |
 | `accent-soft` | accent 10% | accent 14% | The avatar's fill |
-| `ring` | accent 50% | accent 50% | The 3 px focus ring |
+| `ring` | accent 50% | accent 50% | The 2 px focus ring |
 | `gold` | `#F59E0B` (amber 500) | `#FBBF24` (amber 400) | The user's own rating, nothing else |
 | `gold-preview` | gold 55% | gold 55% | The rating control's hover preview: the stars a click would set |
 | `star-empty` | ink 14% | ink 14% | An unfilled star |
@@ -301,7 +301,7 @@ dust jacket.
 | Danger | Danger text, no fill | Destructive commands; the confirm button of a destructive dialog |
 | Icon | 32 square, ghost | Familiar symbols only ("more"), with an accessible name and a tooltip |
 | Text button | Ink text, underline on hover only | In-app navigation inside content: an author, a series, a book title |
-| Link | Accent, underlined, a 12 px external-link icon | Only for things that open the browser: "Open on Hardcover" |
+| Link | Accent, underlined, a 12 px external-link icon | Only for things that open the browser: "Open on Hardcover" on a series, author or list page (a book's is in its "more" menu) |
 | Byline link | Ink, 14/500, underline on hover, pointing hand | A reviewer's name, which opens their Hardcover profile in the browser. It repeats on every review, so it stays quiet; a right-to-left name goes without the underline, which GPUI on Linux draws beside it |
 
 - **Sizes:** default 32 (padding 12, icon 16, gap 8); small 24 (padding 8,
@@ -544,7 +544,7 @@ Each state has one treatment, on every control. Hover is never the only cue.
 | Rest | As specified for the component |
 | Hover | The `hover` fill. A text button gains its underline. The rating control previews the stars a click would set in `gold-preview` |
 | Pressed, selected, open | The `selected` fill. A selected nav row also takes weight 500 and the accent icon. A menu button stays pressed while its menu is open |
-| Focus-visible | A 3 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
+| Focus-visible | A 2 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
 | Disabled | 50% opacity, with no hover or pressed response. When the reason isn't obvious, say it beside the control or in its tooltip (`format::needs_permission`) |
 | Loading | `skeleton` shapes where the content will be, pulsing between 100% and 50% opacity. Covers show a skeleton until the image lands. A button running its action keeps its label, shows its loading state and refuses repeat clicks. No spinner in a list |
 | Error | Say what happened and how to recover, next to the thing that failed (`Services::error_message`) |
@@ -622,7 +622,8 @@ out there exactly as it did before this rule.
 - **Book pane:**
   - **Object bar:** 56 high, no hairline. "Lists" (a ghost menu button with
     the gallery-vertical-end icon, the sidebar's list icon) and "more" (an
-    icon button) sit on the trailing edge, over the content: in a wide
+    icon button: "Open on Hardcover" for any book with a page there, then,
+    for a book in the library, its library commands) sit on the trailing edge, over the content: in a wide
     window the bar keeps to the content's width and inset.
     The book's tools live here, never over the title.
   - **Content:** inset 24, with 0 above.
@@ -671,7 +672,8 @@ out there exactly as it did before this rule.
     at most two lines.
 - **Rail:**
   - On Hardcover: the average as a `display-30` figure with muted 16 px
-    stars; "4,280 ratings · 10,144 readers"; the "Open on Hardcover" link;
+    stars; "4,280 ratings · 10,144 readers"; the ratings breakdown
+    ("Open on Hardcover" is in the "more" menu);
   - Details (key column 72);
   - Reads: a label, plus a small ghost "Add a past read…" on the trailing
     edge;
@@ -886,8 +888,8 @@ it when you wire it.
 | `font_size` | 16 |
 
 The app builds this as two theme configs (`design::theme`), so every mode
-change applies it. `ring` is the solid accent: the kit draws the 3 px ring
-at 50% of it, plus a 1 px accent edge. What the kit doesn't let the theme
+change applies it. `ring` is the solid accent: the kit draws its ring at 50%
+of it, plus a 1 px accent edge. What the kit doesn't let the theme
 reach is listed under "Kit limits".
 
 **Notes:**
@@ -948,3 +950,6 @@ commit that fixes it.
   than disabled radios; a form's radios are disabled only while it saves.
 - The `DatePicker`'s field stays paper.
 - A dialog keeps the kit's shadow.
+- The kit's controls (buttons, inputs, selects, switches) draw a 3 px focus
+  ring, not 2: the width is a private constant of the kit. The app's own
+  rows, text buttons and components draw 2.
