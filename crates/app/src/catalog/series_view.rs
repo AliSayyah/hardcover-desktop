@@ -21,8 +21,9 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{SeriesDetails, SeriesId};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, focus_list_if_fallback_is_focused, follow_list, load_failed,
-    new_list, page_body, page_header_scrolling, page_list, read_summary, reset_scroll, row_details,
+    CatalogBooks, CatalogRow, ListPane, focus_list_if_fallback_is_focused, follow_list,
+    load_failed, new_list, page_body, page_header_scrolling, page_list, read_summary, reset_scroll,
+    row_details,
 };
 use super::navigation::Page;
 use crate::app_state::Services;
@@ -48,6 +49,8 @@ pub struct SeriesView {
     /// Holds focus while the page loads; see [`Self::focus`].
     focus_when_ready: Option<FocusHandle>,
     list: Entity<ListState<CatalogBooks>>,
+    /// The selected book, beside the list when the window is wide.
+    pane: ListPane,
     /// The series whose books the list holds.
     listed: Option<SeriesId>,
     /// The header's scroll, when it gives way in a short window.
@@ -57,13 +60,15 @@ pub struct SeriesView {
 
 impl SeriesView {
     pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let pane = ListPane::new(model.clone(), window, cx);
         let list = new_list(
             model.clone(),
             "Hardcover lists no books in this series.",
+            &pane,
             window,
             cx,
         );
-        let subscriptions = follow_list(&list, &model, window, cx);
+        let subscriptions = follow_list(&list, &model, &pane, window, cx);
         Self {
             model,
             current: None,
@@ -72,6 +77,7 @@ impl SeriesView {
             task: None,
             focus_when_ready: None,
             list,
+            pane,
             listed: None,
             header_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
@@ -268,7 +274,7 @@ impl SeriesView {
 }
 
 impl Render for SeriesView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.current.and_then(|id| self.pages.get(&id));
         let header = match current {
             Some(Loaded::Ready(series)) => self.render_header(&series.clone(), cx),
@@ -289,7 +295,7 @@ impl Render for SeriesView {
                 .into_any_element(),
         };
         let ready = matches!(current, Some(Loaded::Ready(_)));
-        v_flex()
+        let column = v_flex()
             .size_full()
             .min_w_0()
             .child(page_header_scrolling(
@@ -299,6 +305,8 @@ impl Render for SeriesView {
             ))
             .when(ready, |this| {
                 this.child(page_body().child(page_list(&self.list)))
-            })
+            });
+        self.pane
+            .layout(&self.list, CatalogBooks::book_at, column, window, cx)
     }
 }

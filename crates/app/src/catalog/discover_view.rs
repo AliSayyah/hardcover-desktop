@@ -20,7 +20,7 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookSummary, TrendingPeriod};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, follow_list, load_failed, new_list, page_body, page_header,
+    CatalogBooks, CatalogRow, ListPane, follow_list, load_failed, new_list, page_body, page_header,
     page_list, page_loading, row_details,
 };
 use crate::app_state::Services;
@@ -79,6 +79,8 @@ pub struct DiscoverView {
     loading: Option<TrendingPeriod>,
     task: Option<Task<()>>,
     list: Entity<ListState<CatalogBooks>>,
+    /// The selected book, beside the list when the window is wide.
+    pane: ListPane,
     /// The period whose books the list holds.
     listed: Option<TrendingPeriod>,
     /// Holds focus while the books load, so shortcuts keep working.
@@ -94,19 +96,22 @@ impl Focusable for DiscoverView {
 
 impl DiscoverView {
     pub fn new(model: &Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let pane = ListPane::new(model.clone(), window, cx);
         let list = new_list(
             model.clone(),
             "Hardcover lists no books for this period.",
+            &pane,
             window,
             cx,
         );
-        let subscriptions = follow_list(&list, model, window, cx);
+        let subscriptions = follow_list(&list, model, &pane, window, cx);
         Self {
             period: TrendingPeriod::Month,
             periods: HashMap::new(),
             loading: None,
             task: None,
             list,
+            pane,
             listed: None,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
@@ -282,13 +287,15 @@ impl DiscoverView {
 }
 
 impl Render for DiscoverView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let column = v_flex()
             .id("discover")
             .track_focus(&self.focus_handle)
             .size_full()
             .min_w_0()
             .child(page_header().child(self.render_header(cx)))
-            .child(page_body().child(self.render_body(cx)))
+            .child(page_body().child(self.render_body(cx)));
+        self.pane
+            .layout(&self.list, CatalogBooks::book_at, column, window, cx)
     }
 }
