@@ -24,6 +24,8 @@ cargo run -p hardcover-core --example api_check                   # check the li
 cargo run -p hardcover-core --example api_check -- --check        # same, without writing; exit 1 on any change
 ```
 
+A build without `demo` runs once per data directory (`instance`): with the installed app running, `cargo run -p hardcover-desktop` shows that window and exits. The demo build, or a run with its own `XDG_DATA_HOME`, runs beside it.
+
 The `justfile` wraps these; `just` lists the recipes.
 - `just check` runs fmt-check, clippy (`-D warnings`) and the tests.
 - `just ci` adds `cargo deny`, the packaging validation, ShellCheck (`just shellcheck`) and actionlint.
@@ -91,6 +93,7 @@ The workspace has two crates, in `crates/*`.
   - Covers are downloaded from Hardcover at runtime, only for the catalogue's own URLs. Never commit the images.
   - When you add a query, give it an answer in `demo::answer`; the `every_document_has_an_answer` test fails until you do.
   - `upcoming` holds a few unreleased books in the catalogue's series, for "Coming soon": placeholder titles like Hardcover's ("Untitled Empyrean #4"), ids from 99,000,001 (far above the catalogue's), no cover and no description (never invent one for a real series' unreleased book). Each date is `days` from today, so the demo never goes stale; keep one within two weeks, so Home's card shows. They answer `UpcomingInSeries` and `BookDetails`, and are on their series pages.
+- `instance`: one running app per data directory. `main` claims `instance.lock` (a `lock::FileLock`) in `~/.local/share/hardcover-desktop/` and listens on `instance.sock` beside it; a later launch finds the lock taken, asks the running copy to show its window, and exits. The running copy calls `activate_window`; on Wayland the compositor may only mark it as wanting attention. The demo build never claims it, so it runs beside a real one; so does a run with its own `XDG_DATA_HOME`.
 - `prefs`: `Preferences` (theme, automatic update checks) in `~/.config/hardcover-desktop/settings.json`. Loading never fails: a missing or garbled file gives the defaults, and every field has `#[serde(default)]`, because a self-updated app reads the file an older version wrote. Writes are atomic (temporary file, then rename). The file survives signing out.
 
 **`app`** (the package is named `hardcover-desktop`) is the GPUI UI.
