@@ -217,7 +217,7 @@ impl SeriesTrackerView {
     }
 
     fn today() -> Date {
-        chrono::Local::now().date_naive()
+        crate::dates::today()
     }
 
     fn summaries(&self, cx: &mut App) -> Rc<Vec<SeriesSummary>> {

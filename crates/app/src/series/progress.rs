@@ -30,6 +30,7 @@ use hardcover_core::{
     BookId, BookSummary, Date, LibraryEntry, ReadingStatus, SeriesId, TrackedSeries, UserBookId,
 };
 
+use crate::dates::local_day;
 use crate::format::{ProgressSummary, count_text, percent_label, series_position_text, short_date};
 use crate::text::{indexed_words, search_words};
 
@@ -316,7 +317,7 @@ fn entry_dates(entry: &LibraryEntry) -> impl Iterator<Item = Date> + '_ {
         .reads
         .iter()
         .flat_map(|r| [r.started_at, r.finished_at])
-        .chain([entry.updated_at.map(|t| t.date_naive())])
+        .chain([entry.updated_at.map(local_day)])
         .flatten()
 }
 
@@ -472,7 +473,7 @@ pub fn summarize(
         .and_then(|b| entries().find(|e| Some(e.user_book_id) == b.entry))
         .and_then(|e| {
             e.updated_at
-                .map(|t| t.date_naive())
+                .map(local_day)
                 .or_else(|| e.open_read().and_then(|r| r.started_at))
         });
     let started = entries()
@@ -686,8 +687,7 @@ pub fn lane_caption(kind: NextKind, position: f32) -> String {
 /// A book being read: "Page 418 of 1,007 · 42%". `None` with nothing to
 /// say.
 pub fn reading_line(progress: &ProgressSummary) -> Option<String> {
-    let position =
-        (progress.page.is_some() || progress.seconds.is_some()).then(|| progress.text());
+    let position = (progress.page.is_some() || progress.seconds.is_some()).then(|| progress.text());
     let percent = progress.percent.map(percent_label);
     match (position, percent) {
         (Some(a), Some(b)) => Some(format!("{a} · {b}")),

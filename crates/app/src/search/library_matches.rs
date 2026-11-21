@@ -187,13 +187,17 @@ mod tests {
         assert_eq!(titles(&library_matches(&lib, "کلیدر")), kelidar);
         assert_eq!(titles(&library_matches(&lib, "كليدر")), kelidar);
         // Accents, either way.
-        assert_eq!(titles(&library_matches(&lib, "miserables")), ["Les Misérables"]);
+        assert_eq!(
+            titles(&library_matches(&lib, "miserables")),
+            ["Les Misérables"]
+        );
         assert_eq!(titles(&library_matches(&lib, "MISÉR")), ["Les Misérables"]);
         // Persian digits and ASCII ones find each other.
         assert_eq!(titles(&library_matches(&lib, "1984")), ["1984", "۱۹۸۴"]);
         assert_eq!(titles(&library_matches(&lib, "۱۹۸۴")), ["1984", "۱۹۸۴"]);
         // A word with a non-joiner, typed without it, with it or with a space.
-        for query in ["نمیخوریم", "نمی\u{200c}خوریم", "نمی خوریم", "خوریم"] {
+        for query in ["نمیخوریم", "نمی\u{200c}خوریم", "نمی خوریم", "خوریم"]
+        {
             let found = library_matches(&lib, query);
             assert_eq!(titles(&found), ["نمی\u{200c}خوریم"], "{query}");
         }

@@ -57,9 +57,9 @@ use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverArt, CoverSize, detail_art};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{
-    authors_text, books_count_text, count_text, goal_amount, goal_pace,
-    goal_period, goal_unit, needs_permission, paused_text, percent_label, progress_summary, rating_text, series_position_text,
-    short_date,
+    authors_text, books_count_text, count_text, goal_amount, goal_pace, goal_unit,
+    needs_permission, paused_text, percent_label, progress_summary, rating_text,
+    series_position_text, short_date,
 };
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
@@ -569,9 +569,7 @@ impl HomeView {
     /// Reading would start a new read.
     fn paused_row(entry: &LibraryEntry, count: usize, today: Date, cx: &App) -> AnyElement {
         let progress = progress_summary(entry);
-        let since = entry
-            .updated_at
-            .map(|updated| updated.with_timezone(&chrono::Local).date_naive());
+        let since = entry.updated_at.map(crate::dates::local_day);
         h_flex()
             .w_full()
             .gap_3()
@@ -723,11 +721,9 @@ impl HomeView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = colors(cx).fg_muted;
-        let period = goal_period(goal.start, goal.end);
-        let title = if period.len() == 4 {
-            format!("{period} reading goal")
-        } else {
-            "Reading goal".to_owned()
+        let title = match crate::format::goal_year(goal.start, goal.end) {
+            Some(year) => format!("{year} reading goal"),
+            None => "Reading goal".to_owned(),
         };
         let reached = goal.progress >= f64::from(goal.target);
         let library = self.model.read(cx);
@@ -931,7 +927,7 @@ impl HomeView {
 
 impl Render for HomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let now = chrono::Local::now();
+        let now = crate::dates::now();
         let today = now.date_naive();
         let header = Greeting::new(date_line(today), greeting_at(&now));
         let loaded = self.model.read(cx).is_loaded();
@@ -1185,7 +1181,7 @@ pub fn goal_sentence(
         format!("{} {side} pace", pace_amount(goal, pace.abs()))
     };
     let left = pace_amount(goal, (f64::from(goal.target) - goal.progress).ceil());
-    let to_go = match (goal.end - today).num_days() {
+    let to_go = match (goal.last_day() - today).num_days() {
         0 => format!("{left} to go today"),
         1 => format!("{left} to go in 1 day"),
         n => format!("{left} to go in {} days", count_text(n.unsigned_abs())),

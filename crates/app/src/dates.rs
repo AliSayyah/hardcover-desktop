@@ -4,10 +4,10 @@
 //! updated 8 days ago", "Updated yesterday") goes through [`local_day`], and
 //! every "today" is [`today`].
 //!
-//! Views that read today (Home, Series, Stats, Coming soon) key their caches
-//! on it, and the workspace's clock tells them when it changes
-//! (`Workspace::day_changed`), so a window left open across midnight moves
-//! to the new day.
+//! Views read today as they render, and the ones that cache what they work
+//! out from it (Home's digest, Stats, the series) key the cache on it. The
+//! workspace's clock re-renders the window every 30 s, so a window left open
+//! across midnight moves to the new day within the half minute.
 
 use chrono::{DateTime, Local, TimeZone, Utc};
 use hardcover_core::{Date, Timestamp};

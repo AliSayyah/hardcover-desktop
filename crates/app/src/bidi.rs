@@ -230,11 +230,6 @@ pub struct Piece {
 }
 
 impl Piece {
-    /// The piece's text as written (for measuring and building lines).
-    fn text(&self) -> String {
-        self.source.clone()
-    }
-
     /// Whether the piece has no letter or digit: punctuation standing alone,
     /// which stays with the word before it.
     fn is_punctuation(&self) -> bool {
@@ -706,7 +701,15 @@ mod tests {
         let units = rtl_units(text);
         assert_eq!(
             units,
-            ["راهنمای", "(Harry", "Potter", "and", "Friends)", "برای", "خوانندگان"]
+            [
+                "راهنمای",
+                "(Harry",
+                "Potter",
+                "and",
+                "Friends)",
+                "برای",
+                "خوانندگان"
+            ]
         );
         // The phrase breaks between its words, not inside "Potter".
         let lines = break_lines(&units, 22., None, &mut chars);
@@ -726,10 +729,7 @@ mod tests {
         }
         // Words of one phrase on one line join into one piece again, and its
         // brackets are mirrored once.
-        assert_eq!(
-            segs(&lines[0]),
-            v(&[&["راهنمای"], &[")", "Harry Potter"]])
-        );
+        assert_eq!(segs(&lines[0]), v(&[&["راهنمای"], &[")", "Harry Potter"]]));
         assert_eq!(segs(&lines[1]), v(&[&["and Friends", "("], &["برای"]]));
         // A phrase that fits stays on one line, as before.
         let wide = break_lines(&units, 60., None, &mut chars);
@@ -741,7 +741,7 @@ mod tests {
         // The width path joins the pieces into lines, then lays each line
         // out again: the brackets must come out as from the first pass.
         let text = "کتاب (جلد اول) «سلام»";
-        let units: Vec<String> = pieces(text).iter().map(Piece::text).collect();
+        let units: Vec<String> = pieces(text).iter().map(|p| p.source.clone()).collect();
         assert_eq!(segs(&units.join(" ")), segs(text));
         assert_eq!(
             segs(text),
@@ -753,7 +753,7 @@ mod tests {
     fn right_to_left_pieces_break_into_lines_too() {
         let units: Vec<String> = pieces("کتابی پرکشش و پر از امید.")
             .iter()
-            .map(Piece::text)
+            .map(|p| p.source.clone())
             .collect();
         let lines = break_lines(&units, 11., Some(2), &mut chars);
         assert_eq!(lines, ["کتابی پرکشش", "و پر از…"]);

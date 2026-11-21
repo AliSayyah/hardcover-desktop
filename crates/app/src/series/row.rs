@@ -288,7 +288,11 @@ fn next_lane(
             div()
                 .caption(cx)
                 .tabular()
-                .child(crate::format::paused_text(&progress_summary(e), None, today))
+                .child(crate::format::paused_text(
+                    &progress_summary(e),
+                    None,
+                    today,
+                ))
                 .into_any_element()
         }),
         NextKind::Waiting => book.release_date.map(|date| {

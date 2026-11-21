@@ -64,7 +64,7 @@ impl BookDetailView {
         // to Currently reading: not something a paused book's panel should
         // do behind the reader's back.
         let open = entry.open_read().is_some() || entry.status == ReadingStatus::CurrentlyReading;
-        let today = chrono::Local::now().date_naive();
+        let today = crate::dates::today();
         let meta = pace_line(entry, today);
         let model = self.model.clone();
         let update_entry = entry.clone();

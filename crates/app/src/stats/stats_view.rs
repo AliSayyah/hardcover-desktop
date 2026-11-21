@@ -76,7 +76,7 @@ impl StatsView {
     fn stats(&mut self, cx: &App) -> Rc<ReadingStats> {
         let model = self.model.read(cx);
         let revision = model.revision();
-        let today = chrono::Local::now().date_naive();
+        let today = crate::dates::today();
         match &self.computed {
             Some((r, d, stats)) if *r == revision && *d == today => stats.clone(),
             _ => {

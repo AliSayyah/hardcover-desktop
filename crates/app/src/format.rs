@@ -549,24 +549,26 @@ pub fn goal_unit(metric: &GoalMetric, n: f64) -> &str {
     }
 }
 
-/// An amount in a goal's unit, rounded down: whole books and pages, hours to
-/// one decimal (`12.5`, or `12` when whole). Down, so an amount short of the
-/// target never shows as the target.
+/// An amount in a goal's unit, rounded down, with thousands separated: whole
+/// books and pages (`1,200`), hours to one decimal (`12.5`, or `12` when
+/// whole). Down, so an amount short of the target never shows as the
+/// target. Never below zero.
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "goals are displayed as integer units or tenths after rounding down"
+    clippy::cast_sign_loss,
+    reason = "goals are displayed as whole units or tenths after rounding down; `as` saturates"
 )]
 pub fn goal_amount(metric: &GoalMetric, n: f64) -> String {
     match metric {
         GoalMetric::Hours => {
             // The epsilon keeps 2.3 (22.999… tenths in binary) from showing as 2.2.
-            let tenths = (n * 10.0 + 1e-6).floor() as i64;
+            let tenths = (n * 10.0 + 1e-6).floor().max(0.0) as u64;
             match tenths % 10 {
-                0 => format!("{}", tenths / 10),
-                t => format!("{}.{}", tenths / 10, t.abs()),
+                0 => count_text(tenths / 10),
+                t => format!("{}.{t}", count_text(tenths / 10)),
             }
         }
-        _ => format!("{}", n.floor() as i64),
+        _ => count_text(n.floor().max(0.0) as u64),
     }
 }
 
@@ -596,12 +598,12 @@ pub fn goal_year(start: Date, end: Date) -> Option<i32> {
     (from_new_year && to_year_end).then_some(year)
 }
 
-/// `9 of 12 books`.
+/// `9 of 12 books`, `1,200 of 5,000 pages`.
 pub fn goal_progress(goal: &Goal) -> String {
     format!(
         "{} of {} {}",
         goal_amount(&goal.metric, goal.progress),
-        goal.target,
+        count_text(goal.target),
         goal_unit(&goal.metric, f64::from(goal.target))
     )
 }
@@ -618,7 +620,7 @@ pub fn goal_pace(goal: &Goal, today: Date) -> Option<String> {
     if today < goal.start {
         return Some(format!("Starts {}", goal.start.format("%b %-d, %Y")));
     }
-    if today > goal.end {
+    if today > goal.last_day() {
         let short = (f64::from(goal.target) - goal.progress).ceil();
         return Some(format!(
             "Ended {} {} short",
@@ -644,11 +646,9 @@ pub fn goal_pace(goal: &Goal, today: Date) -> Option<String> {
 /// `500 pages by Jun 30, 2026` for other dates.
 pub fn goal_description(metric: &GoalMetric, target: u32, start: Date, end: Date) -> String {
     let unit = goal_unit(metric, f64::from(target));
-    let period = goal_period(start, end);
-    if period.len() == 4 {
-        format!("{target} {unit} in {period}")
-    } else {
-        format!("{target} {unit} by {}", end.format("%b %-d, %Y"))
+    match goal_year(start, end) {
+        Some(year) => format!("{target} {unit} in {year}"),
+        None => format!("{target} {unit} by {}", end.format("%b %-d, %Y")),
     }
 }
 
@@ -831,6 +831,28 @@ mod tests {
             goal_description(&GoalMetric::Pages, 1, d(2026, 1, 1), d(2026, 6, 30)),
             "1 page by Jun 30, 2026"
         );
+        // Hardcover's own year goal, Jan 1 to Jan 1, says its year too.
+        assert_eq!(
+            goal_description(&GoalMetric::Books, 12, d(2026, 1, 1), d(2027, 1, 1)),
+            "12 books in 2026"
+        );
+        assert_eq!(
+            goal_progress(&goal(GoalMetric::Pages, 5_000, 1_200.0)),
+            "1,200 of 5,000 pages"
+        );
+    }
+
+    #[test]
+    fn a_hardcover_year_goal_has_ended_on_new_years_day() {
+        let d = |y, m, d| Date::from_ymd_opt(y, m, d).unwrap();
+        let mut g = goal(GoalMetric::Books, 12, 11.0);
+        g.start = d(2026, 1, 1);
+        g.end = d(2027, 1, 1);
+        assert_eq!(
+            goal_pace(&g, d(2026, 12, 31)).unwrap(),
+            "1 book behind pace"
+        );
+        assert_eq!(goal_pace(&g, d(2027, 1, 1)).unwrap(), "Ended 1 book short");
     }
 
     #[test]
@@ -1095,7 +1117,10 @@ mod tests {
             ),
             "Paused at 42% · since Dec 1, 2025"
         );
-        assert_eq!(paused_text(&summary(None, None, None), None, today), "Paused");
+        assert_eq!(
+            paused_text(&summary(None, None, None), None, today),
+            "Paused"
+        );
         let audio = ProgressSummary {
             seconds: Some(7_500),
             total_seconds: Some(36_000),
