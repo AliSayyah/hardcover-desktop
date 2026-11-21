@@ -16,14 +16,16 @@ use gpui_kit::{
     Render, SharedString, Styled as _, Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::{
-    CancelHandle, GrantedScopes, OAuthConfig, Session, StaticToken, Tokens, begin_sign_in,
+    CancelHandle, GrantedScopes, KeyringTokenStore, OAuthConfig, PendingSignIn, Session,
+    StaticToken, Tokens, begin_sign_in,
 };
 use hardcover_core::{Client, Error, UserId};
 
+use super::keyring_message;
 use super::sign_in_view::SIGN_IN_TIMEOUT;
 use crate::app_state::Services;
 use crate::design::{TypeRoles as _, colors};
-use crate::format::{error_message, permissions_message};
+use crate::format::permissions_message;
 use crate::library::model::LibraryModel;
 use crate::ui::kit::SmallControl as _;
 
@@ -111,6 +113,9 @@ impl Reauthorize {
                         if !session.is_signed_in() {
                             return Err(Error::Unauthorized);
                         }
+                        // The new tokens go to the keyring: say so now if
+                        // it can't take them, not after the browser.
+                        KeyringTokenStore::check_available()?;
                         let user = match user {
                             Some(user) => user,
                             None => client.me()?.id,
@@ -131,18 +136,18 @@ impl Reauthorize {
             let opened = this.update(cx, |this, cx| {
                 cx.open_url(&url);
                 this.state = State::Waiting {
-                    cancel,
+                    cancel: cancel.clone(),
                     url: url.clone().into(),
                 };
                 cx.notify();
             });
             if opened.is_err() {
                 // The notice is gone (signed out): stop listening.
-                pending.cancel_handle().cancel();
+                cancel.cancel();
                 return;
             }
             let result = cx
-                .background_spawn(async move { replace_tokens(&session, pending, user) })
+                .background_spawn(async move { replace_tokens(&session, pending, user, &cancel) })
                 .await;
             let _ = this.update(cx, |this, cx| match result {
                 Ok(scopes) => {
@@ -162,7 +167,9 @@ impl Reauthorize {
     fn fail(&mut self, failure: Failure, cx: &mut Context<Self>) {
         let message = match failure {
             Failure::Core(Error::Timeout) => "Sign-in timed out. Try again.".to_owned(),
-            Failure::Core(e) => error_message(&e),
+            // The session's tokens live in the keyring.
+            Failure::Core(e @ Error::Storage(_)) => keyring_message(&e),
+            Failure::Core(e) => Services::error_message(&e, None, cx),
             Failure::OtherAccount(username) => format!(
                 "You approved as @{username}, not the account shown here. To switch accounts, sign out first."
             ),
@@ -227,14 +234,16 @@ impl Drop for Reauthorize {
 }
 
 /// Blocking: waits for the browser, checks the account, then swaps the tokens
-/// into the session.
+/// into the session, unless the sign-in was cancelled meanwhile.
 fn replace_tokens(
     session: &Session,
-    pending: hardcover_core::auth::PendingSignIn,
+    pending: PendingSignIn,
     user: UserId,
+    cancel: &CancelHandle,
 ) -> Result<GrantedScopes, Failure> {
+    // A cancel during the code exchange revokes the new tokens there.
     let tokens = pending.wait(SIGN_IN_TIMEOUT)?;
-    let result = adopt(session, &tokens, user);
+    let result = adopt(session, &tokens, user, cancel);
     if result.is_err() {
         // `Session::replace` saves before it swaps, so after any failure the
         // session still holds its old tokens and nobody will use these ones:
@@ -248,8 +257,14 @@ fn replace_tokens(
     Ok(session.granted_scopes())
 }
 
-/// Swaps `tokens` into `session` if they belong to `user`.
-fn adopt(session: &Session, tokens: &Tokens, user: UserId) -> Result<(), Failure> {
+/// Swaps `tokens` into `session` if they belong to `user` and the sign-in
+/// wasn't cancelled.
+fn adopt(
+    session: &Session,
+    tokens: &Tokens,
+    user: UserId,
+    cancel: &CancelHandle,
+) -> Result<(), Failure> {
     // A throwaway client on the new access token: the session's own client
     // remembers the old account's id.
     let probe = StaticToken::new(tokens.access_token())
@@ -257,6 +272,9 @@ fn adopt(session: &Session, tokens: &Tokens, user: UserId) -> Result<(), Failure
     let me = Client::new(Arc::new(probe)).me()?;
     if me.id != user {
         return Err(Failure::OtherAccount(me.username));
+    }
+    if cancel.is_cancelled() {
+        return Err(Failure::Core(Error::Cancelled));
     }
     // Refused once the user signed out meanwhile.
     session.replace(tokens.clone()).map_err(Failure::from)

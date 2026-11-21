@@ -22,7 +22,7 @@ use gpui_kit::{
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::store::LibraryCache;
-use hardcover_core::{ListId, ReadingStatus};
+use hardcover_core::{Error, ListId, ReadingStatus};
 
 use crate::about::open_about;
 use crate::app_state::{CoverService, Services, Startup, startup};
@@ -112,7 +112,11 @@ impl Shell {
                     }
                     Startup::SignedOut { cache } => {
                         this.cache = cache;
-                        this.show_sign_in(window, cx);
+                        this.show_sign_in(None, window, cx);
+                    }
+                    Startup::KeyringUnavailable { cache, error } => {
+                        this.cache = cache;
+                        this.show_sign_in(Some(&error), window, cx);
                     }
                 }
             });
@@ -131,19 +135,29 @@ impl Shell {
         self.subscription = Some(cx.subscribe_in(
             &workspace,
             window,
-            |this, _, _: &SignedOut, window, cx| this.show_sign_in(window, cx),
+            |this, _, _: &SignedOut, window, cx| this.show_sign_in(None, window, cx),
         ));
         workspace.update(cx, |w, cx| w.focus_initial(window, cx));
         self.screen = Screen::Workspace(workspace);
         cx.notify();
     }
 
-    fn show_sign_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The sign-in screen; with `keyring_error`, the keyring couldn't be read
+    /// at startup and the screen offers to try again.
+    fn show_sign_in(
+        &mut self,
+        keyring_error: Option<&Error>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if cx.has_global::<Services>() {
             cx.remove_global::<Services>();
         }
         ListsModel::release(cx);
-        let sign_in = cx.new(|cx| SignInView::new(window, cx));
+        let sign_in = cx.new(|cx| match keyring_error {
+            Some(error) => SignInView::keyring_unavailable(error, window, cx),
+            None => SignInView::new(window, cx),
+        });
         self.subscription =
             Some(
                 cx.subscribe_in(&sign_in, window, |this, _, event: &SignedIn, window, cx| {

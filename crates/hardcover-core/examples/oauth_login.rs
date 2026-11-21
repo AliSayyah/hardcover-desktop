@@ -21,8 +21,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pending.authorize_url()
     );
     println!("Listening for the redirect on {}", pending.redirect_uri());
+    let store = Arc::new(KeyringTokenStore::for_client(cfg.client_id())?);
     let tokens = pending.wait(Duration::from_mins(30))?;
-    let session = Session::start(cfg, Arc::new(KeyringTokenStore::new()?), tokens)?;
+    let session = Session::start(cfg, store, tokens)?;
     println!(
         "Signed in. Session stored in the keyring (scope: {:?}).",
         session.scope()
