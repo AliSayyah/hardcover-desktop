@@ -9,12 +9,22 @@
 //! The colours are tokens (`design::colors`): `gold` for the user's own
 //! rating, nothing else; `fg_muted` for catalogue figures (the Hardcover
 //! average, the ratings breakdown); `star_empty` for an unfilled star.
+//!
+//! [`outline`] is the same star as a ring: the rating control's hover
+//! preview draws it in `gold` over the empty star, so the stars a click
+//! would set differ from a saved rating by shape, not by lightness alone.
 
 use gpui_kit::component::Icon;
 
 const SVG: &[u8] = include_bytes!("../../../assets/icons/star.svg");
+const OUTLINE_SVG: &[u8] = include_bytes!("../../../assets/icons/star-outline.svg");
 
 /// The star. Size and color are set by the caller, or come from the text.
 pub fn icon() -> Icon {
     Icon::empty().data(SVG)
+}
+
+/// The star's outline alone, the same size as [`icon`]'s solid star.
+pub fn outline() -> Icon {
+    Icon::empty().data(OUTLINE_SVG)
 }

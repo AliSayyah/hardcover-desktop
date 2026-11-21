@@ -70,36 +70,46 @@ selected row.
 | `chip` | ink 7% | ink 8% | Chip fill |
 | `skeleton` | `#E9E4DA` | `#2B2825` | Something still loading (about 1.2:1 on paper in both themes) |
 | `border` | `#E4DED3` | `#292623` | Hairlines between regions and sections |
-| `border-strong` | `#D0C8BA` | `#3D3934` | Control outlines |
+| `border-strong` | `#918879` | `#77706A` | Control outlines: at least 3:1 on `raised`, paper, `surface` and the sidebar, since a field's outline is all that marks it |
 | `track` | `#E0D9CC` | `#35312C` | The empty part of a meter; an off switch |
 | `switch-thumb` | `#FFFFFF` (`raised`) | `#EEEAE3` (`fg`) | A switch's thumb, on `track` and on `accent`. In dark mode a `raised` thumb on `track` is 1.2:1, and gone once a disabled switch fades its track |
 | `fg` | `#1F1C17` | `#EEEAE3` | Ink: text |
 | `fg-muted` | `#5F574B` | `#ABA498` | Secondary text that carries information: authors, facts, counts, labels |
-| `fg-faint` | `#857D70` | `#807A6F` | Placeholders, disabled hints, empty-state icons. Nothing a reader must read |
+| `fg-faint` | `#7A7266` | `#8D877C` | Empty-state icons and other marks. Never text |
 | `accent` | `#3B4A9C` | `#98A5F4` | Ink blue (details below the table) |
 | `accent-fg` | `#FFFFFF` | `#12142A` | Text on accent |
 | `accent-soft` | accent 10% | accent 14% | The avatar's fill |
 | `ring` | accent 50% | accent 50% | The 2 px focus ring |
-| `gold` | `#F59E0B` (amber 500) | `#FBBF24` (amber 400) | The user's own rating, nothing else |
-| `gold-preview` | gold 55% | gold 55% | The rating control's hover preview: the stars a click would set |
-| `star-empty` | ink 14% | ink 14% | An unfilled star |
-| `danger` | `#B42318` | `#F97066` | Destructive commands and errors |
+| `gold` | `#A16207` (ochre) | `#FBBF24` (amber 400) | The user's own rating, nothing else. The hover preview draws it as an outline |
+| `star-empty` | ink 10% | ink 10% | An unfilled star |
+| `danger` | `#B42318` | `#FB8178` | Destructive commands and errors |
 | `warning` | `#B54708` | `#FDB022` | A content warning's icon; warnings |
 | `cover-edge` | `rgba(30,20,10,.16)` | `rgba(255,255,255,.12)` | The cover's 1 px edge |
 | `cover-hinge` | `rgba(30,20,10,.16)` | `rgba(0,0,0,.28)` | The hinge gradient's dark stop |
 | `cloth-ink` | `#F4ECDD` | `#F4ECDD` | Type and stamp on a cloth cover |
+| `scrim` | ink 16% | black 48% | The backdrop behind a dialog |
 
 Accent is used on progress, the primary commit, the focus ring, the selected
 sidebar icon, links that open the browser, the brand icon, and a genre
 chip's icon. Nothing else.
 
-Contrast, checked over every surface alone, hovered and selected:
-- `fg-muted` is at least 4.7:1 in both themes (WCAG AA), so it may carry
-  information;
-- `fg-faint` is about 3.7:1, so it must never carry anything a reader needs;
-- accent on paper is at least 5:1, and on a chip at least 5.3:1.
+Contrast, checked over every surface alone, hovered and selected
+(`design::contrast_audit` fails the build when a token breaks one):
+- **Text that carries information is at least 4.5:1** (WCAG 1.4.3):
+  `fg-muted` at least 4.7:1 in both themes, so it may carry information;
+  accent on paper at least 5:1 and on a chip at least 4.8:1; danger on
+  paper and in a dialog, pressed too.
+- **Marks that carry meaning without words are at least 3:1** (WCAG
+  1.4.11): `border-strong` on `raised`, paper, `surface` and the sidebar
+  (3:1 to 3.9:1); `gold` against an empty star on paper, hovered or
+  selected (3.1:1 light, 6.4:1 dark); the catalogue's `fg-muted` stars
+  against an empty one; the warning icon on a chip.
+- **`fg-faint` is 3.3:1 to 5.4:1**: enough for an icon, never enough for
+  text. Placeholders are `fg-muted`.
 
-A new colour role needs the same check. The mockup's console audit does it.
+A new colour role needs the same check: add its pairs to
+`design::contrast_audit` (the mockup's console audit shows the same
+numbers).
 
 **Cloth colours** are eight book-cloth tones, the same in both themes.
 cloth-ink on each is at least 5:1.
@@ -331,7 +341,7 @@ dust jacket.
 
 - Input and select are 32 high, `raised`, with a 1 px `border-strong` and
   `r-control`.
-  - Placeholder: `fg-faint`.
+  - Placeholder: `fg-muted` (the kit's `muted_foreground`).
   - A leading icon: 16 px, `fg-muted`.
   - A small select is 24 high.
 - A switch is 28 × 16 (the kit's `.small()`): `track` when off, `accent`
@@ -380,15 +390,20 @@ Never colour-code chips, and never use a badge for ordinary metadata.
 
 - The app's own rounded solid star. Sizes: 20 for the rating control, 16
   in rows, 12 inline; gap 2.
-- **Your rating:** `gold` fill.
+- **Your rating:** `gold` fill. It reads at 3:1 against an empty star.
 - **Hardcover's figures** (the average, the breakdown): the same star in
   `fg-muted`.
 - **An empty star:** the same shape in `star-empty`, so a half star splits
   cleanly.
 - An unrated rating control reads "Rate" beside it, in `fg-muted`.
 - **Hover preview:** over the rating control, the stars a click would set
-  show in `gold-preview` (gold 55%). It is the pointer's preview, never a
-  saved rating; the keyboard changes the rating itself.
+  show as `gold` outlines over the empty star (`star::outline`): they
+  differ from a saved rating by shape, not by lightness alone. It is the
+  pointer's preview, never a saved rating; the keyboard changes the rating
+  itself.
+- **Pointer targets:** each half star is a slice of the whole control, its
+  full height, and the 2 px gaps belong to the halves beside them: ten
+  equal slices, no dead space.
 - In code: the rating control is `book::star_rating::StarRating` (20;
   `.small()` 16 in a row); a rating only shown is `ui::Stars` (16;
   `.small()` 12 inline).
@@ -556,7 +571,7 @@ Each state has one treatment, on every control. Hover is never the only cue.
 | State | Treatment |
 | --- | --- |
 | Rest | As specified for the component |
-| Hover | The `hover` fill. A text button gains its underline. The rating control previews the stars a click would set in `gold-preview` |
+| Hover | The `hover` fill. A text button gains its underline. The rating control previews the stars a click would set as `gold` outlines |
 | Pressed, selected, open | The `selected` fill. A selected nav row also takes weight 500 and the accent icon. A menu button stays pressed while its menu is open |
 | Focus-visible | A 2 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
 | Disabled | 50% opacity, with no hover or pressed response. When the reason isn't obvious, say it beside the control or in its tooltip (`format::needs_permission`) |
@@ -927,8 +942,10 @@ it when you wire it.
 | `primary_hover`, `primary_active` | `hover`, `selected` blended into `accent` |
 | `button_danger` | clear: `danger` text, with `hover` and `selected` on hover and press |
 | `switch` (off), `switch_thumb` | `track`, `switch-thumb` |
-| `scrollbar_thumb`, `scrollbar_thumb_hover` | `border-strong`, `fg-faint` |
-| `tab_bar_segmented` | `chip` blended into `bg` |
+| `scrollbar_thumb`, `scrollbar_thumb_hover` | `border-strong`, `fg-muted` |
+| `tab_bar_segmented`, `tab_bar` | `chip` blended into `bg` (`tab_bar` paints a disabled segment) |
+| `info`, `success` | `fg-muted`: a notification's icon and a success check stay ink |
+| `overlay` | `scrim` |
 | `chart_1` to `chart_5`, `chart_grid` | `accent`, `track` |
 | `skeleton` | `skeleton` |
 | `danger` | `danger` |

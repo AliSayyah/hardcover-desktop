@@ -72,7 +72,7 @@ mod surfaces;
 pub(crate) mod test_support;
 mod text_button;
 
-pub(crate) use self::stars::{StarSize, render_star};
+pub(crate) use self::stars::{StarInk, StarSize, render_star};
 pub use self::{
     avatar::{Avatar, AvatarSize},
     byline_link::BylineLink,
