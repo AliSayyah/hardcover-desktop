@@ -491,17 +491,34 @@ fn read_scaled(cover: &Path, max_height: u32) -> Option<Arc<RenderImage>> {
         .into_iter()
         .filter_map(|(ext, _)| scaled_path(cover, max_height, ext))
         .find_map(|path| {
-            read_copy(&path).filter(|copy| copy.width <= max_height.saturating_mul(MAX_ASPECT))
+            let copy = read_copy(&path)?;
+            if copy.width > max_height.saturating_mul(MAX_ASPECT) {
+                let _ = std::fs::remove_file(&path);
+                return None;
+            }
+            Some(copy)
         })
         .and_then(to_render_image)
 }
 
 /// Reads a saved copy, in the layout it was saved in, and marks it as used.
-/// The one reader of copies, for showing one and for scaling from one.
+/// The one reader of copies, for showing one and for scaling from one. A
+/// copy that is there but doesn't read is deleted, so a copy on disk is one
+/// that can be used: the downloader skips a cover with every copy.
 fn read_copy(path: &Path) -> Option<Source> {
     let ext = path.extension()?.to_str()?;
     let (_, format) = COPY_FORMATS.into_iter().find(|(e, _)| *e == ext)?;
     let bytes = std::fs::read(path).ok()?;
+    let source = decode_copy(&bytes, format);
+    if source.is_some() {
+        mark_used(path);
+    } else {
+        let _ = std::fs::remove_file(path);
+    }
+    source
+}
+
+fn decode_copy(bytes: &[u8], format: image::ImageFormat) -> Option<Source> {
     let source = match format {
         image::ImageFormat::Jpeg => {
             // The JPEG decoder fills in a truncated file (say, one cut short
@@ -510,7 +527,7 @@ fn read_copy(path: &Path) -> Option<Source> {
             if !bytes.ends_with(&[0xFF, 0xD9]) {
                 return None;
             }
-            let rgb = image::load_from_memory_with_format(&bytes, format)
+            let rgb = image::load_from_memory_with_format(bytes, format)
                 .ok()?
                 .into_rgb8();
             Source {
@@ -522,7 +539,7 @@ fn read_copy(path: &Path) -> Option<Source> {
         }
         _ => {
             // Saved as BGRA under QOI's RGBA label.
-            let bgra = image::load_from_memory_with_format(&bytes, format)
+            let bgra = image::load_from_memory_with_format(bytes, format)
                 .ok()?
                 .into_rgba8();
             Source {
@@ -533,7 +550,6 @@ fn read_copy(path: &Path) -> Option<Source> {
             }
         }
     };
-    mark_used(path);
     Some(source)
 }
 

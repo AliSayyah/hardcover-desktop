@@ -38,6 +38,17 @@ pub enum AvatarSize {
     Xl,
 }
 
+impl AvatarSize {
+    /// The height of the copy the picture is drawn from: sharp up to 2.25x
+    /// scale (the 128 px photo from a 144 px thumbnail was enlarged at 2x).
+    fn image_height(self) -> u32 {
+        match self {
+            Self::Md => THUMBNAIL_HEIGHT,
+            Self::Xl => MEDIUM_COVER_HEIGHT,
+        }
+    }
+}
+
 /// A person's avatar. See the module doc.
 #[derive(IntoElement)]
 pub struct Avatar {
@@ -105,11 +116,7 @@ impl RenderOnce for Avatar {
             if is_svg(url) {
                 cover_file(url, window, cx).map(ImageSource::from)
             } else {
-                let height = match self.size {
-                    AvatarSize::Md => THUMBNAIL_HEIGHT,
-                    AvatarSize::Xl => MEDIUM_COVER_HEIGHT,
-                };
-                load_cover(url, height, window, cx)
+                load_cover(url, self.size.image_height(), window, cx)
                     .flatten()
                     .map(ImageSource::from)
             }
@@ -182,6 +189,21 @@ mod tests {
         assert_eq!(initials("@quill_reads"), "Q");
         assert_eq!(initials("شیرین"), "ش");
         assert_eq!(initials(""), "");
+    }
+
+    #[test]
+    fn pictures_are_drawn_from_a_copy_sharp_at_two_times() {
+        for size in [AvatarSize::Md, AvatarSize::Xl] {
+            let side = match size {
+                AvatarSize::Md => size::AVATAR,
+                AvatarSize::Xl => size::AVATAR_LARGE,
+            };
+            #[expect(clippy::cast_precision_loss, reason = "small heights")]
+            let height = size.image_height() as f32;
+            // At the default 16 px rem.
+            let side = f32::from(side.to_pixels(gpui_kit::px(16.)));
+            assert!(height >= 2. * side, "{size:?}");
+        }
     }
 
     #[test]

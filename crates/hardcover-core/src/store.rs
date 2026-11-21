@@ -323,8 +323,9 @@ impl LibraryCache {
     }
 
     /// Forgets everything (use on sign-out), leaving none of it readable in
-    /// the file: deleted rows are overwritten (`secure_delete`), and the WAL,
-    /// which still holds the old pages, is checkpointed and truncated.
+    /// the files: deleted rows are overwritten (`secure_delete`), the WAL,
+    /// which still holds the old pages, is checkpointed and truncated, and a
+    /// damaged file set aside is deleted.
     ///
     /// # Errors
     ///
@@ -335,7 +336,12 @@ impl LibraryCache {
         conn.execute_batch(
             "DELETE FROM library_entries; DELETE FROM sync_state; DELETE FROM current_user;",
         )?;
-        if self.path.is_some() {
+        if let Some(path) = &self.path {
+            // A damaged file set aside holds the old library too.
+            match std::fs::remove_file(aside_path(path)) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                _ => {}
+            }
             let busy: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))?;
             if busy != 0 {
                 return Err(Error::Storage(
@@ -420,12 +426,17 @@ fn make_private(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Where a damaged database is set aside.
+fn aside_path(path: &Path) -> PathBuf {
+    let mut aside = path.as_os_str().to_owned();
+    aside.push(".damaged");
+    PathBuf::from(aside)
+}
+
 /// Moves a damaged database aside, replacing the one set aside before, and
 /// deletes its WAL and journal, which belong to it.
 fn set_aside(path: &Path) -> std::io::Result<()> {
-    let mut aside = path.as_os_str().to_owned();
-    aside.push(".damaged");
-    std::fs::rename(path, aside)?;
+    std::fs::rename(path, aside_path(path))?;
     for file in companions(path) {
         match std::fs::remove_file(file) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
@@ -688,12 +699,6 @@ mod tests {
         assert_eq!(c.load_library(me).unwrap(), loaded);
     }
 
-    fn aside(path: &Path) -> PathBuf {
-        let mut name = path.as_os_str().to_owned();
-        name.push(".damaged");
-        PathBuf::from(name)
-    }
-
     #[test]
     fn a_file_that_is_not_a_database_is_set_aside_and_replaced() {
         let dir = tempfile::tempdir().unwrap();
@@ -709,7 +714,7 @@ mod tests {
             .unwrap();
         assert_eq!(c.load_library(UserId::new(1)).unwrap().len(), 1);
         assert_eq!(
-            std::fs::read(aside(&path)).unwrap(),
+            std::fs::read(aside_path(&path)).unwrap(),
             b"this is not a database, just some bytes long enough"
         );
     }
@@ -734,7 +739,7 @@ mod tests {
         let c = LibraryCache::open(&path).unwrap();
         assert_eq!(c.load_library(UserId::new(1)).unwrap(), []);
         c.upsert(&entry(1, 1, ReadingStatus::Read)).unwrap();
-        assert!(aside(&path).is_file());
+        assert!(aside_path(&path).is_file());
     }
 
     #[test]
@@ -799,8 +804,11 @@ mod tests {
                 .any(|bytes| bytes.windows(needle.len()).any(|w| w == needle))
         };
         assert!(on_disk(b"MARGINALIA-"));
+        // And a damaged file an earlier launch set aside.
+        std::fs::write(aside_path(&path), b"MARGINALIA- from a damaged file").unwrap();
 
         c.clear().unwrap();
+        assert!(!aside_path(&path).exists());
         // With the connection still open, as it is after signing out.
         assert!(!on_disk(b"MARGINALIA-"), "the notes are still in the file");
         assert!(

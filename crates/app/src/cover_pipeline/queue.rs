@@ -245,16 +245,18 @@ mod tests {
         let usage = Arc::new(Mutex::new(Usage::default()));
         // Holds the one thread until every job is queued.
         let (gate, wait) = mpsc::channel::<()>();
-        let wait = Mutex::new(wait);
+        let (started, has_started) = mpsc::channel::<()>();
+        let (wait, started) = (Mutex::new(wait), Mutex::new(started));
         let queue = Queue::spawn("test-queue", 1, usage.clone(), move |Named(name, done)| {
             if name == "gate" {
+                let _ = lock(&started).send(());
                 let _ = lock(&wait).recv();
             }
             let _ = done.send(name);
         });
         let (done, order) = mpsc::channel();
         assert!(queue.push(Named("gate", done.clone())).is_ok());
-        std::thread::sleep(Duration::from_millis(50));
+        has_started.recv_timeout(Duration::from_secs(5)).unwrap();
         for name in ["tidy-1", "row-1", "row-2", "tidy-2", "row-3"] {
             assert!(queue.push(Named(name, done.clone())).is_ok());
         }

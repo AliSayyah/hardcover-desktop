@@ -256,6 +256,27 @@ fn a_copy_wider_than_the_cap_is_not_used() {
     };
     write_scaled(&cover, THUMBNAIL_HEIGHT, &wide).unwrap();
     assert!(read_scaled(&cover, THUMBNAIL_HEIGHT).is_none());
+    assert!(!has_scaled(&cover, THUMBNAIL_HEIGHT), "deleted");
+}
+
+#[test]
+fn a_damaged_copy_is_deleted_so_the_cover_is_downloaded_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let cover = dir.path().join("cover.png");
+    sample(&cover, 600, 900, false);
+    load(&cover, THUMBNAIL_HEIGHT).unwrap();
+    assert!(has_every_copy(&cover) && !cover.exists());
+    // Every copy is there, but the detail one is cut short.
+    let detail = scaled_path(&cover, COVER_HEIGHT, "jpg").unwrap();
+    let bytes = std::fs::read(&detail).unwrap();
+    std::fs::write(&detail, &bytes[..bytes.len() / 2]).unwrap();
+
+    assert!(matches!(
+        Decoding::new(None).load(&cover, COVER_HEIGHT),
+        Loaded::NoSource
+    ));
+    // The downloader skips a cover with every copy: no longer this one.
+    assert!(!has_every_copy(&cover));
 }
 
 #[test]
