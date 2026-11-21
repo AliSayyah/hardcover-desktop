@@ -449,7 +449,7 @@ impl Workspace {
     /// with focus on the control that opened the page left; on the page's or
     /// the destination's own focus if that control is gone.
     fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((_, opener)) = self.pages.pop() else {
+        let Some(opener) = self.pages.pop() else {
             return;
         };
         if self.pages.current().is_some() {

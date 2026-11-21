@@ -65,10 +65,14 @@ impl PageStack {
         true
     }
 
-    /// Leaves the current page: `None` if there was none, else the page and where focus
-    /// was when it opened.
-    pub fn pop(&mut self) -> Option<(Page, Option<FocusReturn>)> {
-        self.pages.pop()
+    /// Leaves the current page: `None` if there was none, else where focus was
+    /// when it opened.
+    #[expect(
+        clippy::option_option,
+        reason = "None means no page, while Some(None) means a page without an opener"
+    )]
+    pub fn pop(&mut self) -> Option<Option<FocusReturn>> {
+        self.pages.pop().map(|(_, from)| from)
     }
 
     pub fn clear(&mut self) {
