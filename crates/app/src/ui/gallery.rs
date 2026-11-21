@@ -105,7 +105,7 @@ fn tools() -> Vec<AnyElement> {
 }
 
 impl Render for Gallery {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
         let main = v_flex()
             .flex_1()
@@ -122,7 +122,7 @@ impl Render for Gallery {
             .child(kit_fixes(&self.input, cx))
             .child(empty(cx))
             .child(stars_and_links())
-            .child(shelf_and_columns(cx))
+            .child(shelf_and_columns(window, cx))
             .child(wrapping_text(cx));
 
         v_flex()
@@ -865,7 +865,7 @@ fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
         )
 }
 
-fn shelf_and_columns(cx: &App) -> AnyElement {
+fn shelf_and_columns(window: &Window, cx: &App) -> AnyElement {
     const TITLES: [&str; 9] = [
         "Fourth Wing",
         "Tomorrow, and Tomorrow, and Tomorrow",
@@ -889,7 +889,7 @@ fn shelf_and_columns(cx: &App) -> AnyElement {
     let main = || column("The main column");
     let section = || RailSection::new("Newest on Want to read").child(shelf());
     // Home's second column: one row, as many as fit (here a 448 column).
-    let rem = px(16.);
+    let rem = window.rem_size();
     let fit = books_that_fit(size::WIDE_COLUMN_MIN.to_pixels(rem), CoverSize::Md, rem);
     let one_row = div()
         .flex()

@@ -221,9 +221,11 @@ pub(crate) const THUMBNAIL_HEIGHT: u32 = 144;
 /// books), in image pixels. An lg cover is 120 px tall, so this is sharp up
 /// to 2.4x scale, and an md one (96 px) up to 3x.
 pub(crate) const MEDIUM_COVER_HEIGHT: u32 = 288;
-/// Height of the decoded detail cover, in image pixels. The cover is 12rem
-/// tall, so this is sharp up to 2.5x scale with the default rem.
-const COVER_HEIGHT: u32 = 480;
+/// Height of the decoded detail cover, in image pixels. The full book page's
+/// xxl cover is 240 design px tall, so this is sharp up to 2.5 device px per
+/// design px: a desktop scale of 2 at the interface scale of 1.25 (`ui_scale`,
+/// a 27" 5K monitor).
+const COVER_HEIGHT: u32 = 600;
 /// Every height a cover is scaled to. A download is decoded once into all of
 /// them, and then deleted: the scaled copies are the cache.
 const SCALED_HEIGHTS: [u32; 3] = [THUMBNAIL_HEIGHT, MEDIUM_COVER_HEIGHT, COVER_HEIGHT];
@@ -635,7 +637,7 @@ fn scaled_size(src_width: u32, src_height: u32, max_height: u32) -> (u32, u32) {
 const SCALED_DIR: &str = "scaled";
 /// Bump whenever [`scale`] changes its output: copies made by an
 /// older build are then ignored, and deleted at the next start.
-const SCALED_VERSION: &str = "v1";
+const SCALED_VERSION: &str = "v2";
 /// A temporary file older than this was left by a write that never finished.
 const STALE_TEMP_AGE: std::time::Duration = std::time::Duration::from_hours(1);
 /// JPEG quality of saved medium and detail copies.
@@ -1079,8 +1081,8 @@ mod tests {
             pixels(&thumbnail)
         );
         let detail = load(&cover, COVER_HEIGHT).unwrap();
-        assert_eq!(pixels(&detail).0, 320);
-        assert_eq!(pixels(&detail).1, 480);
+        assert_eq!(pixels(&detail).0, 400);
+        assert_eq!(pixels(&detail).1, 600);
     }
 
     #[test]
