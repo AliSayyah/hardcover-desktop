@@ -218,11 +218,12 @@ selection fill or a nested surface its own radius.
 | Select | 168; small 128 | `size::SELECT`, `size::SELECT_SMALL` |
 | Meter | 6 high beside words, 2 high inside a row; 400 wide max (160 in a row) | |
 | Prose | 640 wide max | `size::PROSE` |
-| Book pane content | 768 wide max (`size::PAGE_MAX`) | |
 | Page content (Discover, Coming soon, Stats, Series, list, series and author pages) | fills the region inside the 32 inset; only reading text keeps the prose measure | `size::PAGE_INSET` |
 | A catalogue page's list beside the book pane | 704: the prose measure and the inset; the pane takes the rest | `size::PAGE_BESIDE_PANE` |
-| Home | 1024 wide max in two columns, 1840 in three; its inset included | `size::HOME_MAX`, `HOME_WIDE_MAX` |
-| Content column beside another (Home, wide) | 448 to 720 wide | `size::WIDE_COLUMN_MIN`, `COLUMN_MAX` |
+| Book pane and full book page | fill their region | |
+| Side column beside a book's text | at least 320 wide; the text keeps 640, 32 apart | `size::SIDE_MIN`, `size::PROSE` |
+| Home | fills the region | |
+| Content column beside another (Home, wide) | at least 448 wide; the two share the width beside the rail | `size::WIDE_COLUMN_MIN` |
 | Stats, two columns | each column at least 544, filling its half | `size::CHART_COLUMN_MIN` |
 | Chart | bars at most 48 wide; a year in Finished per year at least 64 | `size::CHART_BAR_MAX`, `CHART_YEAR_MIN` |
 | Empty-state text | 288 wide max | `w_72` |
@@ -571,24 +572,31 @@ Every screen starts from its task:
 - The sidebar (240) sits beside the destination.
 - Book, series and author pages open over the destination with a Back bar.
   A sidebar destination clears them.
-- **Wide window:** see "Wide windows" below. A book pane's tools stay over
-  its content.
+- **Wide window:** see "Wide windows" below. A book pane's tools sit at its
+  trailing edge, over its content.
 - **Short window:** when the sidebar's destinations don't all fit, a
   hairline over the account says the list scrolls under it.
 
 ### Wide windows
 
-Surplus width holds more content, never wider rows. A 4K monitor at 1.5
-gives about 2560 logical px; the 1200 × 800 default and the 800 × 560
-minimum are where the README's screenshots are taken, and every screen lays
-out there exactly as it did before this rule.
+Rows and panels fill the width they are given. Only reading text keeps its
+measure: `size::PROSE`, 640, for book descriptions and review text. The
+width left beside the text holds secondary blocks, and cover shelves add
+covers as they widen. A 4K monitor at 1.5 gives about 2560 logical px; a
+layout that stops short of it leaves a blank strip that reads as a bug. The
+1200 × 800 default and the 800 × 560 minimum are where the README's
+screenshots are taken, and every screen lays out there exactly as it did
+before this rule.
 
-- **Leading edge.** Content stays on the leading edge, on the same spine as
-  Back. It is never centred in the window; past a layout's widest tier, the
-  rest of the window stays paper on the trailing side.
-- **More columns, more items.** When a region is wide, it gains a column or
-  shows more items. Rows never stretch past their maximum, so a row's
-  actions stay by its book. Prose stays at 640.
+- **Leading edge.** Content starts on the leading edge, on the same spine as
+  Back. It is never centred in the window.
+- **Fill, then add.** A region's rows, panels and columns take its whole
+  width. Where the width grows past what a column needs, it gains a column
+  or shows more items: a cover shelf adds covers, a side column takes the
+  secondary blocks beside the text.
+- **Reading text keeps its measure.** A description, review text, notes and
+  other running prose stop at 640, in every layout; the rows around them
+  may be wider.
 - **Tiers come from the region.** Each layout picks its tier from the width
   its own region gets: the window less the sidebar, less any list beside it,
   less its insets. Never from the raw window width. The choice is a pure
@@ -596,11 +604,12 @@ out there exactly as it did before this rule.
   800 and 1200 (today's layout), on both sides of each threshold, and at
   1600 and 2560.
 - **Tiers by screen:**
-  - **Home:** two content columns of at least 448 beside the rail (a 1536
-    window) give it three columns: Continue reading; Coming soon, then Rate
-    what you finished; the rail. Each content column is at most 720, so Home
-    is at most 1840. With nothing for the second column, Home keeps two
-    columns at 1024.
+  - **Home:** fills its region in every tier. Two content columns of at
+    least 448 beside the rail (a 1536 window) give it three columns:
+    Continue reading; Coming soon, Rate what you finished, then Newest on
+    Want to read; the rail. The two content columns share the width beside
+    the rail equally. With nothing for the second column, Home keeps two
+    columns.
   - **Series:** the column fills the region. The strip takes the width,
     showing as many books as fit (45 at 2560) before it windows; the next
     lanes stay 240 and lined up on the trailing edge.
@@ -612,8 +621,12 @@ out there exactly as it did before this rule.
     at least 64, so a wider chart reaches further back when the library has
     the years (never fewer than 12). Shelves keeps the shelf list's 384,
     so its counts stay by their names.
-  - **The book pane:** keeps the 768 column for now; its wide tier is
-    added here.
+  - **The book pane and the full book page:** fill their region. When the
+    main column holds the 640 text and a side column of at least 320, 32
+    apart (`book::detail_view::side_width`; the full page in a 1592
+    window), the blocks under the panel split: About this book, Your
+    review and Reviews at 640; tags, other titles and Similar books in the
+    side column, filling the rest, in whole rows.
   - **Discover, list, series and author pages:** the list fills the region,
     and the page's intro line and any description keep the 640 measure.
     When the region also fits a book pane of 392 beside a 704 list (a 1337
@@ -635,10 +648,12 @@ out there exactly as it did before this rule.
   - **Object bar:** 56 high, no hairline. "Lists" (a ghost menu button with
     the gallery-vertical-end icon, the sidebar's list icon) and "more" (an
     icon button: "Open on Hardcover" for any book with a page there, then,
-    for a book in the library, its library commands) sit on the trailing edge, over the content: in a wide
-    window the bar keeps to the content's width and inset.
-    The book's tools live here, never over the title.
-  - **Content:** inset 24, with 0 above.
+    for a book in the library, its library commands) sit on the trailing
+    edge, over the content, which fills the pane. The book's tools live
+    here, never over the title.
+  - **Content:** inset 24, with 0 above. One column; when the pane fits a
+    main column of 400 beside the rail, the full page's columns with the
+    pane's xl header and inset.
 - **Header:** an xl cover beside the info column, 24 apart. The info column
   has, top to bottom:
   - the title in `display-24`;
@@ -681,7 +696,13 @@ out there exactly as it did before this rule.
   - Your review;
   - Reviews (other readers');
   - Similar books: lg covers with shadow, 16 apart, with titles at 12/500 in
-    at most two lines.
+    at most two lines. Eight, wrapping.
+- **Wide main column:** when it holds the 640 text and a 320 side column,
+  32 apart, the blocks under the panel split. The text column, exactly 640:
+  About this book, Your review, Reviews. The side column, filling the rest:
+  Tags, other titles, then Similar books as a grid of lg covers (rows 24
+  apart), two rows of as many as fit (at least eight, at most the sixteen
+  fetched).
 - **Rail:**
   - On Hardcover: the average as a `display-30` figure with muted 16 px
     stars; "4,280 ratings · 10,144 readers"; the ratings breakdown
@@ -735,16 +756,21 @@ out there exactly as it did before this rule.
     the title in `title-18`; the author; a small "Start reading".
   - A hairline.
   - **Newest on Want to read:** three md covers without shadow, 16 apart,
-    with titles at 12 px in two lines.
+    with titles at 12 px in two lines; the section's `label` has a small
+    ghost "See all 7" on the trailing edge.
 - Sections that don't apply (no goal, missing scope) disappear without
   leaving a gap.
 - **Narrow window:** when the main column would get less than 400 beside
   the rail, the rail's sections follow the main column, full width, under
   a hairline (`ui::Columns`).
+- **Width:** Home fills its region; the rows fill their columns.
 - **Wide window:** when two content columns of at least 448 fit beside the
-  rail, "Coming soon" and then "Rate what you finished" move to a second
-  column between the main column and the rail, each column at most 720
-  (`Columns::second`; see "Wide windows").
+  rail, "Coming soon", "Rate what you finished" and "Newest on Want to read"
+  move to a second column between the main column and the rail, 24 apart;
+  the two content columns share the width (`Columns::second`; see "Wide
+  windows"). There Newest on Want to read is a `section` with "See all N"
+  and one row of md covers with their titles, as many as the column holds,
+  never a second row.
 
 ### Coming soon (the full list, over Home)
 

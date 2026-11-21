@@ -76,8 +76,8 @@ pub(crate) use self::stars::{StarSize, render_star};
 pub use self::{
     avatar::{Avatar, AvatarSize},
     byline_link::BylineLink,
-    columns::{Columns, Tier, folds, tier},
-    cover_shelf::CoverShelf,
+    columns::{Columns, Tier, content_column_width, folds, main_column_width, tier},
+    cover_shelf::{CoverShelf, books_that_fit},
     empty_state::{EmptyState, empty_state, empty_state_with_action},
     external_link::ExternalLink,
     headers::{Greeting, PageHeader, SectionHeader, date_line, greeting_at, see_all},

@@ -12,11 +12,15 @@
 //! - **Rail:** the reading goal, Up next (the next book in a series) and the
 //!   newest on Want to read. A section that doesn't apply disappears; the
 //!   rail folds under the main column in a narrow window (`ui::Columns`).
+//! - **Width:** Home fills the width it is given; its rows fill their
+//!   columns.
 //! - **Wide region** ([`home_tier`], from the window less the sidebar and
 //!   the insets): when two content columns of at least 448 fit beside the
-//!   rail (a 1536 window), "Coming soon" and "Rate what you finished" move
-//!   to a second column, each column at most 720 and Home at most 1840.
-//!   With nothing for the second column, Home keeps its two columns.
+//!   rail (a 1536 window), "Coming soon", "Rate what you finished" and
+//!   "Newest on Want to read" move to a second column; the two content
+//!   columns share the width beside the rail. There the shelf is one row of
+//!   md covers, as many as the column holds ([`want_to_read_shown`]). With
+//!   nothing for the second column, Home keeps its two columns.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -41,7 +45,8 @@ use hardcover_core::{
 
 use super::coming_soon::coming_soon_section;
 use super::digest::{
-    Digest, Reading, SeriesNext, ToRate, compute, finished_per_month, finishing_by, to_rate,
+    Digest, Reading, SeriesNext, ToRate, UP_NEXT_IN_RAIL, compute, finished_per_month,
+    finishing_by, to_rate,
 };
 use crate::app_state::{Services, release_cover_image};
 use crate::bidi::is_rtl;
@@ -64,7 +69,8 @@ use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, CoverShelf, Greeting, Lane, Meter, MonthBars, RailSection, RowSpacing, SectionHeader,
-    Sequence, Skeleton, TextButton, Tier, date_line, empty_state, greeting_at, see_all, tier,
+    Sequence, Skeleton, TextButton, Tier, books_that_fit, content_column_width, date_line,
+    empty_state, greeting_at, see_all, tier,
 };
 use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
@@ -875,12 +881,21 @@ impl HomeView {
             .into_any_element()
     }
 
-    /// The newest books on Want to read, as a shelf of covers.
-    fn want_to_read_section(&self, digest: &Digest, cx: &App) -> AnyElement {
+    /// The newest books on Want to read, as a shelf of covers: in the rail,
+    /// or (`in_column`) as a section of the second content column, one row
+    /// of `shown` books.
+    fn want_to_read_section(
+        &self,
+        digest: &Digest,
+        shown: usize,
+        in_column: bool,
+        cx: &App,
+    ) -> AnyElement {
         let library = self.model.read(cx);
         let books = digest
             .up_next
             .iter()
+            .take(shown)
             .filter_map(|id| library.entry(*id))
             .map(|e| {
                 (
@@ -892,17 +907,24 @@ impl HomeView {
                 )
             });
         let count = u32::try_from(digest.want_to_read).unwrap_or(u32::MAX);
+        let all = see_all(
+            "home-all-want",
+            (count > 1).then_some(count),
+            |_, window, cx| window.dispatch_action(Box::new(ShowWantToRead), cx),
+        );
+        let shelf = CoverShelf::new(CoverSize::Md).books(books);
+        if in_column {
+            return div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(SectionHeader::new("Newest on Want to read").action(all))
+                .child(shelf.one_row())
+                .into_any_element();
+        }
         RailSection::new("Newest on Want to read")
-            .action(see_all(
-                "home-all-want",
-                (count > 1).then_some(count),
-                |_, window, cx| window.dispatch_action(Box::new(ShowWantToRead), cx),
-            ))
-            .child(
-                div()
-                    .pt_1()
-                    .child(CoverShelf::new(CoverSize::Md).books(books)),
-            )
+            .action(all)
+            .child(div().pt_1().child(shelf))
             .into_any_element()
     }
 }
@@ -917,7 +939,7 @@ impl Render for HomeView {
         if !loaded {
             return root
                 .child(
-                    page(false)
+                    page()
                         .child(header)
                         .child(div().pt_6().child(lead_skeleton())),
                 )
@@ -955,13 +977,6 @@ impl Render for HomeView {
             let entry = self.model.read(cx).entry(next.id)?.clone();
             Some(self.up_next_section(next, &entry, cx))
         });
-        // Want to Read books that are all still to come leave nothing to suggest.
-        let want = (!digest.up_next.is_empty()).then(|| self.want_to_read_section(&digest, cx));
-        let rail: Vec<AnyElement> = [goal_section, series_next, want]
-            .into_iter()
-            .flatten()
-            .collect();
-
         // The sidebar is fixed, so the columns get the rest of the window
         // less the page's insets.
         let rem = window.rem_size();
@@ -970,6 +985,26 @@ impl Render for HomeView {
             - size::PAGE_INSET.to_pixels(rem) * 2.;
         let has_second = rate.is_some() || coming_soon.is_some();
         let tier = home_tier(width, rem, has_second);
+
+        // Want to Read books that are all still to come leave nothing to
+        // suggest. In three columns the shelf leaves the rail for the second
+        // column, under Rate what you finished.
+        let has_want = !digest.up_next.is_empty();
+        let (want_in_rail, want_in_column) = if tier == Tier::Three {
+            let has_rail = goal_section.is_some() || series_next.is_some();
+            let shown = want_to_read_shown(width, rem, has_rail);
+            let section = (has_want && shown > 0)
+                .then(|| self.want_to_read_section(&digest, shown, true, cx));
+            (None, section)
+        } else {
+            let section =
+                has_want.then(|| self.want_to_read_section(&digest, UP_NEXT_IN_RAIL, false, cx));
+            (section, None)
+        };
+        let rail: Vec<AnyElement> = [goal_section, series_next, want_in_rail]
+            .into_iter()
+            .flatten()
+            .collect();
         let column = |sections: Vec<Option<AnyElement>>| {
             div()
                 .flex()
@@ -979,15 +1014,15 @@ impl Render for HomeView {
         };
         let columns = if tier == Tier::Three {
             // Coming soon leads the second column; Rate what you finished
-            // follows it.
-            Columns::new(reading).second(column(vec![coming_soon, rate]))
+            // and the newest on Want to read follow it.
+            Columns::new(reading).second(column(vec![coming_soon, rate, want_in_column]))
         } else {
             Columns::new(column(vec![Some(reading), rate, coming_soon]))
                 .folded(tier == Tier::Folded)
         };
         root.scroll_y_revealing_focus()
             .child(
-                page(tier == Tier::Three)
+                page()
                     .child(header)
                     .child(div().pt_6().child(columns.wide_gap().rail(rail))),
             )
@@ -1004,17 +1039,22 @@ fn home_tier(width: Pixels, rem: Pixels, has_second: bool) -> Tier {
     }
 }
 
+/// How many of the newest Want to Read books the second column's one row
+/// of md covers holds, in three columns `width` wide (the rail beside them
+/// if `has_rail`).
+fn want_to_read_shown(width: Pixels, rem: Pixels, has_rail: bool) -> usize {
+    books_that_fit(
+        content_column_width(width, rem, true, has_rail),
+        CoverSize::Md,
+        rem,
+    )
+}
+
 // ----- pieces -----
 
-/// Home's column: inset 32, at most [`size::HOME_MAX`] (in three columns,
-/// [`size::HOME_WIDE_MAX`]); the content columns take the surplus up to it.
-fn page(wide: bool) -> gpui_kit::Div {
-    let max = if wide {
-        size::HOME_WIDE_MAX
-    } else {
-        size::HOME_MAX
-    };
-    div().flex().flex_col().w_full().max_w(max).p_8()
+/// Home's column: the whole width, inset 32.
+fn page() -> gpui_kit::Div {
+    div().flex().flex_col().w_full().p_8()
 }
 
 /// The lead while the library loads.
@@ -1267,6 +1307,22 @@ mod tests {
         // Nothing to rate and nothing coming: two columns, however wide.
         assert_eq!(at(2560., false), Tier::Rail);
         assert_eq!(at(800., false), Tier::Folded);
+    }
+
+    #[test]
+    fn the_second_column_holds_as_many_want_to_read_covers_as_fit() {
+        let rem = gpui_kit::px(16.);
+        let at = |window: f32, rail: bool| {
+            want_to_read_shown(gpui_kit::px(window - 240. - 64.), rem, rail)
+        };
+        // At the three-column threshold each column is 448: five md covers.
+        assert_eq!(at(1536., true), 5);
+        // A 1600 laptop panel: (1296 - 336) / 2 = 480.
+        assert_eq!(at(1600., true), 6);
+        // A 4K monitor at 1.5: (2256 - 336) / 2 = 960.
+        assert_eq!(at(2560., true), 12);
+        // With an empty rail the columns share its width too.
+        assert_eq!(at(2560., false), 14);
     }
 
     #[test]
