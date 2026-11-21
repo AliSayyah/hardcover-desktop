@@ -194,6 +194,8 @@ impl HomeView {
             cx.observe(&goals, |_, _, cx| cx.notify()),
             cx.observe(&ratings, |_, _, cx| cx.notify()),
             cx.observe(&upcoming, |_, _, cx| cx.notify()),
+            // What it offers follows the grant (goals, rating, writes).
+            session::observe_grant(cx, |_, cx| cx.notify()),
         ];
         Self {
             model,

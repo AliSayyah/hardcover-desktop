@@ -57,8 +57,8 @@ use gpui_kit::component::select::{SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{ElementExt as _, IconName, WindowExt as _, v_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _,
-    IntoElement, ParentElement as _, Pixels, Render, RenderImage, SharedString, Styled as _,
-    Subscription, Task, Window, div,
+    IntoElement, ParentElement as _, Pixels, Render, RenderImage, SharedString, StyleRefinement,
+    Styled as _, Subscription, Task, Window, div,
 };
 use hardcover_core::{
     BookDetails, BookId, BookSummary, LibraryEntry, Privacy, Rating, ReadId, ReadSession,
@@ -278,6 +278,9 @@ pub struct BookDetailView {
     /// Each read's menu trigger, which its commands focus first.
     read_focus: RefCell<HashMap<ReadId, FocusHandle>>,
     _subscriptions: Vec<Subscription>,
+    /// Frames this view drew, for the tests.
+    #[cfg(test)]
+    renders: usize,
 }
 
 impl BookDetailView {
@@ -352,6 +355,8 @@ impl BookDetailView {
             add_read_focus: cx.focus_handle(),
             read_focus: RefCell::default(),
             _subscriptions: subscriptions,
+            #[cfg(test)]
+            renders: 0,
         }
     }
 
@@ -950,6 +955,7 @@ impl BookDetailView {
                 .into_any_element()
         };
         let measured = self.layout.clone();
+        let view = cx.entity_id();
         v_flex()
             .size_full()
             // GPUI has no container queries, and the pane sits beside a
@@ -957,7 +963,10 @@ impl BookDetailView {
             .on_prepaint(move |bounds, window, _| {
                 let layout = PaneLayout::at(bounds.size.width, window.rem_size());
                 if measured.replace(layout) != layout {
-                    window.refresh();
+                    // Drawn for the other layout. `refresh` does nothing
+                    // while a frame is drawn, and the view is cached: draw
+                    // it again on the next frame.
+                    window.on_next_frame(move |_, cx| cx.notify(view));
                 }
             })
             .child(ObjectBar::new().tools(self.render_tools(book, entry, window, cx)))
@@ -1128,6 +1137,20 @@ impl BookDetailView {
     }
 }
 
+impl BookDetailView {
+    /// `view` as its hosts embed it: cached, filling the place they give
+    /// it, so a host's own frames (a list's hover, a sync's spinner) don't
+    /// draw the book again. It draws again when it changes: everything it
+    /// shows is observed (the library, the catalogue, the lists, the grant,
+    /// its own child views), and the shell refreshes the window when the
+    /// day changes.
+    pub fn embedded(view: &Entity<Self>) -> AnyElement {
+        view.clone()
+            .cached(StyleRefinement::default().size_full())
+            .into_any_element()
+    }
+}
+
 impl ObjectTools for BookDetailView {
     fn object_tools(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         if !self.tools_in_bar {
@@ -1143,6 +1166,10 @@ impl ObjectTools for BookDetailView {
 
 impl Render for BookDetailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(test)]
+        {
+            self.renders += 1;
+        }
         // The cover first: loading it needs the context mutably, and the
         // rest borrows the book and the entry from the model.
         let cover_url = self
@@ -1422,6 +1449,103 @@ mod tests {
             cx.update(|window, _| add.is_focused(window)),
             "on Add to library"
         );
+    }
+
+    /// A host that embeds a book view, as the shelf, search, a list and
+    /// the book page do.
+    struct Host(Entity<BookDetailView>);
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(BookDetailView::embedded(&self.0))
+        }
+    }
+
+    /// A book view embedded in a [`Host`], showing the demo's first entry.
+    fn embedded_view(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<Host>,
+        Entity<BookDetailView>,
+        Entity<LibraryModel>,
+        &mut VisualTestContext,
+    ) {
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            session.install(cx);
+            Catalog::init(&session, cx);
+        });
+        let model = cx.new(|_| LibraryModel::new(session));
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            Host(cx.new(|cx| BookDetailView::new(model.clone(), window, cx)))
+        });
+        let view = host.read_with(cx, |h, _| h.0.clone());
+        cx.update(|window, cx| {
+            let id = model.read(cx).entries()[0].user_book_id;
+            view.update(cx, |v, cx| {
+                v.set_subject(Some(Subject::Entry(id)), window, cx)
+            });
+        });
+        settle(cx);
+        crate::ui::test_support::redraw(cx);
+        (host, view, model, cx)
+    }
+
+    fn renders(view: &Entity<BookDetailView>, cx: &mut VisualTestContext) -> usize {
+        view.read_with(cx, |v, _| v.renders)
+    }
+
+    /// C1: a host's own frames (a hover, a spinner) don't draw the book
+    /// view again; a change to what it shows does.
+    #[gpui_kit::test]
+    fn an_embedded_book_view_draws_only_when_it_changes(cx: &mut TestAppContext) {
+        use crate::ui::test_support::redraw;
+
+        let (host, view, model, cx) = embedded_view(cx);
+        let before = renders(&view, cx);
+
+        host.update(cx, |_, cx| cx.notify());
+        redraw(cx);
+        redraw(cx);
+        assert_eq!(
+            renders(&view, cx),
+            before,
+            "the host drew; the book view didn't"
+        );
+
+        model.update(cx, |_, cx| cx.notify());
+        redraw(cx);
+        assert_eq!(
+            renders(&view, cx),
+            before + 1,
+            "the library changed: drawn again"
+        );
+    }
+
+    /// A pane widened past `pane_has_rail` is drawn again with the rail on
+    /// the next frame, though it is cached: it measures itself only as it
+    /// is drawn.
+    #[gpui_kit::test]
+    fn a_widened_pane_takes_the_rail_on_the_next_frame(cx: &mut TestAppContext) {
+        use crate::ui::test_support::redraw;
+
+        let (_host, view, _, cx) = embedded_view(cx);
+        cx.simulate_resize(gpui_kit::size(px(600.), px(800.)));
+        redraw(cx);
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        redraw(cx);
+        assert!(!view.read_with(cx, |v, _| v.layout.get().rail));
+        cx.simulate_resize(gpui_kit::size(px(1400.), px(800.)));
+        redraw(cx);
+        assert!(view.read_with(cx, |v, _| v.layout.get().rail), "measured");
+        let drawn = renders(&view, cx);
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        redraw(cx);
+        assert!(renders(&view, cx) > drawn, "drawn again for the new layout");
     }
 
     #[gpui_kit::test]

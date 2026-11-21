@@ -887,7 +887,7 @@ impl SearchView {
     /// Beside the list: the selected book, or what opening a result does.
     fn render_detail(&self) -> AnyElement {
         match self.kind {
-            SearchKind::Books => self.detail.clone().into_any_element(),
+            SearchKind::Books => BookDetailView::embedded(&self.detail),
             SearchKind::Authors => empty_state(
                 IconName::User,
                 "Authors".into(),

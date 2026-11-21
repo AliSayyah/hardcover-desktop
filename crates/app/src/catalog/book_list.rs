@@ -249,7 +249,7 @@ impl ListPane {
                     .h_full()
                     .border_l_1()
                     .border_color(colors(cx).border)
-                    .child(self.detail.clone()),
+                    .child(BookDetailView::embedded(&self.detail)),
             )
             .into_any_element()
     }
