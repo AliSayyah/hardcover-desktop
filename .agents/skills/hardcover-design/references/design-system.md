@@ -218,6 +218,7 @@ selection fill or a nested surface its own radius.
 | Select | 168; small 128 | `size::SELECT`, `size::SELECT_SMALL` |
 | Meter | 6 high beside words, 2 high inside a row; 400 wide max (160 in a row) | |
 | Prose | 640 wide max | `size::PROSE` |
+| Book pane content | 768 wide max (`size::PAGE_MAX`) | |
 | Page content (Discover, Coming soon, Stats, Series, list, series and author pages) | fills the region inside the 32 inset; only reading text keeps the prose measure | `size::PAGE_INSET` |
 | A catalogue page's list beside the book pane | 704: the prose measure and the inset; the pane takes the rest | `size::PAGE_BESIDE_PANE` |
 | Home | 1024 wide max in two columns, 1840 in three; its inset included | `size::HOME_MAX`, `HOME_WIDE_MAX` |
@@ -609,7 +610,10 @@ out there exactly as it did before this rule.
     apart, so the third starts on the second column's spine. A chart fills
     its column, its bars widening up to 48; Finished per year gives a year
     at least 64, so a wider chart reaches further back when the library has
-    the years (never fewer than 12).
+    the years (never fewer than 12). Shelves keeps the shelf list's 384,
+    so its counts stay by their names.
+  - **The book pane:** keeps the 768 column for now; its wide tier is
+    added here.
   - **Discover, list, series and author pages:** the list fills the region,
     and the page's intro line and any description keep the 640 measure.
     When the region also fits a book pane of 392 beside a 704 list (a 1337

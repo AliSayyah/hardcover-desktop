@@ -381,8 +381,9 @@ fn render_ratings(stats: &ReadingStats, bar: Pixels, cx: &App) -> impl IntoEleme
 }
 
 /// Each shelf as the sidebar draws it: its icon, its name and its count on
-/// a trailing lane, tabular, so the counts line up. The rows fill their
-/// column, as rows do.
+/// a trailing lane, tabular, so the counts line up. Unlike other rows, they
+/// keep the shelf list's width (`size::LIST`), not their column's: six short
+/// names whose counts would otherwise sit a column's width away from them.
 fn render_shelves(stats: &ReadingStats, cx: &App) -> impl IntoElement {
     let muted = colors(cx).fg_muted;
     let rows = stats.shelves.iter().map(|(status, count)| {
@@ -402,7 +403,7 @@ fn render_shelves(stats: &ReadingStats, cx: &App) -> impl IntoElement {
                 Lane::trailing().child(div().tabular().text_color(muted).child(count_text(*count))),
             )
     });
-    section("Shelves").child(v_flex().children(rows))
+    section("Shelves").child(v_flex().max_w(size::LIST).children(rows))
 }
 
 #[cfg(test)]
