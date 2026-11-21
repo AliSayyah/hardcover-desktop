@@ -166,7 +166,7 @@ fn headers() -> AnyElement {
         "Page header, greeting, section header",
         v_flex()
             .gap_6()
-            .child(PageHeader::new("Currently reading").count(1204))
+            .child(PageHeader::new("Currently reading").count(1204_u32))
             .child(
                 PageHeader::new("Coming soon")
                     .line("5 books still to come in the series on your shelves"),

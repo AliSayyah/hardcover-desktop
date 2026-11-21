@@ -57,9 +57,9 @@ use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverArt, CoverSize, detail_art};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{
-    ProgressSummary, authors_text, books_count_text, count_text, goal_amount, goal_pace,
-    goal_period, goal_unit, needs_permission, progress_summary, rating_text, series_position_text,
-    short_date,
+    authors_text, books_count_text, count_text, goal_amount, goal_pace, goal_unit,
+    needs_permission, paused_text, percent_label, progress_summary, rating_text,
+    series_position_text, short_date,
 };
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
@@ -455,7 +455,7 @@ impl HomeView {
                                             .truncate()
                                             .body_strong()
                                             .tabular()
-                                            .child(position_text(&progress)),
+                                            .child(progress.text()),
                                     )
                                     .children(progress.percent.map(|pct| {
                                         div()
@@ -463,7 +463,7 @@ impl HomeView {
                                             .body()
                                             .tabular()
                                             .text_color(muted)
-                                            .child(percent_text(pct))
+                                            .child(percent_label(pct))
                                     })),
                             )
                             .child(
@@ -498,7 +498,7 @@ impl HomeView {
         let muted = colors(cx).fg_muted;
         let progress = progress_summary(entry);
         let author = authors_text(&entry.book.authors);
-        let mut facts = vec![position_text(&progress)];
+        let mut facts = vec![progress.text()];
         facts.extend(pace_facts(reading, today));
         let [update, finish] = self.reading_actions(entry, true, cx);
 
@@ -532,7 +532,7 @@ impl HomeView {
                                     .w(size::METER_IN_ROW)
                                     .accessibility_label("Reading progress"),
                             )
-                            .child(div().caption(cx).tabular().child(percent_text(pct)))
+                            .child(div().caption(cx).tabular().child(percent_label(pct)))
                     })),
             )
             .child(
@@ -569,9 +569,7 @@ impl HomeView {
     /// Reading would start a new read.
     fn paused_row(entry: &LibraryEntry, count: usize, today: Date, cx: &App) -> AnyElement {
         let progress = progress_summary(entry);
-        let since = entry
-            .updated_at
-            .map(|updated| updated.with_timezone(&chrono::Local).date_naive());
+        let since = entry.updated_at.map(crate::dates::local_day);
         h_flex()
             .w_full()
             .gap_3()
@@ -723,11 +721,9 @@ impl HomeView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = colors(cx).fg_muted;
-        let period = goal_period(goal.start, goal.end);
-        let title = if period.len() == 4 {
-            format!("{period} reading goal")
-        } else {
-            "Reading goal".to_owned()
+        let title = match crate::format::goal_year(goal.start, goal.end) {
+            Some(year) => format!("{year} reading goal"),
+            None => "Reading goal".to_owned(),
         };
         let reached = goal.progress >= f64::from(goal.target);
         let library = self.model.read(cx);
@@ -931,7 +927,7 @@ impl HomeView {
 
 impl Render for HomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let now = chrono::Local::now();
+        let now = crate::dates::now();
         let today = now.date_naive();
         let header = Greeting::new(date_line(today), greeting_at(&now));
         let loaded = self.model.read(cx).is_loaded();
@@ -1095,21 +1091,6 @@ fn cover(entry: &LibraryEntry, size: CoverSize, shadow: bool) -> Cover {
         )
 }
 
-/// "Page 418 of 1,007", with thousands separators; otherwise the summary's
-/// own words ("2h 5m of 10h 30m", "42%", "Not started").
-pub fn position_text(progress: &ProgressSummary) -> String {
-    match (progress.page, progress.total_pages) {
-        (Some(page), Some(total)) => format!("Page {} of {}", count_text(page), count_text(total)),
-        (Some(page), None) => format!("Page {}", count_text(page)),
-        _ => progress.text(),
-    }
-}
-
-/// "66%".
-fn percent_text(percent: f32) -> String {
-    format!("{}%", percent.round().max(0.0))
-}
-
 /// The pace line of a book being read: "16 pages a day · done around Dec 1",
 /// or "Last updated 8 days ago" for a book left idle, which gets no finish
 /// date. `None` when there is nothing to say.
@@ -1157,29 +1138,6 @@ fn caption_facts(facts: Vec<String>, cx: &App) -> gpui_kit::Div {
         }))
 }
 
-/// The paused row's caption: "Paused at page 230 of 1,104 · since Oct 1", or
-/// for an audiobook "Paused at 2h 5m of 10h 0m".
-pub fn paused_text(progress: &ProgressSummary, since: Option<Date>, today: Date) -> String {
-    let mut text = match (progress.page, progress.total_pages, progress.percent) {
-        (Some(page), Some(total), _) => {
-            format!(
-                "Paused at page {} of {}",
-                count_text(page),
-                count_text(total)
-            )
-        }
-        (Some(page), None, _) => format!("Paused at page {}", count_text(page)),
-        // An audiobook: "Paused at 2h 5m of 10h 0m".
-        (None, _, _) if progress.seconds.is_some() => format!("Paused at {}", progress.text()),
-        (None, _, Some(pct)) => format!("Paused at {}", percent_text(pct)),
-        (None, _, None) => "Paused".to_owned(),
-    };
-    if let Some(since) = since {
-        write!(text, " · since {}", short_date(since, today)).expect("writing to a String");
-    }
-    text
-}
-
 /// A rating row's second line: "Andy Weir · Finished Nov 3".
 fn finished_byline(authors: &[String], finished: Date, today: Date) -> String {
     format!(
@@ -1223,10 +1181,10 @@ pub fn goal_sentence(
         format!("{} {side} pace", pace_amount(goal, pace.abs()))
     };
     let left = pace_amount(goal, (f64::from(goal.target) - goal.progress).ceil());
-    let to_go = match (goal.end - today).num_days() {
+    let to_go = match (goal.last_day() - today).num_days() {
         0 => format!("{left} to go today"),
         1 => format!("{left} to go in 1 day"),
-        n => format!("{left} to go in {} days", count_text(n)),
+        n => format!("{left} to go in {} days", count_text(n.unsigned_abs())),
     };
     let mut text = format!("{standing}, {to_go}.");
     let mut title = None;
@@ -1281,17 +1239,6 @@ mod tests {
         s.parse().unwrap()
     }
 
-    fn progress(page: Option<u32>, total: Option<u32>, percent: Option<f32>) -> ProgressSummary {
-        ProgressSummary {
-            page,
-            total_pages: total,
-            seconds: None,
-            total_seconds: None,
-            percent,
-            audio: false,
-        }
-    }
-
     #[test]
     fn home_takes_three_columns_on_a_wide_region_with_something_for_the_second() {
         let rem = gpui_kit::px(16.);
@@ -1326,20 +1273,6 @@ mod tests {
     }
 
     #[test]
-    fn positions_have_thousands_separators() {
-        assert_eq!(
-            position_text(&progress(Some(418), Some(1007), Some(41.5))),
-            "Page 418 of 1,007"
-        );
-        assert_eq!(
-            position_text(&progress(Some(1200), None, None)),
-            "Page 1,200"
-        );
-        assert_eq!(position_text(&progress(None, None, Some(42.))), "42%");
-        assert_eq!(position_text(&progress(None, None, None)), "Not started");
-    }
-
-    #[test]
     fn the_pace_line_names_the_pace_and_the_finish() {
         let today = day("2026-11-20");
         let mut reading = Reading {
@@ -1367,41 +1300,6 @@ mod tests {
         );
         reading.idle_days = None;
         assert_eq!(pace_line(&reading, today), None);
-    }
-
-    #[test]
-    fn the_paused_row_says_where_and_since_when() {
-        let today = day("2026-11-20");
-        assert_eq!(
-            paused_text(
-                &progress(Some(230), Some(1104), Some(20.8)),
-                Some(day("2026-10-01")),
-                today
-            ),
-            "Paused at page 230 of 1,104 · since Oct 1"
-        );
-        assert_eq!(
-            paused_text(
-                &progress(None, None, Some(42.4)),
-                Some(day("2025-12-01")),
-                today
-            ),
-            "Paused at 42% · since Dec 1, 2025"
-        );
-        assert_eq!(
-            paused_text(&progress(None, None, None), None, today),
-            "Paused"
-        );
-        let audio = ProgressSummary {
-            seconds: Some(7_500),
-            total_seconds: Some(36_000),
-            audio: true,
-            ..progress(None, None, Some(20.8))
-        };
-        assert_eq!(
-            paused_text(&audio, None, today),
-            "Paused at 2h 5m of 10h 0m"
-        );
     }
 
     #[test]

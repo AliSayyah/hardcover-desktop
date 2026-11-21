@@ -37,7 +37,6 @@ use crate::chip::{StatusChip, status_icon};
 use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, needs_permission, progress_summary};
-use crate::home::home_view::paused_text;
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::library::writes;
 use crate::ui::focus::{keyed_focus, reveal_when};
@@ -289,7 +288,11 @@ fn next_lane(
             div()
                 .caption(cx)
                 .tabular()
-                .child(paused_text(&progress_summary(e), None, today))
+                .child(crate::format::paused_text(
+                    &progress_summary(e),
+                    None,
+                    today,
+                ))
                 .into_any_element()
         }),
         NextKind::Waiting => book.release_date.map(|date| {

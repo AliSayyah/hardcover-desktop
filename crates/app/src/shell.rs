@@ -254,7 +254,9 @@ pub struct Workspace {
     key_hint_delay: Option<Task<()>>,
     /// The open Settings dialog's sign-out request.
     settings_subscription: Option<Subscription>,
-    /// Re-renders periodically so "Updated 5 min ago" stays true.
+    /// Re-renders periodically so "Updated 5 min ago" stays true, and so a
+    /// window left open across midnight moves every view to the new day
+    /// (`dates`).
     _clock: Task<()>,
     subscriptions: Vec<Subscription>,
 }
@@ -812,7 +814,7 @@ impl Workspace {
         let lists = self.sidebar_lists(cx);
         // Hidden without the catalogue, which the page reads.
         let series_row = Services::global(cx).has_scope(READ_CATALOG).then(|| {
-            let today = chrono::Local::now().date_naive();
+            let today = crate::dates::today();
             let count = self.series.update(cx, |s, cx| {
                 s.is_loaded().then(|| {
                     s.summaries(today, cx)
@@ -1143,7 +1145,11 @@ fn sync_status_line(model: &LibraryModel, cx: &App) -> (gpui_kit::Div, Option<Sh
         SyncStatus::Synced | SyncStatus::Idle => match model.last_synced_at() {
             Some(at) => (
                 None,
-                format!("Updated {}", relative_time(&chrono::Utc::now(), &at)).into(),
+                format!(
+                    "Updated {}",
+                    relative_time(&crate::dates::now(), &at.with_timezone(&chrono::Local))
+                )
+                .into(),
             ),
             None => (None, "Not synced yet".into()),
         },

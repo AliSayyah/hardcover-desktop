@@ -4,8 +4,11 @@
 //! order. Plain functions, so every rule is pinned by a test.
 //!
 //! - **Started:** a series of a library entry (not Ignored) that is Read
-//!   with a finished read, Currently reading, Paused or Did not finish. Only
-//!   Want to read books don't start a series.
+//!   (with a finish date or not, as on Home), Currently reading, Paused or
+//!   Did not finish. Only Want to read books don't start a series. A
+//!   compilation (a boxed set: `SeriesRef::compilation`) is no place in its
+//!   series and counts for nothing here; Hardcover's series lists leave it
+//!   out too.
 //! - **Books shown:** whole-numbered ones, plus fractional ones (novellas)
 //!   only when they're in the library or not out yet, and split parts
 //!   (`is_partial_book`) only when they're in the library. Of several at one position, the one in the library, else
@@ -15,8 +18,11 @@
 //! - **Out yet:** not after today by Hardcover's date or the upcoming books
 //!   (`UpcomingModel`), and not dated to a later year. A book the reader has
 //!   read, is reading, paused or gave up on counts as out for them.
-//! - **The next step:** the first book that is out and isn't Read or Did not
-//!   finish; with none, the first book not out yet.
+//! - **Ignored:** an Ignored book shows on its shelf, but adds no activity
+//!   and is never the next step: the reader chose to skip it, as Home's Up
+//!   next does.
+//! - **The next step:** the first book that is out and isn't Read, Did not
+//!   finish or Ignored; with none, the first book not out yet.
 //! - **Groups:** "In progress" (a book is being read, or the next book is out
 //!   and the series was touched within a year), "Waiting for the next book",
 //!   "Not touched in a year" and "Finished"; within each the most recent
@@ -30,28 +36,34 @@ use hardcover_core::{
     BookId, BookSummary, Date, LibraryEntry, ReadingStatus, SeriesId, TrackedSeries, UserBookId,
 };
 
-use crate::format::{ProgressSummary, count_text, series_position_text, short_date};
-use crate::home::home_view::position_text;
-use crate::search::library_matches::words;
+use crate::dates::local_day;
+use crate::format::{ProgressSummary, count_text, percent_label, series_position_text, short_date};
+use crate::text::{indexed_words, search_words};
 
 /// A series not touched for longer than this is "Not touched in a year".
 const UNTOUCHED_DAYS: i64 = 365;
 
 // ----- started series -----
 
-/// Whether an entry starts its series: read through, being read, paused or
-/// given up on.
+/// Whether an entry starts its series: read (dated or not), being read,
+/// paused or given up on.
 fn starts_series(entry: &LibraryEntry) -> bool {
     match entry.status {
-        ReadingStatus::Read => entry
-            .reads
-            .iter()
-            .any(hardcover_core::ReadSession::is_finished),
-        ReadingStatus::CurrentlyReading | ReadingStatus::Paused | ReadingStatus::DidNotFinish => {
-            true
-        }
+        ReadingStatus::Read
+        | ReadingStatus::CurrentlyReading
+        | ReadingStatus::Paused
+        | ReadingStatus::DidNotFinish => true,
         ReadingStatus::WantToRead | ReadingStatus::Ignored => false,
     }
+}
+
+/// The series an entry has a place in: not those it is a compilation of.
+fn places(entry: &LibraryEntry) -> impl Iterator<Item = SeriesId> + '_ {
+    entry
+        .series
+        .iter()
+        .filter(|s| s.counts_in_series())
+        .filter_map(|s| s.id)
 }
 
 /// The series to ask about, sorted, each once.
@@ -59,7 +71,7 @@ pub fn started_series(entries: &[LibraryEntry]) -> Vec<SeriesId> {
     let mut ids: Vec<SeriesId> = entries
         .iter()
         .filter(|e| starts_series(e))
-        .flat_map(|e| e.series.iter().filter_map(|s| s.id))
+        .flat_map(places)
         .collect();
     ids.sort_unstable();
     ids.dedup();
@@ -74,7 +86,7 @@ pub struct SeriesBook {
     /// With the cover the library shows, when the book is in it.
     pub book: BookSummary,
     pub position: f32,
-    /// The library entry, never an Ignored one.
+    /// The library entry.
     pub entry: Option<UserBookId>,
     pub status: Option<ReadingStatus>,
     /// Out, or as good as out for this reader (see the module doc).
@@ -85,11 +97,11 @@ pub struct SeriesBook {
 }
 
 impl SeriesBook {
-    /// Read or given up on: the next step is past it.
+    /// Read, given up on or Ignored: the next step is past it.
     pub fn is_done(&self) -> bool {
         matches!(
             self.status,
-            Some(ReadingStatus::Read | ReadingStatus::DidNotFinish)
+            Some(ReadingStatus::Read | ReadingStatus::DidNotFinish | ReadingStatus::Ignored)
         )
     }
 }
@@ -262,21 +274,24 @@ impl SeriesSummary {
 
 /// The library, indexed for the series.
 pub struct LibraryIndex<'a> {
+    /// Every entry, so a book the reader has, Ignored too, is never offered
+    /// as one to add.
     by_book: HashMap<BookId, &'a LibraryEntry>,
+    /// The entries that count in each series: not Ignored ones, which add no
+    /// activity, and not compilations.
     by_series: HashMap<SeriesId, Vec<&'a LibraryEntry>>,
 }
 
 impl<'a> LibraryIndex<'a> {
-    /// Every entry but the Ignored ones, which count for nothing.
     pub fn new(entries: &'a [LibraryEntry]) -> Self {
         let mut by_book = HashMap::new();
         let mut by_series: HashMap<SeriesId, Vec<&LibraryEntry>> = HashMap::new();
-        for e in entries
-            .iter()
-            .filter(|e| e.status != ReadingStatus::Ignored)
-        {
+        for e in entries {
             by_book.insert(e.book.id, e);
-            for id in e.series.iter().filter_map(|s| s.id) {
+            if e.status == ReadingStatus::Ignored {
+                continue;
+            }
+            for id in places(e) {
                 by_series.entry(id).or_default().push(e);
             }
         }
@@ -317,7 +332,7 @@ fn entry_dates(entry: &LibraryEntry) -> impl Iterator<Item = Date> + '_ {
         .reads
         .iter()
         .flat_map(|r| [r.started_at, r.finished_at])
-        .chain([entry.updated_at.map(|t| t.date_naive())])
+        .chain([entry.updated_at.map(local_day)])
         .flatten()
 }
 
@@ -360,7 +375,7 @@ fn series_books(
         let position = entry
             .series
             .iter()
-            .find(|s| s.id == Some(series.id))
+            .find(|s| s.id == Some(series.id) && s.counts_in_series())
             .and_then(|s| s.position);
         if let Some(position) = position {
             candidates.push(Candidate {
@@ -382,7 +397,8 @@ fn series_books(
             c.book.release_year,
             upcoming.get(&c.book.id).copied(),
             today,
-        ) || status.is_some_and(|s| s != ReadingStatus::WantToRead);
+        ) || status
+            .is_some_and(|s| !matches!(s, ReadingStatus::WantToRead | ReadingStatus::Ignored));
         let in_library = c.entry.is_some();
         let whole = c.position.fract() == 0.0;
         if c.partial && !in_library {
@@ -473,7 +489,7 @@ pub fn summarize(
         .and_then(|b| entries().find(|e| Some(e.user_book_id) == b.entry))
         .and_then(|e| {
             e.updated_at
-                .map(|t| t.date_naive())
+                .map(local_day)
                 .or_else(|| e.open_read().and_then(|r| r.started_at))
         });
     let started = entries()
@@ -584,9 +600,9 @@ pub fn matches_query(series: &SeriesSummary, query: &[String]) -> bool {
     if query.is_empty() {
         return true;
     }
-    let mut haystack = words(&series.name);
+    let mut haystack = indexed_words(&series.name);
     if let Some(author) = &series.author {
-        haystack.extend(words(author));
+        haystack.extend(indexed_words(author));
     }
     query
         .iter()
@@ -611,7 +627,7 @@ impl Counts {
 }
 
 pub fn counts<'a>(series: impl IntoIterator<Item = &'a SeriesSummary>, query: &str) -> Counts {
-    let query = words(query);
+    let query = search_words(query);
     let mut counts = Counts::default();
     for s in series.into_iter().filter(|s| matches_query(s, &query)) {
         if s.group.is_finished() {
@@ -629,7 +645,7 @@ pub fn grouped<'a>(
     filter: Filter,
     query: &str,
 ) -> Vec<(Group, Vec<&'a SeriesSummary>)> {
-    let query = words(query);
+    let query = search_words(query);
     let mut groups: Vec<(Group, Vec<&SeriesSummary>)> = Vec::new();
     for s in series
         .iter()
@@ -655,8 +671,8 @@ pub fn hidden_line(finished: usize) -> String {
 
 /// The books a strip with room for `capacity` slots shows, and how many
 /// after them it leaves out (its "+N"). A strip that can't show every book
-/// keeps the next one in view, with the book after it, and keeps a slot's
-/// room for the "+N".
+/// keeps the next one in view, with the book after it when there is room,
+/// and keeps a slot's room for the "+N". It always shows at least one book.
 pub fn strip_window(len: usize, next: Option<usize>, capacity: usize) -> (Range<usize>, usize) {
     let capacity = capacity.max(1);
     if len <= capacity {
@@ -667,7 +683,8 @@ pub fn strip_window(len: usize, next: Option<usize>, capacity: usize) -> (Range<
     if next < slots {
         return (0..slots, len - slots);
     }
-    let end = (next + 2).min(len);
+    // The next book, then the one after it if a slot is left for it.
+    let end = (next + 1 + usize::from(slots > 1)).min(len);
     if end == len {
         return (len - capacity..len, 0);
     }
@@ -687,9 +704,8 @@ pub fn lane_caption(kind: NextKind, position: f32) -> String {
 /// A book being read: "Page 418 of 1,007 · 42%". `None` with nothing to
 /// say.
 pub fn reading_line(progress: &ProgressSummary) -> Option<String> {
-    let position =
-        (progress.page.is_some() || progress.seconds.is_some()).then(|| position_text(progress));
-    let percent = progress.percent.map(|p| format!("{}%", p.round().max(0.0)));
+    let position = (progress.page.is_some() || progress.seconds.is_some()).then(|| progress.text());
+    let percent = progress.percent.map(percent_label);
     match (position, percent) {
         (Some(a), Some(b)) => Some(format!("{a} · {b}")),
         (a, b) => a.or(b),
@@ -774,10 +790,12 @@ mod tests {
     }
 
     #[test]
-    fn a_series_starts_with_a_finished_read_a_current_one_a_pause_or_a_dnf() {
+    fn a_series_starts_with_a_read_a_current_one_a_pause_or_a_dnf() {
+        let mut boxed_set = finished(entry(9, ReadingStatus::Read, &[(90, 1.0)]), "2026-01-01");
+        boxed_set.series[0].compilation = true;
         let entries = [
             finished(entry(1, ReadingStatus::Read, &[(10, 1.0)]), "2026-01-01"),
-            // Read, but no finished read: doesn't start it.
+            // Read with no finish date: read all the same, as on Home.
             entry(2, ReadingStatus::Read, &[(20, 1.0)]),
             entry(3, ReadingStatus::CurrentlyReading, &[(30, 1.0)]),
             entry(4, ReadingStatus::Paused, &[(40, 1.0)]),
@@ -785,9 +803,11 @@ mod tests {
             entry(6, ReadingStatus::WantToRead, &[(60, 1.0)]),
             finished(entry(7, ReadingStatus::Ignored, &[(70, 1.0)]), "2026-01-01"),
             entry(8, ReadingStatus::CurrentlyReading, &[(10, 2.0), (80, 1.0)]),
+            // A compilation is no place in its series.
+            boxed_set,
         ];
         let ids: Vec<i64> = started_series(&entries).iter().map(|s| s.get()).collect();
-        assert_eq!(ids, [10, 30, 40, 50, 80]);
+        assert_eq!(ids, [10, 20, 30, 40, 50, 80]);
     }
 
     #[test]
@@ -1029,15 +1049,51 @@ mod tests {
     }
 
     #[test]
-    fn ignored_entries_count_for_nothing() {
-        let series = tracked(10, "Dune", &[(1, 1.0), (2, 2.0)]);
+    fn an_ignored_book_is_never_the_next_step() {
+        let series = tracked(10, "Dune", &[(1, 1.0), (2, 2.0), (3, 3.0)]);
+        let mut ignored = entry(2, ReadingStatus::Ignored, &[(10, 2.0)]);
+        ignored.updated_at = Some("2026-11-19T10:00:00Z".parse().unwrap());
         let entries = [
-            finished(entry(1, ReadingStatus::Read, &[(10, 1.0)]), "2026-10-01"),
-            entry(2, ReadingStatus::Ignored, &[(10, 2.0)]),
+            finished(entry(1, ReadingStatus::Read, &[(10, 1.0)]), "2024-10-01"),
+            ignored,
         ];
         let s = summary(&series, &entries);
-        assert_eq!(s.books[1].mark(), Mark::Missing);
+        // It shows on its shelf, never as a book to add: it has an entry.
+        assert_eq!(s.books[1].mark(), Mark::Shelved(ReadingStatus::Ignored));
+        assert_eq!(s.books[1].entry, Some(UserBookId::new(20)));
+        // Skipped, as Home's Up next skips it.
+        assert_eq!(s.next_book().map(|b| b.book.id), Some(BookId::new(3)));
         assert_eq!(s.next_kind(), Some(NextKind::Add));
+        // And it adds no activity: the series wasn't touched in two years.
+        assert_eq!(s.last_activity, Some(day("2024-10-01")));
+        assert_eq!(s.group, Group::Untouched);
+
+        // With only Ignored books left, the series is finished.
+        let short = tracked(10, "Dune", &[(1, 1.0), (2, 2.0)]);
+        let s = summary(&short, &entries);
+        assert_eq!(s.next, None);
+        assert_eq!(s.group, Group::Finished);
+    }
+
+    #[test]
+    fn a_compilation_never_takes_a_book_s_place() {
+        // A boxed set of #1-3 the overview leaves out, Read, at position 1.
+        let series = tracked(10, "Mistborn", &[(1, 1.0), (2, 2.0), (3, 3.0)]);
+        let mut boxed_set = finished(entry(99, ReadingStatus::Read, &[(10, 1.0)]), "2026-01-01");
+        boxed_set.series[0].compilation = true;
+        let entries = [
+            boxed_set,
+            entry(1, ReadingStatus::CurrentlyReading, &[(10, 1.0)]),
+        ];
+        let s = summary(&series, &entries);
+        let ids: Vec<i64> = s.books.iter().map(|b| b.book.id.get()).collect();
+        assert_eq!(ids, [1, 2, 3]);
+        assert_eq!(s.next_book().map(|b| b.book.id), Some(BookId::new(1)));
+        assert_eq!(s.activity, Activity::ReadingNow);
+        assert_eq!(
+            s.last_activity, None,
+            "the boxed set's finish isn't the series'"
+        );
     }
 
     #[test]
@@ -1134,6 +1190,28 @@ mod tests {
         assert_eq!(strip_window(10, Some(8), 6), (4..10, 0));
         assert_eq!(strip_window(10, None, 6), (0..5, 5));
         assert_eq!(strip_window(3, Some(0), 0), (0..1, 2));
+        // Room for one book and the "+N": the next one, not the one after.
+        assert_eq!(strip_window(10, Some(5), 2), (5..6, 4));
+        assert_eq!(strip_window(10, Some(5), 1), (5..6, 4));
+    }
+
+    #[test]
+    fn every_strip_window_shows_the_next_book() {
+        for len in 1..12 {
+            for capacity in 0..14 {
+                for next in 0..len {
+                    let (shown, more) = strip_window(len, Some(next), capacity);
+                    let what = format!("len {len}, next {next}, capacity {capacity}");
+                    assert!(!shown.is_empty(), "{what}");
+                    assert!(shown.contains(&next), "{what}: {shown:?}");
+                    assert!(shown.end <= len, "{what}");
+                    assert_eq!(shown.end + more, len, "{what}");
+                    // The "+N" takes a slot of its own.
+                    let used = shown.len() + usize::from(more > 0);
+                    assert!(used <= capacity.max(2), "{what}: {shown:?} +{more}");
+                }
+            }
+        }
     }
 
     #[test]

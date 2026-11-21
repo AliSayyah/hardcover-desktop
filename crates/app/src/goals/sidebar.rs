@@ -61,9 +61,8 @@ pub fn pace_percent(goal: &Goal, today: Date) -> Option<f32> {
 /// The goal row's label: the year for a calendar-year goal ("2026"), else
 /// its end ("By Jun 30"), since both dates don't fit beside the count.
 fn row_label(goal: &Goal, today: Date) -> String {
-    let period = goal_period(goal.start, goal.end);
-    if period.len() == 4 {
-        period
+    if let Some(year) = crate::format::goal_year(goal.start, goal.end) {
+        year.to_string()
     } else if goal.end.year() == today.year() {
         format!("By {}", goal.end.format("%b %-d"))
     } else {
@@ -73,7 +72,7 @@ fn row_label(goal: &Goal, today: Date) -> String {
 
 impl Render for GoalsSection {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let today = chrono::Local::now().date_naive();
+        let today = crate::dates::today();
         let model = self.goals.read(cx);
         let can_write = Services::global(cx).has_scope(WRITE_GOALS);
         let goals = self.goals.clone();

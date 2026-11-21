@@ -10,7 +10,8 @@
 
 use hardcover_core::{Length, Measure, ProgressUnit, ProgressUpdate};
 
-use crate::format::{count_text, duration_text, parse_position, position_text};
+use crate::format::{count_text, duration_text, page_position, parse_position, position_text};
+use crate::text::ascii_numerals;
 
 /// What the dialog's field counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,8 +50,11 @@ impl InputUnit {
         }
     }
 
-    /// Whether `text` could become valid input as it is typed.
+    /// Whether `text` could become valid input as it is typed. Persian and
+    /// Arabic-Indic digits, `٫` and `٪` count as their ASCII forms
+    /// ([`ascii_numerals`]), so the field takes a Persian keyboard's input.
     pub fn accepts_typing(self, text: &str) -> bool {
+        let text = ascii_numerals(text);
         let (allowed, max): (fn(char) -> bool, usize) = match self {
             Self::Page => (|c| c.is_ascii_digit(), 7),
             Self::Percent => (
@@ -82,7 +86,7 @@ pub fn parse(
 ) -> Result<ProgressUpdate, String> {
     let length = measure.and_then(Measure::length);
     match unit {
-        InputUnit::Page => match text.trim().parse::<u32>() {
+        InputUnit::Page => match ascii_numerals(text).trim().parse::<u32>() {
             Err(_) => Err("Enter the page you're on.".to_owned()),
             Ok(page) => match length {
                 Some(Length::Pages(total)) if page > total => {
@@ -156,9 +160,7 @@ pub fn preview(
 /// "Page 200 of 476" or "3h 12m of 9h 40m".
 fn position_words(position: ProgressUpdate, length: Length) -> String {
     match position {
-        ProgressUpdate::Pages(p) => {
-            format!("Page {} of {}", count_text(p), count_text(length.total()))
-        }
+        ProgressUpdate::Pages(p) => format!("Page {}", page_position(p, Some(length.total()))),
         ProgressUpdate::Seconds(s) => {
             format!("{} of {}", duration_text(s), duration_text(length.total()))
         }
@@ -268,8 +270,10 @@ fn parse_decimal(text: &str) -> Option<f64> {
     normal.parse().ok()
 }
 
-/// A percentage typed as "42", "42%", "42.5" or "42,5", from 0 to 100.
+/// A percentage typed as "42", "42%", "42.5" or "42,5", from 0 to 100, in
+/// ASCII or Persian digits ("۴۲٫۵٪").
 pub fn parse_percent(text: &str) -> Option<f64> {
+    let text = ascii_numerals(text);
     let text = text.trim();
     let number = text.strip_suffix('%').map_or(text, str::trim_end);
     parse_decimal(number).filter(|p| (0.0..=100.0).contains(p))
@@ -279,8 +283,10 @@ pub fn parse_percent(text: &str) -> Option<f64> {
 /// or hours, minutes and seconds with their units, in that order and each
 /// once: "5h", "5h 30m", "5h30m", "90m", "45s", "1h 2m 3s". An amount may
 /// have a decimal part, with a point or a comma: "5.5h", "5,5h". A bare
-/// number is refused: it could be any of them.
+/// number is refused: it could be any of them. Persian digits read as
+/// ASCII ones ("۲:۰۵").
 pub fn parse_time(text: &str) -> Option<u32> {
+    let text = ascii_numerals(text);
     let text = text.trim();
     if text.contains(':') {
         return parse_position(text);
@@ -388,6 +394,30 @@ mod tests {
         assert_eq!(
             parse(InputUnit::Time, AUDIO_UNKNOWN, "40h"),
             Ok(ProgressUpdate::Seconds(144_000))
+        );
+    }
+
+    #[test]
+    fn persian_digits_and_separators_are_read() {
+        // Typed on a Persian keyboard, each keystroke must be let through.
+        for text in ["۱", "۱۲", "۱۲۰"] {
+            assert!(InputUnit::Page.accepts_typing(text), "{text}");
+        }
+        assert!(InputUnit::Percent.accepts_typing("۴۲٫۵٪"));
+        assert!(InputUnit::Time.accepts_typing("۲:۰۵"));
+        assert!(InputUnit::Page.accepts_typing("١٢٠"), "Arabic-Indic digits");
+        assert!(!InputUnit::Page.accepts_typing("۱۲a"));
+        assert_eq!(
+            parse(InputUnit::Page, PAGES, "۱۲۰"),
+            Ok(ProgressUpdate::Pages(120))
+        );
+        assert_eq!(parse_percent("۴۲٫۵"), Some(42.5));
+        assert_eq!(parse_percent("۴۲٪"), Some(42.0));
+        assert_eq!(parse_time("۲:۰۵"), Some(7_500));
+        assert_eq!(parse_time("۵٫۵h"), Some(19_800));
+        assert_eq!(
+            preview(InputUnit::Percent, PAGES, "۵۰", None).as_deref(),
+            Some("Page 238 of 476")
         );
     }
 

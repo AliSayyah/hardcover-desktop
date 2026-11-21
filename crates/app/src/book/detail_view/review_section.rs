@@ -286,7 +286,7 @@ impl BookDetailView {
         if !editable_here(saved.as_ref()) || self.review_refreshing(id, cx) {
             return;
         }
-        let base = Draft::base(saved.as_ref(), chrono::Local::now().date_naive());
+        let base = Draft::base(saved.as_ref(), crate::dates::today());
         self.fill_review_editor(id, base.clone(), base, true, window, cx);
     }
 

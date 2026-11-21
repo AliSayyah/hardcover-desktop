@@ -16,7 +16,10 @@
 //! spaces where the line may break ([`pieces`]), and each piece into
 //! segments that each read one way only: a run of right-to-left letters, a
 //! left-to-right run ("Harry Potter", "2024"), or one neutral character
-//! (`.`, `،`, `«`), mirrored where the algorithm mirrors it. The pieces and
+//! (`.`, `،`, `«`, an emoji), mirrored where the algorithm mirrors it. Text
+//! is taken a grapheme cluster at a time, so an emoji with its variation
+//! selector, skin tone or joined parts, or a letter with its marks, is never
+//! split. The pieces and
 //! their segments flow right to left in reversed flex rows, packed to the
 //! right as right-to-left text reads. They stay in reading order in the
 //! element tree, so assistive technology reads them in order.
@@ -40,6 +43,7 @@ use gpui_kit::{
     SharedString, Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 use unicode_bidi::{BidiClass, BidiInfo, Direction, Level, bidi_class, get_base_direction};
+use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::fonts;
 
@@ -118,7 +122,7 @@ impl RenderOnce for WrappingText {
             let mut font_size = style.font_size.to_pixels(rem);
             let mut line_height = style.line_height_in_pixels(rem);
             let units = if rtl {
-                pieces(&self.text).iter().map(Piece::text).collect()
+                rtl_units(&self.text)
             } else {
                 ltr_units(&self.text)
             };
@@ -226,11 +230,6 @@ pub struct Piece {
 }
 
 impl Piece {
-    /// The piece's text as written (for measuring and building lines).
-    fn text(&self) -> String {
-        self.source.clone()
-    }
-
     /// Whether the piece has no letter or digit: punctuation standing alone,
     /// which stays with the word before it.
     fn is_punctuation(&self) -> bool {
@@ -249,10 +248,11 @@ impl Piece {
 /// space joins the piece before it, so a line never starts with it.
 ///
 /// Inside a piece, each run of right-to-left letters is one segment, each
-/// left-to-right run is one, and every other character (punctuation, quotes,
-/// brackets) is a segment of its own, mirrored where right-to-left text
-/// mirrors it: laid out alone, GPUI would draw it as if the line read left
-/// to right.
+/// left-to-right run is one, and every other grapheme cluster (punctuation,
+/// quotes, brackets, an emoji) is a segment of its own, mirrored where
+/// right-to-left text mirrors it: laid out alone, GPUI would draw it as if
+/// the line read left to right. A cluster is classed by its first character
+/// and never split, so "❤️" and "👍🏽" stay whole.
 pub fn pieces(text: &str) -> Vec<Piece> {
     let info = BidiInfo::new(text, Some(Level::rtl()));
     let mut pieces: Vec<Piece> = Vec::new();
@@ -287,7 +287,10 @@ pub fn pieces(text: &str) -> Vec<Piece> {
         }
     };
 
-    for (ix, c) in text.char_indices() {
+    for (ix, cluster) in text.grapheme_indices(true) {
+        let Some(c) = cluster.chars().next() else {
+            continue;
+        };
         let level = info.levels[ix];
         let class = bidi_class(c);
         if level.is_rtl() && (c.is_whitespace() || class == BidiClass::B) {
@@ -295,32 +298,29 @@ pub fn pieces(text: &str) -> Vec<Piece> {
             flush_piece(&mut current, &mut source, &mut pieces);
             continue;
         }
-        source.push(c);
+        source.push_str(cluster);
         if level.is_ltr() {
             if !segment_ltr {
                 flush_segment(&mut segment, &mut current);
                 segment_ltr = true;
             }
-            segment.push(c);
+            segment.push_str(cluster);
             continue;
         }
-        let letter = matches!(
-            class,
-            BidiClass::R | BidiClass::AL | BidiClass::NSM | BidiClass::BN
-        );
+        let letter = is_letter(class);
         if letter && (segment_ltr || !segment_is_letters(&segment)) {
             flush_segment(&mut segment, &mut current);
         }
         segment_ltr = false;
         if letter {
-            segment.push(c);
+            segment.push_str(cluster);
         } else {
             flush_segment(&mut segment, &mut current);
-            current.push(
-                unicode_bidi_mirroring::get_mirrored(c)
-                    .unwrap_or(c)
-                    .to_string(),
-            );
+            // Only a lone character has a mirror image.
+            let mirrored = (cluster.len() == c.len_utf8())
+                .then(|| unicode_bidi_mirroring::get_mirrored(c))
+                .flatten();
+            current.push(mirrored.map_or_else(|| cluster.to_owned(), String::from));
         }
     }
     flush_segment(&mut segment, &mut current);
@@ -328,15 +328,33 @@ pub fn pieces(text: &str) -> Vec<Piece> {
     pieces
 }
 
+/// Whether a character of this class belongs to a run of right-to-left
+/// letters: a letter, a mark on one, or a joiner such as the non-joiner.
+fn is_letter(class: BidiClass) -> bool {
+    matches!(
+        class,
+        BidiClass::R | BidiClass::AL | BidiClass::NSM | BidiClass::BN
+    )
+}
+
 /// Whether the right-to-left segment being built is a run of letters (empty
 /// counts: a new one starts there).
 fn segment_is_letters(segment: &str) -> bool {
-    segment.chars().all(|c| {
-        matches!(
-            bidi_class(c),
-            BidiClass::R | BidiClass::AL | BidiClass::NSM | BidiClass::BN
-        )
-    })
+    segment
+        .graphemes(true)
+        .all(|g| g.chars().next().is_some_and(|c| is_letter(bidi_class(c))))
+}
+
+/// Right-to-left text's units for breaking into lines on a known width: its
+/// pieces, with a left-to-right phrase inside one ("Harry Potter", "(Dune
+/// Messiah)") cut at its spaces, so the phrase can break across lines like
+/// any other words instead of between letters. Laid out again, a line's
+/// words of one phrase join into one piece.
+fn rtl_units(text: &str) -> Vec<String> {
+    pieces(text)
+        .iter()
+        .flat_map(|piece| ltr_units(&piece.source))
+        .collect()
 }
 
 /// Left-to-right text's words, the units its lines break between.
@@ -410,22 +428,16 @@ pub fn break_lines(
             last.pop();
             continue;
         }
-        // One unit too wide even alone with the ellipsis: cut it.
-        let mut chars: Vec<char> = text.chars().collect();
-        loop {
-            chars.pop();
-            let ended = format!(
-                "{}{ELLIPSIS}",
-                trim_for_ellipsis(&chars.iter().collect::<String>())
-            );
-            if chars.is_empty() || fits(&ended, measure) {
-                break;
+        // One unit too wide even alone with the ellipsis: cut it, a
+        // grapheme cluster at a time.
+        let mut clusters: Vec<&str> = text.graphemes(true).collect();
+        break loop {
+            clusters.pop();
+            let ended = format!("{}{ELLIPSIS}", trim_for_ellipsis(&clusters.concat()));
+            if clusters.is_empty() || fits(&ended, measure) {
+                break ended;
             }
-        }
-        break format!(
-            "{}{ELLIPSIS}",
-            trim_for_ellipsis(&chars.iter().collect::<String>())
-        );
+        };
     };
     let mut lines: Vec<String> = lines.into_iter().map(|l| l.join(" ")).collect();
     lines.push(ended);
@@ -441,25 +453,21 @@ fn trim_for_ellipsis(text: &str) -> &str {
 }
 
 /// A unit too wide for a line, cut into the longest head that fits and the
-/// rest. The head has at least one character, and a combining mark stays
-/// with the letter before it.
+/// rest. The head has at least one grapheme cluster, and a cut never splits
+/// one: a letter keeps its marks, an emoji its modifiers.
 fn cut_to_fit(unit: &str, width: f32, measure: &mut dyn FnMut(&str) -> f32) -> (String, String) {
     let mut end = 0;
-    for (ix, c) in unit.char_indices().skip(1) {
-        if bidi_class(c) == BidiClass::NSM {
-            continue;
-        }
+    for (ix, _) in unit.grapheme_indices(true).skip(1) {
         if measure(&unit[..ix]) > width + 0.5 {
             break;
         }
         end = ix;
     }
     if end == 0 {
-        // Even the first character doesn't fit: it goes alone.
+        // Even the first cluster doesn't fit: it goes alone.
         end = unit
-            .char_indices()
-            .skip(1)
-            .find(|(_, c)| bidi_class(*c) != BidiClass::NSM)
+            .grapheme_indices(true)
+            .nth(1)
             .map_or(unit.len(), |(ix, _)| ix);
     }
     // Everything fits up to the last character: take it all.
@@ -603,6 +611,24 @@ mod tests {
     }
 
     #[test]
+    fn an_emoji_sequence_stays_one_segment() {
+        // A heart with its variation selector, a skin tone, a family joined
+        // with zero-width joiners: each stays whole, standing with the word
+        // before it.
+        assert_eq!(segs("عالی ❤\u{fe0f}"), v(&[&["عالی", " ", "❤\u{fe0f}"]]));
+        assert_eq!(segs("عالی 👍🏽"), v(&[&["عالی", " ", "👍🏽"]]));
+        let family = "👨\u{200d}👩\u{200d}👧";
+        assert_eq!(
+            segs(&format!("کتاب {family} خوب")),
+            v(&[&["کتاب", " ", family], &["خوب"]])
+        );
+        // Inside a word, too.
+        assert_eq!(segs("خوب👍🏽"), v(&[&["خوب", "👍🏽"]]));
+        // A letter keeps its marks.
+        assert_eq!(segs("كِتَابٌ"), v(&[&["كِتَابٌ"]]));
+    }
+
+    #[test]
     fn empty_text_has_no_pieces() {
         assert_eq!(pieces(""), []);
         assert_eq!(pieces("   "), []);
@@ -655,11 +681,67 @@ mod tests {
     }
 
     #[test]
+    fn a_cut_never_splits_a_grapheme_cluster() {
+        let thumbs = "👍🏽";
+        // Two clusters a line: the skin tone stays with its hand.
+        let lines = break_lines(&[format!("{thumbs}{thumbs}{thumbs}")], 2., None, &mut |t| {
+            t.graphemes(true).fold(0., |w, _| w + 1.)
+        });
+        assert_eq!(lines, [format!("{thumbs}{thumbs}"), thumbs.to_owned()]);
+        // The ellipsis cut, too.
+        let lines = break_lines(&[format!("ab{thumbs}{thumbs}cd")], 4., Some(1), &mut |t| {
+            t.graphemes(true).fold(0., |w, _| w + 1.)
+        });
+        assert_eq!(lines, [format!("ab{thumbs}…")]);
+    }
+
+    #[test]
+    fn a_latin_run_breaks_at_its_spaces_on_a_fixed_width() {
+        let text = "راهنمای (Harry Potter and Friends) برای خوانندگان";
+        let units = rtl_units(text);
+        assert_eq!(
+            units,
+            [
+                "راهنمای",
+                "(Harry",
+                "Potter",
+                "and",
+                "Friends)",
+                "برای",
+                "خوانندگان"
+            ]
+        );
+        // The phrase breaks between its words, not inside "Potter".
+        let lines = break_lines(&units, 22., None, &mut chars);
+        assert_eq!(
+            lines,
+            ["راهنمای (Harry Potter", "and Friends) برای", "خوانندگان"]
+        );
+        for line in &lines {
+            for piece in pieces(line) {
+                for segment in piece.segments {
+                    assert!(
+                        !segment.starts_with(['o', 't', 'e', 'r']),
+                        "a word cut between letters: {segment:?}"
+                    );
+                }
+            }
+        }
+        // Words of one phrase on one line join into one piece again, and its
+        // brackets are mirrored once.
+        assert_eq!(segs(&lines[0]), v(&[&["راهنمای"], &[")", "Harry Potter"]]));
+        assert_eq!(segs(&lines[1]), v(&[&["and Friends", "("], &["برای"]]));
+        // A phrase that fits stays on one line, as before.
+        let wide = break_lines(&units, 60., None, &mut chars);
+        assert_eq!(segs(&wide[0]), segs(text));
+    }
+
+    #[test]
     fn a_line_built_from_pieces_is_mirrored_once() {
         // The width path joins the pieces into lines, then lays each line
         // out again: the brackets must come out as from the first pass.
         let text = "کتاب (جلد اول) «سلام»";
-        let units: Vec<String> = pieces(text).iter().map(Piece::text).collect();
+        let units: Vec<String> = pieces(text).iter().map(|p| p.source.clone()).collect();
         assert_eq!(segs(&units.join(" ")), segs(text));
         assert_eq!(
             segs(text),
@@ -671,7 +753,7 @@ mod tests {
     fn right_to_left_pieces_break_into_lines_too() {
         let units: Vec<String> = pieces("کتابی پرکشش و پر از امید.")
             .iter()
-            .map(Piece::text)
+            .map(|p| p.source.clone())
             .collect();
         let lines = break_lines(&units, 11., Some(2), &mut chars);
         assert_eq!(lines, ["کتابی پرکشش", "و پر از…"]);

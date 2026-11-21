@@ -112,7 +112,7 @@ fn library_paginates_by_keyset() {
     // One book is in two series, one of them listed twice; the others list none.
     first[1]["book"]["book_series"] = json!([
         {"position": 2.0, "featured": true, "series": {"id": 31, "name": "Synthetic Saga", "slug": "synthetic-saga"}},
-        {"position": null, "featured": false, "series": {"id": 32, "name": "Omnibus", "slug": null}},
+        {"position": null, "featured": false, "compilation": true, "series": {"id": 32, "name": "Omnibus", "slug": null}},
         {"position": 7.0, "featured": false, "series": {"id": 31, "name": "Synthetic Saga", "slug": "synthetic-saga"}}
     ]);
     // Second page holds one shelf entry, one with a status id we don't know
@@ -184,6 +184,8 @@ fn library_paginates_by_keyset() {
         (series[1].name.as_str(), series[1].position),
         ("Omnibus", None)
     );
+    assert!(!series[0].compilation);
+    assert!(series[1].compilation);
 }
 
 #[test]

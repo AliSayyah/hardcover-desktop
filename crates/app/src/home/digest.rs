@@ -176,7 +176,7 @@ pub fn pace(entry: &LibraryEntry, today: Date) -> Option<Pace> {
 /// Days since the entry last changed, if that is at least [`IDLE_DAYS`].
 /// A progress update changes the entry, and so does any other edit.
 fn idle_days(entry: &LibraryEntry, today: Date) -> Option<i64> {
-    let updated = entry.updated_at?.with_timezone(&chrono::Local).date_naive();
+    let updated = crate::dates::local_day(entry.updated_at?);
     Some((today - updated).num_days()).filter(|d| *d >= IDLE_DAYS)
 }
 
@@ -190,7 +190,9 @@ fn idle_days(entry: &LibraryEntry, today: Date) -> Option<i64> {
 /// in case the books between are missing from the library.
 ///
 /// A book not out yet is never next, and doesn't hold back a later one that
-/// is (a novella announced after the next novel came out).
+/// is (a novella announced after the next novel came out). A compilation (a
+/// boxed set) has no place of its own in the series: it is neither next nor
+/// the book before it.
 fn series_next(
     entries: &[LibraryEntry],
     released: &dyn Fn(&LibraryEntry) -> bool,
@@ -198,7 +200,7 @@ fn series_next(
     let in_series = |e: &LibraryEntry, series: SeriesId| {
         e.series
             .iter()
-            .find(|s| s.id == Some(series))
+            .find(|s| s.id == Some(series) && s.counts_in_series())
             .and_then(|s| s.position)
     };
     let mut best: Option<(Option<Date>, SeriesNext)> = None;
@@ -206,7 +208,7 @@ fn series_next(
         .iter()
         .filter(|e| e.status == ReadingStatus::WantToRead && released(e))
     {
-        for series in &next.series {
+        for series in next.series.iter().filter(|s| s.counts_in_series()) {
             let (Some(id), Some(position)) = (series.id, series.position) else {
                 continue;
             };
@@ -304,14 +306,15 @@ pub fn to_rate(
 /// can name them. A book left idle doesn't count, as Home shows no finish
 /// date for it. Only for a goal counted in books.
 pub fn finishing_by(goal: &Goal, digest: &Digest, today: Date) -> Vec<UserBookId> {
-    if goal.metric != GoalMetric::Books || today > goal.end {
+    let last_day = goal.last_day();
+    if goal.metric != GoalMetric::Books || today > last_day {
         return Vec::new();
     }
     digest
         .reading
         .iter()
         .filter(|r| r.idle_days.is_none())
-        .filter(|r| r.pace.and_then(|p| p.finish).is_some_and(|f| f <= goal.end))
+        .filter(|r| r.pace.and_then(|p| p.finish).is_some_and(|f| f <= last_day))
         .map(|r| r.id)
         .collect()
 }
@@ -323,8 +326,6 @@ pub fn finished_per_month(goal: &Goal, entries: &[LibraryEntry]) -> Option<[u32;
     use chrono::Datelike as _;
     let year = crate::format::goal_year(goal.start, goal.end)?;
     let mut months = [0; 12];
-    // A goal that ends on the next New Year's Day counts that day too; it
-    // has no bar of its own.
     for (_, finished) in crate::goals::model::GoalsModel::finished_in(goal, entries) {
         if finished.year() == year {
             months[finished.month0() as usize] += 1;
@@ -539,6 +540,36 @@ mod tests {
             day("2026-11-20"),
             &HashSet::new(),
         );
+        assert_eq!(d.series_next, None);
+    }
+
+    #[test]
+    fn a_compilation_is_neither_next_nor_before_it() {
+        let boxed = |mut e: LibraryEntry| {
+            e.series[0].compilation = true;
+            e
+        };
+        let today = day("2026-11-20");
+        // A boxed set of #1-3, Read at position 1, isn't book 1.
+        let set = finished(
+            boxed(in_series(entry(9, ReadingStatus::Read, None), 7, Some(1.0))),
+            "2026-10-12",
+        );
+        let two = in_series(entry(2, ReadingStatus::WantToRead, None), 7, Some(2.0));
+        let d = compute(&[set, two], today, &HashSet::new());
+        assert_eq!(d.series_next, None);
+
+        // Nor is one on Want to read the book after a finished #1.
+        let one = finished(
+            in_series(entry(1, ReadingStatus::Read, None), 7, Some(1.0)),
+            "2026-10-12",
+        );
+        let set = boxed(in_series(
+            entry(9, ReadingStatus::WantToRead, None),
+            7,
+            Some(2.0),
+        ));
+        let d = compute(&[one, set], today, &HashSet::new());
         assert_eq!(d.series_next, None);
     }
 
@@ -787,7 +818,8 @@ mod tests {
 
     #[test]
     fn a_year_goal_may_end_on_the_next_new_years_day() {
-        // How Hardcover dates its own year goals. The last day has no bar.
+        // How Hardcover dates its own year goals. It ends on Dec 31: a book
+        // finished on New Year's Day counts in the next year's goal.
         let books = [
             finished(entry(1, ReadingStatus::Read, None), "2026-01-01"),
             finished(entry(2, ReadingStatus::Read, None), "2026-12-31"),

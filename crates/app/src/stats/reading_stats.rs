@@ -2,7 +2,9 @@
 //!
 //! The rules, each pinned by a test below:
 //! - Every finished read counts, so a re-read counts again, in the year of its
-//!   finish date. A read with no finish date is not finished.
+//!   finish date. A read with no finish date is not finished, and one dated
+//!   in a later year is a mistake that counts nowhere: every total agrees
+//!   with the years.
 //! - On a Did Not Finish book, the latest read is the abandoned one and does
 //!   not count, even if it has a finish date; earlier finished reads do.
 //! - A read's pages come from its own edition, then the entry's edition, then
@@ -46,8 +48,7 @@ pub struct ReadingStats {
     /// Books in the library, Ignored included.
     pub books: usize,
     /// Consecutive years, oldest first, from the first finish (at most
-    /// [`MAX_YEARS`] back) to this year or the latest finish. Empty without
-    /// a finished read.
+    /// [`MAX_YEARS`] back) to this year. Empty without a finished read.
     pub years: Vec<YearTotals>,
     /// Finished reads before the first year in `years`.
     pub earlier_books: u32,
@@ -80,10 +81,11 @@ pub fn compute(entries: &[LibraryEntry], today: Date) -> ReadingStats {
     let mut days_total = 0.0;
     let mut timed_reads = 0;
     for entry in entries {
-        let finished: Vec<&ReadSession> = counted_reads(entry).collect();
-        if entry.status == ReadingStatus::Read && finished.is_empty() {
+        if entry.status == ReadingStatus::Read && counted_reads(entry).next().is_none() {
             read_without_date += 1;
         }
+        let finished = counted_reads(entry)
+            .filter(|r| r.finished_at.is_some_and(|d| d.year() <= today.year()));
         for read in finished {
             let Some(done) = read.finished_at else {
                 continue;
@@ -180,8 +182,7 @@ fn read_pages(entry: &LibraryEntry, read: &ReadSession) -> Option<u32> {
 }
 
 /// Consecutive years ending this year, at most [`MAX_YEARS`] of them, and the
-/// books finished before the first one. Finishes dated in a later year are
-/// mistakes; they are left out rather than stretching the chart.
+/// books finished before the first one. `per_year` holds no later year.
 fn year_range(per_year: &BTreeMap<i32, YearTotals>, this_year: i32) -> (Vec<YearTotals>, u32) {
     let Some(&first) = per_year.keys().next() else {
         return (Vec::new(), 0);
@@ -295,6 +296,20 @@ mod tests {
             stats.years.first().map(|y| (y.year, y.books)),
             Some((2025, 1))
         );
+        // Nor any total: they all agree with the years.
+        assert_eq!(stats.finished_reads, 1);
+        assert_eq!(stats.timed_reads, 0);
+        assert_eq!(stats.read_without_date, 0);
+
+        // A Read book finished only in a later year counts nowhere, and it
+        // has a finish date, so it isn't one without.
+        let mut later = entry(2, ReadingStatus::Read, Some(300));
+        later.reads = vec![read(3, Some("2062-02-01"), Some("2062-03-01"))];
+        let stats = compute(&[later], date(TODAY));
+        assert_eq!(stats.finished_reads, 0);
+        assert_eq!(stats.timed_reads, 0);
+        assert_eq!(stats.read_without_date, 0);
+        assert!(stats.years.is_empty());
     }
 
     #[test]

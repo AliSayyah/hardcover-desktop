@@ -417,7 +417,14 @@ impl LibraryModel {
         }
     }
 
+    /// Marks adding `book` as in flight. `false` if one already is, or if
+    /// the library already has the book, on any shelf (Ignored too): adding
+    /// it again would make a second entry or overwrite the reader's choice,
+    /// so a book the reader has changes shelf through its entry instead.
     pub fn begin_add(&mut self, book: BookId, cx: &mut Context<Self>) -> bool {
+        if self.entry_for_book(book).is_some() {
+            return false;
+        }
         let started = self.adding.insert(book);
         cx.notify();
         started
@@ -629,6 +636,22 @@ mod tests {
         model.update(cx, |m, cx| {
             m.sync_if_stale(cx);
             assert_eq!(*m.sync_status(), SyncStatus::Synced);
+        });
+    }
+
+    #[gpui_kit::test]
+    fn a_book_in_the_library_is_never_added_again(cx: &mut gpui_kit::TestAppContext) {
+        let (model, _) = demo_model(cx);
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let had = model.read_with(cx, |m, _| m.entries()[0].book.id);
+        model.update(cx, |m, cx| {
+            assert!(!m.begin_add(had, cx), "already in the library");
+            assert!(!m.is_adding(had));
+            let new = BookId::new(i64::MAX);
+            assert!(m.begin_add(new, cx));
+            assert!(!m.begin_add(new, cx), "one add at a time");
+            m.end_add(new, cx);
         });
     }
 
