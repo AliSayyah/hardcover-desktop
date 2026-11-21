@@ -2,6 +2,12 @@
 //! reviews of the book, the most liked first, a page at a time, as sequence
 //! rows 16 apart with hairlines between them.
 //!
+//! Its own view, [`CommunityReviews`], so the book view around it doesn't
+//! rebuild it on every frame it draws (a caret blink in Notes, a star
+//! hovered): it re-renders when its reviews change, when the reader opens
+//! one, or when the grant changes. Each review's paragraphs and where it is
+//! cut when collapsed are worked out once, when its page arrives.
+//!
 //! Asked for a moment after the book is shown, whether or not its details
 //! load, and kept per book in the session's catalogue (`resource::Catalog`,
 //! which also says when stale pages are fetched again and folded back into
@@ -9,22 +15,25 @@
 //! is left out (it has its own section): the query excludes the signed-in
 //! user, whose id the library knows, or `me()` tells when it doesn't yet.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Subscription,
-    Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
+    Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_SOCIAL;
 use hardcover_core::{BookId, CommunityReview, UserBookId};
 
-use super::{BookDetailView, Fetch};
 use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, date_text, rating_text};
-use crate::resource::Demand;
+use crate::library::model::LibraryModel;
+use crate::resource::catalog::ReviewPages;
+use crate::resource::{Catalog, Demand, SharedChanged};
 use crate::session;
 use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::SmallControl as _;
@@ -35,138 +44,160 @@ const COLLAPSED_LINES: usize = 6;
 /// ...counting this many characters to a line of the pane's text.
 const CHARS_PER_LINE: usize = 75;
 
-/// What the section keeps of its own: which reviews the reader opened.
-#[derive(Default)]
+/// A review's text as it is drawn: its paragraphs, and those a collapsed
+/// review shows when it is long.
+#[derive(Debug, PartialEq)]
+struct Prepared {
+    paragraphs: Vec<SharedString>,
+    collapsed: Option<Vec<SharedString>>,
+}
+
+impl Prepared {
+    fn of(review: &CommunityReview) -> Self {
+        let paragraphs: Vec<&str> = review.paragraphs().collect();
+        Self {
+            collapsed: collapse(&paragraphs, COLLAPSED_LINES, CHARS_PER_LINE)
+                .map(|shown| shown.into_iter().map(SharedString::from).collect()),
+            paragraphs: paragraphs
+                .into_iter()
+                .map(|p| SharedString::from(p.to_owned()))
+                .collect(),
+        }
+    }
+}
+
+/// The "Reviews" block of the book shown. See the module doc.
 pub(super) struct CommunityReviews {
+    model: Entity<LibraryModel>,
+    /// The session's catalogue; `None` once signed out.
+    catalog: Option<Catalog>,
+    book: Option<BookId>,
+    /// The reviews shown, as last prepared, and what was made of each.
+    shown: Option<Arc<ReviewPages>>,
+    prepared: HashMap<UserBookId, Rc<Prepared>>,
     /// Long reviews opened with "Read more".
     expanded: HashSet<UserBookId>,
     /// Spoiler reviews opened with "Show".
     spoilers_shown: HashSet<UserBookId>,
+    _subscriptions: Vec<Subscription>,
 }
 
-impl BookDetailView {
-    /// Asks for the reviews when `read:social` is granted while a book is
-    /// shown ("Sign in again…" keeps the pane as it is).
-    pub(super) fn observe_review_scope(cx: &mut Context<Self>) -> Subscription {
-        session::observe_grant(cx, |this, cx| {
-            if let Some(book) = this.book(cx) {
-                this.fetch(book.id, Fetch::Reviews, Demand::Shown, cx);
-            }
-        })
+impl CommunityReviews {
+    pub(super) fn new(model: Entity<LibraryModel>, cx: &mut Context<Self>) -> Self {
+        let catalog = Catalog::global(cx);
+        let mut subscriptions = vec![
+            // "Sign in again…" may grant `read:social` while a book is shown.
+            session::observe_grant(cx, |this, cx| {
+                this.fetch(Demand::Shown, cx);
+                cx.notify();
+            }),
+        ];
+        if let Some(catalog) = &catalog {
+            subscriptions.push(cx.subscribe(
+                &catalog.reviews,
+                |this, _, SharedChanged(id): &SharedChanged<BookId>, cx| {
+                    if this.book == Some(*id) {
+                        this.prepare(cx);
+                        cx.notify();
+                    }
+                },
+            ));
+        }
+        Self {
+            model,
+            catalog,
+            book: None,
+            shown: None,
+            prepared: HashMap::new(),
+            expanded: HashSet::new(),
+            spoilers_shown: HashSet::new(),
+            _subscriptions: subscriptions,
+        }
     }
 
-    /// Fetches the next page, or the first again after it failed.
-    fn more_reviews(&mut self, cx: &mut Context<Self>) {
-        let (Some(book), Some(catalog)) = (self.book(cx), self.catalog.clone()) else {
+    /// Shows `book`'s reviews: what the catalogue has at once; the view asks
+    /// for them ([`Self::fetch`]) once the book has settled.
+    pub(super) fn set_book(&mut self, book: Option<BookId>, cx: &mut Context<Self>) {
+        if self.book == book {
+            return;
+        }
+        self.book = book;
+        self.prepare(cx);
+        cx.notify();
+    }
+
+    /// Whether the block shows at all: only with `read:social`.
+    pub(super) fn visible(cx: &App) -> bool {
+        session::has_scope(cx, READ_SOCIAL)
+    }
+
+    /// Asks the catalogue for the book's reviews, if `demand` calls for it.
+    pub(super) fn fetch(&mut self, demand: Demand, cx: &mut Context<Self>) {
+        let (Some(book), Some(catalog)) = (self.book, self.catalog.clone()) else {
             return;
         };
-        let loaded = catalog
+        if session::has_scope(cx, READ_SOCIAL) {
+            let me = self.model.read(cx).verified_user_id();
+            catalog.request_reviews(book, me, demand, cx);
+        }
+    }
+
+    /// The pages the catalogue holds for the book shown.
+    fn pages(&self, cx: &App) -> Option<Arc<ReviewPages>> {
+        let book = self.book?;
+        self.catalog
+            .as_ref()?
             .reviews
             .read(cx)
             .resource()
-            .value(&book.id)
-            .is_some();
+            .value(&book)
+            .cloned()
+    }
+
+    /// Works out the paragraphs and collapse points of reviews that arrived
+    /// since the last time, and forgets those of reviews no longer shown.
+    fn prepare(&mut self, cx: &App) {
+        let pages = self.pages(cx);
+        let same = match (&pages, &self.shown) {
+            (Some(new), Some(old)) => Arc::ptr_eq(new, old),
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        let reviews = pages.as_ref().map_or(&[][..], |p| p.reviews.as_slice());
+        self.prepared
+            .retain(|id, _| reviews.iter().any(|r| r.id == *id));
+        for review in reviews {
+            self.prepared
+                .entry(review.id)
+                .or_insert_with(|| Rc::new(Prepared::of(review)));
+        }
+        self.shown = pages;
+    }
+
+    /// Fetches the next page, or the first again after it failed.
+    pub(super) fn more_reviews(&mut self, cx: &mut Context<Self>) {
+        let (Some(book), Some(catalog)) = (self.book, self.catalog.clone()) else {
+            return;
+        };
+        let loaded = catalog.reviews.read(cx).resource().value(&book).is_some();
         if loaded {
             let me = self.model.read(cx).verified_user_id();
-            catalog.more_reviews(book.id, me, cx);
+            catalog.more_reviews(book, me, cx);
         } else {
-            self.fetch(book.id, Fetch::Reviews, Demand::Now, cx);
+            self.fetch(Demand::Now, cx);
         }
     }
 
-    // ----- rendering -----
-
-    /// The "Reviews" block, or `None` without `read:social`: the count on the
-    /// heading's trailing edge, then the reviews between hairlines.
-    pub(super) fn render_community_reviews(
-        &self,
-        book: BookId,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        if !session::has_scope(cx, READ_SOCIAL) {
-            return None;
-        }
-        let muted = colors(cx).fg_muted;
-        let (state, first_error, more_error, loading) = match &self.catalog {
-            Some(catalog) => {
-                let store = catalog.reviews.read(cx).resource();
-                (
-                    store.value(&book).cloned(),
-                    store.error(&book).cloned(),
-                    store.more_error(&book).cloned(),
-                    store.is_loading(&book),
-                )
-            }
-            None => (None, None, None, false),
-        };
-        let retry = |id: &'static str, message: SharedString, cx: &mut Context<Self>| {
-            LoadFailed::new(id, message)
-                .on_retry(cx.listener(|this, _, _, cx| this.more_reviews(cx)))
-        };
-        let body: AnyElement = match &state {
-            None => match first_error {
-                Some(message) if !loading => retry("retry-reviews", message, cx).into_any_element(),
-                // Waiting out the delay or loading: the shape of two reviews.
-                _ => placeholder(loading).into_any_element(),
-            },
-            Some(state) if state.reviews.is_empty() && !state.has_more => div()
-                .body()
-                .text_color(muted)
-                .child("No reviews yet")
-                .into_any_element(),
-            Some(state) => v_flex()
-                .items_start()
-                .gap_2()
-                .child(
-                    Sequence::new()
-                        .spacing(RowSpacing::Reviews)
-                        .flush_top()
-                        .children(
-                            state
-                                .reviews
-                                .iter()
-                                .map(|review| self.render_community_review(review, cx)),
-                        ),
-                )
-                .map(|this| match more_error.clone().filter(|_| !loading) {
-                    Some(error) => this.child(retry("retry-more-reviews", error, cx)),
-                    None if state.has_more => this.child(
-                        Button::new("more-reviews")
-                            .small_control()
-                            .label("Show more reviews")
-                            .loading(loading)
-                            .on_click(cx.listener(|this, _, _, cx| this.more_reviews(cx))),
-                    ),
-                    None => this,
-                })
-                .into_any_element(),
-        };
-        let caption = state
-            .as_ref()
-            .and_then(|s| s.total)
-            .filter(|n| *n > 0)
-            .map(|n| match n {
-                1 => "1 review".to_owned(),
-                n => format!("{} reviews", count_text(n)),
-            });
-        Some(
-            Block::new("Reviews")
-                .when_some(caption, |this, caption| {
-                    this.action(div().caption(cx).tabular().child(caption))
-                })
-                .child(body)
-                .into_any_element(),
-        )
-    }
-
-    fn review_body(&self, review: &CommunityReview, cx: &mut Context<Self>) -> AnyElement {
+    fn review_body(&self, review: &CommunityReview, cx: &Context<Self>) -> AnyElement {
         let id = review.id;
         let key = id.get().cast_unsigned();
         let muted = colors(cx).fg_muted;
-        let hidden = review.has_spoilers && !self.community_reviews.spoilers_shown.contains(&id);
+        let hidden = review.has_spoilers && !self.spoilers_shown.contains(&id);
         if hidden {
-            h_flex()
+            return h_flex()
                 .gap_2()
                 .items_center()
                 .body()
@@ -178,62 +209,56 @@ impl BookDetailView {
                         .small_control()
                         .label("Show")
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.community_reviews.spoilers_shown.insert(id);
+                            this.spoilers_shown.insert(id);
                             cx.notify();
                         })),
                 )
-                .into_any_element()
-        } else {
-            let paragraphs: Vec<&str> = review.paragraphs().collect();
-            let expanded = self.community_reviews.expanded.contains(&id);
-            let collapsed = collapse(&paragraphs, COLLAPSED_LINES, CHARS_PER_LINE);
-            let shown: Vec<String> = match (&collapsed, expanded) {
-                (Some(short), false) => short.clone(),
-                _ => paragraphs.iter().map(|p| (*p).to_owned()).collect(),
-            };
-            v_flex()
-                .items_start()
-                .gap_2()
-                .child(
-                    v_flex()
-                        .w_full()
-                        .max_w(size::PROSE)
-                        .gap_2()
-                        .reader()
-                        .children(shown.into_iter().map(WrappingText::new)),
-                )
-                .when(collapsed.is_some(), |this| {
-                    this.child(
-                        // Its label on the text's spine: back by the
-                        // ghost button's padding.
-                        Button::new(("review-more", key))
-                            .ghost()
-                            .small_control()
-                            .on_text_spine(true)
-                            .label(if expanded { "Show less" } else { "Read more" })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                let expanded = &mut this.community_reviews.expanded;
-                                if !expanded.remove(&id) {
-                                    expanded.insert(id);
-                                }
-                                cx.notify();
-                            })),
-                    )
-                })
-                .into_any_element()
+                .into_any_element();
         }
+        let Some(prepared) = self.prepared.get(&id).cloned() else {
+            return div().into_any_element();
+        };
+        let expanded = self.expanded.contains(&id);
+        let shown = match (&prepared.collapsed, expanded) {
+            (Some(short), false) => short,
+            _ => &prepared.paragraphs,
+        };
+        v_flex()
+            .items_start()
+            .gap_2()
+            .child(
+                v_flex()
+                    .w_full()
+                    .max_w(size::PROSE)
+                    .gap_2()
+                    .reader()
+                    .children(shown.iter().cloned().map(WrappingText::new)),
+            )
+            .when(prepared.collapsed.is_some(), |this| {
+                this.child(
+                    // Its label on the text's spine: back by the ghost
+                    // button's padding.
+                    Button::new(("review-more", key))
+                        .ghost()
+                        .small_control()
+                        .on_text_spine(true)
+                        .label(if expanded { "Show less" } else { "Read more" })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if !this.expanded.remove(&id) {
+                                this.expanded.insert(id);
+                            }
+                            cx.notify();
+                        })),
+                )
+            })
+            .into_any_element()
     }
 
     /// One review: the avatar beside the byline and rating, the date and
     /// likes, and the text in `reader`, collapsed when long; a spoiler review
     /// shows only that it has spoilers, and "Show".
-    fn render_community_review(
-        &self,
-        review: &CommunityReview,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let id = review.id;
-        let key = id.get().cast_unsigned();
+    fn render_review(&self, review: &CommunityReview, cx: &Context<Self>) -> AnyElement {
+        let key = review.id.get().cast_unsigned();
         let name = review.reviewer.display_name();
         let mut facts: Vec<String> = Vec::new();
         if let Some(date) = review.reviewed_at {
@@ -244,7 +269,6 @@ impl BookDetailView {
             1 => facts.push("1 like".to_owned()),
             n => facts.push(format!("{} likes", count_text(n))),
         }
-        let body = self.review_body(review, cx);
         let name_element: AnyElement = match review.reviewer.profile_url() {
             Some(url) => BylineLink::new(("reviewer", key), name.clone(), url).into_any_element(),
             None => div()
@@ -291,8 +315,88 @@ impl BookDetailView {
                                 this.child(div().caption(cx).tabular().child(facts.join(" · ")))
                             }),
                     )
-                    .child(body),
+                    .child(self.review_body(review, cx)),
             )
+            .into_any_element()
+    }
+}
+
+impl Render for CommunityReviews {
+    /// The "Reviews" block: the count on the heading's trailing edge, then
+    /// the reviews between hairlines. Empty without `read:social`; the book
+    /// view leaves the block out then ([`CommunityReviews::visible`]).
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(book) = self.book.filter(|_| Self::visible(cx)) else {
+            return div().into_any_element();
+        };
+        let muted = colors(cx).fg_muted;
+        let (first_error, more_error, loading) = match &self.catalog {
+            Some(catalog) => {
+                let store = catalog.reviews.read(cx).resource();
+                (
+                    store.error(&book).cloned(),
+                    store.more_error(&book).cloned(),
+                    store.is_loading(&book),
+                )
+            }
+            None => (None, None, false),
+        };
+        let retry = |id: &'static str, message: SharedString, cx: &Context<Self>| {
+            LoadFailed::new(id, message)
+                .on_retry(cx.listener(|this, _, _, cx| this.more_reviews(cx)))
+        };
+        let state = self.shown.clone();
+        let body: AnyElement = match &state {
+            None => match first_error {
+                Some(message) if !loading => retry("retry-reviews", message, cx).into_any_element(),
+                // Waiting out the delay or loading: the shape of two reviews.
+                _ => placeholder(loading).into_any_element(),
+            },
+            Some(state) if state.reviews.is_empty() && !state.has_more => div()
+                .body()
+                .text_color(muted)
+                .child("No reviews yet")
+                .into_any_element(),
+            Some(state) => v_flex()
+                .items_start()
+                .gap_2()
+                .child(
+                    Sequence::new()
+                        .spacing(RowSpacing::Reviews)
+                        .flush_top()
+                        .children(
+                            state
+                                .reviews
+                                .iter()
+                                .map(|review| self.render_review(review, cx)),
+                        ),
+                )
+                .map(|this| match more_error.clone().filter(|_| !loading) {
+                    Some(error) => this.child(retry("retry-more-reviews", error, cx)),
+                    None if state.has_more => this.child(
+                        Button::new("more-reviews")
+                            .small_control()
+                            .label("Show more reviews")
+                            .loading(loading)
+                            .on_click(cx.listener(|this, _, _, cx| this.more_reviews(cx))),
+                    ),
+                    None => this,
+                })
+                .into_any_element(),
+        };
+        let caption = state
+            .as_ref()
+            .and_then(|s| s.total)
+            .filter(|n| *n > 0)
+            .map(|n| match n {
+                1 => "1 review".to_owned(),
+                n => format!("{} reviews", count_text(n)),
+            });
+        Block::new("Reviews")
+            .when_some(caption, |this, caption| {
+                this.action(div().caption(cx).tabular().child(caption))
+            })
+            .child(body)
             .into_any_element()
     }
 }
@@ -364,10 +468,10 @@ fn cut(text: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
-    use gpui_kit::{Entity, TestAppContext, VisualTestContext};
+    use gpui_kit::{TestAppContext, VisualTestContext};
 
+    use super::super::BookDetailView;
     use super::super::tests::{BOOK, demo_pane, settle};
-    use crate::resource::catalog::ReviewPages;
 
     fn reviews(view: &Entity<BookDetailView>, cx: &mut VisualTestContext) -> ReviewPages {
         view.read_with(cx, |view, cx| {
@@ -380,10 +484,15 @@ mod tests {
         reviews(view, cx).pages
     }
 
+    fn more_reviews(view: &Entity<BookDetailView>, cx: &mut VisualTestContext) {
+        let child = view.read_with(cx, |view, _| view.community_reviews.clone());
+        child.update(cx, CommunityReviews::more_reviews);
+    }
+
     #[gpui_kit::test]
     fn the_same_book_with_newer_facts_keeps_the_pane(cx: &mut TestAppContext) {
         let (view, cx) = demo_pane(cx);
-        view.update(cx, |view, cx| view.more_reviews(cx));
+        more_reviews(&view, cx);
         settle(cx);
         assert_eq!(review_pages(&view, cx), 2);
 
@@ -407,7 +516,7 @@ mod tests {
     fn paged_reviews_are_replaced_only_when_shown_again(cx: &mut TestAppContext) {
         let (view, cx) = demo_pane(cx);
         assert_eq!(review_pages(&view, cx), 1);
-        view.update(cx, |view, cx| view.more_reviews(cx));
+        more_reviews(&view, cx);
         settle(cx);
         assert_eq!(review_pages(&view, cx), 2);
 
@@ -424,6 +533,28 @@ mod tests {
         let reviews = reviews(&view, cx);
         assert!(reviews.has_more);
         assert!(!reviews.reviews.is_empty());
+    }
+
+    /// C1: each review's paragraphs and cut are worked out when its page
+    /// arrives, once, and kept for the reviews still shown.
+    #[gpui_kit::test]
+    fn reviews_are_prepared_when_they_arrive(cx: &mut TestAppContext) {
+        let (view, cx) = demo_pane(cx);
+        let child = view.read_with(cx, |view, _| view.community_reviews.clone());
+        let prepared = |cx: &mut VisualTestContext| {
+            child.read_with(cx, |c, _| {
+                let reviews = &c.shown.as_ref().unwrap().reviews;
+                assert_eq!(c.prepared.len(), reviews.len());
+                c.prepared.get(&reviews[0].id).cloned().unwrap()
+            })
+        };
+        let first = prepared(cx);
+        more_reviews(&view, cx);
+        settle(cx);
+        assert!(
+            Rc::ptr_eq(&first, &prepared(cx)),
+            "a review already prepared isn't worked out again"
+        );
     }
 
     #[test]

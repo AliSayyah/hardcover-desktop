@@ -56,7 +56,6 @@ use gpui_kit::{
     IntoElement, ParentElement as _, Pixels, Render, RenderImage, SharedString, Styled as _,
     Subscription, Task, Window, div,
 };
-use hardcover_core::auth::scopes::READ_SOCIAL;
 use hardcover_core::{
     BookDetails, BookId, BookSummary, LibraryEntry, Privacy, Rating, ReadId, ReadSession,
     ReadingStatus, UserBookId,
@@ -76,7 +75,6 @@ use crate::library::writes::{self, Ratings};
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::resource::{Catalog, Demand, SharedChanged};
-use crate::session;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, EmptyState, ObjectBar, ObjectTools, Tier, blocks, folds, main_column_width,
@@ -256,7 +254,8 @@ pub struct BookDetailView {
     /// The pane's layout, as measured when it was last laid out.
     layout: Rc<Cell<PaneLayout>>,
     review: ReviewEditor,
-    community_reviews: CommunityReviews,
+    /// Other readers' reviews, a view of their own.
+    community_reviews: Entity<CommunityReviews>,
     /// Ratings asked for and not yet saved.
     ratings: Entity<Ratings>,
     /// The status menu's trigger, which its commands and their
@@ -276,6 +275,7 @@ impl BookDetailView {
 
         let (review, review_subscriptions) = ReviewEditor::new(window, cx);
         let ratings = cx.new(|cx| Ratings::new(model.clone(), window, cx));
+        let community_reviews = cx.new(|cx| CommunityReviews::new(model.clone(), cx));
         let mut subscriptions =
             vec![
                 cx.observe_in(&model, window, |this, _, window, cx| {
@@ -306,7 +306,6 @@ impl BookDetailView {
             ];
         subscriptions.extend(review_subscriptions);
         subscriptions.push(cx.observe(&ratings, |_, _, cx| cx.notify()));
-        subscriptions.push(Self::observe_review_scope(cx));
         subscriptions.push(cx.on_release_in(window, |this: &mut Self, window, cx| {
             for url in this.similar_covers.drain(..) {
                 release_cover_medium(&url, Some(window), cx);
@@ -348,7 +347,7 @@ impl BookDetailView {
             tools_in_bar: false,
             layout: Rc::new(Cell::new(PaneLayout::default())),
             review,
-            community_reviews: CommunityReviews::default(),
+            community_reviews,
             ratings,
             status_focus: cx.focus_handle(),
             _subscriptions: subscriptions,
@@ -425,12 +424,9 @@ impl BookDetailView {
                 self.similar_due = Some(book);
                 catalog.request_similar(book, demand, cx);
             }
-            Fetch::Reviews => {
-                if session::has_scope(cx, READ_SOCIAL) {
-                    let me = self.model.read(cx).verified_user_id();
-                    catalog.request_reviews(book, me, demand, cx);
-                }
-            }
+            Fetch::Reviews => self
+                .community_reviews
+                .update(cx, |reviews, cx| reviews.fetch(demand, cx)),
         }
     }
 
@@ -459,15 +455,12 @@ impl BookDetailView {
                     }
                 },
             ),
-            cx.subscribe(
-                &catalog.reviews,
-                |this, _, SharedChanged(id): &SharedChanged<BookId>, cx| {
-                    if this.shows(*id, cx) {
-                        cx.notify();
-                    }
-                },
-            ),
         ]
+    }
+
+    /// The "Reviews" block, left out without `read:social`.
+    fn render_community_reviews(&self, cx: &App) -> Option<AnyElement> {
+        CommunityReviews::visible(cx).then(|| self.community_reviews.clone().into_any_element())
     }
 
     /// The book shown is `book`.
@@ -534,6 +527,9 @@ impl BookDetailView {
     /// Points the controls at the entry's current values when they differ from
     /// what is shown. Never emits control events, so it cannot loop.
     fn sync_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let book = self.book(cx).map(|b| b.id);
+        self.community_reviews
+            .update(cx, |reviews, cx| reviews.set_book(book, cx));
         let entry = self.entry(self.model.read(cx));
         let notes = entry.map(|e| (e.user_book_id, e.private_notes.clone()));
         let next = entry.map(Shown::of);
@@ -1078,7 +1074,7 @@ impl BookDetailView {
             column.push(self.render_reads(entry, false, cx));
         }
         column.extend(Self::render_on_hardcover(book, details, false, cx));
-        column.extend(self.render_community_reviews(book.id, window, cx));
+        column.extend(self.render_community_reviews(cx));
         column.extend(self.render_similar(book, details, None, cx));
 
         v_flex()
@@ -1112,7 +1108,7 @@ impl BookDetailView {
         let tags = self.render_tags(details, cx);
         let other_titles = Self::render_other_titles(details, cx);
         let review = entry.map(|entry| self.render_review(entry, cx).into_any_element());
-        let reviews = self.render_community_reviews(book.id, window, cx);
+        let reviews = self.render_community_reviews(cx);
         let similar = self.render_similar(book, details, side, cx);
 
         // Keyboard order follows the task, not the tree: the header and
