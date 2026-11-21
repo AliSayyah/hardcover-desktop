@@ -46,6 +46,10 @@
 //!   reach, so it stays paper.
 //! - **A dialog's shadow** is set after its style is applied, so it keeps
 //!   the kit's.
+//! - **A disabled segment** of a segmented `TabBar` is painted with the
+//!   theme's `tab_bar` (paper), like the selected segment's indicator, so
+//!   it reads as chosen. Leave a segment out rather than disable it (the
+//!   progress dialog's %).
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::dialog::{AlertDialog, Dialog};

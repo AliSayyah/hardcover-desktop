@@ -6,8 +6,8 @@
 use chrono::{DateTime, Datelike, TimeZone};
 use hardcover_core::auth::{DEFAULT_SCOPES, scopes};
 use hardcover_core::{
-    AuthorHit, Date, EditionSummary, Error, Goal, GoalMetric, Length, LibraryEntry, ProgressUpdate,
-    Rating, ReadingStatus, SeriesHit,
+    AuthorHit, Date, EditionSummary, Error, Goal, GoalMetric, Length, LibraryEntry, Rating,
+    ReadingStatus, SeriesHit,
 };
 
 /// Sentence-case label for a status, as the app shows it.
@@ -45,14 +45,12 @@ pub struct ProgressSummary {
     pub total_seconds: Option<u32>,
     /// 0..=100, from the server or derived from pages or time.
     pub percent: Option<f32>,
+    /// Progress is counted in time: the edition is an audiobook, whether or
+    /// not its running time is known.
+    pub audio: bool,
 }
 
 impl ProgressSummary {
-    /// True when progress is counted in time: the edition is an audiobook.
-    pub fn is_audio(&self) -> bool {
-        self.total_seconds.is_some()
-    }
-
     /// "Page 120 of 350", "Page 120", "2h 5m of 10h 30m", "42%", or "Not started".
     pub fn text(&self) -> String {
         match (self.page, self.total_pages, self.seconds, self.percent) {
@@ -67,12 +65,14 @@ impl ProgressSummary {
         }
     }
 
-    /// Compact form for a list row's trailing lane: "42%" or "p. 120".
+    /// Compact form for a list row's trailing lane: "42%", or without a
+    /// length "p. 120" or "2h 5m".
     pub fn short_text(&self) -> Option<String> {
-        match (self.percent, self.page) {
-            (Some(pct), _) => Some(format!("{}%", pct.round().max(0.0))),
-            (None, Some(page)) => Some(format!("p. {page}")),
-            (None, None) => None,
+        match (self.percent, self.page, self.seconds) {
+            (Some(pct), _, _) => Some(format!("{}%", pct.round().max(0.0))),
+            (None, Some(page), _) => Some(format!("p. {page}")),
+            (None, None, Some(seconds)) => Some(duration_text(seconds)),
+            (None, None, None) => None,
         }
     }
 }
@@ -88,8 +88,9 @@ pub fn bar_percent(fraction: f64) -> f32 {
 }
 
 /// Progress of the entry's unfinished read, if it has one, in the unit of
-/// [`LibraryEntry::length`]: pages, or time for an audiobook.
+/// [`LibraryEntry::measure`]: pages, or time for an audiobook.
 pub fn progress_summary(entry: &LibraryEntry) -> ProgressSummary {
+    let audio = entry.is_audio();
     let (total_pages, total_seconds) = match entry.length() {
         Some(Length::Pages(p)) => (Some(p), None),
         Some(Length::Seconds(s)) => (None, Some(s)),
@@ -98,7 +99,7 @@ pub fn progress_summary(entry: &LibraryEntry) -> ProgressSummary {
     let read = entry.open_read();
     let page = read
         .and_then(|r| r.progress_pages)
-        .filter(|p| *p > 0 && total_seconds.is_none());
+        .filter(|p| *p > 0 && !audio);
     let seconds = read
         .and_then(|r| r.progress_seconds)
         .filter(|s| *s > 0 && page.is_none());
@@ -117,6 +118,7 @@ pub fn progress_summary(entry: &LibraryEntry) -> ProgressSummary {
         seconds,
         total_seconds,
         percent,
+        audio,
     }
 }
 
@@ -173,27 +175,6 @@ fn time_position(hours: u32, minutes: u32, seconds: u32) -> Option<u32> {
         .checked_add(seconds)
 }
 
-/// What the user typed as their place in a book of `length`: a page, or for
-/// an audiobook a time like 2:05. The error says what to type instead.
-pub fn parse_progress(length: Option<Length>, text: &str) -> Result<ProgressUpdate, String> {
-    match length {
-        Some(Length::Seconds(total)) => match parse_position(text) {
-            None => Err("Enter the time you're at, like 2:05.".to_owned()),
-            Some(s) if s > total => Err(format!("This edition is {} long.", duration_text(total))),
-            Some(s) => Ok(ProgressUpdate::Seconds(s)),
-        },
-        length => match text.trim().parse::<u32>() {
-            Err(_) => Err("Enter the page you're on.".to_owned()),
-            Ok(page) => match length {
-                Some(Length::Pages(total)) if page > total => {
-                    Err(format!("This edition has {total} pages."))
-                }
-                _ => Ok(ProgressUpdate::Pages(page)),
-            },
-        },
-    }
-}
-
 /// "Nov 3, 2024", as the date pickers show dates.
 pub fn date_text(date: Date) -> String {
     date.format("%b %-d, %Y").to_string()
@@ -213,8 +194,12 @@ pub fn short_date(date: Date, today: Date) -> String {
 /// `None` when nothing is known beyond its id.
 pub fn edition_text(edition: &EditionSummary) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
-    if let Some(format) = edition.format.as_ref().or(edition.reading_format.as_ref()) {
-        parts.push(format.clone());
+    match (&edition.format, &edition.reading_format) {
+        (Some(format), _) => parts.push(format.clone()),
+        // Hardcover's name for the audiobook format is "Listened".
+        (None, Some(_)) if edition.is_audiobook() => parts.push("Audiobook".to_owned()),
+        (None, Some(format)) => parts.push(format.clone()),
+        (None, None) => {}
     }
     match edition.length() {
         Some(Length::Pages(p)) => parts.push(format!("{p} pages")),
@@ -635,40 +620,6 @@ mod tests {
         UserId,
     };
 
-    #[test]
-    fn progress_is_a_page_or_an_audiobook_time_within_the_length() {
-        let pages = Some(Length::Pages(300));
-        assert_eq!(
-            parse_progress(pages, " 120 "),
-            Ok(ProgressUpdate::Pages(120))
-        );
-        assert_eq!(parse_progress(pages, "300"), Ok(ProgressUpdate::Pages(300)));
-        assert_eq!(
-            parse_progress(pages, "301"),
-            Err("This edition has 300 pages.".to_owned())
-        );
-        assert_eq!(
-            parse_progress(pages, "1:05"),
-            Err("Enter the page you're on.".to_owned())
-        );
-        // Without a known length any page goes.
-        assert_eq!(parse_progress(None, "999"), Ok(ProgressUpdate::Pages(999)));
-
-        let audio = Some(Length::Seconds(36_000));
-        assert_eq!(
-            parse_progress(audio, "2:05"),
-            Ok(ProgressUpdate::Seconds(7_500))
-        );
-        assert_eq!(
-            parse_progress(audio, "11:00"),
-            Err("This edition is 10h 0m long.".to_owned())
-        );
-        assert_eq!(
-            parse_progress(audio, "125"),
-            Err("Enter the time you're at, like 2:05.".to_owned())
-        );
-    }
-
     fn entry_with_read(
         pages: Option<u32>,
         percent: Option<f32>,
@@ -855,6 +806,17 @@ mod tests {
             progress_summary(&entry_with_read(None, Some(41.6), None)).text(),
             "42%"
         );
+        let mut audio = entry_with_read(None, None, Some(300));
+        audio.reads[0].progress_seconds = Some(7_500);
+        let mut edition = EditionSummary::new(EditionId::new(3));
+        edition.reading_format_id = Some(hardcover_core::AUDIOBOOK_FORMAT_ID);
+        audio.edition = Some(edition);
+        let audio = progress_summary(&audio);
+        // An audiobook without a running time counts time, not the book's pages.
+        assert!(audio.audio);
+        assert_eq!(audio.total_pages, None);
+        assert_eq!(audio.text(), "2h 5m");
+        assert_eq!(audio.short_text().as_deref(), Some("2h 5m"));
         let none = progress_summary(&entry_with_read(None, None, Some(300)));
         assert_eq!(none.text(), "Not started");
         assert_eq!(none.short_text(), None);
@@ -879,7 +841,7 @@ mod tests {
         audio.audio_seconds = Some(10 * 3600);
         e.edition = Some(audio);
         let p = progress_summary(&e);
-        assert!(p.is_audio());
+        assert!(p.audio);
         assert_eq!(p.page, None);
         assert_eq!(p.text(), "2h 5m of 10h 0m");
         assert_eq!(p.percent.map(f32::round), Some(21.0));

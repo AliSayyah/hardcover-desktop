@@ -395,8 +395,13 @@ pub struct EditionSummary {
     pub cover: Option<Cover>,
     /// `editions.edition_format`, free text such as "Paperback", "Hardcover", "Kindle Edition".
     pub format: Option<String>,
-    /// `reading_formats.format`, Hardcover's broad kind of edition (such as "Audiobook").
+    /// `reading_formats.format`, Hardcover's broad kind of edition: "Read",
+    /// "Listened" (an audiobook) or "Ebook".
     pub reading_format: Option<String>,
+    /// `editions.reading_format_id`: 1 physical, 2 audiobook, 4 ebook. `None`
+    /// in caches written before it was stored, until the next sync.
+    #[serde(default)]
+    pub reading_format_id: Option<i64>,
     pub release_date: Option<Date>,
     pub isbn_13: Option<String>,
     pub publisher: Option<String>,
@@ -414,6 +419,7 @@ impl EditionSummary {
             cover: None,
             format: None,
             reading_format: None,
+            reading_format_id: None,
             release_date: None,
             isbn_13: None,
             publisher: None,
@@ -421,11 +427,73 @@ impl EditionSummary {
         }
     }
 
-    /// The edition's length: pages, or for an audiobook without a page count,
-    /// its running time.
+    /// True for an audiobook edition, whose progress is counted in time.
+    #[must_use]
+    pub fn is_audiobook(&self) -> bool {
+        match self.reading_format_id {
+            Some(id) => id == AUDIOBOOK_FORMAT_ID,
+            // Caches written before the id was stored have the name.
+            None => self.reading_format.as_deref() == Some(AUDIOBOOK_FORMAT_NAME),
+        }
+    }
+
+    /// What the edition's progress is counted in, and how long it is in that
+    /// unit. `None` when the edition doesn't say.
+    #[must_use]
+    pub fn measure(&self) -> Option<Measure> {
+        measure_of([self.parts()], None)
+    }
+
+    pub(crate) fn parts(&self) -> EditionParts {
+        EditionParts {
+            pages: self.pages,
+            audio_seconds: self.audio_seconds,
+            reading_format_id: self.reading_format_id.or_else(|| {
+                (self.reading_format.as_deref() == Some(AUDIOBOOK_FORMAT_NAME))
+                    .then_some(AUDIOBOOK_FORMAT_ID)
+            }),
+        }
+    }
+
+    /// The edition's length in the unit its progress is counted in: pages, or
+    /// for an audiobook its running time.
     #[must_use]
     pub fn length(&self) -> Option<Length> {
-        length_from_parts(self.pages, self.audio_seconds)
+        self.measure().and_then(Measure::length)
+    }
+}
+
+/// `reading_formats.id` of an audiobook. Hardcover counts an audiobook's
+/// progress in seconds and every other format's in pages (the official SDK's
+/// `ReadingFormat`: 1 physical, 2 audiobook, 4 ebook).
+pub const AUDIOBOOK_FORMAT_ID: i64 = 2;
+/// `reading_formats.format` of an audiobook.
+const AUDIOBOOK_FORMAT_NAME: &str = "Listened";
+
+/// What a read's progress is counted in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProgressUnit {
+    Pages,
+    /// Seconds into an audiobook.
+    Time,
+}
+
+/// The unit a read's progress is counted in, and the edition's length in it
+/// when known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Measure {
+    pub unit: ProgressUnit,
+    pub total: Option<u32>,
+}
+
+impl Measure {
+    #[must_use]
+    pub fn length(self) -> Option<Length> {
+        let total = self.total.filter(|t| *t > 0)?;
+        Some(match self.unit {
+            ProgressUnit::Pages => Length::Pages(total),
+            ProgressUnit::Time => Length::Seconds(total),
+        })
     }
 }
 
@@ -436,12 +504,121 @@ pub enum Length {
     Seconds(u32),
 }
 
-pub(crate) fn length_from_parts(pages: Option<u32>, audio_seconds: Option<u32>) -> Option<Length> {
-    match (pages, audio_seconds) {
-        (Some(p), _) if p > 0 => Some(Length::Pages(p)),
-        (_, Some(s)) if s > 0 => Some(Length::Seconds(s)),
-        _ => None,
+impl Length {
+    /// The position `percent` (0..=100) of the way through: whole pages or
+    /// seconds, rounded. Anything short of 100% stays before the end, since
+    /// progress that reaches the end finishes the read.
+    #[must_use]
+    pub fn position_at(self, percent: f64) -> ProgressUpdate {
+        let units = self.units_at(percent);
+        match self {
+            Self::Pages(_) => ProgressUpdate::Pages(units),
+            Self::Seconds(_) => ProgressUpdate::Seconds(units),
+        }
     }
+
+    /// [`Self::position_at`] as a count of pages or seconds.
+    #[must_use]
+    pub fn units_at(self, percent: f64) -> u32 {
+        scale(percent / 100.0, self.total())
+    }
+
+    /// The length in its own unit.
+    #[must_use]
+    pub fn total(self) -> u32 {
+        match self {
+            Self::Pages(n) | Self::Seconds(n) => n,
+        }
+    }
+}
+
+/// `fraction` (0..=1) of `total`, to the nearest unit. Short of 1 it never
+/// lands on the last unit: progress at the end may finish the read on
+/// Hardcover and move the book to Read, which neither a percentage short of
+/// 100 nor changing the edition must do.
+pub(crate) fn scale(fraction: f64, total: u32) -> u32 {
+    let fraction = if fraction.is_nan() {
+        0.0
+    } else {
+        fraction.clamp(0.0, 1.0)
+    };
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a progress fraction in 0..=1 rounds to an unsigned unit count no larger than total"
+    )]
+    let units = (fraction * f64::from(total)).round() as u32;
+    if fraction < 1.0 {
+        units.min(total.saturating_sub(1))
+    } else {
+        units.min(total)
+    }
+}
+
+/// An edition's lengths and `reading_format_id`, as Hardcover gives them.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EditionParts {
+    pub pages: Option<u32>,
+    pub audio_seconds: Option<u32>,
+    pub reading_format_id: Option<i64>,
+}
+
+impl EditionParts {
+    /// The unit the edition counts progress in, when it says: time for an
+    /// audiobook, pages for any other known format, and with no format, the
+    /// length it lists (pages first).
+    fn unit(self) -> Option<ProgressUnit> {
+        match self.reading_format_id {
+            Some(AUDIOBOOK_FORMAT_ID) => Some(ProgressUnit::Time),
+            Some(_) => Some(ProgressUnit::Pages),
+            None if self.total(ProgressUnit::Pages).is_some() => Some(ProgressUnit::Pages),
+            None if self.total(ProgressUnit::Time).is_some() => Some(ProgressUnit::Time),
+            None => None,
+        }
+    }
+
+    fn total(self, unit: ProgressUnit) -> Option<u32> {
+        match unit {
+            ProgressUnit::Pages => self.pages,
+            ProgressUnit::Time => self.audio_seconds,
+        }
+        .filter(|n| *n > 0)
+    }
+}
+
+/// The [`Measure`] of a read on the first of `editions` (the read's, then the
+/// entry's), falling back to the book's page count.
+///
+/// The first edition that says decides the unit. An audiobook counts time
+/// with its own running time only, or none: another edition's would be a
+/// guess. Pages take the first page count among the page editions, else the
+/// book's. With no edition that says, the book's page count decides.
+pub(crate) fn measure_of(
+    editions: impl IntoIterator<Item = EditionParts>,
+    book_pages: Option<u32>,
+) -> Option<Measure> {
+    let editions: Vec<EditionParts> = editions.into_iter().collect();
+    let book_pages = book_pages.filter(|p| *p > 0);
+    let Some(first) = editions.iter().copied().find(|e| e.unit().is_some()) else {
+        return book_pages.map(|p| Measure {
+            unit: ProgressUnit::Pages,
+            total: Some(p),
+        });
+    };
+    Some(match first.unit() {
+        Some(ProgressUnit::Time) => Measure {
+            unit: ProgressUnit::Time,
+            total: first.total(ProgressUnit::Time),
+        },
+        _ => Measure {
+            unit: ProgressUnit::Pages,
+            total: editions
+                .iter()
+                .filter(|e| e.unit() == Some(ProgressUnit::Pages))
+                .find_map(|e| e.total(ProgressUnit::Pages))
+                .or(book_pages),
+        },
+    })
 }
 
 /// One read-through of a book (`user_book_reads`).
@@ -526,6 +703,11 @@ pub struct LibraryEntry {
     /// was stored, until the next sync.
     #[serde(default)]
     pub series: Vec<SeriesRef>,
+    /// `books.audio_seconds`: the running time of the book's audiobook, when
+    /// Hardcover knows one. `None` in caches written before it was stored,
+    /// until the next sync.
+    #[serde(default)]
+    pub book_audio_seconds: Option<u32>,
 }
 
 impl LibraryEntry {
@@ -549,6 +731,7 @@ impl LibraryEntry {
             private_notes: None,
             privacy: None,
             series: Vec::new(),
+            book_audio_seconds: None,
         }
     }
 
@@ -586,15 +769,34 @@ impl LibraryEntry {
             .or(self.book.cover.as_ref())
     }
 
-    /// Length of what is being read: the open read's edition, else the entry's
-    /// edition, else the book's default page count. The first of those with a
-    /// known length decides the unit, as in [`crate::api::Client::update_progress`].
+    /// What progress on this book is counted in, and the length in that unit:
+    /// the open read's edition, else the entry's edition, else the book's
+    /// default page count. The first edition that says decides the unit, as in
+    /// [`crate::api::Client::update_progress`]: a read on a page edition
+    /// counts pages even when the entry's edition is an audiobook, and an
+    /// audiobook counts time even without its running time.
+    #[must_use]
+    pub fn measure(&self) -> Option<Measure> {
+        let read = self.open_read().and_then(|r| r.edition.as_ref());
+        measure_of(
+            [read, self.edition.as_ref()]
+                .into_iter()
+                .flatten()
+                .map(EditionSummary::parts),
+            self.book.pages,
+        )
+    }
+
+    /// Length of what is being read, in the unit of [`Self::measure`].
+    #[must_use]
     pub fn length(&self) -> Option<Length> {
-        self.open_read()
-            .and_then(|r| r.edition.as_ref())
-            .and_then(EditionSummary::length)
-            .or_else(|| self.edition.as_ref().and_then(EditionSummary::length))
-            .or_else(|| self.book.pages.filter(|p| *p > 0).map(Length::Pages))
+        self.measure().and_then(Measure::length)
+    }
+
+    /// True when progress is counted in time: the edition is an audiobook.
+    #[must_use]
+    pub fn is_audio(&self) -> bool {
+        self.measure().is_some_and(|m| m.unit == ProgressUnit::Time)
     }
 
     /// Page count of what is being read; `None` for an audiobook.
@@ -1427,6 +1629,79 @@ mod tests {
         r.edition = Some(paper);
         e.upsert_read(r);
         assert_eq!(e.total_pages(), Some(410));
+    }
+
+    #[test]
+    fn the_reading_format_decides_the_unit() {
+        let edition = |pages, seconds, format: Option<i64>| {
+            let mut e = EditionSummary::new(EditionId::new(1));
+            e.pages = pages;
+            e.audio_seconds = seconds;
+            e.reading_format_id = format;
+            e
+        };
+        let m = |unit, total| Some(Measure { unit, total });
+        // Without a format, the lengths decide: pages first.
+        assert_eq!(
+            edition(Some(300), Some(36_000), None).measure(),
+            m(ProgressUnit::Pages, Some(300))
+        );
+        assert_eq!(
+            edition(None, Some(36_000), None).measure(),
+            m(ProgressUnit::Time, Some(36_000))
+        );
+        assert_eq!(edition(None, None, None).measure(), None);
+        // An audiobook counts time, even with a page count or no running time.
+        assert_eq!(
+            edition(Some(300), Some(36_000), Some(2)).measure(),
+            m(ProgressUnit::Time, Some(36_000))
+        );
+        assert_eq!(
+            edition(Some(300), None, Some(2)).measure(),
+            m(ProgressUnit::Time, None)
+        );
+        assert_eq!(edition(Some(300), None, Some(2)).length(), None);
+        // Paper and ebooks count pages, with or without a page count.
+        assert_eq!(
+            edition(Some(300), Some(36_000), Some(4)).measure(),
+            m(ProgressUnit::Pages, Some(300))
+        );
+        assert_eq!(
+            edition(None, Some(36_000), Some(1)).measure(),
+            m(ProgressUnit::Pages, None)
+        );
+        // A cache from before the id was stored has the format's name.
+        let mut cached = edition(None, None, None);
+        cached.reading_format = Some("Listened".into());
+        assert!(cached.is_audiobook());
+        assert_eq!(cached.measure(), m(ProgressUnit::Time, None));
+
+        // On an entry, an audiobook without a running time doesn't fall back
+        // to the book's pages.
+        let mut book = BookSummary::new(BookId::new(1), "Synthetic");
+        book.pages = Some(300);
+        let mut e = LibraryEntry::new(
+            UserBookId::new(1),
+            UserId::new(1),
+            book,
+            ReadingStatus::CurrentlyReading,
+        );
+        assert!(!e.is_audio());
+        e.edition = Some(edition(None, None, Some(2)));
+        assert!(e.is_audio());
+        assert_eq!(e.length(), None);
+        // A paper edition without pages takes the book's.
+        e.edition = Some(edition(None, None, Some(1)));
+        assert_eq!(e.length(), Some(Length::Pages(300)));
+        // A read on a paper edition without pages counts pages, though the
+        // entry's edition is an audiobook: never time on a page edition.
+        e.edition = Some(edition(None, Some(36_000), Some(2)));
+        let mut r = ReadSession::new(ReadId::new(7));
+        r.started_at = Date::from_ymd_opt(2026, 1, 1);
+        r.edition = Some(edition(None, None, Some(1)));
+        e.upsert_read(r);
+        assert!(!e.is_audio());
+        assert_eq!(e.length(), Some(Length::Pages(300)));
     }
 
     #[test]

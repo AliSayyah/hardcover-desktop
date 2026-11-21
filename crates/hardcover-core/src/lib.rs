@@ -26,14 +26,14 @@ mod ratelimit;
 
 pub use api::UpcomingBook;
 pub use api::{
-    AuthorBook, AuthorDetails, AuthorHit, AuthorId, AuthorRef, BookDetails, BookId, BookSummary,
-    Client, Contributor, Cover, Date, EDITIONS_PER_PAGE, EditionChange, EditionId, EditionSummary,
-    Goal, GoalConditions, GoalId, GoalMetric, LIST_BOOKS_PER_PAGE, Length, LibraryEntry, ListBook,
-    ListBookId, ListDraft, ListId, ListMembership, ListMemberships, NewGoal, OWNED_LIST_SLUG,
-    Privacy, ProgressUpdate, Rating, RatingBucket, ReadId, ReadSession, ReadingStatus, Review,
-    ReviewedEntry, SearchHits, SearchPage, SeriesBook, SeriesDetails, SeriesHit, SeriesId,
-    SeriesRef, Timestamp, TokenSource, TrackedBook, TrackedSeries, TrendingPeriod, User,
-    UserBookId, UserId, UserList,
+    AUDIOBOOK_FORMAT_ID, AuthorBook, AuthorDetails, AuthorHit, AuthorId, AuthorRef, BookDetails,
+    BookId, BookSummary, Client, Contributor, Cover, Date, EDITIONS_PER_PAGE, EditionChange,
+    EditionId, EditionSummary, Goal, GoalConditions, GoalId, GoalMetric, LIST_BOOKS_PER_PAGE,
+    Length, LibraryEntry, ListBook, ListBookId, ListDraft, ListId, ListMembership, ListMemberships,
+    Measure, NewGoal, OWNED_LIST_SLUG, Privacy, ProgressUnit, ProgressUpdate, Rating, RatingBucket,
+    ReadId, ReadSession, ReadingStatus, Review, ReviewedEntry, SearchHits, SearchPage, SeriesBook,
+    SeriesDetails, SeriesHit, SeriesId, SeriesRef, Timestamp, TokenSource, TrackedBook,
+    TrackedSeries, TrendingPeriod, User, UserBookId, UserId, UserList,
 };
 pub use api::{CommunityReview, REVIEWS_PER_PAGE, Reviewer, ReviewsPage};
 pub use error::{Error, Result};

@@ -11,12 +11,12 @@ use serde_json::Value;
 
 use super::model::{
     AuthorBook, AuthorDetails, AuthorHit, AuthorId, AuthorRef, BookDetails, BookId, BookSummary,
-    CommunityReview, Contributor, Cover, Date, EditionId, EditionSummary, Goal, GoalConditions,
-    GoalId, GoalMetric, Length, LibraryEntry, ListBook, ListBookId, ListId, ListMembership,
-    Privacy, Rating, RatingBucket, ReadId, ReadSession, ReadingStatus, Review, Reviewer,
-    SearchHits, SearchPage, SeriesBook, SeriesDetails, SeriesHit, SeriesId, SeriesRef, Timestamp,
-    TrackedBook, TrackedSeries, UpcomingBook, User, UserBookId, UserId, UserList,
-    length_from_parts, read_order,
+    CommunityReview, Contributor, Cover, Date, EditionId, EditionParts, EditionSummary, Goal,
+    GoalConditions, GoalId, GoalMetric, Length, LibraryEntry, ListBook, ListBookId, ListId,
+    ListMembership, Measure, Privacy, Rating, RatingBucket, ReadId, ReadSession, ReadingStatus,
+    Review, Reviewer, SearchHits, SearchPage, SeriesBook, SeriesDetails, SeriesHit, SeriesId,
+    SeriesRef, Timestamp, TrackedBook, TrackedSeries, UpcomingBook, User, UserBookId, UserId,
+    UserList, measure_of, read_order,
 };
 
 // ---------- scalar helpers ----------
@@ -559,6 +559,8 @@ pub(crate) struct RawEdition {
     pub release_date: Option<String>,
     pub isbn_13: Option<String>,
     pub reading_format: Option<RawReadingFormat>,
+    #[serde(default)]
+    pub reading_format_id: Option<i64>,
     pub publisher: Option<RawName>,
     pub language: Option<RawLanguage>,
 }
@@ -587,6 +589,7 @@ impl RawEdition {
         e.cover = cover_from_value(&self.cached_image);
         e.format = non_empty(self.edition_format);
         e.reading_format = self.reading_format.and_then(|f| non_empty(f.format));
+        e.reading_format_id = self.reading_format_id;
         e.release_date = self.release_date.as_deref().and_then(parse_date);
         e.isbn_13 = non_empty(self.isbn_13);
         e.publisher = self.publisher.and_then(|p| non_empty(p.name));
@@ -647,6 +650,9 @@ pub(crate) struct RawUserBookBook {
     pub book: RawBook,
     #[serde(default)]
     pub book_series: Vec<RawBookSeries>,
+    /// `books.audio_seconds`, the running time of the book's audiobook.
+    #[serde(default)]
+    pub audio_seconds: Option<i64>,
 }
 
 impl RawUserBook {
@@ -660,6 +666,7 @@ impl RawUserBook {
             status,
         );
         e.series = series_refs(self.book.book_series);
+        e.book_audio_seconds = opt_u32(self.book.audio_seconds).filter(|s| *s > 0);
         e.rating = self
             .rating
             .as_ref()
@@ -1142,6 +1149,9 @@ pub(crate) struct DeleteReadPayload {
 pub(crate) struct Lengths {
     pub pages: Option<i64>,
     pub audio_seconds: Option<i64>,
+    /// An edition's; a book has none.
+    #[serde(default)]
+    pub reading_format_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1160,27 +1170,34 @@ pub(crate) struct ProgressContext {
 }
 
 impl Lengths {
-    fn length(&self) -> Option<Length> {
-        length_from_parts(opt_u32(self.pages), opt_u32(self.audio_seconds))
+    fn parts(&self) -> EditionParts {
+        EditionParts {
+            pages: opt_u32(self.pages),
+            audio_seconds: opt_u32(self.audio_seconds),
+            reading_format_id: self.reading_format_id,
+        }
     }
 }
 
 impl ProgressContext {
     /// The length of the read's edition, else the entry's edition, else the
-    /// book's. The first with a known length decides the unit, as
-    /// [`LibraryEntry::length`] does, so an audiobook counts time even though
-    /// the book has a page count.
+    /// book's page count, decided as [`LibraryEntry::measure`] decides it: an
+    /// audiobook counts time even though the book has a page count, and an
+    /// audiobook without a running time has no length rather than the book's
+    /// pages.
     pub fn length(&self) -> Option<Length> {
-        [
-            self.user_book_reads
-                .first()
-                .and_then(|r| r.edition.as_ref()),
-            self.edition.as_ref(),
-            self.book.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        .find_map(Lengths::length)
+        let read = self
+            .user_book_reads
+            .first()
+            .and_then(|r| r.edition.as_ref());
+        measure_of(
+            [read, self.edition.as_ref()]
+                .into_iter()
+                .flatten()
+                .map(Lengths::parts),
+            self.book.as_ref().and_then(|b| opt_u32(b.pages)),
+        )
+        .and_then(Measure::length)
     }
 }
 

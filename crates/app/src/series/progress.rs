@@ -1144,6 +1144,7 @@ mod tests {
             seconds: None,
             total_seconds: None,
             percent: Some(41.5),
+            audio: false,
         };
         assert_eq!(reading_line(&p).unwrap(), "Page 418 of 1,007 · 42%");
         let none = ProgressSummary {
@@ -1152,8 +1153,18 @@ mod tests {
             seconds: None,
             total_seconds: None,
             percent: None,
+            audio: false,
         };
         assert_eq!(reading_line(&none), None);
+        let audio = ProgressSummary {
+            page: None,
+            total_pages: None,
+            seconds: Some(11_520),
+            total_seconds: Some(34_800),
+            percent: Some(33.1),
+            audio: true,
+        };
+        assert_eq!(reading_line(&audio).unwrap(), "3h 12m of 9h 40m · 33%");
         assert_eq!(lane_caption(NextKind::Reading, 1.0), "Reading · #1");
         assert_eq!(lane_caption(NextKind::Waiting, 3.5), "Next · #3.5");
     }
