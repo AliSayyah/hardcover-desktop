@@ -565,6 +565,12 @@ impl SearchView {
         cx.notify();
     }
 
+    /// Fetches the pane's book again where it is stale ([`crate::freshness`]).
+    pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
+        self.detail
+            .update(cx, |detail, cx| detail.revalidate(shown_again, cx));
+    }
+
     pub fn focus_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.input.update(cx, |input, cx| {
             input.focus(window, cx);

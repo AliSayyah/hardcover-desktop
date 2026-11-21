@@ -22,20 +22,22 @@ use hardcover_core::{SeriesDetails, SeriesId};
 
 use super::book_list::{
     CatalogBooks, CatalogRow, ListPane, focus_list_if_fallback_is_focused, follow_list,
-    load_failed, new_list, page_body, page_header_scrolling, page_list, read_summary, reset_scroll,
-    row_details,
+    load_failed, new_list, page_body, page_header_scrolling, page_list, read_summary, replace_rows,
+    reset_scroll, row_details,
 };
 use super::navigation::Page;
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::series_position_text;
+use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{ExternalLink, Skeleton, TextButton};
 
 enum Loaded {
-    Ready(Arc<SeriesDetails>),
+    /// Kept for the run, fetched again when stale ([`crate::freshness`]).
+    Ready(Fetched<Arc<SeriesDetails>>),
     Failed(SharedString),
 }
 
@@ -114,10 +116,18 @@ impl SeriesView {
 
     fn load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.current else { return };
-        if matches!(self.pages.get(&id), Some(Loaded::Ready(_))) || self.loading == Some(id) {
+        let revalidating = match self.pages.get(&id) {
+            Some(Loaded::Ready(fetched)) if !fetched.is_stale(cx) => return,
+            Some(Loaded::Ready(_)) => true,
+            Some(Loaded::Failed(_)) | None => false,
+        };
+        if self.loading == Some(id) {
             return;
         }
-        self.pages.remove(&id);
+        // A stale page stays on screen while it is fetched again.
+        if !revalidating {
+            self.pages.remove(&id);
+        }
         self.loading = Some(id);
         let client = Services::global(cx).client().clone();
         // Replacing the task drops the fetch for a page no longer shown.
@@ -127,13 +137,26 @@ impl SeriesView {
                 if this.loading == Some(id) {
                     this.loading = None;
                 }
-                let page = match result {
-                    Ok(series) => Loaded::Ready(Arc::new(series)),
-                    Err(e) => {
-                        Loaded::Failed(Services::error_message(&e, Some(READ_CATALOG), cx).into())
+                let result = result.map(Arc::new);
+                let changed = match (this.pages.get_mut(&id), result) {
+                    // A refetch: a failure keeps the page shown.
+                    (Some(Loaded::Ready(fetched)), result) => fetched.refetched(result, cx),
+                    (_, Ok(page)) => {
+                        this.pages.insert(id, Loaded::Ready(Fetched::new(page, cx)));
+                        false
+                    }
+                    (_, Err(e)) => {
+                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        this.pages.insert(id, Loaded::Failed(message.into()));
+                        false
                     }
                 };
-                this.pages.insert(id, page);
+                if changed
+                    && this.listed == Some(id)
+                    && let Some(rows) = this.rows(id)
+                {
+                    replace_rows(&this.list, rows, window, cx);
+                }
                 this.fill_list(window, cx);
                 if this.is_ready() {
                     focus_list_if_fallback_is_focused(
@@ -160,10 +183,24 @@ impl SeriesView {
         if self.listed == Some(id) {
             return;
         }
-        let Some(Loaded::Ready(series)) = self.pages.get(&id) else {
+        let Some(rows) = self.rows(id) else {
             return;
         };
-        let rows: Vec<CatalogRow> = series
+        self.listed = Some(id);
+        self.list.update(cx, |list, cx| {
+            list.delegate_mut().set_rows(rows);
+            list.set_selected_index(None, window, cx);
+            cx.notify();
+        });
+    }
+
+    /// The list's rows for a loaded page.
+    fn rows(&self, id: SeriesId) -> Option<Vec<CatalogRow>> {
+        let Some(Loaded::Ready(series)) = self.pages.get(&id) else {
+            return None;
+        };
+        let rows = series
+            .value()
             .books
             .iter()
             .map(|b| CatalogRow {
@@ -171,12 +208,14 @@ impl SeriesView {
                 book: b.book.clone(),
             })
             .collect();
-        self.listed = Some(id);
-        self.list.update(cx, |list, cx| {
-            list.delegate_mut().set_rows(rows);
-            list.set_selected_index(None, window, cx);
-            cx.notify();
-        });
+        Some(rows)
+    }
+
+    /// Fetches the page again if it is stale ([`crate::freshness`]), and
+    /// the book in the pane beside the list.
+    pub fn revalidate(&mut self, shown_again: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.load(window, cx);
+        self.pane.revalidate(shown_again, cx);
     }
 
     fn render_header(&self, series: &SeriesDetails, cx: &mut Context<Self>) -> AnyElement {
@@ -267,7 +306,7 @@ impl SeriesView {
     /// The name of a page already loaded this session, for Back's label.
     pub fn name(&self, id: SeriesId) -> Option<&str> {
         match self.pages.get(&id)? {
-            Loaded::Ready(details) => Some(&details.name),
+            Loaded::Ready(details) => Some(&details.value().name),
             Loaded::Failed(_) => None,
         }
     }
@@ -277,7 +316,7 @@ impl Render for SeriesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.current.and_then(|id| self.pages.get(&id));
         let header = match current {
-            Some(Loaded::Ready(series)) => self.render_header(&series.clone(), cx),
+            Some(Loaded::Ready(series)) => self.render_header(&series.value().clone(), cx),
             Some(Loaded::Failed(message)) => load_failed(
                 message.clone(),
                 Button::new("retry-series")
