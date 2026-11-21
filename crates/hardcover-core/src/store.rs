@@ -10,6 +10,12 @@
 //! A sync writes only the rows that changed (see
 //! [`LibraryCache::replace_library`]), so the usual sync, which changes a few
 //! entries or none, costs a few row writes instead of the whole library.
+//!
+//! The file holds private notes, so it and its WAL are readable by this user
+//! only (0600), deleted rows are overwritten (`secure_delete`), and
+//! [`LibraryCache::clear`] folds the WAL back and truncates it. A file that is
+//! not a database or is damaged is moved aside (`library.sqlite3.damaged`,
+//! one kept) and a new cache is made in its place.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -66,7 +72,9 @@ impl LibraryCache {
         Self::open(Self::default_path()?)
     }
 
-    /// Opens (creating if needed) the cache at `path`, creating parent directories.
+    /// Opens (creating if needed) the cache at `path`, creating parent
+    /// directories. A file that is not a database, or fails SQLite's quick
+    /// check, is moved aside and replaced with an empty cache.
     ///
     /// # Errors
     ///
@@ -77,12 +85,38 @@ impl LibraryCache {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        match Self::open_file(path) {
+            Err(OpenError::Damaged(e)) => {
+                eprintln!("hardcover: the library cache was damaged ({e}); starting a new one");
+                set_aside(path)?;
+                Self::open_file(path).map_err(Error::from)
+            }
+            opened => opened.map_err(Error::from),
+        }
+    }
+
+    fn open_file(path: &Path) -> std::result::Result<Self, OpenError> {
+        make_private(path)?;
         let conn = Connection::open(path)?;
+        // Before any statement, so that a second instance opening the file at
+        // the same moment waits for the lock instead of failing at once.
+        // rusqlite sets 5 s by default; said here rather than relied on.
+        conn.busy_timeout(BUSY_TIMEOUT)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         // A cache: a crash may lose the last transactions but never corrupts
         // the file in WAL mode, and everything in it can be downloaded again.
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        Self::init(conn, Some(path.to_owned()))
+        // A file with a valid header can still have damaged pages, which
+        // would fail later queries one by one. Reads every page: a few
+        // milliseconds for a library of a thousand books.
+        let check: String = conn.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
+        if check != "ok" {
+            return Err(OpenError::Damaged(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+                Some(check),
+            )));
+        }
+        Ok(Self::init(conn, Some(path.to_owned()))?)
     }
 
     /// Opens a temporary library cache in memory.
@@ -91,11 +125,14 @@ impl LibraryCache {
     ///
     /// Returns an error if SQLite cannot initialize the in-memory cache.
     pub fn open_in_memory() -> Result<Self> {
-        Self::init(Connection::open_in_memory()?, None)
+        Ok(Self::init(Connection::open_in_memory()?, None)?)
     }
 
-    fn init(mut conn: Connection, path: Option<PathBuf>) -> Result<Self> {
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    fn init(mut conn: Connection, path: Option<PathBuf>) -> rusqlite::Result<Self> {
+        conn.busy_timeout(BUSY_TIMEOUT)?;
+        // Deleted and replaced rows are overwritten with zeros, so private
+        // notes don't linger in free pages after an edit or a sign-out.
+        conn.pragma_update(None, "secure_delete", true)?;
         let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
         if version != SCHEMA_VERSION && migrate(&mut conn, version).is_err() {
             conn.execute_batch(
@@ -285,17 +322,117 @@ impl LibraryCache {
         )
     }
 
-    /// Forgets everything (use on sign-out).
+    /// Forgets everything (use on sign-out), leaving none of it readable in
+    /// the file: deleted rows are overwritten (`secure_delete`), and the WAL,
+    /// which still holds the old pages, is checkpointed and truncated.
     ///
     /// # Errors
     ///
-    /// Returns an error if SQLite cannot clear the cache tables.
+    /// Returns an error if SQLite cannot clear the cache tables, or another
+    /// connection (a second instance) keeps the WAL from being truncated.
     pub fn clear(&self) -> Result<()> {
-        self.conn().execute_batch(
+        let conn = self.conn();
+        conn.execute_batch(
             "DELETE FROM library_entries; DELETE FROM sync_state; DELETE FROM current_user;",
         )?;
+        if self.path.is_some() {
+            let busy: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))?;
+            if busy != 0 {
+                return Err(Error::Storage(
+                    "the library cache is in use by another instance, so its log was not cleared"
+                        .into(),
+                ));
+            }
+        }
         Ok(())
     }
+}
+
+/// How long a statement waits for another connection's lock.
+const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Why [`LibraryCache::open_file`] failed: a damaged file is set aside and
+/// replaced; anything else is reported.
+enum OpenError {
+    Damaged(rusqlite::Error),
+    Other(Error),
+}
+
+impl From<rusqlite::Error> for OpenError {
+    fn from(e: rusqlite::Error) -> Self {
+        let damaged = matches!(
+            e.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt)
+        );
+        if damaged {
+            Self::Damaged(e)
+        } else {
+            Self::Other(e.into())
+        }
+    }
+}
+
+impl From<std::io::Error> for OpenError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Other(e.into())
+    }
+}
+
+impl From<OpenError> for Error {
+    fn from(e: OpenError) -> Self {
+        match e {
+            OpenError::Damaged(e) => e.into(),
+            OpenError::Other(e) => e,
+        }
+    }
+}
+
+/// The files SQLite keeps beside the database.
+fn companions(path: &Path) -> [PathBuf; 3] {
+    ["-wal", "-shm", "-journal"].map(|suffix| {
+        let mut name = path.as_os_str().to_owned();
+        name.push(suffix);
+        PathBuf::from(name)
+    })
+}
+
+/// Creates the database file readable by this user only, and makes an
+/// existing one (and its WAL) so. SQLite gives the files it creates beside
+/// the database the database's mode.
+fn make_private(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+        std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .mode(0o600)
+            .open(path)?;
+        for file in std::iter::once(path.to_owned()).chain(companions(path)) {
+            match std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+                _ => {}
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+/// Moves a damaged database aside, replacing the one set aside before, and
+/// deletes its WAL and journal, which belong to it.
+fn set_aside(path: &Path) -> std::io::Result<()> {
+    let mut aside = path.as_os_str().to_owned();
+    aside.push(".damaged");
+    std::fs::rename(path, aside)?;
+    for file in companions(path) {
+        match std::fs::remove_file(file) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Upgrades a file at `version` to [`SCHEMA_VERSION`] in one transaction.
@@ -549,6 +686,131 @@ mod tests {
         drop(c);
         let c = LibraryCache::open(&path).unwrap();
         assert_eq!(c.load_library(me).unwrap(), loaded);
+    }
+
+    fn aside(path: &Path) -> PathBuf {
+        let mut name = path.as_os_str().to_owned();
+        name.push(".damaged");
+        PathBuf::from(name)
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_database_is_set_aside_and_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        std::fs::write(
+            &path,
+            b"this is not a database, just some bytes long enough",
+        )
+        .unwrap();
+
+        let c = LibraryCache::open(&path).unwrap();
+        c.replace_library(UserId::new(1), &[entry(1, 1, ReadingStatus::Read)])
+            .unwrap();
+        assert_eq!(c.load_library(UserId::new(1)).unwrap().len(), 1);
+        assert_eq!(
+            std::fs::read(aside(&path)).unwrap(),
+            b"this is not a database, just some bytes long enough"
+        );
+    }
+
+    #[test]
+    fn a_damaged_database_is_set_aside_and_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        {
+            let c = LibraryCache::open(&path).unwrap();
+            let entries: Vec<_> = (1..=200)
+                .map(|id| entry(id, 1, ReadingStatus::Read))
+                .collect();
+            c.replace_library(UserId::new(1), &entries).unwrap();
+        }
+        // Cut short, as a full disk or a crash of the file system might
+        // leave it: the header is intact, most pages are gone.
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.len() > 16 * 4096, "several pages to lose");
+        std::fs::write(&path, &bytes[..bytes.len() / 3]).unwrap();
+
+        let c = LibraryCache::open(&path).unwrap();
+        assert_eq!(c.load_library(UserId::new(1)).unwrap(), []);
+        c.upsert(&entry(1, 1, ReadingStatus::Read)).unwrap();
+        assert!(aside(&path).is_file());
+    }
+
+    #[test]
+    fn opening_waits_for_another_instance_holding_the_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        // A file another instance has just created, not yet in WAL mode,
+        // and is writing to.
+        let other = Connection::open(&path).unwrap();
+        other
+            .execute_batch("CREATE TABLE t (x); BEGIN EXCLUSIVE; INSERT INTO t VALUES (1);")
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            other.execute_batch("COMMIT").unwrap();
+        });
+        let opened = LibraryCache::open(&path);
+        release.join().unwrap();
+        assert!(opened.is_ok(), "{opened:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_database_and_its_wal_are_private() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+
+        let c = LibraryCache::open(&path).unwrap();
+        c.replace_library(UserId::new(1), &[entry(1, 1, ReadingStatus::Read)])
+            .unwrap();
+        let [wal, shm, _] = companions(&path);
+        for file in [&path, &wal, &shm] {
+            assert_eq!(mode(file), 0o600, "{}", file.display());
+        }
+        drop(c);
+
+        // A file an earlier build made with the umask is made private too.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let _c = LibraryCache::open(&path).unwrap();
+        assert_eq!(mode(&path), 0o600);
+    }
+
+    #[test]
+    fn clearing_leaves_nothing_readable_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        let c = LibraryCache::open(&path).unwrap();
+        let mut noted = entry(1, 1, ReadingStatus::Read);
+        // Long enough to spill into overflow pages.
+        noted.private_notes = Some("MARGINALIA-".repeat(1_000));
+        let mut u = User::new(UserId::new(1), "SECRETREADER");
+        u.name = Some("A. Reader".into());
+        c.save_user(&u).unwrap();
+        c.replace_library(UserId::new(1), &[noted, entry(2, 1, ReadingStatus::Read)])
+            .unwrap();
+        let on_disk = |needle: &[u8]| {
+            std::iter::once(path.clone())
+                .chain(companions(&path))
+                .filter_map(|file| std::fs::read(file).ok())
+                .any(|bytes| bytes.windows(needle.len()).any(|w| w == needle))
+        };
+        assert!(on_disk(b"MARGINALIA-"));
+
+        c.clear().unwrap();
+        // With the connection still open, as it is after signing out.
+        assert!(!on_disk(b"MARGINALIA-"), "the notes are still in the file");
+        assert!(
+            !on_disk(b"SECRETREADER"),
+            "the account is still in the file"
+        );
+        assert!(!on_disk(b"Synthetic 2"), "a title is still in the file");
+        // Still a working cache.
+        c.upsert(&entry(3, 1, ReadingStatus::Read)).unwrap();
+        assert_eq!(c.load_library(UserId::new(1)).unwrap().len(), 1);
     }
 
     #[test]
