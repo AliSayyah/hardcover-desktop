@@ -80,8 +80,7 @@ fn sort_author(entry: &LibraryEntry) -> String {
         .authors
         .first()
         .and_then(|a| a.split_whitespace().last())
-        .map(str::to_lowercase)
-        .unwrap_or_default()
+        .map_or_default(str::to_lowercase)
 }
 
 fn compare(a: &LibraryEntry, b: &LibraryEntry, order: SortOrder) -> Ordering {

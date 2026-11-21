@@ -4,13 +4,13 @@
 //! - an unpacked release tarball (`<prefix>/bin/hardcover-desktop` next to
 //!   `<prefix>/share/applications/…`) in a prefix it can write to, such as
 //!   `~/.local`, where `install.sh` puts it;
-//! - an AppImage in a directory it can write to.
+//! - an `AppImage` in a directory it can write to.
 //!
 //! Other installs only learn that a newer version exists: a distribution
 //! package, a development build, or files this user can't replace.
 //!
 //! Trust chain for an install:
-//! 1. The release file (tarball or AppImage) must be signed by the key in
+//! 1. The release file (tarball or `AppImage`) must be signed by the key in
 //!    `packaging/minisign.pub`.
 //! 2. The signature's trusted comment names the signed file, and that name must
 //!    be the file name for the advertised version and this architecture. A
@@ -19,14 +19,14 @@
 //! 3. The advertised version must be newer than the running one.
 //! 4. A tarball's top-level directory must carry the same name as the tarball,
 //!    and only regular files under `bin/hardcover-desktop` and `share/` are
-//!    unpacked, with plain relative paths and a total size cap. An AppImage
-//!    must carry the AppImage type 2 magic bytes.
+//!    unpacked, with plain relative paths and a total size cap. An `AppImage`
+//!    must carry the `AppImage` type 2 magic bytes.
 //!
 //! Tarball files are staged inside the prefix and renamed into place, the
-//! binary last, so every file is replaced atomically. An AppImage is written
+//! binary last, so every file is replaced atomically. An `AppImage` is written
 //! next to the running one and renamed over it, keeping its path (and so its
 //! name, launchers and the restart path). Replacing a running executable or a
-//! mounted AppImage is safe on Linux; the new version runs after a restart.
+//! mounted `AppImage` is safe on Linux; the new version runs after a restart.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -45,6 +45,10 @@ use crate::{Error, Result};
 pub const REPOSITORY: &str = "AliSayyah/hardcover-desktop";
 
 /// The release signing public key (minisign, base64).
+///
+/// # Panics
+///
+/// Panics if the bundled signing-key file has no key line.
 pub fn release_public_key() -> &'static str {
     let file = include_str!("../../../packaging/minisign.pub");
     file.lines()
@@ -74,6 +78,7 @@ pub struct Version {
 
 impl Version {
     /// Parses `1.2.3`, `v1.2.3` or `1.2.3-rc.1`.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         let s = s.trim().strip_prefix('v').unwrap_or(s.trim());
         let s = s.split('+').next()?;
@@ -101,6 +106,11 @@ impl Version {
 
     /// The version of this build of `hardcover-core`'s caller, from its Cargo
     /// version (pass `env!("CARGO_PKG_VERSION")`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the supplied Cargo version cannot be parsed.
+    #[must_use]
     pub fn current(cargo_version: &str) -> Self {
         Self::parse(cargo_version).expect("CARGO_PKG_VERSION is a valid version")
     }
@@ -142,19 +152,19 @@ impl fmt::Display for Version {
 pub enum InstallKind {
     /// Unpacked from a release tarball into a writable prefix.
     Tarball { prefix: PathBuf },
-    /// Run from an AppImage, the file at `path`, in a writable directory.
+    /// Run from an `AppImage`, the file at `path`, in a writable directory.
     AppImage { path: PathBuf },
     /// Anything else: a package, a development build, or a prefix or
-    /// AppImage this user can't write to. Updates are announced, not installed.
+    /// `AppImage` this user can't write to. Updates are announced, not installed.
     Other,
 }
 
-/// What the AppImage runtime tells the program it starts, from the environment.
+/// What the `AppImage` runtime tells the program it starts, from the environment.
 #[derive(Debug, Default)]
 pub(crate) struct LaunchEnv {
-    /// `APPIMAGE`: the AppImage file.
+    /// `APPIMAGE`: the `AppImage` file.
     pub appimage: Option<PathBuf>,
-    /// `APPDIR`: where the AppImage is mounted or extracted.
+    /// `APPDIR`: where the `AppImage` is mounted or extracted.
     pub appdir: Option<PathBuf>,
 }
 
@@ -169,6 +179,7 @@ impl LaunchEnv {
 
 impl InstallKind {
     /// Classifies the executable at `exe` (resolve it once, at startup).
+    #[must_use]
     pub fn detect(exe: &Path) -> Self {
         Self::detect_in(exe, &LaunchEnv::current())
     }
@@ -222,11 +233,13 @@ impl InstallKind {
         }
     }
 
+    #[must_use]
     pub fn can_self_update(&self) -> bool {
         !matches!(self, Self::Other)
     }
 
     /// The release file this install updates from, if the release has one.
+    #[must_use]
     pub fn asset<'a>(&self, release: &'a Release) -> Option<&'a Asset> {
         match self {
             Self::Tarball { .. } => release.tarball.as_ref(),
@@ -236,8 +249,9 @@ impl InstallKind {
     }
 
     /// What a restart must run instead of the executable, if anything. An
-    /// AppImage's executable is gone once it exits (the runtime unmounts or
-    /// deletes it), so a restart runs the AppImage file.
+    /// `AppImage`'s executable is gone once it exits (the runtime unmounts or
+    /// deletes it), so a restart runs the `AppImage` file.
+    #[must_use]
     pub fn restart_path(&self) -> Option<&Path> {
         match self {
             Self::AppImage { path } => Some(path),
@@ -246,8 +260,8 @@ impl InstallKind {
     }
 }
 
-/// Whether `path` is an AppImage: an ELF file with the type 2 magic bytes
-/// (`AI` and 2 at offset 8), as the AppImage specification defines.
+/// Whether `path` is an `AppImage`: an ELF file with the type 2 magic bytes
+/// (`AI` and 2 at offset 8), as the `AppImage` specification defines.
 fn is_appimage_file(path: &Path) -> bool {
     let mut head = [0u8; 11];
     fs::File::open(path)
@@ -283,7 +297,7 @@ pub struct Release {
     pub page_url: String,
     /// The tarball for this architecture, if the release has one.
     pub tarball: Option<Asset>,
-    /// The AppImage for this architecture, if the release has one.
+    /// The `AppImage` for this architecture, if the release has one.
     pub appimage: Option<Asset>,
 }
 
@@ -295,11 +309,13 @@ pub struct Asset {
 }
 
 /// The tarball name a release of `version` uses on this architecture.
+#[must_use]
 pub fn tarball_name(version: &Version) -> String {
     format!("{BINARY}-{version}-{}-linux.tar.gz", std::env::consts::ARCH)
 }
 
-/// The AppImage name a release of `version` uses on this architecture.
+/// The `AppImage` name a release of `version` uses on this architecture.
+#[must_use]
 pub fn appimage_name(version: &Version) -> String {
     format!(
         "{BINARY}-{version}-{}-linux.AppImage",
@@ -351,6 +367,7 @@ impl Default for Updater {
 
 impl Updater {
     /// Checks [`REPOSITORY`] and verifies against the release signing key.
+    #[must_use]
     pub fn new() -> Self {
         Self::with_transport(
             Arc::new(UreqTransport::new()),
@@ -373,6 +390,11 @@ impl Updater {
 
     /// The latest release, if it is newer than `current`. `Ok(None)` also when
     /// there is no published release (or the repository isn't public).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the release request fails or the response cannot be
+    /// decoded.
     pub fn check(&self, current: &Version) -> Result<Option<Release>> {
         let resp = self.http.send(
             HttpRequest::new(Method::Get, &self.api_url)
@@ -428,6 +450,11 @@ impl Updater {
 
     /// Downloads, verifies and installs `release` over the install `target`.
     /// The running app keeps its old code until it restarts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the release is ineligible, verification fails or the
+    /// installation cannot be replaced.
     pub fn install(
         &self,
         release: &Release,
@@ -637,6 +664,10 @@ fn set_mode(_: &Path, _: u32) -> Result<()> {
     Ok(())
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "map_err passes the owned error to this conversion"
+)]
 fn io_error(e: std::io::Error) -> Error {
     update_error(&format!("installing the update failed: {e}"))
 }

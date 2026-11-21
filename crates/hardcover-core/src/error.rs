@@ -12,7 +12,7 @@ pub enum Error {
     #[error("not signed in, or the session has expired")]
     Unauthorized,
     /// HTTP 403 `insufficient_scope`: the token lacks a scope (`scope` names it when the server says).
-    #[error("the token is missing a required scope{}", .scope.as_deref().map(|s| format!(" ({s})")).unwrap_or_default())]
+    #[error("the token is missing a required scope{}", .scope.as_deref().map_or_default(|s| format!(" ({s})")))]
     InsufficientScope { scope: Option<String> },
     /// HTTP 429. `retry_after` comes from the `Retry-After` header when present.
     #[error("rate limited by Hardcover, try again later")]

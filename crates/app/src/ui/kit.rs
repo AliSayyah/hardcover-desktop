@@ -279,7 +279,7 @@ mod tests {
     }
 
     fn dialog_open(cx: &mut VisualTestContext) -> bool {
-        cx.update(|window, cx| window.has_active_dialog(cx))
+        cx.update(gpui_kit::component::WindowExt::has_active_dialog)
     }
 
     #[gpui_kit::test]
@@ -321,7 +321,7 @@ mod tests {
         assert!(dialog_open(cx));
 
         // On a button: a press, as with Space, and nothing else.
-        cx.update(|window, cx| window.focus_next(cx));
+        cx.update(gpui_kit::Window::focus_next);
         redraw(cx);
         press(cx, "enter");
         redraw(cx);
@@ -353,7 +353,7 @@ mod tests {
             });
             redraw(cx);
             for _ in 0..steps {
-                cx.update(|window, cx| window.focus_next(cx));
+                cx.update(gpui_kit::Window::focus_next);
             }
             redraw(cx);
         };

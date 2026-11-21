@@ -57,10 +57,7 @@ pub(crate) fn star_fill(value: f32, star: u8) -> StarFill {
 
 /// The value a click on `target` requests: clicking the current value clears.
 pub(crate) fn clicked_value(current: Option<Rating>, target: f32) -> Option<Rating> {
-    match current {
-        Some(r) if r.value() == target => None,
-        _ => Rating::new(target),
-    }
+    Rating::new(target).filter(|r| Some(*r) != current)
 }
 
 /// The value after one keyboard step of half a star (`up` or down). Stepping
@@ -153,7 +150,11 @@ impl RenderOnce for StarRating {
 
         let value = self.value;
         let disabled = self.disabled;
-        let small = self.small;
+        let size = if self.small {
+            StarSize::Medium
+        } else {
+            StarSize::Large
+        };
         let on_change = self.on_change.clone();
         let request = move |next: Option<Rating>, window: &mut Window, cx: &mut App| {
             if let Some(handler) = &on_change
@@ -189,13 +190,13 @@ impl RenderOnce for StarRating {
                     .on_action({
                         let request = request.clone();
                         move |_: &IncreaseRating, window, cx| {
-                            request(stepped_value(value, true), window, cx)
+                            request(stepped_value(value, true), window, cx);
                         }
                     })
                     .on_action({
                         let request = request.clone();
                         move |_: &DecreaseRating, window, cx| {
-                            request(stepped_value(value, false), window, cx)
+                            request(stepped_value(value, false), window, cx);
                         }
                     })
                     .on_action({
@@ -214,77 +215,71 @@ impl RenderOnce for StarRating {
                         }
                     })
                     .children((1..=STARS).map(|n| {
-                        let half = |trailing: bool| {
-                            let target = f32::from(n) - if trailing { 0.0 } else { 0.5 };
-                            let hover = hover.clone();
-                            let request = request.clone();
-                            div()
-                                .id(ElementId::from(SharedString::from(format!(
-                                    "{n}-{}",
-                                    if trailing { "end" } else { "start" }
-                                ))))
-                                .absolute()
-                                .top_0()
-                                .h_full()
-                                .w(relative(0.5))
-                                .map(|this| {
-                                    if trailing {
-                                        this.right_0()
-                                    } else {
-                                        this.left_0()
-                                    }
-                                })
-                                .on_mouse_move(move |_, _, cx| {
-                                    hover.update(cx, |h, cx| {
-                                        if *h != Some(target) {
-                                            *h = Some(target);
-                                            cx.notify();
-                                        }
-                                    });
-                                })
-                                .on_click({
-                                    let focus = focus.clone();
-                                    move |_, window, cx| {
-                                        focus.focus(window, cx);
-                                        request(clicked_value(value, target), window, cx);
-                                    }
-                                })
+                        let half = |trailing| {
+                            half_star_target(
+                                n,
+                                trailing,
+                                value,
+                                hover.clone(),
+                                focus.clone(),
+                                request.clone(),
+                            )
                         };
-                        render_star(
-                            n,
-                            shown,
-                            if small {
-                                StarSize::Medium
-                            } else {
-                                StarSize::Large
-                            },
-                            filled_color,
-                            empty_color,
-                        )
-                        .child(half(false))
-                        .child(half(true))
+                        render_star(n, shown, size, filled_color, empty_color)
+                            .child(half(false))
+                            .child(half(true))
                     }))
             })
             .when(disabled, |this| {
-                this.opacity(0.5).children((1..=STARS).map(|n| {
-                    render_star(
-                        n,
-                        shown,
-                        if small {
-                            StarSize::Medium
-                        } else {
-                            StarSize::Large
-                        },
-                        filled_color,
-                        empty_color,
-                    )
-                }))
+                this.opacity(0.5).children(
+                    (1..=STARS).map(|n| render_star(n, shown, size, filled_color, empty_color)),
+                )
             })
             .when_some(self.tooltip, |this, tip| {
                 this.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
             })
             .when(focused, |this| this.focus_ring(radius, cx))
     }
+}
+
+fn half_star_target(
+    n: u8,
+    trailing: bool,
+    value: Option<Rating>,
+    hover: gpui_kit::Entity<Option<f32>>,
+    focus: FocusHandle,
+    request: Rc<impl Fn(Option<Rating>, &mut Window, &mut App) + 'static>,
+) -> impl IntoElement {
+    let target = f32::from(n) - if trailing { 0.0 } else { 0.5 };
+
+    div()
+        .id(ElementId::from(SharedString::from(format!(
+            "{n}-{}",
+            if trailing { "end" } else { "start" }
+        ))))
+        .absolute()
+        .top_0()
+        .h_full()
+        .w(relative(0.5))
+        .map(|this| {
+            if trailing {
+                this.right_0()
+            } else {
+                this.left_0()
+            }
+        })
+        .on_mouse_move(move |_, _, cx| {
+            hover.update(cx, |h, cx| {
+                if *h != Some(target) {
+                    *h = Some(target);
+                    cx.notify();
+                }
+            });
+        })
+        .on_click(move |_, window, cx| {
+            focus.focus(window, cx);
+            request(clicked_value(value, target), window, cx);
+        })
 }
 
 #[cfg(test)]

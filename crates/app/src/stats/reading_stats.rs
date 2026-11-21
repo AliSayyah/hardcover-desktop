@@ -18,7 +18,7 @@ use hardcover_core::{Date, EditionSummary, Length, LibraryEntry, ReadSession, Re
 use crate::format::SIDEBAR_SHELVES;
 
 /// The per-year chart shows at most this many years, ending with the latest.
-pub const MAX_YEARS: usize = 12;
+pub const MAX_YEARS: i32 = 12;
 
 /// Books and pages finished in one year.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -44,14 +44,14 @@ pub struct ReadingStats {
     pub read_without_date: u32,
     /// Ratings given, one per book.
     pub ratings: u32,
-    pub average_rating: Option<f32>,
+    pub average_rating: Option<f64>,
     /// Ratings per half star: index 0 is ½, index 9 is 5.
     pub rating_counts: [u32; 10],
     /// Books per shelf, in sidebar order.
-    pub shelves: Vec<(ReadingStatus, u32)>,
+    pub shelves: Vec<(ReadingStatus, usize)>,
     /// Reads with both dates, which the average below covers.
     pub timed_reads: u32,
-    pub average_days: Option<f32>,
+    pub average_days: Option<f64>,
 }
 
 impl ReadingStats {
@@ -64,7 +64,7 @@ pub fn compute(entries: &[LibraryEntry], today: Date) -> ReadingStats {
     let mut per_year: BTreeMap<i32, YearTotals> = BTreeMap::new();
     let mut finished_reads = 0;
     let mut read_without_date = 0;
-    let mut days_total: u64 = 0;
+    let mut days_total = 0.0;
     let mut timed_reads = 0;
     for entry in entries {
         let finished: Vec<&ReadSession> = counted_reads(entry).collect();
@@ -85,7 +85,7 @@ pub fn compute(entries: &[LibraryEntry], today: Date) -> ReadingStats {
             if let Some(started) = read.started_at
                 && done >= started
             {
-                days_total += (done - started).num_days() as u64 + 1;
+                days_total += f64::from(done.num_days_from_ce() - started.num_days_from_ce() + 1);
                 timed_reads += 1;
             }
         }
@@ -101,6 +101,11 @@ pub fn compute(entries: &[LibraryEntry], today: Date) -> ReadingStats {
     let mut rating_sum = 0.0;
     let mut ratings = 0;
     for rating in entries.iter().filter_map(|e| e.rating) {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "Rating permits exactly ten half-star values; doubling gives the bin number in 1..=10"
+        )]
         let half_stars = (rating.value() * 2.0).round() as usize;
         rating_counts[half_stars.clamp(1, 10) - 1] += 1;
         rating_sum += f64::from(rating.value());
@@ -115,15 +120,14 @@ pub fn compute(entries: &[LibraryEntry], today: Date) -> ReadingStats {
         finished_reads,
         read_without_date,
         ratings,
-        average_rating: (ratings > 0).then(|| (rating_sum / f64::from(ratings)) as f32),
+        average_rating: (ratings > 0).then(|| rating_sum / f64::from(ratings)),
         rating_counts,
         shelves: SIDEBAR_SHELVES
             .iter()
-            .map(|&s| (s, entries.iter().filter(|e| e.status == s).count() as u32))
+            .map(|&s| (s, entries.iter().filter(|e| e.status == s).count()))
             .collect(),
         timed_reads,
-        average_days: (timed_reads > 0)
-            .then(|| (days_total as f64 / f64::from(timed_reads)) as f32),
+        average_days: (timed_reads > 0).then(|| days_total / f64::from(timed_reads)),
     }
 }
 
@@ -170,7 +174,7 @@ fn year_range(per_year: &BTreeMap<i32, YearTotals>, this_year: i32) -> (Vec<Year
         return (Vec::new(), 0);
     };
     let last = this_year;
-    let first = first.max(last - MAX_YEARS as i32 + 1);
+    let first = first.max(last - MAX_YEARS + 1);
     let years = (first..=last)
         .map(|year| {
             per_year.get(&year).copied().unwrap_or(YearTotals {
@@ -218,7 +222,7 @@ mod tests {
     fn an_empty_library_has_no_stats() {
         let stats = compute(&[], date(TODAY));
         assert!(stats.is_empty());
-        assert!(stats.years.is_empty());
+        assert_eq!(stats.years, []);
         assert_eq!(
             stats.this_year,
             YearTotals {
@@ -368,7 +372,7 @@ mod tests {
             read(4, None, Some("2026-10-12")),
         ];
         let stats = compute(&[e], date(TODAY));
-        assert_eq!(stats.years.len(), MAX_YEARS);
+        assert_eq!(stats.years.len(), usize::try_from(MAX_YEARS).unwrap());
         assert_eq!(stats.years.first().unwrap().year, 2015);
         assert_eq!(stats.years.last().unwrap().year, 2026);
         assert_eq!(stats.earlier_books, 2);

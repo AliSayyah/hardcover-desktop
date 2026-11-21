@@ -273,29 +273,12 @@ impl BookDetailView {
         )
     }
 
-    /// One review: the avatar beside the byline and rating, the date and
-    /// likes, and the text in `reader`, collapsed when long; a spoiler review
-    /// shows only that it has spoilers, and "Show".
-    fn render_community_review(
-        &self,
-        review: &CommunityReview,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let muted = colors(cx).fg_muted;
+    fn review_body(&self, review: &CommunityReview, cx: &mut Context<Self>) -> AnyElement {
         let id = review.id;
-        let key = id.get() as u64;
-        let name = review.reviewer.display_name();
-        let mut facts: Vec<String> = Vec::new();
-        if let Some(date) = review.reviewed_at {
-            facts.push(date_text(date));
-        }
-        match review.likes {
-            0 => {}
-            1 => facts.push("1 like".to_owned()),
-            n => facts.push(format!("{} likes", count_text(n))),
-        }
+        let key = id.get().cast_unsigned();
+        let muted = colors(cx).fg_muted;
         let hidden = review.has_spoilers && !self.community_reviews.spoilers_shown.contains(&id);
-        let body: AnyElement = if hidden {
+        if hidden {
             h_flex()
                 .gap_2()
                 .items_center()
@@ -351,7 +334,30 @@ impl BookDetailView {
                     )
                 })
                 .into_any_element()
-        };
+        }
+    }
+
+    /// One review: the avatar beside the byline and rating, the date and
+    /// likes, and the text in `reader`, collapsed when long; a spoiler review
+    /// shows only that it has spoilers, and "Show".
+    fn render_community_review(
+        &self,
+        review: &CommunityReview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = review.id;
+        let key = id.get().cast_unsigned();
+        let name = review.reviewer.display_name();
+        let mut facts: Vec<String> = Vec::new();
+        if let Some(date) = review.reviewed_at {
+            facts.push(date_text(date));
+        }
+        match review.likes {
+            0 => {}
+            1 => facts.push("1 like".to_owned()),
+            n => facts.push(format!("{} likes", count_text(n))),
+        }
+        let body = self.review_body(review, cx);
         let name_element: AnyElement = match review.reviewer.profile_url() {
             Some(url) => BylineLink::new(("reviewer", key), name.clone(), url).into_any_element(),
             None => div()

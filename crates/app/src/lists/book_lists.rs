@@ -121,7 +121,7 @@ pub fn lists_button(book: &BookSummary, cx: &App) -> Option<AnyElement> {
                         .icon(IconName::Plus)
                         .disabled(!can_write)
                         .on_click(move |_, window, cx| {
-                            open_new_list(new_lists.clone(), Some(new_book.clone()), window, cx)
+                            open_new_list(new_lists.clone(), Some(new_book.clone()), window, cx);
                         }),
                 )
             })

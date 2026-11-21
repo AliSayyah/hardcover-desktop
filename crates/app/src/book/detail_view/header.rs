@@ -22,6 +22,7 @@ use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{
     BookDetails, BookSummary, Contributor, Length, LibraryEntry, Rating, ReadingStatus,
 };
+use std::fmt::Write as _;
 
 use super::BookDetailView;
 use crate::app_state::{Services, release_cover_image};
@@ -90,39 +91,12 @@ impl BookDetailView {
         let art = self.load_cover(cover_url, window, cx);
         let size = if page { CoverSize::Xxl } else { CoverSize::Xl };
 
-        let mut facts: Vec<String> = Vec::new();
-        if let Some(year) = book
-            .release_year
-            .or_else(|| details.and_then(|d| d.release_date.map(|d| chrono::Datelike::year(&d))))
-        {
-            facts.push(year.to_string());
-        }
-        match entry
-            .and_then(LibraryEntry::length)
-            .or(book.pages.map(Length::Pages))
-        {
-            Some(Length::Pages(pages)) => facts.push(format!("{} pages", count_text(pages))),
-            Some(Length::Seconds(seconds)) => facts.push(duration_text(seconds)),
-            None => {}
-        }
-        let average = book
-            .average_rating
-            .or_else(|| details.and_then(|d| d.summary.average_rating))
-            .filter(|a| *a > 0.0)
-            .filter(|_| !with_rail)
-            .map(|average| {
-                let mut text = format!("{} average", average_rating_text(average));
-                if let Some(n) = details.and_then(|d| d.ratings_count).filter(|n| *n > 0) {
-                    text.push_str(&match n {
-                        1 => " · 1 rating".to_owned(),
-                        n => format!(" · {} ratings", count_text(n)),
-                    });
-                }
-                text
-            });
-        let genres: Vec<String> = details
-            .map(|d| d.genres.iter().take(HEADER_GENRES).cloned().collect())
-            .unwrap_or_default();
+        let facts = book_facts(book, entry, details);
+        let average = (!with_rail)
+            .then(|| community_average(book, details))
+            .flatten();
+        let genres: Vec<String> =
+            details.map_or_default(|d| d.genres.iter().take(HEADER_GENRES).cloned().collect());
 
         // The title's line height grows for Persian and Arabic, whose marks
         // need the room at display sizes.
@@ -149,7 +123,7 @@ impl BookDetailView {
                         .child(WrappingText::new(subtitle)),
                 )
             })
-            .child(self.render_contributors(book, details, cx))
+            .child(Self::render_contributors(book, details, cx))
             .children(series_line(details))
             .when(!facts.is_empty(), |this| {
                 this.child(
@@ -213,12 +187,11 @@ impl BookDetailView {
     /// The authors as text buttons once the details name them, otherwise as
     /// text. Other contributors follow on their own line with their roles.
     fn render_contributors(
-        &self,
         book: &BookSummary,
         details: Option<&BookDetails>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let contributors = details.map(|d| d.contributors.as_slice()).unwrap_or(&[]);
+        let contributors = details.map_or_default(|d| d.contributors.as_slice());
         let authors: Vec<&Contributor> = contributors.iter().filter(|c| c.is_author()).collect();
         let others: Vec<&Contributor> = contributors.iter().filter(|c| !c.is_author()).collect();
         let byline = |this: gpui_kit::Div| this.byline();
@@ -324,7 +297,7 @@ impl BookDetailView {
                         this.tooltip(needs_permission(WRITE_LIBRARY))
                     })
                     .on_change(cx.listener(|this, rating: &Option<Rating>, window, cx| {
-                        this.change_rating(*rating, window, cx)
+                        this.change_rating(*rating, window, cx);
                     })),
             )
             .map(|this| match rating {
@@ -429,7 +402,7 @@ impl BookDetailView {
                                 PopupMenuItem::new("Add to Owned list…")
                                     .disabled(!has_edition || owning || !can_write)
                                     .on_click(move |_, window, cx| {
-                                        book_lists::confirm_owned(&owned_entry, window, cx)
+                                        book_lists::confirm_owned(&owned_entry, window, cx);
                                     }),
                             )
                             // Ownership is per edition on Hardcover. Without
@@ -447,12 +420,12 @@ impl BookDetailView {
                         menu.item(
                             PopupMenuItem::element(move |_, _| {
                                 div()
-                                    .when_some(danger, |this, danger| this.text_color(danger))
+                                    .when_some(danger, gpui_kit::Styled::text_color)
                                     .child("Remove from library…")
                             })
                             .icon(
                                 Icon::new(IconName::Delete)
-                                    .when_some(danger, |this, danger| this.text_color(danger)),
+                                    .when_some(danger, gpui_kit::Styled::text_color),
                             )
                             .disabled(!can_write)
                             .on_click(move |_, window, cx| {
@@ -469,6 +442,43 @@ impl BookDetailView {
         }
         tools
     }
+}
+
+fn book_facts(
+    book: &BookSummary,
+    entry: Option<&LibraryEntry>,
+    details: Option<&BookDetails>,
+) -> Vec<String> {
+    let mut facts: Vec<String> = Vec::new();
+    if let Some(year) = book
+        .release_year
+        .or_else(|| details.and_then(|d| d.release_date.map(|d| chrono::Datelike::year(&d))))
+    {
+        facts.push(year.to_string());
+    }
+    match entry
+        .and_then(LibraryEntry::length)
+        .or(book.pages.map(Length::Pages))
+    {
+        Some(Length::Pages(pages)) => facts.push(format!("{} pages", count_text(pages))),
+        Some(Length::Seconds(seconds)) => facts.push(duration_text(seconds)),
+        None => {}
+    }
+    facts
+}
+
+fn community_average(book: &BookSummary, details: Option<&BookDetails>) -> Option<String> {
+    book.average_rating
+        .or_else(|| details.and_then(|d| d.summary.average_rating))
+        .filter(|a| *a > 0.0)
+        .map(|average| {
+            let mut text = format!("{} average", average_rating_text(average));
+            if let Some(n) = details.and_then(|d| d.ratings_count).filter(|n| *n > 0) {
+                let unit = if n == 1 { "rating" } else { "ratings" };
+                write!(text, " · {} {unit}", count_text(n)).expect("writing to a String");
+            }
+            text
+        })
 }
 
 /// The series and the book's place in it, opening the series page when

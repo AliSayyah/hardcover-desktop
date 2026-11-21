@@ -85,7 +85,7 @@ impl ListDelegate for ShelfDelegate {
     ) -> Option<Self::Item> {
         let entry = self.rows.get(ix.row)?;
         Some(
-            ListItem::new(("library-book", entry.user_book_id.get() as u64))
+            ListItem::new(("library-book", entry.user_book_id.get().cast_unsigned()))
                 .list_row(self.focus.shows_focus(ix, window), cx)
                 .accessibility_label(entry.book.title.clone())
                 .child(BookRow::for_entry(entry).selected(self.focus.is_selected(ix))),
@@ -221,7 +221,7 @@ impl LibraryView {
                 },
             ),
             on_keyboard_entry(&list, window, cx, |this, window, cx| {
-                this.select_first(window, cx)
+                this.select_first(window, cx);
             }),
         ];
 
@@ -273,7 +273,7 @@ impl LibraryView {
         self.selection.insert(self.status, id);
         self.sync_list_selection(window, cx);
         self.detail.update(cx, |d, cx| {
-            d.set_subject(Some(Subject::Entry(id)), window, cx)
+            d.set_subject(Some(Subject::Entry(id)), window, cx);
         });
     }
 
@@ -307,12 +307,12 @@ impl LibraryView {
             .into_iter()
             .map(|ix| entries[ix].clone())
             .collect();
-        let shelf = status_label(self.status);
+        let shelf_name = status_label(self.status);
         let empty = if !query.trim().is_empty() {
             EmptyCopy {
                 icon: IconName::Search,
                 title: "No matches".into(),
-                description: format!("No books in {shelf} match “{}”.", query.trim()).into(),
+                description: format!("No books in {shelf_name} match “{}”.", query.trim()).into(),
             }
         } else if let SyncStatus::Failed { message, .. } = model.sync_status()
             && entries.is_empty()
@@ -325,7 +325,7 @@ impl LibraryView {
         } else {
             EmptyCopy {
                 icon: status_icon(self.status),
-                title: format!("No books in {shelf}").into(),
+                title: format!("No books in {shelf_name}").into(),
                 description: match self.status {
                     ReadingStatus::Ignored => {
                         "Books you hide from recommendations on Hardcover appear here."
@@ -406,7 +406,7 @@ impl Render for ShelfPane {
                     .child(
                         h_flex()
                             .h(size::CONTROL)
-                            .child(PageHeader::new(status_label(self.status)).count(count as u32)),
+                            .child(PageHeader::new(status_label(self.status)).count(count)),
                     )
                     .child(
                         // As the list narrows the sort gives way first, down

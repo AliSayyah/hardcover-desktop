@@ -161,8 +161,8 @@ mod tests {
     use crate::demo::client;
     use crate::{BookId, UserId};
 
-    const PROJECT_HAIL_MARY: BookId = BookId::new(427578);
-    const DUNE: BookId = BookId::new(312460);
+    const PROJECT_HAIL_MARY: BookId = BookId::new(427_578);
+    const DUNE: BookId = BookId::new(312_460);
     const READER: UserId = UserId::new(1);
 
     #[test]
@@ -209,8 +209,10 @@ mod tests {
     #[test]
     fn some_books_have_no_reviews() {
         let client = client();
-        let page = client.book_reviews(BookId::new(386446), READER, 0).unwrap();
-        assert!(page.reviews.is_empty());
+        let page = client
+            .book_reviews(BookId::new(386_446), READER, 0)
+            .unwrap();
+        assert_eq!(page.reviews, []);
         assert!(!page.has_more);
     }
 }

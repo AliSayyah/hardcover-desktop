@@ -158,7 +158,7 @@ impl ListDelegate for CatalogBooks {
             .entry_for_book(row.book.id)
             .map(|e| e.status);
         Some(
-            ListItem::new(("catalog-book", row.book.id.get() as u64))
+            ListItem::new(("catalog-book", row.book.id.get().cast_unsigned()))
                 .list_row(focused, cx)
                 .accessibility_label(row.book.title.clone())
                 .child(BookRow::for_catalog(&row.book, row.details.clone(), status)),
@@ -195,7 +195,7 @@ pub fn new_list(
         ListState::new(
             CatalogBooks {
                 rows: Vec::new(),
-                model: model.clone(),
+                model,
                 empty,
                 focus: RowFocus::default(),
             },
@@ -218,7 +218,7 @@ pub fn follow_list<V: 'static>(
     let entered = list.clone();
     vec![
         on_keyboard_entry(list, window, cx, move |_, window, cx| {
-            select_first_row(&entered, window, cx)
+            select_first_row(&entered, window, cx);
         }),
         cx.subscribe(list, |_, list, event: &ListEvent, cx| match event {
             ListEvent::Confirm(ix) => {

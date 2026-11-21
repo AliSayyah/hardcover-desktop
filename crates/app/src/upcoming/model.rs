@@ -37,8 +37,8 @@ pub struct UpcomingModel {
     requested: Option<Vec<SeriesId>>,
     /// Bumped whenever the books change.
     revision: u64,
-    _load: Option<Task<()>>,
-    _reload: Option<Task<()>>,
+    load_task: Option<Task<()>>,
+    reload_task: Option<Task<()>>,
     _subscription: Subscription,
 }
 
@@ -69,8 +69,8 @@ impl UpcomingModel {
             status: UpcomingStatus::Idle,
             requested: None,
             revision: 0,
-            _load: None,
-            _reload: None,
+            load_task: None,
+            reload_task: None,
             _subscription: subscription,
         }
     }
@@ -105,13 +105,13 @@ impl UpcomingModel {
         }
         let series = watched_series(library.entries());
         self.requested = Some(series.clone());
-        self._reload = None;
+        self.reload_task = None;
         self.status = UpcomingStatus::Loading;
         cx.notify();
         let client = Services::global(cx).client().clone();
         let today = chrono::Local::now().date_naive();
         // Replacing the task drops a load still running: its series are older.
-        self._load = Some(cx.spawn(async move |this, cx| {
+        self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move { client.upcoming_in_series(&series, today) })
                 .await;
@@ -133,9 +133,9 @@ impl UpcomingModel {
     }
 
     fn schedule_reload(&mut self, cx: &mut Context<Self>) {
-        self._reload = Some(cx.spawn(async move |this, cx| {
+        self.reload_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(RELOAD_DELAY).await;
-            let _ = this.update(cx, |this, cx| this.load(cx));
+            let _ = this.update(cx, UpcomingModel::load);
         }));
     }
 }

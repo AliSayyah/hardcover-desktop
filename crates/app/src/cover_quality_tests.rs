@@ -19,7 +19,10 @@ fn reference(path: &Path, max_height: u32) -> Option<(u32, u32, Vec<u8>)> {
         .decode()
         .ok()?;
     let height = max_height.min(image.height().max(1));
-    let width = (image.width() as u64 * height as u64 / image.height().max(1) as u64).max(1) as u32;
+    let width = u32::try_from(
+        (u64::from(image.width()) * u64::from(height) / u64::from(image.height().max(1))).max(1),
+    )
+    .ok()?;
     let mut rgba = image
         .resize(width, height, image::imageops::FilterType::Triangle)
         .into_rgba8();
@@ -33,8 +36,8 @@ fn candidate(path: &Path, max_height: u32) -> Option<(u32, u32, Vec<u8>)> {
     let image = decode_scaled(path, max_height)?;
     let size = image.size(0);
     Some((
-        size.width.0 as u32,
-        size.height.0 as u32,
+        u32::try_from(size.width.0).ok()?,
+        u32::try_from(size.height.0).ok()?,
         image.as_bytes(0)?.to_vec(),
     ))
 }
@@ -45,7 +48,7 @@ fn psnr(a: &[u8], b: &[u8]) -> f64 {
     let mut n = 0f64;
     for (pa, pb) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0) {
         for c in 0..3 {
-            let d = pa[c] as f64 - pb[c] as f64;
+            let d = f64::from(pa[c]) - f64::from(pb[c]);
             sum += d * d;
             n += 1.0;
         }
@@ -67,13 +70,17 @@ impl Rng {
         self.0
     }
     fn range(&mut self, lo: u32, hi: u32) -> u32 {
-        lo + (self.next() % (hi - lo) as u64) as u32
+        lo + u32::try_from(self.next() % u64::from(hi - lo)).unwrap()
+    }
+
+    fn color(&mut self) -> [u8; 3] {
+        std::array::from_fn(|_| u8::try_from(self.range(0, 255)).unwrap())
     }
 }
 
 /// A cover-like picture: gradients, blocks of colour, and some noise.
 fn synthetic(rng: &mut Rng, width: u32, height: u32) -> image::RgbImage {
-    let (r0, g0, b0) = (rng.range(0, 255), rng.range(0, 255), rng.range(0, 255));
+    let [r0, g0, b0] = rng.color();
     let blocks: Vec<(u32, u32, u32, u32, [u8; 3])> = (0..12)
         .map(|_| {
             let x = rng.range(0, width);
@@ -83,11 +90,7 @@ fn synthetic(rng: &mut Rng, width: u32, height: u32) -> image::RgbImage {
                 y,
                 rng.range(1, width / 2 + 2),
                 rng.range(1, height / 2 + 2),
-                [
-                    rng.range(0, 255) as u8,
-                    rng.range(0, 255) as u8,
-                    rng.range(0, 255) as u8,
-                ],
+                rng.color(),
             )
         })
         .collect();
@@ -103,13 +106,23 @@ fn synthetic(rng: &mut Rng, width: u32, height: u32) -> image::RgbImage {
                 ]);
             }
         }
-        let fx = x as f32 / width as f32;
-        let fy = y as f32 / height as f32;
-        image::Rgb([
-            (r0 as f32 * (1.0 - fx) + 255.0 * fx * fy) as u8,
-            (g0 as f32 * (1.0 - fy) + 128.0 * fx) as u8,
-            (b0 as f32 * fy + 64.0 * (1.0 - fx)) as u8,
-        ])
+        let fraction = |position, extent| {
+            // The fixture covers are smaller than 65536 pixels on each side.
+            f32::from(u16::try_from(position).unwrap()) / f32::from(u16::try_from(extent).unwrap())
+        };
+        let fx = fraction(x, width);
+        let fy = fraction(y, height);
+        #[expect(
+            clippy::cast_sign_loss,
+            clippy::cast_possible_truncation,
+            reason = "the gradient is quantized to an 8-bit color channel"
+        )]
+        let pixel = image::Rgb([
+            (f32::from(r0) * (1.0 - fx) + 255.0 * fx * fy) as u8,
+            (f32::from(g0) * (1.0 - fy) + 128.0 * fx) as u8,
+            (f32::from(b0) * fy + 64.0 * (1.0 - fx)) as u8,
+        ]);
+        pixel
     })
 }
 
@@ -173,7 +186,7 @@ fn cover_quality_matches_reference() {
     // The four-channel path: a PNG with transparency, and a grayscale JPEG.
     let mut rgba = image::DynamicImage::ImageRgb8(synthetic(&mut rng, 410, 615)).into_rgba8();
     for (x, _, pixel) in rgba.enumerate_pixels_mut() {
-        pixel[3] = (x * 255 / 410) as u8;
+        pixel[3] = u8::try_from(x * 255 / 410).unwrap();
     }
     let path = dir.path().join("alpha.png");
     rgba.save(&path).unwrap();

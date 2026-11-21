@@ -117,7 +117,7 @@ impl RenderOnce for Meter {
         let overhang = size::PACE_TICK_OVERHANG;
         Progress::new(self.id)
             .value(filled * 100.)
-            .when_some(self.label, |this, label| this.accessibility_label(label))
+            .when_some(self.label, gpui_kit::base::Progress::accessibility_label)
             .relative()
             .flex_none()
             .w_full()

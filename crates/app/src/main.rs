@@ -157,8 +157,7 @@ fn main() {
             ui::kit::bind_keys(cx);
             let install = exe
                 .as_deref()
-                .map(InstallKind::detect)
-                .unwrap_or(InstallKind::Other);
+                .map_or(InstallKind::Other, InstallKind::detect);
             // An AppImage restarts from its file: the executable inside it is
             // gone once this process exits.
             if let Some(path) = install.restart_path().or(exe.as_deref()) {

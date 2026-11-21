@@ -129,7 +129,7 @@ impl RenderOnce for SeriesRow {
                 .pt_6()
                 .pb_1()
                 .child(div().label(cx).child(group.label()))
-                .child(div().caption(cx).tabular().child(count_text(count as u32)))
+                .child(div().caption(cx).tabular().child(count_text(count)))
         });
 
         let row = h_flex()
@@ -273,7 +273,7 @@ fn next_lane(
     let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
     let reason = (!can_write).then(|| needs_permission(WRITE_LIBRARY));
 
-    let line = match kind {
+    let book_details = match kind {
         NextKind::Reading => entry
             .as_ref()
             .and_then(|e| reading_line(&progress_summary(e)))
@@ -309,7 +309,7 @@ fn next_lane(
                 .label("Update progress…")
                 .loading(pending == Some(WriteKind::Progress))
                 .disabled(pending.is_some() || !can_write)
-                .when_some(reason.clone(), |b, r| b.tooltip(r))
+                .when_some(reason.clone(), Button::tooltip)
                 .on_click(move |_, window, cx| open_progress(library.clone(), &entry, window, cx))
                 .into_any_element()
         }),
@@ -320,7 +320,7 @@ fn next_lane(
                 .label("Start reading")
                 .loading(pending == Some(WriteKind::Status))
                 .disabled(pending.is_some() || !can_write)
-                .when_some(reason.clone(), |b, r| b.tooltip(r))
+                .when_some(reason.clone(), Button::tooltip)
                 .on_click(move |_, window, cx| start_reading(library.clone(), entry, window, cx))
                 .into_any_element()
         }),
@@ -355,7 +355,7 @@ fn next_lane(
                 TextButton::book(SharedString::from(format!("series-next-{id}")), &book.book)
                     .text_color(colors.fg),
             )
-            .children(line)
+            .children(book_details)
             .children(action.map(|action| h_flex().pt_2().child(action))),
     )
 }
@@ -370,7 +370,7 @@ fn want_to_read(
 ) -> gpui_kit::AnyElement {
     let adding = library.read(cx).is_adding(book.book.id);
     let library = library.clone();
-    let summary = book.book.clone();
+    let book_id = book.book.id;
     Button::new(SharedString::from(format!("series-add-{}", series.id)))
         .ghost()
         .small_control()
@@ -383,7 +383,7 @@ fn want_to_read(
             this.tooltip(needs_permission(WRITE_LIBRARY))
         })
         .on_click(move |_, window, cx| {
-            add_to_want_to_read(library.clone(), summary.clone(), window, cx)
+            add_to_want_to_read(library.clone(), book_id, window, cx);
         })
         .into_any_element()
 }

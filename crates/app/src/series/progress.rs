@@ -43,7 +43,10 @@ const UNTOUCHED_DAYS: i64 = 365;
 /// given up on.
 fn starts_series(entry: &LibraryEntry) -> bool {
     match entry.status {
-        ReadingStatus::Read => entry.reads.iter().any(|r| r.is_finished()),
+        ReadingStatus::Read => entry
+            .reads
+            .iter()
+            .any(hardcover_core::ReadSession::is_finished),
         ReadingStatus::CurrentlyReading | ReadingStatus::Paused | ReadingStatus::DidNotFinish => {
             true
         }
@@ -234,8 +237,8 @@ impl SeriesSummary {
     pub fn facts(&self, today: Date) -> String {
         let mut parts = vec![format!(
             "{} of {} read",
-            count_text(self.read_count() as u32),
-            count_text(self.out_count() as u32)
+            count_text(self.read_count()),
+            count_text(self.out_count())
         )];
         if self.group != Group::Waiting
             && let Some(book) = self.first_unreleased()
@@ -324,14 +327,13 @@ fn latest_finish<'a>(entries: impl Iterator<Item = &'a LibraryEntry>) -> Option<
         .max()
 }
 
-/// The series as the reader sees it. `upcoming` holds the release dates of
-/// the books not out yet that `UpcomingModel` knows.
-pub fn summarize(
+fn series_books(
     series: &TrackedSeries,
     library: &LibraryIndex,
+    series_entries: &[&LibraryEntry],
     upcoming: &HashMap<BookId, Date>,
     today: Date,
-) -> SeriesSummary {
+) -> Vec<SeriesBook> {
     struct Candidate<'a> {
         book: BookSummary,
         position: f32,
@@ -339,11 +341,6 @@ pub fn summarize(
         partial: bool,
         entry: Option<&'a LibraryEntry>,
     }
-    let series_entries: &[&LibraryEntry] = library
-        .by_series
-        .get(&series.id)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
     let mut candidates: Vec<Candidate> = series
         .books
         .iter()
@@ -417,6 +414,10 @@ pub fn summarize(
             release_date,
             progress,
         };
+        #[expect(
+            clippy::float_cmp,
+            reason = "positions are catalogue keys; nearby volumes must remain distinct"
+        )]
         match books.iter().position(|b| b.position == c.position) {
             Some(ix) if rank < chosen[ix] => {
                 books[ix] = candidate;
@@ -431,6 +432,22 @@ pub fn summarize(
     }
     books.sort_by(|a, b| a.position.total_cmp(&b.position));
 
+    books
+}
+
+/// The series as the reader sees it. `upcoming` holds the release dates of
+/// the books not out yet that `UpcomingModel` knows.
+pub fn summarize(
+    series: &TrackedSeries,
+    library: &LibraryIndex,
+    upcoming: &HashMap<BookId, Date>,
+    today: Date,
+) -> SeriesSummary {
+    let series_entries: &[&LibraryEntry] = library
+        .by_series
+        .get(&series.id)
+        .map_or_default(Vec::as_slice);
+    let books = series_books(series, library, series_entries, upcoming, today);
     let next = books
         .iter()
         .position(|b| b.out && !b.is_done())
@@ -630,10 +647,7 @@ pub fn grouped<'a>(
 pub fn hidden_line(finished: usize) -> String {
     match finished {
         1 => "1 finished series isn't shown.".to_owned(),
-        n => format!(
-            "{} finished series aren't shown.",
-            count_text(u32::try_from(n).unwrap_or(u32::MAX))
-        ),
+        n => format!("{} finished series aren't shown.", count_text(n)),
     }
 }
 
@@ -675,7 +689,7 @@ pub fn lane_caption(kind: NextKind, position: f32) -> String {
 pub fn reading_line(progress: &ProgressSummary) -> Option<String> {
     let position =
         (progress.page.is_some() || progress.seconds.is_some()).then(|| position_text(progress));
-    let percent = progress.percent.map(|p| format!("{}%", p.round() as u32));
+    let percent = progress.percent.map(|p| format!("{}%", p.round().max(0.0)));
     match (position, percent) {
         (Some(a), Some(b)) => Some(format!("{a} · {b}")),
         (a, b) => a.or(b),
@@ -1102,7 +1116,7 @@ mod tests {
         let shown = grouped(&all, Filter::NotFinished, "");
         assert_eq!(shown.len(), 1);
         assert_eq!(shown[0].1.len(), 2);
-        assert!(grouped(&all, Filter::Finished, "salt").is_empty());
+        assert_eq!(grouped(&all, Filter::Finished, "salt"), []);
         assert_eq!(grouped(&all, Filter::All, "").len(), 2);
         assert_eq!(hidden_line(1), "1 finished series isn't shown.");
         assert_eq!(hidden_line(3), "3 finished series aren't shown.");

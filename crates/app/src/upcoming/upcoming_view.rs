@@ -55,7 +55,7 @@ impl UpcomingView {
     }
 
     /// "Couldn't load …" and "Try again", in one muted line.
-    fn failed(&self, message: SharedString, cx: &mut Context<Self>) -> impl IntoElement {
+    fn failed(message: SharedString, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .flex_wrap()
             .gap_2()
@@ -65,7 +65,7 @@ impl UpcomingView {
                     .small_control()
                     .label("Try again")
                     .on_click(
-                        cx.listener(|this, _, _, cx| this.upcoming.update(cx, |u, cx| u.load(cx))),
+                        cx.listener(|this, _, _, cx| this.upcoming.update(cx, UpcomingModel::load)),
                     ),
             )
     }
@@ -77,7 +77,7 @@ pub fn count_line(books: usize) -> String {
         1 => "1 book still to come in the series on your shelves".to_owned(),
         n => format!(
             "{} books still to come in the series on your shelves",
-            count_text(u32::try_from(n).unwrap_or(u32::MAX))
+            count_text(n)
         ),
     }
 }
@@ -140,7 +140,7 @@ impl Render for UpcomingView {
                 UpcomingStatus::Failed(message) => column()
                     .gap_2()
                     .child(PageHeader::new("Coming soon"))
-                    .child(self.failed(message, cx))
+                    .child(Self::failed(message, cx))
                     .into_any_element(),
                 UpcomingStatus::Loaded => empty_state(
                     IconName::Calendar,
@@ -166,7 +166,7 @@ impl Render for UpcomingView {
             })
             .collect::<Vec<_>>();
         let failed = match status {
-            UpcomingStatus::Failed(message) => Some(div().pt_2().child(self.failed(message, cx))),
+            UpcomingStatus::Failed(message) => Some(div().pt_2().child(Self::failed(message, cx))),
             _ => None,
         };
 

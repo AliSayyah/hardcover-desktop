@@ -28,7 +28,7 @@ use crate::format::error_message;
 use crate::ui::kit::RaisedField as _;
 
 /// How long to wait for the browser before giving up.
-pub(crate) const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+pub(crate) const SIGN_IN_TIMEOUT: Duration = Duration::from_mins(10);
 
 /// Emitted once sign-in completes.
 pub struct SignedIn {
@@ -46,7 +46,7 @@ enum State {
 pub struct SignInView {
     state: State,
     url: Entity<InputState>,
-    _task: Option<Task<()>>,
+    task: Option<Task<()>>,
 }
 
 impl EventEmitter<SignedIn> for SignInView {}
@@ -56,7 +56,7 @@ impl SignInView {
         Self {
             state: State::Idle { error: None },
             url: cx.new(|cx| InputState::new(window, cx)),
-            _task: None,
+            task: None,
         }
     }
 
@@ -66,7 +66,7 @@ impl SignInView {
         }
         self.state = State::Starting;
         cx.notify();
-        self._task = Some(cx.spawn_in(window, async move |this, cx| {
+        self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let config = OAuthConfig::default();
             let pending = cx
                 .background_spawn({

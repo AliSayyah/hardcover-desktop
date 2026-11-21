@@ -36,11 +36,19 @@ impl fmt::Debug for Session {
 impl Session {
     /// A session for freshly obtained tokens (from [`super::PendingSignIn::wait`]);
     /// saves them to `store`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the storage error if the new tokens cannot be saved.
     pub fn start(cfg: OAuthConfig, store: Arc<dyn TokenStore>, tokens: Tokens) -> Result<Self> {
         Self::start_with(cfg, store, tokens, Arc::new(UreqTransport::new()))
     }
 
     /// The session saved by a previous run, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stored tokens cannot be loaded.
     pub fn restore(cfg: OAuthConfig, store: Arc<dyn TokenStore>) -> Result<Option<Self>> {
         Self::restore_with(cfg, store, Arc::new(UreqTransport::new()))
     }
@@ -77,7 +85,9 @@ impl Session {
     }
 
     fn lock(&self) -> MutexGuard<'_, Option<Tokens>> {
-        self.tokens.lock().unwrap_or_else(|p| p.into_inner())
+        self.tokens
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// False after [`Session::sign_out`] or after the refresh token was rejected.
@@ -116,6 +126,8 @@ impl Session {
     /// The old tokens are not revoked: they belong to a different grant, and
     /// are dropped here.
     ///
+    /// # Errors
+    ///
     /// `Error::Unauthorized` once the session holds no tokens (signed out, or
     /// its refresh token was rejected): a sign-in that finishes after that
     /// must not sign the user back in. Revoke those tokens with
@@ -132,11 +144,17 @@ impl Session {
 
     /// Revokes tokens from a sign-in that will not replace this session's,
     /// e.g. ones another account approved. The session itself is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if token revocation fails.
     pub fn discard(&self, tokens: &Tokens) -> Result<()> {
         oauth::revoke(&*self.http, &self.cfg, tokens)
     }
 
     /// Revokes the tokens at Hardcover, then forgets them locally (store and memory).
+    ///
+    /// # Errors
     ///
     /// The local sign-out always happens. An `Err` means the server-side revoke
     /// (or clearing the store) failed; the user is signed out of this app either way.
@@ -281,8 +299,8 @@ mod tests {
     use crate::auth::MemoryTokenStore;
     use crate::http::fake::FakeTransport;
 
-    fn soon(minutes: i64) -> Option<crate::api::Timestamp> {
-        Some(chrono::Utc::now() + chrono::Duration::minutes(minutes))
+    fn soon(minutes: i64) -> crate::api::Timestamp {
+        chrono::Utc::now() + chrono::Duration::minutes(minutes)
     }
 
     fn session(tokens: Tokens) -> (Session, Arc<FakeTransport>, Arc<MemoryTokenStore>) {
@@ -297,14 +315,14 @@ mod tests {
 
     #[test]
     fn fresh_token_is_used_as_is() {
-        let (s, http, _) = session(Tokens::new("at1", Some("rt1".into()), soon(60 * 24)));
+        let (s, http, _) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(60 * 24))));
         assert_eq!(s.access_token().unwrap(), "at1");
         assert!(http.requests().is_empty());
     }
 
     #[test]
     fn refreshes_near_expiry_and_persists_rotation() {
-        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(2)));
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(2))));
         http.push(200, ROTATED);
         assert_eq!(s.access_token().unwrap(), "at2");
         let req = &http.requests()[0];
@@ -323,17 +341,17 @@ mod tests {
 
     #[test]
     fn proactive_refresh_network_error_falls_back_while_valid() {
-        let (s, http, _) = session(Tokens::new("at1", Some("rt1".into()), soon(2)));
+        let (s, http, _) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(2))));
         http.push_err(Error::Network("down".into()));
         assert_eq!(s.access_token().unwrap(), "at1");
-        let (s, http, _) = session(Tokens::new("at1", Some("rt1".into()), soon(-1)));
+        let (s, http, _) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(-1))));
         http.push_err(Error::Network("down".into()));
         assert!(matches!(s.access_token(), Err(Error::Network(_))));
     }
 
     #[test]
     fn unauthorized_refreshes_once_per_token() {
-        let (s, http, _) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        let (s, http, _) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(600))));
         http.push(200, ROTATED);
         assert!(s.on_unauthorized("at1").unwrap());
         // A second 401 for the old token (a concurrent request) does not refresh again.
@@ -344,7 +362,7 @@ mod tests {
 
     #[test]
     fn rejected_refresh_signs_out() {
-        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(600))));
         http.push(400, r#"{"error":"invalid_grant"}"#);
         assert!(!s.on_unauthorized("at1").unwrap());
         assert!(!s.is_signed_in());
@@ -354,7 +372,7 @@ mod tests {
 
     #[test]
     fn concurrent_callers_refresh_once() {
-        let (s, http, _) = session(Tokens::new("at1", Some("rt1".into()), soon(1)));
+        let (s, http, _) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(1))));
         http.push(200, ROTATED);
         let s = Arc::new(s);
         let handles: Vec<_> = (0..8)
@@ -371,14 +389,14 @@ mod tests {
 
     #[test]
     fn sign_out_revokes_and_clears() {
-        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(600))));
         http.push(200, "");
         s.sign_out().unwrap();
         assert!(!s.is_signed_in());
         assert!(store.load().unwrap().is_none());
         assert_eq!(http.requests()[0].form_value("token"), Some("rt1"));
         // Revoke failure still signs out locally.
-        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(600))));
         http.push(503, "");
         assert!(s.sign_out().is_err());
         assert!(!s.is_signed_in());
@@ -389,7 +407,7 @@ mod tests {
     fn refresh_keeps_the_scope_unless_the_server_reports_a_new_one() {
         let granted = "read:me read:library";
         let (s, http, store) = session(
-            Tokens::new("at1", Some("rt1".into()), soon(2)).with_scope(Some(granted.into())),
+            Tokens::new("at1", Some("rt1".into()), Some(soon(2))).with_scope(Some(granted.into())),
         );
         // ROTATED has no `scope`.
         http.push(200, ROTATED);
@@ -398,7 +416,7 @@ mod tests {
         assert_eq!(store.load().unwrap().unwrap().scope(), Some(granted));
 
         let (s, http, store) = session(
-            Tokens::new("at1", Some("rt1".into()), soon(2)).with_scope(Some(granted.into())),
+            Tokens::new("at1", Some("rt1".into()), Some(soon(2))).with_scope(Some(granted.into())),
         );
         http.push(
             200,
@@ -412,7 +430,8 @@ mod tests {
     #[test]
     fn refresh_without_a_rotated_token_keeps_the_old_one_and_the_scope() {
         let (s, http, store) = session(
-            Tokens::new("at1", Some("rt1".into()), soon(2)).with_scope(Some("read:me".into())),
+            Tokens::new("at1", Some("rt1".into()), Some(soon(2)))
+                .with_scope(Some("read:me".into())),
         );
         http.push(200, r#"{"access_token":"at2","expires_in":604800}"#);
         assert_eq!(s.access_token().unwrap(), "at2");
@@ -436,11 +455,11 @@ mod tests {
 
     #[test]
     fn replace_swaps_tokens_for_every_user_of_the_session() {
-        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(600))));
         let s = Arc::new(s);
         let client_side = s.clone();
         s.replace(
-            Tokens::new("at9", Some("rt9".into()), soon(600))
+            Tokens::new("at9", Some("rt9".into()), Some(soon(600)))
                 .with_scope(Some("read:me read:goals".into())),
         )
         .unwrap();
@@ -484,11 +503,11 @@ mod tests {
 
     #[test]
     fn replace_after_sign_out_is_refused() {
-        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(600))));
         http.push(200, "");
         s.sign_out().unwrap();
         assert_eq!(
-            s.replace(Tokens::new("at2", Some("rt2".into()), soon(600))),
+            s.replace(Tokens::new("at2", Some("rt2".into()), Some(soon(600)))),
             Err(Error::Unauthorized)
         );
         assert!(!s.is_signed_in());
@@ -497,9 +516,9 @@ mod tests {
 
     #[test]
     fn discard_revokes_other_tokens_and_keeps_the_session() {
-        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), soon(600)));
+        let (s, http, store) = session(Tokens::new("at1", Some("rt1".into()), Some(soon(600))));
         http.push(200, "");
-        s.discard(&Tokens::new("at9", Some("rt9".into()), soon(600)))
+        s.discard(&Tokens::new("at9", Some("rt9".into()), Some(soon(600))))
             .unwrap();
         assert_eq!(http.requests()[0].form_value("token"), Some("rt9"));
         assert_eq!(s.access_token().unwrap(), "at1");

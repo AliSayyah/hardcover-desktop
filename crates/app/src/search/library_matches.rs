@@ -104,7 +104,10 @@ mod tests {
 
     fn entry(id: i64, title: &str, authors: &[&str], status: ReadingStatus) -> LibraryEntry {
         let mut book = BookSummary::new(BookId::new(id), title);
-        book.authors = authors.iter().map(|a| a.to_string()).collect();
+        book.authors = authors
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         LibraryEntry::new(UserBookId::new(id), UserId::new(1), book, status)
     }
 
@@ -199,8 +202,8 @@ mod tests {
     #[test]
     fn short_queries_and_long_lists_are_cut() {
         let lib = library();
-        assert!(library_matches(&lib, "d").is_empty());
-        assert!(library_matches(&lib, "  ").is_empty());
+        assert_eq!(library_matches(&lib, "d"), []);
+        assert_eq!(library_matches(&lib, "  "), []);
         let many: Vec<LibraryEntry> = (1..=9)
             .map(|i| entry(i, &format!("Book {i}"), &[], ReadingStatus::Read))
             .collect();

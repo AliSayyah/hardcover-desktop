@@ -52,13 +52,13 @@ use std::rc::Rc;
 use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
 use gpui_kit::{App, Hsla, Rgba, SharedString};
 
-use super::color::{Palette, solid};
+use super::color::{Palette, channel_byte, solid};
 use crate::fonts;
 
 /// The radius of controls (`r-control`).
-const RADIUS: usize = 6;
+const RADIUS: u8 = 6;
 /// The radius of rows, panels, popovers and dialogs (`r-box`).
-const RADIUS_LG: usize = 8;
+const RADIUS_LG: u8 = 8;
 
 /// Installs the app's light and dark themes and applies the current mode's.
 /// Runs after `gpui_kit::init` and `fonts::init`. `bundled_fonts` says
@@ -78,19 +78,16 @@ pub fn init(bundled_fonts: bool, cx: &mut App) {
 }
 
 /// A colour as the theme config reads it: `#RRGGBBAA`.
-fn css(color: Hsla) -> Option<SharedString> {
+fn css_color(color: Hsla) -> SharedString {
     let c = Rgba::from(color);
-    let byte = |v: f32| (v.clamp(0., 1.) * 255.).round() as u8;
-    Some(
-        format!(
-            "#{:02X}{:02X}{:02X}{:02X}",
-            byte(c.r),
-            byte(c.g),
-            byte(c.b),
-            byte(c.a)
-        )
-        .into(),
+    format!(
+        "#{:02X}{:02X}{:02X}{:02X}",
+        channel_byte(c.r),
+        channel_byte(c.g),
+        channel_byte(c.b),
+        channel_byte(c.a)
     )
+    .into()
 }
 
 /// The theme config for `mode`.
@@ -121,11 +118,12 @@ pub fn config(mode: ThemeMode, bundled_fonts: bool) -> ThemeConfig {
     if bundled_fonts {
         config.font_family = Some(fonts::INTER.into());
     }
-    config.radius = Some(RADIUS);
-    config.radius_lg = Some(RADIUS_LG);
+    config.radius = Some(usize::from(RADIUS));
+    config.radius_lg = Some(usize::from(RADIUS_LG));
     // Controls are flat: elevation is for covers and popovers only.
     config.shadow = Some(false);
 
+    let css = |color| Some(css_color(color));
     let c = &mut config.colors;
     // Paper, ink and hairlines.
     c.background = css(p.bg);
@@ -183,6 +181,14 @@ pub fn config(mode: ThemeMode, bundled_fonts: bool) -> ThemeConfig {
     c.warning = css(p.warning);
     c.warning_foreground = css(p.bg);
 
+    apply_collection_colors(c, p);
+
+    config
+}
+
+fn apply_collection_colors(c: &mut gpui_kit::component::ThemeConfigColors, p: &Palette) {
+    let css = |color| Some(css_color(color));
+    let clear = p.fg.opacity(0.);
     // Lists and menus.
     c.list = css(p.bg);
     c.list_even = css(p.bg);
@@ -230,8 +236,6 @@ pub fn config(mode: ThemeMode, bundled_fonts: bool) -> ThemeConfig {
         *chart = css(p.accent);
     }
     c.chart_grid = css(p.track);
-
-    config
 }
 
 #[cfg(test)]
@@ -296,8 +300,8 @@ mod tests {
             }
             assert!(close(theme.tokens.button_hover.color, theme.button_hover));
             assert!(close(theme.tokens.list_hover.color, p.hover));
-            assert_eq!(theme.radius, gpui_kit::px(RADIUS as f32));
-            assert_eq!(theme.radius_lg, gpui_kit::px(RADIUS_LG as f32));
+            assert_eq!(theme.radius, gpui_kit::px(f32::from(RADIUS)));
+            assert_eq!(theme.radius_lg, gpui_kit::px(f32::from(RADIUS_LG)));
             assert_eq!(theme.font_family.as_ref(), fonts::INTER);
         }
     }
@@ -305,7 +309,7 @@ mod tests {
     #[test]
     fn a_colour_is_written_with_its_alpha() {
         let p = Palette::light();
-        assert_eq!(css(p.bg).unwrap().as_ref(), "#FAF8F4FF");
-        assert_eq!(css(p.hover).unwrap().as_ref(), "#1F1C170D");
+        assert_eq!(css_color(p.bg).as_ref(), "#FAF8F4FF");
+        assert_eq!(css_color(p.hover).as_ref(), "#1F1C170D");
     }
 }

@@ -77,7 +77,7 @@ pub struct DiscoverView {
     /// Periods fetched this session.
     periods: HashMap<TrendingPeriod, Loaded>,
     loading: Option<TrendingPeriod>,
-    _task: Option<Task<()>>,
+    task: Option<Task<()>>,
     list: Entity<ListState<CatalogBooks>>,
     /// The period whose books the list holds.
     listed: Option<TrendingPeriod>,
@@ -93,19 +93,19 @@ impl Focusable for DiscoverView {
 }
 
 impl DiscoverView {
-    pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(model: &Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let list = new_list(
             model.clone(),
             "Hardcover lists no books for this period.",
             window,
             cx,
         );
-        let subscriptions = follow_list(&list, &model, window, cx);
+        let subscriptions = follow_list(&list, model, window, cx);
         Self {
             period: TrendingPeriod::Month,
             periods: HashMap::new(),
             loading: None,
-            _task: None,
+            task: None,
             list,
             listed: None,
             focus_handle: cx.focus_handle(),
@@ -162,7 +162,7 @@ impl DiscoverView {
         self.loading = Some(period);
         let client = Services::global(cx).client().clone();
         // Replacing the task drops the fetch for a period no longer shown.
-        self._task = Some(cx.spawn_in(window, async move |this, cx| {
+        self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = cx
                 .background_spawn(async move { client.trending_books(period) })
                 .await;

@@ -4,6 +4,7 @@
 //! SHA-256 of the image URL plus the URL's extension. Downloads are atomic
 //! (temp file + rename) and capped in size; only `https` URLs are fetched.
 
+use std::fmt::Write as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -30,21 +31,34 @@ impl std::fmt::Debug for CoverCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CoverCache")
             .field("dir", &self.dir)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 impl CoverCache {
     /// `$XDG_CACHE_HOME/hardcover-desktop/covers`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the user cache directory cannot be located.
     pub fn default_dir() -> Result<PathBuf> {
         Ok(crate::project_dirs()?.cache_dir().join("covers"))
     }
 
+    /// Opens the cover cache in the user cache directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the cache directory cannot be located or created.
     pub fn open_default() -> Result<Self> {
         Self::new(Self::default_dir()?)
     }
 
     /// Uses (and creates) `dir`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the cache directory cannot be created.
     pub fn new(dir: impl Into<PathBuf>) -> Result<Self> {
         Self::with_transport(dir, Arc::new(UreqTransport::new()))
     }
@@ -58,17 +72,23 @@ impl CoverCache {
         Ok(Self { dir, http })
     }
 
+    #[must_use]
     pub fn dir(&self) -> &Path {
         &self.dir
     }
 
     /// The file for `cover` if it has been downloaded already. Never touches the network.
+    #[must_use]
     pub fn cached_path(&self, cover: &Cover) -> Option<PathBuf> {
         let path = self.dir.join(file_name(&cover.url).ok()?);
         path.is_file().then_some(path)
     }
 
     /// The cached file, downloading it first if needed. Blocking.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the URL, download, image response or cache write fails.
     pub fn fetch(&self, cover: &Cover) -> Result<PathBuf> {
         let name = file_name(&cover.url)?;
         let path = self.dir.join(&name);
@@ -129,8 +149,13 @@ fn file_name(url: &str) -> Result<String> {
         .filter(|ext| EXTENSIONS.contains(&ext.as_str()))
         .unwrap_or_else(|| "img".to_owned());
     let hash = Sha256::digest(url.as_bytes());
-    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(format!("{hex}.{ext}"))
+    let mut name = String::with_capacity(2 * hash.len() + 1 + ext.len());
+    for byte in hash {
+        write!(name, "{byte:02x}").expect("writing to a String");
+    }
+    name.push('.');
+    name.push_str(&ext);
+    Ok(name)
 }
 
 #[cfg(test)]
@@ -141,21 +166,31 @@ mod tests {
     #[test]
     fn names_keep_extension_and_reject_non_https() {
         let n = file_name("https://assets.hardcover.app/edition/1/abc.JPG").unwrap();
-        assert!(n.ends_with(".jpg") && n.len() == 64 + 4);
-        assert!(
+        assert_eq!(n.len(), 64 + 4);
+        assert_eq!(n.rsplit_once('.').unwrap().1, "jpg");
+        assert_eq!(
             file_name("https://assets.hardcover.app/x")
                 .unwrap()
-                .ends_with(".img")
+                .rsplit_once('.')
+                .unwrap()
+                .1,
+            "img"
         );
-        assert!(
+        assert_eq!(
             file_name("https://assets.hardcover.app/x.exe")
                 .unwrap()
-                .ends_with(".img")
+                .rsplit_once('.')
+                .unwrap()
+                .1,
+            "img"
         );
-        assert!(
+        assert_eq!(
             file_name("https://assets.hardcover.app/p.svg?v=2")
                 .unwrap()
-                .ends_with(".svg")
+                .rsplit_once('.')
+                .unwrap()
+                .1,
+            "svg"
         );
         assert!(file_name("http://assets.hardcover.app/x.jpg").is_err());
         assert!(file_name("file:///etc/passwd").is_err());

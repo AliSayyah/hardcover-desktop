@@ -139,6 +139,7 @@ pub struct GrantedScopes {
 impl GrantedScopes {
     /// Everything. Personal access tokens carry no scope information; they act
     /// for their owner with full access.
+    #[must_use]
     pub fn all() -> Self {
         Self { scopes: None }
     }
@@ -158,6 +159,7 @@ impl GrantedScopes {
     /// when none was recorded. Sessions saved since this version always have
     /// one (see [`super::Tokens::scope`]), so `None` means an older version
     /// saved it, and that version asked for exactly those.
+    #[must_use]
     pub fn for_session(scope: Option<&str>) -> Self {
         match scope {
             Some(scope) => Self::parse(scope),
@@ -169,6 +171,7 @@ impl GrantedScopes {
     /// implies it, or because every narrower scope it stands for was granted
     /// (a server may list `read:lists:public read:lists:following
     /// read:lists:private` instead of `read:lists`).
+    #[must_use]
     pub fn contains(&self, scope: &str) -> bool {
         let Some(granted) = &self.scopes else {
             return true;
@@ -181,6 +184,7 @@ impl GrantedScopes {
     }
 
     /// The scopes of `required` that were not granted, in order.
+    #[must_use]
     pub fn missing<'a>(&self, required: &[&'a str]) -> Vec<&'a str> {
         required
             .iter()
@@ -190,6 +194,7 @@ impl GrantedScopes {
     }
 
     /// True if every scope of `required` was granted.
+    #[must_use]
     pub fn covers(&self, required: &[&str]) -> bool {
         self.missing(required).is_empty()
     }

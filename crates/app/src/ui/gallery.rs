@@ -27,7 +27,13 @@ use super::kit::{
     RaisedField as _, SmallControl as _, SmallIconButton as _, open_alert_dialog, open_dialog,
 };
 use super::reveal::RevealScroll as _;
-use super::*;
+use super::{
+    AccountRow, Avatar, Block, BylineLink, Columns, CoverShelf, CoverSlot, EmptyState,
+    ExternalLink, GoalRow, Greeting, Lane, ListRow, Meter, MonthBars, NavRow, ObjectBar,
+    PageHeader, PropertyList, Rail, RailSection, RowSpacing, SectionHeader, Sequence, SeriesStrip,
+    Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton, blocks, brand_row,
+    date_line, greeting, panel, see_all, sidebar_label,
+};
 use crate::bidi::WrappingText;
 use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverSize};
@@ -334,7 +340,7 @@ fn series_strips(cx: &App) -> AnyElement {
     // A Persian series of ten: two read, the third paused, the rest not in
     // the library, cut to six slots with "+N".
     let today: hardcover_core::Date = "2026-11-20".parse().unwrap_or_default();
-    let books = (1..=10)
+    let books = (1_u8..=10)
         .map(|n| {
             let digits: String = n
                 .to_string()
@@ -347,8 +353,11 @@ fn series_strips(cx: &App) -> AnyElement {
                 _ => None,
             };
             SeriesBook {
-                book: BookSummary::new(BookId::new(90_000 + n), format!("کلیدر {digits}")),
-                position: n as f32,
+                book: BookSummary::new(
+                    BookId::new(90_000 + i64::from(n)),
+                    format!("کلیدر {digits}"),
+                ),
+                position: f32::from(n),
                 entry: None,
                 status,
                 out: true,
@@ -571,7 +580,7 @@ fn kit_fixes(input: &Entity<InputState>, cx: &App) -> AnyElement {
         .on_click(|_, window, cx| {
             open_dialog(window, cx, |dialog, _, _| {
                 dialog.title("Edit list").child("A dialog on raised.")
-            })
+            });
         });
     let alert = Button::new("g-alert")
         .label("Confirm…")
@@ -582,7 +591,7 @@ fn kit_fixes(input: &Entity<InputState>, cx: &App) -> AnyElement {
                     .description("Its books stay in your library.")
                     .confirm()
                     .ok_text("Delete")
-            })
+            });
         });
     let small = h_flex()
         .gap_2()
@@ -660,8 +669,7 @@ fn empty(cx: &App) -> AnyElement {
     )
 }
 
-fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
-    let c = colors(cx);
+fn gallery_nav_rows(selected_nav: usize, cx: &mut Context<Gallery>) -> Vec<NavRow> {
     let view = cx.entity().downgrade();
     let nav = [
         ("Home", IconName::LayoutDashboard, None),
@@ -669,8 +677,7 @@ fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
         ("Want to read", IconName::Inbox, Some("1,204")),
         ("Did not finish", IconName::Ban, Some("2")),
     ];
-    let nav_rows: Vec<NavRow> = nav
-        .into_iter()
+    nav.into_iter()
         .enumerate()
         .map(|(ix, (label, icon, count))| {
             let view = view.clone();
@@ -690,8 +697,12 @@ fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
             }
             row
         })
-        .collect();
+        .collect()
+}
 
+fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
+    let c = colors(cx);
+    let nav_rows = gallery_nav_rows(selected_nav, cx);
     Rail::new()
         .section(
             RailSection::new("On Hardcover")

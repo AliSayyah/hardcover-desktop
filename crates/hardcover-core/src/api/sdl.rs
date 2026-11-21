@@ -269,7 +269,7 @@ pub fn check_scopes(
             .push(format!("scope {scope} is no longer in the scope map"));
     }
     let needs = |gated: &BTreeMap<String, Vec<String>>, name: &str| -> String {
-        gated.get(name).map(|s| s.join(" or ")).unwrap_or_default()
+        gated.get(name).map_or_default(|s| s.join(" or "))
     };
     for (name, usage) in documents {
         for field in &usage.top_level {

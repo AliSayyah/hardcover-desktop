@@ -49,16 +49,26 @@ impl Default for Preferences {
 
 impl Preferences {
     /// `$XDG_CONFIG_HOME/hardcover-desktop/settings.json`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the user configuration directory cannot be located.
     pub fn default_path() -> Result<PathBuf> {
         Ok(crate::project_dirs()?.config_dir().join(PREFERENCES_FILE))
     }
 
     /// Blocking. The saved preferences, or the defaults.
+    #[must_use]
     pub fn load(path: &Path) -> Self {
         read_json(path).unwrap_or_default()
     }
 
     /// Blocking. Creates the directory if needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the preferences cannot be serialized or the file cannot be
+    /// replaced.
     pub fn save(&self, path: &Path) -> Result<()> {
         write_json(path, self)
     }
@@ -83,6 +93,8 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
 }
 
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    // Unique per write, so overlapping writes never share a temporary file.
+    static WRITES: AtomicU64 = AtomicU64::new(0);
     let dir = path
         .parent()
         .ok_or_else(|| crate::Error::Storage(format!("{} has no parent", path.display())))?;
@@ -90,8 +102,6 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let json = serde_json::to_vec_pretty(value)
         .map_err(|e| crate::Error::Storage(format!("could not encode settings: {e}")))?;
     let name = path.file_name().unwrap_or_default().to_string_lossy();
-    // Unique per write, so overlapping writes never share a temporary file.
-    static WRITES: AtomicU64 = AtomicU64::new(0);
     let serial = WRITES.fetch_add(1, Ordering::Relaxed);
     let temp = dir.join(format!(".{name}.{}-{serial}.tmp", std::process::id()));
     let written = (|| {

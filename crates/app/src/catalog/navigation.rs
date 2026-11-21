@@ -65,10 +65,10 @@ impl PageStack {
         true
     }
 
-    /// Leaves the current page: `None` if there was none, else where focus
+    /// Leaves the current page: `None` if there was none, else the page and where focus
     /// was when it opened.
-    pub fn pop(&mut self) -> Option<Option<FocusReturn>> {
-        self.pages.pop().map(|(_, from)| from)
+    pub fn pop(&mut self) -> Option<(Page, Option<FocusReturn>)> {
+        self.pages.pop()
     }
 
     pub fn clear(&mut self) {
@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn history_is_bounded_and_clears() {
         let mut stack = PageStack::default();
-        for id in 0..(PageStack::MAX as i64 + 10) {
+        for id in 0..(i64::try_from(PageStack::MAX).unwrap() + 10) {
             stack.push(Page::Author(AuthorId::new(id)), None);
         }
         let mut depth = 0;

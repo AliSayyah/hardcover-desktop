@@ -41,13 +41,13 @@ pub fn redraw(cx: &mut VisualTestContext) {
 
 /// Moves focus as Tab does, and draws the frame that shows it.
 pub fn tab(cx: &mut VisualTestContext) {
-    cx.update(|window, cx| window.focus_next(cx));
+    cx.update(gpui_kit::Window::focus_next);
     redraw(cx);
 }
 
 /// Moves focus as Shift+Tab does, and draws the frame that shows it.
 pub fn shift_tab(cx: &mut VisualTestContext) {
-    cx.update(|window, cx| window.focus_prev(cx));
+    cx.update(gpui_kit::Window::focus_prev);
     redraw(cx);
 }
 

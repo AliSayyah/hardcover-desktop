@@ -287,13 +287,13 @@ fn render_ratings(stats: &ReadingStats, cx: &App) -> impl IntoElement {
                     n => n.to_string(),
                 })
                 .tooltip_title(|(ix, _)| {
-                    let stars = half_stars(*ix);
-                    let unit = if matches!(stars.as_ref(), "1" | "½") {
+                    let label = half_stars(*ix);
+                    let unit = if matches!(label.as_ref(), "1" | "½") {
                         "star"
                     } else {
                         "stars"
                     };
-                    format!("{stars} {unit}").into()
+                    format!("{label} {unit}").into()
                 })
                 .tooltip_value(|(_, n), _| books_count_text(*n).into()),
         ),

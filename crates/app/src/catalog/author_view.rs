@@ -82,7 +82,7 @@ fn ordered(books: &[AuthorBook], order: BookOrder) -> Vec<&AuthorBook> {
     match order {
         BookOrder::MostRead => {}
         BookOrder::Newest => {
-            out.sort_by_key(|b| std::cmp::Reverse(b.book.release_year.unwrap_or(i32::MIN)))
+            out.sort_by_key(|b| std::cmp::Reverse(b.book.release_year.unwrap_or(i32::MIN)));
         }
         BookOrder::Oldest => out.sort_by_key(|b| b.book.release_year.unwrap_or(i32::MAX)),
     }
@@ -113,7 +113,7 @@ pub struct AuthorView {
     /// Pages fetched this session, so Back costs no request.
     pages: HashMap<AuthorId, Loaded>,
     loading: Option<AuthorId>,
-    _task: Option<Task<()>>,
+    task: Option<Task<()>>,
     /// Holds focus while the page loads; see [`Self::focus`].
     focus_when_ready: Option<FocusHandle>,
     order: BookOrder,
@@ -157,7 +157,7 @@ impl AuthorView {
             current: None,
             pages: HashMap::new(),
             loading: None,
-            _task: None,
+            task: None,
             focus_when_ready: None,
             order: BookOrder::default(),
             order_select,
@@ -209,7 +209,7 @@ impl AuthorView {
         self.loading = Some(id);
         let client = Services::global(cx).client().clone();
         // Replacing the task drops the fetch for a page no longer shown.
-        self._task = Some(cx.spawn_in(window, async move |this, cx| {
+        self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = cx.background_spawn(async move { client.author(id) }).await;
             let _ = this.update_in(cx, |this, window, cx| {
                 if this.loading == Some(id) {

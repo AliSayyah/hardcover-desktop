@@ -86,7 +86,7 @@ impl RenderOnce for Sequence {
                             RowSpacing::Rows => this.py_3(),
                             RowSpacing::Reviews => this.py_4(),
                         })
-                        .when(ix == 0 && flush_top, |this| this.pt_0())
+                        .when(ix == 0 && flush_top, gpui_kit::Styled::pt_0)
                         .when(ix > 0, |this| this.border_t_1().border_color(border))
                         .child(row),
                 )
@@ -156,7 +156,7 @@ impl Lane {
     }
 
     /// An upcoming row's action: 136 wide ("Want to read", or the
-    /// StatusChip).
+    /// `StatusChip`).
     pub fn action() -> Self {
         Self::new(size::ACTION_LANE)
     }
@@ -191,7 +191,7 @@ impl RenderOnce for Lane {
             div()
                 .flex()
                 .flex_none()
-                .when_some(self.width, |this, width| this.w(width))
+                .when_some(self.width, gpui_kit::Styled::w)
                 .map(|this| {
                     if self.stacked {
                         this.flex_col().items_end().gap_1()

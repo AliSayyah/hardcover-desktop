@@ -53,7 +53,7 @@ fn search_and_details() {
     };
     let page = c.search_books("dune", 1).unwrap();
     assert!(page.total.unwrap_or(0) > 0);
-    assert!(!page.books.is_empty());
+    assert_ne!(page.books, [] as [hardcover_core::BookSummary; 0]);
     let top = &page.books[0];
     assert!(!top.title.is_empty() && !top.authors.is_empty());
     let d = c.book_details(top.id).unwrap();

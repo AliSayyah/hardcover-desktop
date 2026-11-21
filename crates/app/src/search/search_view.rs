@@ -20,7 +20,7 @@
 //! A failed search says why with "Try again": the first page runs the query
 //! again; a later page asks for that page again, keeping the rows so far.
 //!
-//! In a narrow list a row's StatusChip shrinks to its icon
+//! In a narrow list a row's `StatusChip` shrinks to its icon
 //! ([`BookRow::compact`]), so the title keeps its room.
 
 use std::cell::Cell;
@@ -63,7 +63,7 @@ use crate::ui::{
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
 
-/// Below this list width (360) a row's StatusChip shrinks to its icon: the
+/// Below this list width (360) a row's `StatusChip` shrinks to its icon: the
 /// widest chip ("Currently reading") would leave a title too little room.
 const COMPACT_BELOW: f32 = 22.5;
 
@@ -146,7 +146,7 @@ impl SearchHit for BookSummary {
     }
 
     fn row_id(&self) -> (&'static str, u64) {
-        ("search-book", self.id.get() as u64)
+        ("search-book", self.id.get().cast_unsigned())
     }
 
     fn name(&self) -> SharedString {
@@ -188,7 +188,7 @@ impl SearchHit for AuthorHit {
     }
 
     fn row_id(&self) -> (&'static str, u64) {
-        ("search-author", self.id.get() as u64)
+        ("search-author", self.id.get().cast_unsigned())
     }
 
     fn name(&self) -> SharedString {
@@ -216,7 +216,7 @@ impl SearchHit for SeriesHit {
     }
 
     fn row_id(&self) -> (&'static str, u64) {
-        ("search-series", self.id.get() as u64)
+        ("search-series", self.id.get().cast_unsigned())
     }
 
     fn name(&self) -> SharedString {
@@ -284,7 +284,7 @@ impl<T: SearchHit> ResultsDelegate<T> {
 
     /// Hardcover's results so far that are left out as library matches.
     fn hidden_duplicates(&self) -> u32 {
-        self.results.hits().len() as u32 - self.remote().count() as u32
+        u32::try_from(self.results.hits().len() - self.remote().count()).unwrap_or(u32::MAX)
     }
 }
 
@@ -441,14 +441,14 @@ pub struct SearchView {
 }
 
 impl SearchView {
-    pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(model: &Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input =
             cx.new(|cx| InputState::new(window, cx).placeholder(SearchKind::Books.placeholder()));
         let view = cx.entity().downgrade();
         let compact = Rc::new(Cell::new(false));
-        let books = new_results_list(&model, &view, &compact, window, cx);
-        let authors = new_results_list(&model, &view, &compact, window, cx);
-        let series = new_results_list(&model, &view, &compact, window, cx);
+        let books = new_results_list(model, &view, &compact, window, cx);
+        let authors = new_results_list(model, &view, &compact, window, cx);
+        let series = new_results_list(model, &view, &compact, window, cx);
         let detail = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
         let subscriptions = vec![
             cx.subscribe_in(
@@ -503,7 +503,7 @@ impl SearchView {
             // Status badges follow library changes, and a book that left the
             // library leaves its matches. New matches wait for the next query:
             // adding the selected book mustn't move it under the pointer.
-            cx.observe_in(&model, window, |this, model, window, cx| {
+            cx.observe_in(model, window, |this, model, window, cx| {
                 this.books.update(cx, |list, cx| {
                     let library = model.read(cx);
                     let delegate = list.delegate_mut();
@@ -528,10 +528,10 @@ impl SearchView {
                 }
             }),
             on_keyboard_entry(&authors, window, cx, |this, window, cx| {
-                select_first_row(&this.authors, window, cx)
+                select_first_row(&this.authors, window, cx);
             }),
             on_keyboard_entry(&series, window, cx, |this, window, cx| {
-                select_first_row(&this.series, window, cx)
+                select_first_row(&this.series, window, cx);
             }),
         ];
         Self {
@@ -597,7 +597,7 @@ impl SearchView {
         self.selected = Some(book.id);
         self.sync_list_selection(window, cx);
         self.detail.update(cx, |d, cx| {
-            d.set_subject(Some(Subject::Book(book)), window, cx)
+            d.set_subject(Some(Subject::Book(book)), window, cx);
         });
     }
 
@@ -607,7 +607,7 @@ impl SearchView {
         }
         self.kind = kind;
         self.input.update(cx, |input, cx| {
-            input.set_placeholder(kind.placeholder(), window, cx)
+            input.set_placeholder(kind.placeholder(), window, cx);
         });
         let query = self.input.read(cx).value();
         // Search this kind for the current query, unless it already has.
@@ -681,7 +681,7 @@ impl SearchView {
                 .background_spawn(async move { T::fetch(&client, &q, 1) })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.receive(revision, result, window, cx)
+                this.receive(revision, result, window, cx);
             });
         }));
     }
@@ -701,7 +701,7 @@ impl SearchView {
                 .background_spawn(async move { T::fetch(&client, &query, page) })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.receive(revision, result, window, cx)
+                this.receive(revision, result, window, cx);
             });
         }));
     }
@@ -764,7 +764,7 @@ impl SearchView {
                         div()
                             .key_context(KEY_CONTEXT)
                             .on_action(cx.listener(|this, _: &EnterResults, window, cx| {
-                                this.enter_results(window, cx)
+                                this.enter_results(window, cx);
                             }))
                             .child(
                                 Input::new(&self.input)

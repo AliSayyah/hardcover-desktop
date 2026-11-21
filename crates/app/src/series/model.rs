@@ -49,8 +49,8 @@ pub struct SeriesModel {
     /// Bumped whenever the series change.
     revision: u64,
     summaries: Option<(SummaryKey, Rc<Vec<SeriesSummary>>)>,
-    _load: Option<Task<()>>,
-    _reload: Option<Task<()>>,
+    load_task: Option<Task<()>>,
+    reload_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -90,8 +90,8 @@ impl SeriesModel {
             requested: None,
             revision: 0,
             summaries: None,
-            _load: None,
-            _reload: None,
+            load_task: None,
+            reload_task: None,
             _subscriptions: subscriptions,
         }
     }
@@ -144,13 +144,13 @@ impl SeriesModel {
         }
         let ids = started_series(library.entries());
         self.requested = Some(ids.clone());
-        self._reload = None;
+        self.reload_task = None;
         self.status = SeriesStatus::Loading;
         cx.notify();
         let client = Services::global(cx).client().clone();
         // Replacing the task drops a load still running: its series are older.
         // A load that lands after signing out finds the model gone.
-        self._load = Some(cx.spawn(async move |this, cx| {
+        self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move { client.tracked_series(&ids) })
                 .await;
@@ -172,9 +172,9 @@ impl SeriesModel {
     }
 
     fn schedule_reload(&mut self, cx: &mut Context<Self>) {
-        self._reload = Some(cx.spawn(async move |this, cx| {
+        self.reload_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(RELOAD_DELAY).await;
-            let _ = this.update(cx, |this, cx| this.load(cx));
+            let _ = this.update(cx, SeriesModel::load);
         }));
     }
 }

@@ -55,7 +55,6 @@ pub struct ListsModel {
     lists_known: bool,
     /// Which books are on which list; `None` until first needed.
     memberships: Option<ListMemberships>,
-    memberships_loading: bool,
     /// Books looked up one at a time because the index was cut short.
     book_rows: HashMap<BookId, Vec<ListMembership>>,
     book_rows_loading: HashSet<BookId>,
@@ -71,9 +70,9 @@ pub struct ListsModel {
     /// Counts local writes. A load that started before one would bring back
     /// the old state, so it is run again instead of applied.
     generation: u64,
-    _load: Option<Task<()>>,
-    _memberships: Option<Task<()>>,
-    _book_rows: Vec<Task<()>>,
+    load_task: Option<Task<()>>,
+    memberships_task: Option<Task<()>>,
+    book_row_tasks: Vec<Task<()>>,
 }
 
 impl EventEmitter<ListsEvent> for ListsModel {}
@@ -122,7 +121,6 @@ impl ListsModel {
             loaded_once: false,
             lists_known: false,
             memberships: None,
-            memberships_loading: false,
             book_rows: HashMap::new(),
             book_rows_loading: HashSet::new(),
             pending_books: HashSet::new(),
@@ -130,9 +128,9 @@ impl ListsModel {
             busy_books: HashSet::new(),
             writing: false,
             generation: 0,
-            _load: None,
-            _memberships: None,
-            _book_rows: Vec::new(),
+            load_task: None,
+            memberships_task: None,
+            book_row_tasks: Vec::new(),
         }
     }
 
@@ -231,7 +229,7 @@ impl ListsModel {
         self.status = ListsStatus::Loading;
         cx.notify();
         let generation = self.generation;
-        self._load = Some(cx.spawn(async move |this, cx| {
+        self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = cx.background_spawn(async move { client.lists() }).await;
             let _ = this.update(cx, |this, cx| {
                 if this.generation != generation && result.is_ok() {
@@ -299,12 +297,14 @@ impl ListsModel {
         if let Some(book) = self.shown_book {
             self.pending_books.insert(book);
         }
-        self.memberships.is_some() || self.memberships_loading || !self.pending_books.is_empty()
+        self.memberships.is_some()
+            || self.memberships_task.is_some()
+            || !self.pending_books.is_empty()
     }
 
     /// Loads the index of the user's books on lists, if it isn't loaded yet.
     pub fn ensure_memberships(&mut self, cx: &mut Context<Self>) {
-        if self.memberships.is_none() && !self.memberships_loading {
+        if self.memberships.is_none() && self.memberships_task.is_none() {
             self.load_memberships(cx);
         }
     }
@@ -316,14 +316,13 @@ impl ListsModel {
         else {
             return;
         };
-        self.memberships_loading = true;
         let generation = self.generation;
-        self._memberships = Some(cx.spawn(async move |this, cx| {
+        self.memberships_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move { client.list_memberships() })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.memberships_loading = false;
+                this.memberships_task = None;
                 if this.generation != generation && result.is_ok() {
                     this.load_memberships(cx);
                     return;
@@ -352,7 +351,7 @@ impl ListsModel {
     pub fn ensure_book(&mut self, book: BookId, cx: &mut Context<Self>) {
         self.shown_book = Some(book);
         self.ensure_memberships(cx);
-        if self.memberships_loading || self.memberships.is_none() {
+        if self.memberships_task.is_some() || self.memberships.is_none() {
             // Decided when the index lands.
             self.pending_books.insert(book);
             return;
@@ -415,8 +414,8 @@ impl ListsModel {
             });
         });
         // Finished lookups are dropped with the next one; there are few.
-        self._book_rows.retain(|t| !t.is_ready());
-        self._book_rows.push(task);
+        self.book_row_tasks.retain(|t| !t.is_ready());
+        self.book_row_tasks.push(task);
     }
 
     // ----- local changes -----
@@ -873,7 +872,7 @@ mod tests {
         let (a, b) = (BookId::new(10), BookId::new(11));
         m.pending_books.extend([a, b]);
         // No index yet (still loading, or it failed): they keep waiting.
-        assert!(m.take_lookups().is_empty());
+        assert_eq!(m.take_lookups(), []);
         assert_eq!(m.pending_books.len(), 2);
 
         m.memberships = Some(ListMemberships {
@@ -887,7 +886,7 @@ mod tests {
         // A complete index answers for every book.
         m.pending_books.insert(a);
         m.memberships.as_mut().unwrap().complete = true;
-        assert!(m.take_lookups().is_empty());
+        assert_eq!(m.take_lookups(), []);
         assert!(m.pending_books.is_empty());
     }
 
@@ -938,7 +937,7 @@ mod tests {
     fn the_first_owned_edition_adds_nothing_while_the_lists_are_unknown() {
         let mut m = ListsModel::new();
         assert!(!m.add_owned_placeholder(ListId::new(7)));
-        assert!(m.lists.is_empty());
+        assert_eq!(m.lists, []);
     }
 
     #[test]

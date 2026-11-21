@@ -207,11 +207,8 @@ impl ListDialog {
 
 const PRIVACY: [Privacy; 3] = Privacy::ALL;
 
-impl Render for ListDialog {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let writing = self.lists.read(cx).is_writing();
-        let can_write = Services::global(cx).has_scope(WRITE_LISTS);
-        let colors = colors(cx);
+impl ListDialog {
+    fn options(&self, writing: bool, cx: &Context<Self>) -> (RadioGroup, Checkbox) {
         let view = cx.entity().downgrade();
         let privacy = RadioGroup::horizontal("list-privacy")
             .children(PRIVACY.map(|p| Radio::new(SharedString::from(p.label())).label(p.label())))
@@ -234,6 +231,16 @@ impl Render for ListDialog {
                     cx.notify();
                 });
             });
+        (privacy, ranked)
+    }
+}
+
+impl Render for ListDialog {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let writing = self.lists.read(cx).is_writing();
+        let can_write = Services::global(cx).has_scope(WRITE_LISTS);
+        let colors = colors(cx);
+        let (privacy, ranked) = self.options(writing, cx);
         let (commit, adds): (&str, Option<String>) = match &self.mode {
             Mode::Create(book) => ("Create", book.as_ref().map(|b| b.title.clone())),
             Mode::Edit(_) => ("Save", None),

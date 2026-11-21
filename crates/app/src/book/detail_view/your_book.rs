@@ -89,7 +89,7 @@ impl BookDetailView {
                                 .body()
                                 .tabular()
                                 .text_color(muted)
-                                .child(format!("{}%", percent.round() as u32)),
+                                .child(format!("{}%", percent.round().max(0.0))),
                         )
                     }),
             )
@@ -123,7 +123,7 @@ impl BookDetailView {
                                     this.tooltip(needs_permission(WRITE_LIBRARY))
                                 })
                                 .on_click(move |_, window, cx| {
-                                    open_progress(model.clone(), &update_entry, window, cx)
+                                    open_progress(model.clone(), &update_entry, window, cx);
                                 }),
                         )
                     }),
@@ -160,7 +160,7 @@ impl BookDetailView {
                         this.tooltip(needs_permission(WRITE_LIBRARY))
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.change_status(ReadingStatus::CurrentlyReading, window, cx)
+                        this.change_status(ReadingStatus::CurrentlyReading, window, cx);
                     })),
             )
             .into_any_element()
@@ -249,7 +249,7 @@ impl BookDetailView {
         entry: &LibraryEntry,
         in_rail: bool,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    ) -> AnyElement {
         let id = entry.user_book_id;
         let pending = self.model.read(cx).pending_write(id);
         let can_write = Self::can_write(cx);
@@ -296,17 +296,17 @@ impl BookDetailView {
                 ),
             }
         };
-        Some(if in_rail {
+        if in_rail {
             RailSection::new("Notes")
-                .when_some(action, |this, action| this.action(action))
+                .when_some(action, crate::ui::RailSection::action)
                 .child(body)
                 .into_any_element()
         } else {
             Block::new("Notes")
-                .when_some(action, |this, action| this.action(action))
+                .when_some(action, crate::ui::Block::action)
                 .child(body)
                 .into_any_element()
-        })
+        }
     }
 
     fn render_notes_editor(&self, entry: &LibraryEntry, cx: &mut Context<Self>) -> AnyElement {
@@ -418,7 +418,7 @@ impl BookDetailView {
                                 this.child(div().caption(cx).tabular().child(facts.join(" · ")))
                             }),
                     )
-                    .child(self.read_menu(read, pending.is_some() || !can_write, cx))
+                    .child(Self::read_menu(read, pending.is_some() || !can_write, cx))
                     .into_any_element()
             })
             .collect();
@@ -458,12 +458,7 @@ impl BookDetailView {
     }
 
     /// A read's actions: changing its dates and deleting it.
-    fn read_menu(
-        &self,
-        read: &ReadSession,
-        disabled: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn read_menu(read: &ReadSession, disabled: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity().downgrade();
         let session = read.clone();
         let read_id = read.id;
@@ -481,9 +476,8 @@ impl BookDetailView {
                     PopupMenuItem::new("Change dates…")
                         .icon(IconName::Calendar)
                         .on_click(move |_, window, cx| {
-                            let session = session.clone();
                             let _ = edit_view.update(cx, |this, cx| {
-                                this.open_read_dialog(Some(session), window, cx)
+                                this.open_read_dialog(Some(&session), window, cx);
                             });
                         }),
                 )
@@ -492,7 +486,7 @@ impl BookDetailView {
                         .icon(IconName::Delete)
                         .on_click(move |_, window, cx| {
                             let _ = delete_view.update(cx, |this, cx| {
-                                this.confirm_delete_read(read_id, window, cx)
+                                this.confirm_delete_read(read_id, window, cx);
                             });
                         }),
                 )
@@ -531,11 +525,10 @@ fn pace_line(entry: &LibraryEntry, today: Date) -> Option<SharedString> {
         .then(|| crate::home::digest::pace(entry, today))
         .flatten();
     if let Some(pace) = pace {
-        parts.push(match pace.pages_per_day.round() as u32 {
-            0 => "under a page a day".to_owned(),
-            1 => "1 page a day".to_owned(),
-            n => format!("{} pages a day", count_text(n)),
-        });
+        parts.push(crate::format::pages_per_day_text(
+            pace.pages_per_day,
+            "under a page a day",
+        ));
         if let Some(finish) = pace.finish {
             parts.push(format!("done around {}", short_date(finish, today)));
         }

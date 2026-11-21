@@ -62,7 +62,7 @@ impl ProgressSummary {
                 Some(total) => format!("{} of {}", duration_text(secs), duration_text(total)),
                 None => duration_text(secs),
             },
-            (None, _, None, Some(pct)) => format!("{}%", pct.round() as u32),
+            (None, _, None, Some(pct)) => format!("{}%", pct.round().max(0.0)),
             (None, _, None, None) => "Not started".to_owned(),
         }
     }
@@ -70,11 +70,21 @@ impl ProgressSummary {
     /// Compact form for a list row's trailing lane: "42%" or "p. 120".
     pub fn short_text(&self) -> Option<String> {
         match (self.percent, self.page) {
-            (Some(pct), _) => Some(format!("{}%", pct.round() as u32)),
+            (Some(pct), _) => Some(format!("{}%", pct.round().max(0.0))),
             (None, Some(page)) => Some(format!("p. {page}")),
             (None, None) => None,
         }
     }
+}
+
+/// Percentage of a progress bar filled by a fraction, in GPUI's precision.
+pub fn bar_percent(fraction: f64) -> f32 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the bar uses f32 and the percentage is in 0..=100"
+    )]
+    let percent = (fraction.clamp(0.0, 1.0) * 100.0) as f32;
+    percent
 }
 
 /// Progress of the entry's unfinished read, if it has one, in the unit of
@@ -92,7 +102,7 @@ pub fn progress_summary(entry: &LibraryEntry) -> ProgressSummary {
     let seconds = read
         .and_then(|r| r.progress_seconds)
         .filter(|s| *s > 0 && page.is_none());
-    let fraction = |done: u32, total: u32| (f64::from(done) / f64::from(total) * 100.0) as f32;
+    let fraction = |done: u32, total: u32| bar_percent(f64::from(done) / f64::from(total));
     let percent = read
         .and_then(|r| r.progress_percent)
         .or_else(|| match (page, total_pages, seconds, total_seconds) {
@@ -107,6 +117,17 @@ pub fn progress_summary(entry: &LibraryEntry) -> ProgressSummary {
         seconds,
         total_seconds,
         percent,
+    }
+}
+
+pub fn pages_per_day_text(pages: f64, under_one: &str) -> String {
+    let pages = pages.round();
+    if pages < 1.0 {
+        under_one.to_owned()
+    } else if pages < 2.0 {
+        "1 page a day".to_owned()
+    } else {
+        format!("{} pages a day", count_text(pages))
     }
 }
 
@@ -255,7 +276,7 @@ pub fn series_position_text(position: f32) -> String {
 }
 
 /// A count with thousands separated: "950", "12,480".
-pub fn count_text(count: u32) -> String {
+pub fn count_text(count: impl std::fmt::Display) -> String {
     let digits = count.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, c) in digits.chars().enumerate() {
@@ -334,14 +355,14 @@ where
     let hours = mins / 60;
     let days = hours / 24;
     match () {
-        _ if mins < 1 => "just now".to_owned(),
-        _ if mins < 60 => format!("{mins} min ago"),
-        _ if hours == 1 => "1 hour ago".to_owned(),
-        _ if hours < 24 => format!("{hours} hours ago"),
-        _ if days == 1 => "yesterday".to_owned(),
-        _ if days < 7 => format!("{days} days ago"),
-        _ if then.year() == now.year() => format!("on {}", then.format("%b %-d")),
-        _ => format!("on {}", then.format("%b %-d, %Y")),
+        () if mins < 1 => "just now".to_owned(),
+        () if mins < 60 => format!("{mins} min ago"),
+        () if hours == 1 => "1 hour ago".to_owned(),
+        () if hours < 24 => format!("{hours} hours ago"),
+        () if days == 1 => "yesterday".to_owned(),
+        () if days < 7 => format!("{days} days ago"),
+        () if then.year() == now.year() => format!("on {}", then.format("%b %-d")),
+        () => format!("on {}", then.format("%b %-d, %Y")),
     }
 }
 
@@ -484,6 +505,10 @@ pub fn goal_unit(metric: &GoalMetric, n: f64) -> &str {
 /// An amount in a goal's unit, rounded down: whole books and pages, hours to
 /// one decimal (`12.5`, or `12` when whole). Down, so an amount short of the
 /// target never shows as the target.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "goals are displayed as integer units or tenths after rounding down"
+)]
 pub fn goal_amount(metric: &GoalMetric, n: f64) -> String {
     match metric {
         GoalMetric::Hours => {
@@ -857,7 +882,7 @@ mod tests {
         assert!(p.is_audio());
         assert_eq!(p.page, None);
         assert_eq!(p.text(), "2h 5m of 10h 0m");
-        assert_eq!(p.percent.map(|p| p.round()), Some(21.0));
+        assert_eq!(p.percent.map(f32::round), Some(21.0));
     }
 
     #[test]

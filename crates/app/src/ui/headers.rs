@@ -46,7 +46,7 @@ impl PageHeader {
     }
 
     /// How many things the destination holds, beside the title.
-    pub fn count(mut self, count: u32) -> Self {
+    pub fn count(mut self, count: impl std::fmt::Display) -> Self {
         self.count = Some(crate::format::count_text(count).into());
         self
     }
@@ -136,7 +136,7 @@ pub fn greeting(hour: u32) -> &'static str {
 }
 
 /// The greeting for a local time.
-pub fn greeting_at(time: impl chrono::Timelike) -> &'static str {
+pub fn greeting_at(time: &impl chrono::Timelike) -> &'static str {
     greeting(time.hour())
 }
 

@@ -44,7 +44,7 @@ pub struct SeriesView {
     /// Pages fetched this session, so Back costs no request.
     pages: HashMap<SeriesId, Loaded>,
     loading: Option<SeriesId>,
-    _task: Option<Task<()>>,
+    task: Option<Task<()>>,
     /// Holds focus while the page loads; see [`Self::focus`].
     focus_when_ready: Option<FocusHandle>,
     list: Entity<ListState<CatalogBooks>>,
@@ -69,7 +69,7 @@ impl SeriesView {
             current: None,
             pages: HashMap::new(),
             loading: None,
-            _task: None,
+            task: None,
             focus_when_ready: None,
             list,
             listed: None,
@@ -115,7 +115,7 @@ impl SeriesView {
         self.loading = Some(id);
         let client = Services::global(cx).client().clone();
         // Replacing the task drops the fetch for a page no longer shown.
-        self._task = Some(cx.spawn_in(window, async move |this, cx| {
+        self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = cx.background_spawn(async move { client.series(id) }).await;
             let _ = this.update_in(cx, |this, window, cx| {
                 if this.loading == Some(id) {
@@ -161,10 +161,7 @@ impl SeriesView {
             .books
             .iter()
             .map(|b| CatalogRow {
-                details: row_details(
-                    &[b.position.map(series_position_text).unwrap_or_default()],
-                    &b.book,
-                ),
+                details: row_details(&[b.position.map_or_default(series_position_text)], &b.book),
                 book: b.book.clone(),
             })
             .collect();

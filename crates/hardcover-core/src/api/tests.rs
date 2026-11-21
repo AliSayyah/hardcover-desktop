@@ -86,7 +86,7 @@ fn user_book(id: i64, status_id: i64) -> Value {
 }
 
 fn data(v: Value) -> String {
-    json!({ "data": v }).to_string()
+    Value::Object(serde_json::Map::from_iter([("data".into(), v)])).to_string()
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn library_paginates_by_keyset() {
 fn library_stops_on_empty_first_page() {
     let (c, http) = client(TestTokens::new(false));
     http.push(200, &data(json!({ "user_books": [] })));
-    assert!(c.library(UserId::new(1)).unwrap().is_empty());
+    assert_eq!(c.library(UserId::new(1)).unwrap(), []);
     assert_eq!(http.requests().len(), 1);
 }
 
@@ -242,7 +242,7 @@ fn search_parses_typesense_hits() {
 #[test]
 fn search_blank_query_sends_nothing_and_error_field_maps() {
     let (c, http) = client(TestTokens::new(false));
-    assert!(c.search_books("   ", 1).unwrap().books.is_empty());
+    assert_eq!(c.search_books("   ", 1).unwrap().books, []);
     assert_eq!(http.requests().len(), 0);
     http.push(200, &data(json!({"search": {"error": "Search timed out", "page": 1, "per_page": 25, "results": null}})));
     assert_eq!(
@@ -254,7 +254,7 @@ fn search_blank_query_sends_nothing_and_error_field_maps() {
         &data(json!({"search": {"error": null, "results": {"hits": "weird"}}})),
     );
     let p = c.search_books("x", 3).unwrap();
-    assert!(p.books.is_empty());
+    assert_eq!(p.books, []);
     assert_eq!((p.page, p.total), (3, None));
 }
 
@@ -362,7 +362,7 @@ fn series_search_parses_documented_fields() {
             .contains("query_type: \"series\"")
     );
 
-    assert!(c.search_series("  ", 1).unwrap().hits.is_empty());
+    assert_eq!(c.search_series("  ", 1).unwrap().hits, []);
     assert_eq!(http.requests().len(), 1, "a blank query sends nothing");
     http.push(200, &data(json!({"search": {"error": "Search timed out"}})));
     assert_eq!(
@@ -413,7 +413,7 @@ fn trending_errors_and_empty_results() {
         200,
         &data(json!({"books_trending": {"error": null, "ids": null}})),
     );
-    assert!(c.trending_books(TrendingPeriod::Week).unwrap().is_empty());
+    assert_eq!(c.trending_books(TrendingPeriod::Week).unwrap(), []);
     assert_eq!(http.requests().len(), 2, "no ids, no books request");
     http.push(200, &data(json!({"books_trending": null})));
     assert!(matches!(
@@ -454,7 +454,7 @@ fn book_details_parse() {
     assert_eq!(d.release_date.unwrap().to_string(), "1999-05-06");
     assert_eq!(d.genres, vec!["Science Fiction", "Adventure"]);
     assert_eq!(d.moods, vec!["tense"]);
-    assert!(d.tags.is_empty());
+    assert_eq!(d.tags, [] as [String; 0]);
     assert_eq!(d.content_warnings, vec!["Violence"]);
     assert_eq!(d.series.len(), 2);
     assert!(d.series[0].featured);
@@ -468,9 +468,9 @@ fn book_details_parse() {
     assert!(d.contributors[0].is_author());
     assert_eq!(d.contributors[1].role.as_deref(), Some("Translator"));
     // Not in the fixture: empty, not an error.
-    assert!(d.ratings_distribution.is_empty());
-    assert!(d.alternative_titles.is_empty());
-    assert!(d.similar_book_ids.is_empty());
+    assert_eq!(d.ratings_distribution, []);
+    assert_eq!(d.alternative_titles, [] as [String; 0]);
+    assert_eq!(d.similar_book_ids, []);
 
     http.push(200, &data(json!({ "books_by_pk": null })));
     assert!(matches!(c.book_details(BookId::new(8)), Err(Error::Api(_))));
@@ -600,7 +600,7 @@ fn author_page_merges_roles_and_drops_partial_books() {
 #[test]
 fn books_by_ids_keeps_the_given_order() {
     let (c, http) = client(TestTokens::new(false));
-    assert!(c.books_by_ids(&[]).unwrap().is_empty());
+    assert_eq!(c.books_by_ids(&[]).unwrap(), []);
     assert_eq!(http.requests().len(), 0, "no ids, no request");
 
     http.push(
@@ -686,7 +686,7 @@ fn http_errors_map_to_typed_errors() {
             r#"{"error":"Too Many Requests","message":"slow down"}"#
         ),
         Error::RateLimited {
-            retry_after: Some(Duration::from_secs(86400))
+            retry_after: Some(Duration::from_hours(24))
         }
     );
     assert_eq!(
@@ -896,7 +896,7 @@ fn progress_creates_a_read_when_none_is_open() {
     let vars = &reqs[1].json.as_ref().unwrap()["variables"];
     assert_eq!(vars["userBookId"], 3);
     assert_eq!(vars["read"]["progress_seconds"], 360);
-    assert!(vars["read"]["started_at"].as_str().unwrap().len() == 10);
+    assert_eq!(vars["read"]["started_at"].as_str().unwrap().len(), 10);
 }
 
 #[test]
@@ -1351,7 +1351,7 @@ fn an_unfinished_read_never_scales_to_the_last_unit() {
     assert_eq!(super::scale(0.5, 0), 0);
 }
 
-fn goal_row(id: i64, metric: &str, goal: i64, progress: Value) -> Value {
+fn goal_row(id: i64, metric: &str, goal: i64, progress: &Value) -> Value {
     json!({
         "id": id,
         "metric": metric,
@@ -1377,8 +1377,8 @@ fn goals_are_scoped_to_me_and_convert_hours() {
     http.push(
         200,
         &data(json!({"goals": [
-            goal_row(5, "book", 30, json!("12")),
-            goal_row(6, "hour", 100, json!(36000)),
+            goal_row(5, "book", 30, &json!("12")),
+            goal_row(6, "hour", 100, &json!(36000)),
             // Unparseable dates are skipped, not fatal.
             {"id": 7, "metric": "book", "goal": 1, "progress": 0, "start_date": "soon", "end_date": "later"},
         ]})),
@@ -1404,7 +1404,7 @@ fn create_goal_sends_a_whole_goal_input() {
     let (c, http) = client(TestTokens::new(false));
     http.push(
         200,
-        &data(json!({"insert_goal": {"errors": null, "id": 5, "goal": goal_row(5, "book", 30, json!(0))}})),
+        &data(json!({"insert_goal": {"errors": null, "id": 5, "goal": goal_row(5, "book", 30, &json!(0))}})),
     );
     let d = |m, d| Date::from_ymd_opt(2030, m, d).unwrap();
     let new = NewGoal {
@@ -1453,7 +1453,7 @@ fn create_goal_sends_a_whole_goal_input() {
 #[test]
 fn update_goal_resends_everything_and_refetches_when_needed() {
     let (c, http) = client(TestTokens::new(false));
-    let mut row = goal_row(5, "page", 9000, json!(1200));
+    let mut row = goal_row(5, "page", 9000, &json!(1200));
     row["conditions"] = json!({"readingFormatId": 1, "authorBipoc": null});
     // A payload without the goal: re-read by id.
     http.push(
@@ -1461,7 +1461,7 @@ fn update_goal_resends_everything_and_refetches_when_needed() {
         &data(json!({"update_goal": {"errors": [], "id": 5, "goal": null}})),
     );
     http.push(200, &data(json!({"goals_by_pk": row})));
-    let mut goal = RawGoal::deserialize(goal_row(5, "page", 9000, json!(1200)))
+    let mut goal = RawGoal::deserialize(goal_row(5, "page", 9000, &json!(1200)))
         .unwrap()
         .into_goal()
         .unwrap();
@@ -1505,7 +1505,7 @@ fn update_goal_resends_everything_and_refetches_when_needed() {
 #[test]
 fn update_goal_keeps_a_privacy_setting_it_does_not_know() {
     let (c, http) = client(TestTokens::new(false));
-    let mut row = goal_row(5, "book", 30, json!(3));
+    let mut row = goal_row(5, "book", 30, &json!(3));
     row["privacy_setting_id"] = json!(7);
     let mut goal = RawGoal::deserialize(row.clone())
         .unwrap()
@@ -1556,10 +1556,10 @@ fn delete_goal_checks_the_payload() {
 
 fn reviewed_user_book(id: i64, status_id: i64, review: Value) -> Value {
     let mut entry = user_book(id, status_id);
-    entry
-        .as_object_mut()
-        .unwrap()
-        .extend(review.as_object().unwrap().clone());
+    let Value::Object(fields) = review else {
+        panic!("expected review fields")
+    };
+    entry.as_object_mut().unwrap().extend(fields);
     entry
 }
 
@@ -2188,7 +2188,7 @@ fn book_reviews_count_reads_the_aggregate() {
 fn upcoming_in_series_merges_books_and_names_every_series() {
     let (c, http) = client(TestTokens::new(false));
     let today: Date = "2026-11-20".parse().unwrap();
-    assert!(c.upcoming_in_series(&[], today).unwrap().is_empty());
+    assert_eq!(c.upcoming_in_series(&[], today).unwrap(), []);
     assert_eq!(http.requests().len(), 0, "no series, no request");
 
     let upcoming = |id: i64, title: &str, date: Option<&str>, partial: Option<bool>| {
@@ -2273,7 +2273,7 @@ fn upcoming_in_series_merges_books_and_names_every_series() {
 #[test]
 fn tracked_series_batches_ids_and_keeps_every_candidate() {
     let (c, http) = client(TestTokens::new(false));
-    assert!(c.tracked_series(&[]).unwrap().is_empty());
+    assert_eq!(c.tracked_series(&[]).unwrap(), []);
     assert_eq!(http.requests().len(), 0, "no ids, no request");
 
     let row = |position: Option<f64>, compilation: bool, book: Value| json!({ "position": position, "compilation": compilation, "book": book });
@@ -2353,5 +2353,5 @@ fn tracked_series_batches_ids_and_keeps_every_candidate() {
     assert!(s.books[2].partial);
     assert!(!s.books[0].partial);
     assert_eq!(series[1].name, "Untitled series");
-    assert!(series[1].books.is_empty());
+    assert_eq!(series[1].books, []);
 }

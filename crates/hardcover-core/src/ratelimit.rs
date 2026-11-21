@@ -50,7 +50,10 @@ impl TokenBucket {
     /// Takes `cost` tokens and returns how long the caller must wait before sending.
     pub fn reserve_at(&self, cost: u32, now: Instant) -> Duration {
         let cost = f64::from(cost).min(self.capacity);
-        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let mut s = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.refill(&mut s, now);
         s.tokens -= cost;
         if s.tokens >= 0.0 {
@@ -70,7 +73,10 @@ impl TokenBucket {
 
     /// The server said 429: empty the bucket and push the next slot `retry_after` out.
     pub fn penalize_at(&self, retry_after: Option<Duration>, now: Instant) {
-        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let mut s = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.refill(&mut s, now);
         let debt = retry_after.map_or(0.0, |d| d.as_secs_f64() * self.refill_per_sec);
         s.tokens = s.tokens.min(0.0) - debt;

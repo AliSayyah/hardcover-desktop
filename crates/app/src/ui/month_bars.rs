@@ -95,6 +95,7 @@ impl RenderOnce for MonthBars {
                 } else if n == 0 {
                     this.h_0p5().bg(c.track)
                 } else {
+                    #[expect(clippy::cast_precision_loss, reason = "bar heights are relative pixel dimensions; individual units below a pixel are immaterial")]
                     this.h(relative(n as f32 / max as f32))
                         .rounded_t(CoverSize::Sm.radius())
                         .bg(c.accent)

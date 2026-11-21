@@ -62,7 +62,7 @@ pub struct Reauthorize {
     state: State,
     /// "Later" hides the notice until the next launch.
     dismissed: bool,
-    _task: Option<Task<()>>,
+    task: Option<Task<()>>,
 }
 
 impl EventEmitter<Reauthorized> for Reauthorize {}
@@ -73,7 +73,7 @@ impl Reauthorize {
             library,
             state: State::Idle { error: None },
             dismissed: false,
-            _task: None,
+            task: None,
         }
     }
 
@@ -96,7 +96,7 @@ impl Reauthorize {
         let client = services.client().clone();
         self.state = State::Starting;
         cx.notify();
-        self._task = Some(cx.spawn_in(window, async move |this, cx| {
+        self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let config = OAuthConfig::default();
             // Whose session this is, before the browser opens: before the
             // first sync the library doesn't know yet, and only the same
@@ -182,7 +182,7 @@ impl Reauthorize {
             // Not listening yet: dropping the task drops the listener once
             // it is set up.
             State::Starting => {
-                self._task = None;
+                self.task = None;
                 self.state = State::Idle { error: None };
             }
             State::Idle { .. } => {}

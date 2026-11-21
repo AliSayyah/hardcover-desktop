@@ -137,7 +137,7 @@ pub struct LibraryModel {
     /// The last [`ReviewSlot`] generation handed out. Model-wide, so a slot
     /// made again after its entry was removed can't repeat an old one.
     review_generation: u64,
-    _sync_task: Option<Task<()>>,
+    sync_task: Option<Task<()>>,
 }
 
 impl LibraryModel {
@@ -160,7 +160,7 @@ impl LibraryModel {
             adding: HashSet::new(),
             reviews: HashMap::new(),
             review_generation: 0,
-            _sync_task: None,
+            sync_task: None,
         }
     }
 
@@ -252,7 +252,7 @@ impl LibraryModel {
                 this.sync(cx);
             });
         });
-        self._sync_task = Some(task);
+        self.sync_task = Some(task);
     }
 
     /// Fetches the whole library and replaces the local copy. No-op while a
@@ -269,7 +269,7 @@ impl LibraryModel {
         cx.notify();
 
         let services = Services::global(cx).clone();
-        self._sync_task = Some(cx.spawn(async move |this, cx| {
+        self.sync_task = Some(cx.spawn(async move |this, cx| {
             let client = services.client().clone();
             let (pages_tx, pages_rx) = async_channel::unbounded::<Vec<LibraryEntry>>();
             let fetch = cx.background_spawn(async move {

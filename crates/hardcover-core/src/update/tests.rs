@@ -282,10 +282,10 @@ fn install_replaces_the_files_and_cleans_up() {
     assert!(!prefix.path().join(STAGING_DIR).exists());
 }
 
-fn install_fails(sig: Vec<u8>, data: Vec<u8>, r: &Release, key: &Key) -> (String, String) {
+fn install_fails(sig: &[u8], data: &[u8], r: &Release, key: &Key) -> (String, String) {
     let (u, fake) = updater(key);
-    fake.push_bytes(200, &sig);
-    fake.push_bytes(200, &data);
+    fake.push_bytes(200, sig);
+    fake.push_bytes(200, data);
     let prefix = old_install();
     let err = u
         .install(r, &v("0.1.0"), &tarball_target(prefix.path()))
@@ -300,7 +300,7 @@ fn install_rejects_a_signature_from_another_key() {
     let r = release("0.2.0");
     let data = release_tarball("0.2.0");
     let sig = Key::new().sign(&data, &r.tarball.as_ref().unwrap().name);
-    let (err, bin) = install_fails(sig, data, &r, &key);
+    let (err, bin) = install_fails(&sig, &data, &r, &key);
     assert!(err.contains("signature is not valid"), "{err}");
     assert_eq!(bin, "binary 0.1.0");
 }
@@ -314,7 +314,7 @@ fn install_rejects_tampered_bytes() {
     let mut tampered = data.clone();
     let last = tampered.len() - 1;
     tampered[last] ^= 1;
-    let (err, bin) = install_fails(sig, tampered, &r, &key);
+    let (err, bin) = install_fails(&sig, &tampered, &r, &key);
     assert!(err.contains("signature is not valid"), "{err}");
     assert_eq!(bin, "binary 0.1.0");
 }
@@ -325,7 +325,7 @@ fn install_rejects_an_old_signed_release_served_as_new() {
     let key = Key::new();
     let old = release_tarball("0.1.5");
     let sig = key.sign(&old, &tarball_name(&v("0.1.5")));
-    let (err, bin) = install_fails(sig, old, &release("0.2.0"), &key);
+    let (err, bin) = install_fails(&sig, &old, &release("0.2.0"), &key);
     assert!(err.contains("different file"), "{err}");
     assert_eq!(bin, "binary 0.1.0");
 }
@@ -337,7 +337,7 @@ fn install_rejects_a_mismatched_top_directory() {
     let r = release("0.2.0");
     let data = release_tarball("0.1.5");
     let sig = key.sign(&data, &r.tarball.as_ref().unwrap().name);
-    let (err, bin) = install_fails(sig, data, &r, &key);
+    let (err, bin) = install_fails(&sig, &data, &r, &key);
     assert!(err.contains("top-level"), "{err}");
     assert_eq!(bin, "binary 0.1.0");
 }
@@ -371,7 +371,7 @@ fn install_rejects_unsafe_entries() {
         let key = Key::new();
         let r = release("0.2.0");
         let sig = key.sign(&data, &r.tarball.as_ref().unwrap().name);
-        let (err, bin) = install_fails(sig, data, &r, &key);
+        let (err, bin) = install_fails(&sig, &data, &r, &key);
         assert!(err.contains(expected), "{expected}: {err}");
         assert_eq!(bin, "binary 0.1.0");
     }
@@ -417,14 +417,14 @@ fn every_copy_of_the_public_key_is_the_release_key() {
     }
 }
 
-/// An AppImage file's first bytes: ELF, then the type 2 magic at offset 8.
+/// An `AppImage` file's first bytes: ELF, then the type 2 magic at offset 8.
 const APPIMAGE_HEAD: &[u8] = b"\x7fELF\x02\x01\x01\x00AI\x02";
 
 fn appimage_bytes(body: &str) -> Vec<u8> {
     [APPIMAGE_HEAD, body.as_bytes()].concat()
 }
 
-/// A running AppImage: the file in `apps/`, and its contents mounted at
+/// A running `AppImage`: the file in `apps/`, and its contents mounted at
 /// `mount/` (a tarball's layout under `usr/`, next to `AppRun`).
 struct RunningAppImage {
     dir: tempfile::TempDir,
@@ -583,7 +583,7 @@ fn install_replaces_the_appimage_in_place() {
         let mode = fs::metadata(app.file()).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o755);
     }
-    assert!(leftovers(&app.dir.path().join("apps")).is_empty());
+    assert_eq!(leftovers(&app.dir.path().join("apps")), [] as [String; 0]);
 }
 
 #[test]
@@ -623,7 +623,7 @@ fn install_rejects_a_bad_appimage_and_keeps_the_old_one() {
         let err = u.install(&r, &v("0.1.0"), &target).unwrap_err().to_string();
         assert!(err.contains(expected), "{err}");
         assert_eq!(fs::read(app.file()).unwrap(), appimage_bytes("0.1.0"));
-        assert!(leftovers(&app.dir.path().join("apps")).is_empty());
+        assert_eq!(leftovers(&app.dir.path().join("apps")), [] as [String; 0]);
     }
 
     // A release without an AppImage has nothing for this install.
