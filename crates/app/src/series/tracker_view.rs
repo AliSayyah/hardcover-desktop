@@ -516,3 +516,27 @@ impl Render for SeriesTrackerView {
             .into_any_element()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(summaries: &Rc<Vec<SeriesSummary>>) -> ListKey {
+        ListKey {
+            summaries: summaries.clone(),
+            filter: Filter::default(),
+            query: String::new(),
+            rem: px(16.),
+        }
+    }
+
+    #[test]
+    fn the_list_is_built_again_for_new_summaries_even_if_equal() {
+        let first = Rc::new(Vec::new());
+        let again = Rc::new(Vec::new());
+        assert!(key(&first) == key(&first), "the same summaries: kept");
+        // Worked out afresh (a sync, a day): built again, wherever the new
+        // summaries were allocated.
+        assert!(key(&first) != key(&again));
+    }
+}

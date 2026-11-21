@@ -848,7 +848,8 @@ every width below (the tiers' thresholds included) is in design px too.
   every word must begin a word of the name or the author) and the select
   (168): Not finished (the default), Finished and All series, each with its
   count. The choice is kept for the session. In a narrow window the
-  controls wrap under the title.
+  controls wrap under the title. The header stays put while the series
+  scroll under it, so the filters are always at hand.
 - **Which series:** those in which the reader has read, is reading, paused
   or gave up on a book. A series shows its whole-numbered books, and a
   fractional one (a novella) only when it is in the library or not out yet.
