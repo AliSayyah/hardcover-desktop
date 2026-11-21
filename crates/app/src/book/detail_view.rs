@@ -67,7 +67,7 @@ use hardcover_core::{
 
 use self::community_reviews::CommunityReviews;
 use self::notes::Notes;
-use self::review_section::ReviewEditor;
+use self::review_section::YourReview;
 use self::similar_books::{SideGrid, SimilarBooks};
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
@@ -239,7 +239,8 @@ pub struct BookDetailView {
     tools_in_bar: bool,
     /// The pane's layout, as measured when it was last laid out.
     layout: Rc<Cell<PaneLayout>>,
-    review: ReviewEditor,
+    /// Your review, a view of its own.
+    review: Entity<YourReview>,
     /// Other readers' reviews, a view of their own.
     community_reviews: Entity<CommunityReviews>,
     /// Similar books, a view of their own, and the side column's grid the
@@ -262,7 +263,7 @@ impl BookDetailView {
     pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let privacy = cx.new(|cx| SelectState::new(privacy_options(), None, window, cx));
 
-        let (review, review_subscriptions) = ReviewEditor::new(window, cx);
+        let review = cx.new(|cx| YourReview::new(model.clone(), window, cx));
         let ratings = cx.new(|cx| Ratings::new(model.clone(), window, cx));
         let community_reviews = cx.new(|cx| CommunityReviews::new(model.clone(), cx));
         let similar_side = Rc::new(Cell::new(None));
@@ -284,7 +285,6 @@ impl BookDetailView {
                 },
             ),
         ];
-        subscriptions.extend(review_subscriptions);
         subscriptions.push(cx.observe(&ratings, |_, _, cx| cx.notify()));
         // The Reviews block shows only with `read:social`.
         subscriptions.push(session::observe_grant(cx, |_, cx| cx.notify()));
@@ -386,13 +386,9 @@ impl BookDetailView {
         };
         match fetch {
             Fetch::Details => catalog.request_details(book, demand, cx),
-            Fetch::OwnReview => {
-                self.review.asked = Some(book);
-                if let Some(entry) = self.entry(self.model.read(cx)).map(|e| e.user_book_id) {
-                    self.model
-                        .update(cx, |m, cx| m.request_review(entry, demand, cx));
-                }
-            }
+            Fetch::OwnReview => self
+                .review
+                .update(cx, |review, cx| review.fetch(demand, cx)),
             Fetch::Similar => self
                 .similar_books
                 .update(cx, |similar, cx| similar.fetch(demand, cx)),
@@ -512,8 +508,9 @@ impl BookDetailView {
         let entry = self.entry(self.model.read(cx)).map(|e| e.user_book_id);
         self.notes
             .update(cx, |notes, cx| notes.set_entry(entry, window, cx));
+        self.review
+            .update(cx, |review, cx| review.set_subject(entry, book, window, cx));
         let next = self.entry(self.model.read(cx)).map(Shown::of);
-        self.sync_review(window, cx);
         let Some(next) = next else {
             self.shown = None;
             return;
@@ -550,19 +547,13 @@ impl BookDetailView {
     /// failure. `warning` names what to say despite success.
     fn run_write<T: Written>(
         &mut self,
-        mut write: LibraryWrite<T>,
+        write: LibraryWrite<T>,
         warning: impl FnOnce(&T) -> Option<(&'static str, &'static str)> + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (kind, target) = (write.kind(), write.target());
-        let WriteTarget::Entry(id) = target else {
+        if !matches!(write.target(), WriteTarget::Entry(_)) {
             return;
-        };
-        // A review write needs write:reviews and, for its status,
-        // write:library: an unnamed refusal can't be pinned on either.
-        if kind == WriteKind::Review {
-            write = write.any_scope();
         }
         let outcome = self.model.update(cx, |m, cx| m.write(write, window, cx));
         cx.spawn_in(window, async move |this, cx| {
@@ -571,9 +562,6 @@ impl BookDetailView {
                 WriteOutcome::Saved(written) => {
                     if let Some((title, message)) = warning(&written) {
                         window.push_notification(Notification::warning(message).title(title), cx);
-                    }
-                    if kind == WriteKind::Review {
-                        this.review_written(id, cx);
                     }
                 }
                 WriteOutcome::Failed { .. } | WriteOutcome::Busy => {
@@ -642,7 +630,7 @@ impl BookDetailView {
     /// Whether this view holds words not saved: in the notes or review
     /// editor, or set aside for another book (`crate::drafts`).
     pub fn has_unsaved_drafts(&self, cx: &App) -> bool {
-        self.notes.read(cx).has_unsaved(cx) || self.review_unsaved(cx)
+        self.notes.read(cx).has_unsaved(cx) || self.review.read(cx).review_unsaved(cx)
     }
 
     /// Notes, as a rail section or a block.
@@ -944,7 +932,7 @@ impl BookDetailView {
         column.extend(Self::render_other_titles(details, cx));
         if let Some(entry) = entry {
             column.push(self.render_details(entry, false, cx));
-            column.push(self.render_review(entry, cx).into_any_element());
+            column.push(self.review.clone().into_any_element());
             column.push(self.render_reads(entry, false, cx));
         }
         column.extend(Self::render_on_hardcover(book, details, false, cx));
@@ -981,7 +969,7 @@ impl BookDetailView {
         let about = self.render_about(book, cx);
         let tags = self.render_tags(details, cx);
         let other_titles = Self::render_other_titles(details, cx);
-        let review = entry.map(|entry| self.render_review(entry, cx).into_any_element());
+        let review = entry.map(|_| self.review.clone().into_any_element());
         let reviews = self.render_community_reviews(cx);
         let similar = self.render_similar(side, cx);
 
