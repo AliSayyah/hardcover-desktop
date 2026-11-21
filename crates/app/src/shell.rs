@@ -333,6 +333,13 @@ impl Workspace {
         let updates = Updates::global(cx).clone();
         self.subscriptions = vec![
             cx.observe(&self.model, |_, _, cx| cx.notify()),
+            // Coming back to the window catches up with changes made on the
+            // website or another device, once the last sync is old enough.
+            cx.observe_window_activation(window, |this, window, cx| {
+                if window.is_window_active() {
+                    this.model.update(cx, LibraryModel::sync_if_stale);
+                }
+            }),
             cx.observe(&updates, |_, _, cx| cx.notify()),
             cx.observe(&self.reauthorize, |_, _, cx| cx.notify()),
             cx.observe(&self.goals, |_, _, cx| cx.notify()),

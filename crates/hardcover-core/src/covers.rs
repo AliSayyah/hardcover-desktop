@@ -3,6 +3,10 @@
 //! Files live in `$XDG_CACHE_HOME/hardcover-desktop/covers/`, named by the
 //! SHA-256 of the image URL plus the URL's extension. Downloads are atomic
 //! (temp file + rename) and capped in size; only `https` URLs are fetched.
+//!
+//! The app keeps scaled copies of each raster cover next to these files and
+//! then deletes the download (see `app_state` in the app), so a file missing
+//! here does not mean the cover is not cached.
 
 use std::fmt::Write as _;
 use std::io::Write;
@@ -77,10 +81,20 @@ impl CoverCache {
         &self.dir
     }
 
+    /// Where `cover`'s download is (or would be) kept, whether or not it is
+    /// there. Never touches the disk or the network.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the URL is not an https URL with a host.
+    pub fn file_path(&self, cover: &Cover) -> Result<PathBuf> {
+        Ok(self.dir.join(file_name(&cover.url)?))
+    }
+
     /// The file for `cover` if it has been downloaded already. Never touches the network.
     #[must_use]
     pub fn cached_path(&self, cover: &Cover) -> Option<PathBuf> {
-        let path = self.dir.join(file_name(&cover.url).ok()?);
+        let path = self.file_path(cover).ok()?;
         path.is_file().then_some(path)
     }
 

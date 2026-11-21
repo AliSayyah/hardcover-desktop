@@ -6,7 +6,12 @@
 //! file is upgraded in place by `MIGRATIONS`, so the library still shows
 //! instantly after an update; any other version is wiped and rebuilt, since
 //! everything in it can be re-downloaded.
+//!
+//! A sync writes only the rows that changed (see
+//! [`LibraryCache::replace_library`]), so the usual sync, which changes a few
+//! entries or none, costs a few row writes instead of the whole library.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
@@ -74,6 +79,9 @@ impl LibraryCache {
         }
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // A cache: a crash may lose the last transactions but never corrupts
+        // the file in WAL mode, and everything in it can be downloaded again.
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         Self::init(conn, Some(path.to_owned()))
     }
 
@@ -180,33 +188,46 @@ impl LibraryCache {
     }
 
     /// Replaces everything cached for `user` with `entries` (a full sync) and
-    /// records the sync time.
+    /// records the sync time. Only rows whose JSON changed are written, and
+    /// rows no longer in `entries` are deleted.
     ///
     /// # Errors
     ///
     /// Returns an error if serialization or the database transaction fails.
     pub fn replace_library(&self, user: UserId, entries: &[LibraryEntry]) -> Result<()> {
         self.replace_library_at(user, entries, chrono::Utc::now())
+            .map(drop)
     }
 
+    /// Returns how many rows were written or deleted.
     fn replace_library_at(
         &self,
         user: UserId,
         entries: &[LibraryEntry],
         now: Timestamp,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        tx.execute(
-            "DELETE FROM library_entries WHERE user_id = ?1",
-            [user.get()],
-        )?;
+        let mut stored: HashMap<i64, String> = tx
+            .prepare("SELECT user_book_id, json FROM library_entries WHERE user_id = ?1")?
+            .query_map([user.get()], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut written = 0;
         {
-            let mut stmt = tx.prepare(
+            let mut upsert = tx.prepare(
                 "INSERT OR REPLACE INTO library_entries (user_book_id, user_id, json) VALUES (?1, ?2, ?3)",
             )?;
             for e in entries {
-                stmt.execute(params![e.user_book_id.get(), user.get(), to_json(e)?])?;
+                let id = e.user_book_id.get();
+                let json = to_json(e)?;
+                if stored.remove(&id).as_ref() != Some(&json) {
+                    upsert.execute(params![id, user.get(), json])?;
+                    written += 1;
+                }
+            }
+            let mut delete = tx.prepare("DELETE FROM library_entries WHERE user_book_id = ?1")?;
+            for id in stored.into_keys() {
+                written += delete.execute([id])?;
             }
         }
         tx.execute(
@@ -215,7 +236,7 @@ impl LibraryCache {
             params![user.get(), now.to_rfc3339()],
         )?;
         tx.commit()?;
-        Ok(())
+        Ok(written)
     }
 
     /// Inserts or replaces one entry (e.g. after a mutation), filed under its `user_id`.
@@ -388,6 +409,40 @@ mod tests {
             .unwrap();
         assert_eq!(c.load_library(me).unwrap().len(), 1);
         assert_eq!(c.load_library(UserId::new(2)).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_sync_writes_only_what_changed() {
+        let c = LibraryCache::open_in_memory().unwrap();
+        let me = UserId::new(1);
+        let now = chrono::Utc::now();
+        let mut entries: Vec<_> = (1..=4)
+            .map(|id| entry(id, 1, ReadingStatus::Read))
+            .collect();
+        c.upsert(&entry(9, 2, ReadingStatus::Read)).unwrap(); // another user
+        assert_eq!(c.replace_library_at(me, &entries, now).unwrap(), 4);
+        assert_eq!(
+            c.replace_library_at(me, &entries, now).unwrap(),
+            0,
+            "an unchanged library writes no rows"
+        );
+
+        // One changed, one removed, one added; the order does not matter.
+        entries[1].status = ReadingStatus::Paused;
+        entries.remove(2);
+        entries.push(entry(5, 1, ReadingStatus::WantToRead));
+        entries.reverse();
+        assert_eq!(c.replace_library_at(me, &entries, now).unwrap(), 3);
+        let loaded = c.load_library(me).unwrap();
+        let ids: Vec<i64> = loaded.iter().map(|e| e.user_book_id.get()).collect();
+        assert_eq!(ids, [1, 2, 4, 5]);
+        assert_eq!(loaded[1].status, ReadingStatus::Paused);
+        assert_eq!(c.load_library(UserId::new(2)).unwrap().len(), 1);
+        assert!(c.last_synced_at(me).unwrap().is_some());
+
+        // An empty library still records the sync, and deletes every row.
+        assert_eq!(c.replace_library_at(me, &[], now).unwrap(), 4);
+        assert_eq!(c.load_library(me).unwrap(), []);
     }
 
     #[test]

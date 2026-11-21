@@ -147,6 +147,18 @@ pub fn merge_sync(mut synced: Vec<LibraryEntry>, changes: &[LocalChange]) -> Vec
     synced
 }
 
+/// True if `a` and `b` hold the same entries, in any order: a sync that
+/// brings nothing new then leaves the library, and everything worked out from
+/// it, as it is.
+pub fn same_entries(a: &[LibraryEntry], b: &[LibraryEntry]) -> bool {
+    fn by_id(entries: &[LibraryEntry]) -> Vec<&LibraryEntry> {
+        let mut sorted: Vec<&LibraryEntry> = entries.iter().collect();
+        sorted.sort_by_key(|e| e.user_book_id);
+        sorted
+    }
+    a.len() == b.len() && by_id(a) == by_id(b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +177,24 @@ mod tests {
         rows.iter()
             .map(|&ix| entries[ix].book.title.clone())
             .collect()
+    }
+
+    #[test]
+    fn the_same_entries_in_another_order_are_the_same() {
+        let a = vec![
+            entry(1, "A", "", ReadingStatus::Read),
+            entry(2, "B", "", ReadingStatus::Paused),
+        ];
+        let reversed: Vec<_> = a.iter().rev().cloned().collect();
+        assert!(same_entries(&a, &reversed));
+        assert!(same_entries(&[], &[]));
+
+        let mut changed = a.clone();
+        changed[1].status = ReadingStatus::Read;
+        assert!(!same_entries(&a, &changed));
+        assert!(!same_entries(&a, &a[..1]));
+        let duplicated = vec![a[0].clone(), a[0].clone()];
+        assert!(!same_entries(&a, &duplicated));
     }
 
     #[test]
