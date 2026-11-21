@@ -289,7 +289,7 @@ impl Workspace {
         // Before the views: they find the catalogue and the lists through
         // their globals.
         Catalog::init(&session, cx);
-        let lists = ListsModel::init(session.clone(), cx);
+        let lists = ListsModel::init(session.clone(), &model, cx);
         let list_page = cx.new(|cx| ListView::new(lists.clone(), model.clone(), window, cx));
         let library = cx.new(|cx| LibraryView::new(model.clone(), window, cx));
         let search = cx.new(|cx| SearchView::new(&model, window, cx));
