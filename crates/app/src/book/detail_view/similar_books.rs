@@ -95,12 +95,20 @@ impl SimilarBooks {
 
     /// Shows `book`'s similar books: what the catalogue has at once; the
     /// book view asks for them ([`Self::fetch`]) once the book has settled.
-    pub(super) fn set_book(&mut self, book: Option<BookId>, cx: &mut Context<Self>) {
+    /// The previous book's covers are let go at once, even when the new
+    /// one shows no similar books.
+    pub(super) fn set_book(
+        &mut self,
+        book: Option<BookId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.book == book {
             return;
         }
         self.book = book;
         self.due = None;
+        self.keep_covers(None, window, cx);
         cx.notify();
     }
 

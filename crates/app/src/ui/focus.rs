@@ -254,7 +254,7 @@ pub fn reveal_when(
                 return;
             };
             scroll.set_offset(point(offset.x, offset.y + shift));
-            window.refresh();
+            crate::ui::refresh_after_draw(window);
         },
         |_, (), _, _| {},
     )

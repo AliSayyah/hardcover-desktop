@@ -179,7 +179,7 @@ impl RenderOnce for TagChip {
                     let is_cut = width > bounds.size.width + px(0.5);
                     if *cut.read(cx) != is_cut {
                         cut.update(cx, |c, _| *c = is_cut);
-                        window.refresh();
+                        crate::ui::refresh_after_draw(window);
                     }
                 }
             },

@@ -320,19 +320,22 @@ impl Workspace {
         lists.update(cx, ListsModel::load);
         // Views read today as they render. The cached ones (the book view,
         // Home, Stats, Series) draw again only when they change, so a new
-        // day refreshes the whole window.
+        // day refreshes the whole window, and every tick draws Home, whose
+        // greeting reads the time.
         let clock = cx.spawn_in(window, async move |this, cx| {
             let mut day = crate::dates::today();
             loop {
                 cx.background_executor()
                     .timer(Duration::from_secs(30))
                     .await;
-                let ticked = this.update_in(cx, |_, window, cx| {
+                let ticked = this.update_in(cx, |this, window, cx| {
                     let today = crate::dates::today();
                     if today != day {
                         day = today;
                         window.refresh();
                     }
+                    // Home's greeting follows the time of day.
+                    this.home.update(cx, |_, cx| cx.notify());
                     cx.notify();
                 });
                 if ticked.is_err() {

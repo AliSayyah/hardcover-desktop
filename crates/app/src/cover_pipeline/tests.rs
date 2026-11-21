@@ -55,6 +55,87 @@ fn thumbnails_drawn_past_the_budget_are_released(cx: &mut TestAppContext) {
     assert!(cx.update(|_, cx| cx.has_asset::<CoverThumbnail>(&url(0))));
 }
 
+/// A view that shows one cover and sits still, embedded cached.
+struct Still;
+
+impl gpui_kit::Render for Still {
+    fn render(
+        &mut self,
+        _: &mut gpui_kit::Window,
+        _: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        div()
+            .size_full()
+            .child(Cover::new(CoverSize::Sm, "A still book").thumbnail(Some(url(100))))
+    }
+}
+
+/// Covers scrolling by beside a still, cached view.
+struct Scrolling {
+    still: gpui_kit::Entity<Still>,
+    shown: Rc<Cell<usize>>,
+}
+
+impl gpui_kit::Render for Scrolling {
+    fn render(
+        &mut self,
+        _: &mut gpui_kit::Window,
+        _: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        div()
+            .size_full()
+            .child(
+                div().size(px(100.)).child(
+                    self.still
+                        .clone()
+                        .cached(gpui_kit::StyleRefinement::default().size_full()),
+                ),
+            )
+            .child(
+                Cover::new(CoverSize::Sm, "A synthetic book")
+                    .thumbnail(Some(url(self.shown.get()))),
+            )
+    }
+}
+
+/// A cover a cached view shows without drawing it again is not lost when
+/// others scroll past the budget: the release draws every view again, and
+/// the still view's cover loads again.
+#[gpui_kit::test]
+fn a_still_cached_view_keeps_its_cover(cx: &mut TestAppContext) {
+    use gpui_kit::AppContext as _;
+
+    let budget = Budget { keep: 2, slack: 1 };
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        cx.set_global(CoverService::with_cache(
+            None,
+            Usage::new(budget, usage::MEDIUM_BUDGET),
+        ));
+    });
+    let shown = Rc::new(Cell::new(0));
+    let (root, cx) = cx.add_window_view({
+        let shown = shown.clone();
+        move |_, cx| Scrolling {
+            still: cx.new(|_| Still),
+            shown,
+        }
+    });
+    redraw(cx);
+    cx.run_until_parked();
+    for i in 0..6 {
+        shown.set(i);
+        root.update(cx, |_, cx| cx.notify());
+        redraw(cx);
+        cx.run_until_parked();
+        redraw(cx);
+    }
+    assert!(
+        cx.update(|_, cx| cx.has_asset::<CoverThumbnail>(&url(100))),
+        "the still view's cover is loaded"
+    );
+}
+
 /// A cover that loads at once.
 enum TestCover {}
 

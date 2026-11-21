@@ -537,7 +537,7 @@ impl BookDetailView {
         self.community_reviews
             .update(cx, |reviews, cx| reviews.set_book(book, cx));
         self.similar_books
-            .update(cx, |similar, cx| similar.set_book(book, cx));
+            .update(cx, |similar, cx| similar.set_book(book, window, cx));
         let entry = self.entry(self.model.read(cx)).map(|e| e.user_book_id);
         self.notes
             .update(cx, |notes, cx| notes.set_entry(entry, window, cx));
@@ -1546,6 +1546,51 @@ mod tests {
         cx.update(|window, cx| window.simulate_next_frame(cx));
         redraw(cx);
         assert!(renders(&view, cx) > drawn, "drawn again for the new layout");
+    }
+
+    /// Focus moved below the fold from the keyboard scrolls into view in a
+    /// cached book view: the scroll is worked out as a frame is drawn, and
+    /// shown on the next one.
+    #[gpui_kit::test]
+    fn focus_below_the_fold_is_revealed_in_a_cached_view(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (_host, view, _, cx) = embedded_view(cx);
+        cx.simulate_resize(gpui_kit::size(px(700.), px(400.)));
+        redraw(cx);
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        redraw(cx);
+        let opener = view.read_with(cx, |v, cx| v.notes.read(cx).opener_for_tests());
+        // Keyboard input, so the focus counts as the keyboard's.
+        press(cx, "f12");
+        cx.update(|window, cx| window.focus(&opener, cx));
+        redraw(cx);
+        let drawn = renders(&view, cx);
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        redraw(cx);
+        assert!(renders(&view, cx) > drawn, "drawn again, scrolled");
+    }
+
+    /// Controls inside a cached book view draw their own changes: moving
+    /// the caret in the notes field, with no text changed, draws it again.
+    #[gpui_kit::test]
+    fn a_caret_moved_in_a_cached_view_is_drawn(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (_host, view, _, cx) = embedded_view(cx);
+        let notes = view.read_with(cx, |v, _| v.notes.clone());
+        cx.update(|window, cx| notes.update(cx, |n, cx| n.edit_for_tests(window, cx)));
+        redraw(cx);
+        cx.simulate_input("Some words");
+        redraw(cx);
+        let drawn = renders(&view, cx);
+        press(cx, "left");
+        redraw(cx);
+        assert!(renders(&view, cx) > drawn, "the caret moved: drawn again");
+        let drawn = renders(&view, cx);
+        press(cx, "shift-left");
+        redraw(cx);
+        assert!(renders(&view, cx) > drawn, "a selection: drawn again");
     }
 
     #[gpui_kit::test]

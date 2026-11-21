@@ -877,7 +877,7 @@ impl SearchView {
                             < size::LIST_COMPACT_BELOW.to_pixels(window.rem_size());
                         if compact.replace(narrow) != narrow {
                             // The rows were drawn for the other width.
-                            window.refresh();
+                            crate::ui::refresh_after_draw(window);
                         }
                     })
                     .child(list),

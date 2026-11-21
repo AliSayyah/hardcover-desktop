@@ -234,7 +234,7 @@ impl Element for Region {
             self.scroll.max_offset(),
         ) {
             self.scroll.set_offset(offset);
-            window.refresh();
+            crate::ui::refresh_after_draw(window);
         }
     }
 

@@ -174,6 +174,16 @@ impl Notes {
             .is_some_and(|(_, saved)| notes_differ(&self.field.read(cx).value(), saved.as_deref()))
     }
 
+    #[cfg(test)]
+    pub(super) fn opener_for_tests(&self) -> FocusHandle {
+        self.opener.clone()
+    }
+
+    #[cfg(test)]
+    pub(super) fn edit_for_tests(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit(window, cx);
+    }
+
     /// Words not saved: in the field, or set aside for another entry.
     pub(super) fn has_unsaved(&self, cx: &App) -> bool {
         self.dirty(cx) || !self.drafts.is_empty()
