@@ -107,7 +107,8 @@ fn me_parses_and_sends_bearer_token() {
 #[test]
 fn library_paginates_by_keyset() {
     let (c, http) = client(TestTokens::new(false));
-    let mut first: Vec<Value> = (1..=100).map(|i| user_book(i, 1 + i % 5)).collect();
+    let full = i64::from(LIBRARY_PAGE_SIZE);
+    let mut first: Vec<Value> = (1..=full).map(|i| user_book(i, 1 + i % 5)).collect();
     // One book is in two series, one of them listed twice; the others list none.
     first[1]["book"]["book_series"] = json!([
         {"position": 2.0, "featured": true, "series": {"id": 31, "name": "Synthetic Saga", "slug": "synthetic-saga"}},
@@ -115,15 +116,15 @@ fn library_paginates_by_keyset() {
         {"position": 7.0, "featured": false, "series": {"id": 31, "name": "Synthetic Saga", "slug": "synthetic-saga"}}
     ]);
     // Second page holds one shelf entry and one with a status id we don't know.
-    let second = vec![user_book(150, 3), user_book(151, 42)];
+    let second = vec![user_book(full + 50, 3), user_book(full + 51, 42)];
     http.push(200, &data(json!({ "user_books": first })));
     http.push(200, &data(json!({ "user_books": second })));
     let mut pages = Vec::new();
     let lib = c
         .library_with_progress(UserId::new(77), |p| pages.push(p.len()))
         .unwrap();
-    assert_eq!(lib.len(), 101);
-    assert_eq!(pages, vec![100, 1]);
+    assert_eq!(lib.len(), LIBRARY_PAGE_SIZE as usize + 1);
+    assert_eq!(pages, vec![LIBRARY_PAGE_SIZE as usize, 1]);
     let reqs = http.requests();
     assert_eq!(reqs.len(), 2);
     let v0 = &reqs[0].json.as_ref().unwrap()["variables"];
@@ -134,9 +135,9 @@ fn library_paginates_by_keyset() {
             v0["afterId"].as_i64(),
             v0["limit"].as_i64()
         ),
-        (Some(77), Some(0), Some(100))
+        (Some(77), Some(0), Some(full))
     );
-    assert_eq!(v1["afterId"].as_i64(), Some(100));
+    assert_eq!(v1["afterId"].as_i64(), Some(full));
 
     let e = &lib[0];
     assert_eq!(e.user_book_id, UserBookId::new(1));

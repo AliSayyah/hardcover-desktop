@@ -12,6 +12,7 @@ mod cover_quality_tests;
 mod design;
 mod fonts;
 mod format;
+mod freshness;
 mod goals;
 mod home;
 mod icons;

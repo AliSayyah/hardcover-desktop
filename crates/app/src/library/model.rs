@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use gpui_kit::{AppContext as _, Context, SharedString, Task};
 use hardcover_core::auth::scopes::READ_LIBRARY;
@@ -127,8 +127,9 @@ pub struct LibraryModel {
     revision: u64,
     sync: SyncStatus,
     last_synced_at: Option<Timestamp>,
-    /// When the last sync started, whether or not it succeeded.
-    sync_started: Option<Instant>,
+    /// When the last sync started, whether or not it succeeded. Wall-clock
+    /// time: `Instant` stops while the computer sleeps.
+    sync_started: Option<SystemTime>,
     /// Entries received so far by the running sync.
     sync_fetched: usize,
     /// The running sync shows pages as they arrive (nothing was cached).
@@ -270,7 +271,7 @@ impl LibraryModel {
             return;
         }
         self.sync = SyncStatus::Syncing;
-        self.sync_started = Some(Instant::now());
+        self.sync_started = Some(SystemTime::now());
         self.sync_fetched = 0;
         self.fill_during_sync = self.entries.is_empty();
         self.changes_during_sync = Some(Vec::new());
@@ -319,9 +320,12 @@ impl LibraryModel {
     /// so changes made on the website or another device show without
     /// Refresh. Waits for the first sync, which [`Self::start`] runs.
     pub fn sync_if_stale(&mut self, cx: &mut Context<Self>) {
-        let stale = self
-            .sync_started
-            .is_some_and(|started| started.elapsed() >= SYNC_AGAIN_AFTER);
+        // A clock set back since (`elapsed` fails) counts as stale too.
+        let stale = self.sync_started.is_some_and(|started| {
+            started
+                .elapsed()
+                .map_or(true, |age| age >= SYNC_AGAIN_AFTER)
+        });
         if stale {
             self.sync(cx);
         }

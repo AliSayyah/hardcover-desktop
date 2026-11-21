@@ -29,11 +29,12 @@ use hardcover_core::{AuthorBook, AuthorDetails, AuthorId};
 use super::book_list::{
     CatalogBooks, CatalogRow, ListPane, focus_list_if_fallback_is_focused, follow_list,
     load_failed, new_list, page_body, page_header, page_header_scrolling, page_list, read_summary,
-    reset_scroll, row_details,
+    replace_rows, reset_scroll, row_details,
 };
 use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
+use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
@@ -103,7 +104,8 @@ fn life_years(author: &AuthorDetails) -> Option<String> {
 const LONG_BIO: usize = 400;
 
 enum Loaded {
-    Ready(Arc<AuthorDetails>),
+    /// Kept for the run, fetched again when stale ([`crate::freshness`]).
+    Ready(Fetched<Arc<AuthorDetails>>),
     Failed(SharedString),
 }
 
@@ -207,10 +209,18 @@ impl AuthorView {
 
     fn load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.current else { return };
-        if matches!(self.pages.get(&id), Some(Loaded::Ready(_))) || self.loading == Some(id) {
+        let revalidating = match self.pages.get(&id) {
+            Some(Loaded::Ready(fetched)) if !fetched.is_stale(cx) => return,
+            Some(Loaded::Ready(_)) => true,
+            Some(Loaded::Failed(_)) | None => false,
+        };
+        if self.loading == Some(id) {
             return;
         }
-        self.pages.remove(&id);
+        // A stale page stays on screen while it is fetched again.
+        if !revalidating {
+            self.pages.remove(&id);
+        }
         self.loading = Some(id);
         let client = Services::global(cx).client().clone();
         // Replacing the task drops the fetch for a page no longer shown.
@@ -220,13 +230,32 @@ impl AuthorView {
                 if this.loading == Some(id) {
                     this.loading = None;
                 }
-                let page = match result {
-                    Ok(author) => Loaded::Ready(Arc::new(author)),
-                    Err(e) => {
-                        Loaded::Failed(Services::error_message(&e, Some(READ_CATALOG), cx).into())
+                let result = result.map(Arc::new);
+                let changed = match (this.pages.get_mut(&id), result) {
+                    // A refetch: a failure keeps the page shown, and only
+                    // records a refused scope.
+                    (Some(Loaded::Ready(fetched)), result) => {
+                        if let Err(e) = &result {
+                            Services::error_message(e, Some(READ_CATALOG), cx);
+                        }
+                        fetched.refetched(result, cx)
+                    }
+                    (_, Ok(page)) => {
+                        this.pages.insert(id, Loaded::Ready(Fetched::new(page, cx)));
+                        false
+                    }
+                    (_, Err(e)) => {
+                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        this.pages.insert(id, Loaded::Failed(message.into()));
+                        false
                     }
                 };
-                this.pages.insert(id, page);
+                if changed
+                    && this.listed.is_some_and(|(listed, _)| listed == id)
+                    && let Some(rows) = this.rows(id)
+                {
+                    replace_rows(&this.list, rows, window, cx);
+                }
                 this.fill_list(window, cx);
                 if this.is_ready() {
                     focus_list_if_fallback_is_focused(
@@ -252,22 +281,43 @@ impl AuthorView {
         if self.listed == Some((id, self.order)) {
             return;
         }
-        let Some(Loaded::Ready(author)) = self.pages.get(&id) else {
+        let Some(rows) = self.rows(id) else {
             return;
         };
-        let rows: Vec<CatalogRow> = ordered(&author.books, self.order)
-            .into_iter()
-            .map(|b| CatalogRow {
-                details: row_details(&[b.role.clone().unwrap_or_default()], &b.book),
-                book: b.book.clone(),
-            })
-            .collect();
         self.listed = Some((id, self.order));
         self.list.update(cx, |list, cx| {
             list.delegate_mut().set_rows(rows);
             list.set_selected_index(None, window, cx);
             cx.notify();
         });
+    }
+
+    /// The list's rows for a loaded page, in the order chosen.
+    fn rows(&self, id: AuthorId) -> Option<Vec<CatalogRow>> {
+        let Some(Loaded::Ready(author)) = self.pages.get(&id) else {
+            return None;
+        };
+        let rows = ordered(&author.value().books, self.order)
+            .into_iter()
+            .map(|b| CatalogRow {
+                details: row_details(&[b.role.clone().unwrap_or_default()], &b.book),
+                book: b.book.clone(),
+            })
+            .collect();
+        Some(rows)
+    }
+
+    /// Fetches the page again if it is stale ([`crate::freshness`]), and
+    /// the book in the pane beside the list.
+    /// A failed page is tried again only with `shown_again`.
+    pub fn revalidate(&mut self, shown_again: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let failed = self
+            .current
+            .is_some_and(|id| matches!(self.pages.get(&id), Some(Loaded::Failed(_))));
+        if shown_again || !failed {
+            self.load(window, cx);
+        }
+        self.pane.revalidate(shown_again, cx);
     }
 
     fn render_header(&self, author: &AuthorDetails, cx: &mut Context<Self>) -> AnyElement {
@@ -393,7 +443,7 @@ impl AuthorView {
     /// The name of a page already loaded this session, for Back's label.
     pub fn name(&self, id: AuthorId) -> Option<&str> {
         match self.pages.get(&id)? {
-            Loaded::Ready(details) => Some(&details.name),
+            Loaded::Ready(details) => Some(&details.value().name),
             Loaded::Failed(_) => None,
         }
     }
@@ -402,7 +452,7 @@ impl AuthorView {
 impl Render for AuthorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.current.and_then(|id| match self.pages.get(&id) {
-            Some(Loaded::Ready(author)) => Some(Ok(author.clone())),
+            Some(Loaded::Ready(author)) => Some(Ok(author.value().clone())),
             Some(Loaded::Failed(message)) => Some(Err(message.clone())),
             None => None,
         });

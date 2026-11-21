@@ -3,7 +3,10 @@
 //! rows 16 apart with hairlines between them.
 //!
 //! Fetched once the details are in, after [`REVIEWS_DELAY`], and kept per book
-//! for the run. Hidden without `read:social`. The user's own review is left
+//! for the run. Stale ones ([`crate::freshness`]) are fetched again from the
+//! first page, which replaces the pages shown; while the book stays on screen
+//! (the window became active) only a single page is replaced, so "Show more"
+//! never folds up under the reader. Hidden without `read:social`. The user's own review is left
 //! out (it has its own section): the query excludes the signed-in user, whose
 //! id the library knows, or `me()` tells when it doesn't yet.
 
@@ -24,6 +27,7 @@ use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, date_text, rating_text};
+use crate::freshness::Stamp;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{Avatar, Block, BylineLink, RowSpacing, Sequence, Skeleton, Stars};
 
@@ -45,6 +49,10 @@ struct BookReviews {
     has_more: bool,
     /// The first page has arrived.
     loaded: bool,
+    /// Pages shown: the first, then each "Show more".
+    pages: u32,
+    /// When the first page was last fetched or tried.
+    fetched: Option<Stamp>,
     /// The last fetch failed: the first page, or the next one once loaded.
     error: Option<SharedString>,
 }
@@ -86,23 +94,42 @@ impl BookDetailView {
                 reviews.remove(&book.id);
             }
         }
-        self.load_community_reviews(cx);
+        self.revalidate_reviews(true, cx);
     }
 
     /// Fetches the shown book's first page of reviews once its details are
     /// in. Not again after a failure, until the book is shown again.
     pub(super) fn load_community_reviews(&mut self, cx: &mut Context<Self>) {
+        self.revalidate_reviews(false, cx);
+    }
+
+    /// Fetches the first page if there is none, or again if it is stale.
+    /// Replacing more than one page needs `shown_again`.
+    pub(super) fn revalidate_reviews(&mut self, shown_again: bool, cx: &mut Context<Self>) {
         if !Services::global(cx).has_scope(READ_SOCIAL) {
             return;
         }
         let Some(book) = self.book(cx) else { return };
-        if !matches!(self.details.get(&book.id), Some(Details::Loaded(_)))
-            || self.community_reviews.books.contains_key(&book.id)
+        if self
+            .details
+            .get(&book.id)
+            .and_then(Details::loaded)
+            .is_none()
             || self.community_reviews.loading == Some(book.id)
         {
             return;
         }
-        self.fetch_reviews(book.id, Some(REVIEWS_DELAY), cx);
+        match self.community_reviews.books.get(&book.id) {
+            None => self.fetch_reviews(book.id, Some(REVIEWS_DELAY), false, cx),
+            Some(state)
+                if state.loaded
+                    && state.fetched.is_some_and(|stamp| stamp.is_stale(cx))
+                    && (shown_again || state.pages <= 1) =>
+            {
+                self.fetch_reviews(book.id, Some(REVIEWS_DELAY), true, cx);
+            }
+            Some(_) => {}
+        }
     }
 
     /// Fetches the next page, or the first one again after a failure.
@@ -111,13 +138,22 @@ impl BookDetailView {
         if self.community_reviews.loading == Some(book.id) {
             return;
         }
-        self.fetch_reviews(book.id, None, cx);
+        self.fetch_reviews(book.id, None, false, cx);
         cx.notify();
     }
 
-    fn fetch_reviews(&mut self, id: BookId, delay: Option<Duration>, cx: &mut Context<Self>) {
+    /// Fetches the next page, or the first while none has arrived. With
+    /// `replace`, fetches the first page again to replace the pages shown; a
+    /// failure then keeps them and shows nothing.
+    fn fetch_reviews(
+        &mut self,
+        id: BookId,
+        delay: Option<Duration>,
+        replace: bool,
+        cx: &mut Context<Self>,
+    ) {
         let state = self.community_reviews.books.get(&id);
-        let first = state.is_none_or(|s| !s.loaded);
+        let first = replace || state.is_none_or(|s| !s.loaded);
         let offset = state.filter(|_| !first).map_or(0, |s| s.next_offset);
         let user = self.model.read(cx).user().map(|u| u.id);
         let client = Services::global(cx).client().clone();
@@ -154,15 +190,13 @@ impl BookDetailView {
                     .err()
                     .map(|e| SharedString::from(Services::error_message(e, Some(READ_SOCIAL), cx)));
                 let state = this.community_reviews.books.entry(id).or_default();
+                if first {
+                    state.fetched = Some(Stamp::now(cx));
+                }
                 match result {
-                    Ok((page, total)) => {
-                        // Likes change between requests, so a review can move
-                        // into the next page: show it once.
-                        let seen: HashSet<UserBookId> =
-                            state.reviews.iter().map(|r| r.id).collect();
-                        state
-                            .reviews
-                            .extend(page.reviews.into_iter().filter(|r| !seen.contains(&r.id)));
+                    Ok((page, total)) if replace => {
+                        state.reviews = page.reviews;
+                        state.pages = 1;
                         state.next_offset = page.next_offset;
                         state.has_more = page.has_more;
                         if total.is_some() {
@@ -171,6 +205,24 @@ impl BookDetailView {
                         state.loaded = true;
                         state.error = None;
                     }
+                    Ok((page, total)) => {
+                        // Likes change between requests, so a review can move
+                        // into the next page: show it once.
+                        let seen: HashSet<UserBookId> =
+                            state.reviews.iter().map(|r| r.id).collect();
+                        state
+                            .reviews
+                            .extend(page.reviews.into_iter().filter(|r| !seen.contains(&r.id)));
+                        state.pages += 1;
+                        state.next_offset = page.next_offset;
+                        state.has_more = page.has_more;
+                        if total.is_some() {
+                            state.total = total;
+                        }
+                        state.loaded = true;
+                        state.error = None;
+                    }
+                    Err(_) if replace => {}
                     Err(_) => state.error = error,
                 }
                 cx.notify();
@@ -476,6 +528,62 @@ fn cut(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use gpui_kit::{Entity, TestAppContext, VisualTestContext};
+
+    use super::super::tests::{BOOK, demo_pane, settle};
+
+    fn review_pages(view: &Entity<BookDetailView>, cx: &mut VisualTestContext) -> u32 {
+        view.read_with(cx, |view, _| view.community_reviews.books[&BOOK].pages)
+    }
+
+    #[gpui_kit::test]
+    fn the_same_book_with_newer_facts_keeps_the_pane(cx: &mut TestAppContext) {
+        let (view, cx) = demo_pane(cx);
+        view.update(cx, |view, cx| view.more_reviews(cx));
+        settle(cx);
+        assert_eq!(review_pages(&view, cx), 2);
+
+        // Its list's page was fetched again (the reviews being stale too): a
+        // new summary, same book.
+        cx.update(|window, cx| {
+            crate::freshness::refresh_all(cx);
+            view.update(cx, |view, cx| {
+                let mut book = hardcover_core::BookSummary::new(BOOK, "Project Hail Mary");
+                book.users_count = Some(12_345);
+                view.set_subject(Some(super::super::Subject::Book(book)), window, cx);
+            });
+        });
+        settle(cx);
+        assert_eq!(review_pages(&view, cx), 2, "the reviews paged through stay");
+        let count = view.read_with(cx, |view, cx| view.book(cx).and_then(|b| b.users_count));
+        assert_eq!(count, Some(12_345), "the newer facts are shown");
+    }
+
+    #[gpui_kit::test]
+    fn paged_reviews_are_replaced_only_when_shown_again(cx: &mut TestAppContext) {
+        let (view, cx) = demo_pane(cx);
+        assert_eq!(review_pages(&view, cx), 1);
+        view.update(cx, |view, cx| view.more_reviews(cx));
+        settle(cx);
+        assert_eq!(review_pages(&view, cx), 2);
+
+        // The window became active: the pages the reader opened stay.
+        cx.update(|_, cx| crate::freshness::refresh_all(cx));
+        view.update(cx, |view, cx| view.revalidate(false, cx));
+        settle(cx);
+        assert_eq!(review_pages(&view, cx), 2);
+
+        // Refresh, or the book shown again: a fresh first page replaces them.
+        view.update(cx, |view, cx| view.revalidate(true, cx));
+        settle(cx);
+        assert_eq!(review_pages(&view, cx), 1);
+        view.read_with(cx, |view, _| {
+            let reviews = &view.community_reviews.books[&BOOK];
+            assert!(reviews.has_more);
+            assert!(!reviews.reviews.is_empty());
+        });
+    }
 
     #[test]
     fn short_reviews_are_not_collapsed() {
