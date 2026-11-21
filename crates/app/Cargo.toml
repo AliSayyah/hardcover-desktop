@@ -12,7 +12,6 @@ demo = ["hardcover-core/demo"]
 
 [dependencies]
 async-channel = "2"
-async-lock = "3"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 fast_image_resize = "6"
 gpui-kit = "0.10"
