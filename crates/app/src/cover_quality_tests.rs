@@ -1,6 +1,9 @@
-//! Guards the cover decode pipeline: `app_state::decode_scaled` must keep the
+//! Guards the cover decode pipeline: `cover_pipeline::decode_scaled` must keep the
 //! size and look of the straightforward implementation below (full decode,
 //! `image`'s Triangle resize, RGBA to BGRA).
+//!
+//! It also checks that a thumbnail saved as JPEG (how opaque copies are
+//! saved) stays visually lossless, and reports its size against QOI's.
 //!
 //! Inputs are generated from a fixed seed; set `COVER_QUALITY_SEED` to try
 //! others. Set `COVER_QUALITY_DIR` to also check every image in that
@@ -8,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::app_state::decode_scaled;
+use crate::cover_pipeline::{SCALED_JPEG_QUALITY, decode_scaled};
 
 /// The reference output.
 fn reference(path: &Path, max_height: u32) -> Option<(u32, u32, Vec<u8>)> {
@@ -207,14 +210,88 @@ fn cover_quality_matches_reference() {
     }
     let mut failures = Vec::new();
     let mut checked = 0;
+    let mut thumbnails = Thumbnails::default();
     for path in &paths {
         for h in [144, 288, 600] {
             if check(path, h, &mut failures) {
                 checked += 1;
             }
         }
+        thumbnails.check(path, &mut failures);
     }
     eprintln!("cover_quality checked {checked} decodes");
+    thumbnails.report();
     assert!(checked >= 20, "only {checked} decodes checked");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The worst a JPEG thumbnail may look, in PSNR. 32 dB on a 96x144 image
+/// drawn 48 px tall is not visibly different.
+const THUMBNAIL_MIN_PSNR: f64 = 32.0;
+
+/// Thumbnails saved as JPEG against QOI: sizes and the worst PSNR.
+#[derive(Default)]
+struct Thumbnails {
+    count: u32,
+    jpeg: usize,
+    qoi: usize,
+    psnr_sum: f64,
+    worst: Option<f64>,
+}
+
+impl Thumbnails {
+    fn check(&mut self, path: &Path, failures: &mut Vec<String>) {
+        use image::ImageEncoder as _;
+        let Some((w, h, bgra)) = candidate(path, 144) else {
+            return;
+        };
+        if bgra.as_chunks::<4>().0.iter().any(|p| p[3] != u8::MAX) {
+            return; // saved as QOI
+        }
+        let rgb: Vec<u8> = bgra
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0]])
+            .collect();
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, SCALED_JPEG_QUALITY)
+            .encode(&rgb, w, h, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let mut qoi = Vec::new();
+        image::codecs::qoi::QoiEncoder::new(&mut qoi)
+            .write_image(&bgra, w, h, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        let decoded = image::load_from_memory_with_format(&jpeg, image::ImageFormat::Jpeg)
+            .unwrap()
+            .into_rgba8();
+        let mut again = decoded.into_raw();
+        for pixel in again.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+        }
+        let db = psnr(&bgra, &again);
+        if db < THUMBNAIL_MIN_PSNR {
+            failures.push(format!(
+                "{}: JPEG thumbnail PSNR {db:.1} dB",
+                path.display()
+            ));
+        }
+        self.count += 1;
+        self.jpeg += jpeg.len();
+        self.qoi += qoi.len();
+        self.psnr_sum += db;
+        self.worst = Some(self.worst.map_or(db, |w| w.min(db)));
+    }
+
+    fn report(&self) {
+        let n = f64::from(self.count.max(1));
+        #[expect(clippy::cast_precision_loss, reason = "a report")]
+        let (jpeg, qoi) = (self.jpeg as f64 / n / 1024.0, self.qoi as f64 / n / 1024.0);
+        eprintln!(
+            "cover_quality thumbnails: {} as JPEG {jpeg:.1} KB against QOI {qoi:.1} KB, PSNR mean {:.1} dB, worst {:.1} dB",
+            self.count,
+            self.psnr_sum / n,
+            self.worst.unwrap_or(0.0)
+        );
+    }
 }

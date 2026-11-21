@@ -2,8 +2,9 @@
 //!
 //! In order of preference:
 //! 1. their picture: a raster one through the cover pipeline (decoded and
-//!    scaled on the cover-decoder thread, like a list cover), an SVG (many
-//!    Hardcover avatars) drawn from its cached file by GPUI;
+//!    scaled on the cover-decoder thread, like a cover: 144 px for md, 288 px
+//!    for xl, so the 128 px photo stays sharp at 2x), an SVG (many Hardcover
+//!    avatars) drawn from its cached file by GPUI;
 //! 2. their initials on their Hardcover colour (`cached_image.color`), in
 //!    white or ink, whichever reads ([`data_color`], [`text_on_data`]);
 //! 3. their initials in `accent` on `accent-soft`.
@@ -22,7 +23,7 @@ use gpui_kit::{
     SharedString, Styled as _, StyledImage as _, Window, div, img,
 };
 
-use crate::app_state::{cover_file, cover_thumbnail};
+use crate::cover_pipeline::{MEDIUM_COVER_HEIGHT, THUMBNAIL_HEIGHT, cover_file, load_cover};
 use crate::design::color::{data_color, text_on_data};
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors, size};
@@ -35,6 +36,17 @@ pub enum AvatarSize {
     Md,
     /// 128: a person's page, where a book has its xl cover.
     Xl,
+}
+
+impl AvatarSize {
+    /// The height of the copy the picture is drawn from: sharp up to 2.25x
+    /// scale (the 128 px photo from a 144 px thumbnail was enlarged at 2x).
+    fn image_height(self) -> u32 {
+        match self {
+            Self::Md => THUMBNAIL_HEIGHT,
+            Self::Xl => MEDIUM_COVER_HEIGHT,
+        }
+    }
 }
 
 /// A person's avatar. See the module doc.
@@ -104,7 +116,9 @@ impl RenderOnce for Avatar {
             if is_svg(url) {
                 cover_file(url, window, cx).map(ImageSource::from)
             } else {
-                cover_thumbnail(url, window, cx).map(ImageSource::from)
+                load_cover(url, self.size.image_height(), window, cx)
+                    .flatten()
+                    .map(ImageSource::from)
             }
         });
         let circle = div()
@@ -175,6 +189,21 @@ mod tests {
         assert_eq!(initials("@quill_reads"), "Q");
         assert_eq!(initials("شیرین"), "ش");
         assert_eq!(initials(""), "");
+    }
+
+    #[test]
+    fn pictures_are_drawn_from_a_copy_sharp_at_two_times() {
+        for size in [AvatarSize::Md, AvatarSize::Xl] {
+            let side = match size {
+                AvatarSize::Md => size::AVATAR,
+                AvatarSize::Xl => size::AVATAR_LARGE,
+            };
+            #[expect(clippy::cast_precision_loss, reason = "small heights")]
+            let height = size.image_height() as f32;
+            // At the default 16 px rem.
+            let side = f32::from(side.to_pixels(gpui_kit::px(16.)));
+            assert!(height >= 2. * side, "{size:?}");
+        }
     }
 
     #[test]

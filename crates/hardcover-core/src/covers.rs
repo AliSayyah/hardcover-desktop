@@ -2,7 +2,9 @@
 //!
 //! Files live in `$XDG_CACHE_HOME/hardcover-desktop/covers/`, named by the
 //! SHA-256 of the image URL plus the URL's extension. Downloads are atomic
-//! (temp file + rename) and capped in size; only `https` URLs are fetched.
+//! (temp file + rename) and capped in size; only `https` URLs are fetched,
+//! and only images the app can show ([`DECODABLE`]): another type (AVIF, say)
+//! is refused before anything is written.
 //!
 //! The app keeps scaled copies of each raster cover next to these files and
 //! then deletes the download (see `app_state` in the app), so a file missing
@@ -24,7 +26,18 @@ use crate::{Error, Result};
 /// Largest image we will download.
 pub const MAX_COVER_BYTES: u64 = 10 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
-const EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "svg", "avif"];
+/// Extensions a cached file keeps; any other is named `.img`. Only the
+/// ones the app can show: the decoder sniffs the content, so the name only
+/// matters for SVGs.
+const EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "svg"];
+/// The image types the app decodes (`image`'s jpeg, png, webp and gif
+/// features) or draws (SVG), as `Content-Type` subtypes of `image/`.
+pub const DECODABLE: &[&str] = &[
+    "jpeg", "jpg", "pjpeg", "png", "apng", "x-png", "webp", "gif", "svg+xml",
+];
+/// The `Accept` header: the same types, so a server that picks a format by
+/// it doesn't send one the app can't show.
+const ACCEPT: &str = "image/jpeg, image/png, image/webp, image/gif, image/svg+xml";
 
 pub struct CoverCache {
     dir: PathBuf,
@@ -100,9 +113,15 @@ impl CoverCache {
 
     /// The cached file, downloading it first if needed. Blocking.
     ///
+    /// The download is not synced to disk: the app decodes it into scaled
+    /// copies and deletes it, and a crash only costs a download. An SVG,
+    /// which is kept as downloaded, is synced.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the URL, download, image response or cache write fails.
+    /// Returns [`Error::Decode`] if the server answers with an image type the
+    /// app can't show (trying again won't help), and another error if the
+    /// URL, download, response or cache write fails.
     pub fn fetch(&self, cover: &Cover) -> Result<PathBuf> {
         let name = file_name(&cover.url)?;
         let path = self.dir.join(&name);
@@ -110,7 +129,7 @@ impl CoverCache {
             return Ok(path);
         }
         let req = HttpRequest::new(Method::Get, cover.url.as_str())
-            .header("accept", "image/*")
+            .header("accept", ACCEPT)
             .timeout(TIMEOUT)
             .max_response_bytes(MAX_COVER_BYTES);
         let resp = self.http.send(req)?;
@@ -120,12 +139,19 @@ impl CoverCache {
                 resp.status
             )));
         }
-        if let Some(ct) = resp.header("content-type")
-            && !ct.trim_start().to_ascii_lowercase().starts_with("image/")
-        {
-            return Err(Error::Network(format!(
-                "cover download returned {ct}, not an image"
-            )));
+        if let Some(ct) = resp.header("content-type") {
+            let essence = ct.split(';').next().unwrap_or_default().trim();
+            let essence = essence.to_ascii_lowercase();
+            let Some(subtype) = essence.strip_prefix("image/") else {
+                return Err(Error::Network(format!(
+                    "cover download returned {ct}, not an image"
+                )));
+            };
+            if !DECODABLE.contains(&subtype) {
+                return Err(Error::Decode(format!(
+                    "cover is {essence}, which the app can't show"
+                )));
+            }
         }
         if resp.body.is_empty() || resp.body.len() as u64 > MAX_COVER_BYTES {
             return Err(Error::Network(format!(
@@ -135,10 +161,13 @@ impl CoverCache {
         }
         let suffix = crate::auth::random_suffix();
         let tmp = self.dir.join(format!(".{name}.{suffix}.tmp"));
+        let kept = name.ends_with(".svg");
         let write = || -> std::io::Result<()> {
             let mut f = std::fs::File::create(&tmp)?;
             f.write_all(&resp.body)?;
-            f.sync_all()?;
+            if kept {
+                f.sync_all()?;
+            }
             std::fs::rename(&tmp, &path)
         };
         if let Err(e) = write() {
@@ -206,6 +235,15 @@ mod tests {
                 .1,
             "svg"
         );
+        assert_eq!(
+            file_name("https://assets.hardcover.app/a.avif")
+                .unwrap()
+                .rsplit_once('.')
+                .unwrap()
+                .1,
+            "img",
+            "not an image the app can show"
+        );
         assert!(file_name("http://assets.hardcover.app/x.jpg").is_err());
         assert!(file_name("file:///etc/passwd").is_err());
         assert!(file_name("not a url").is_err());
@@ -229,6 +267,7 @@ mod tests {
         assert_eq!(cache.fetch(&cover).unwrap(), p);
         assert_eq!(http.requests().len(), 1);
         assert_eq!(http.requests()[0].method, Method::Get);
+        assert_eq!(http.requests()[0].header("accept"), Some(ACCEPT));
         // No temp files left behind.
         let files: Vec<_> = std::fs::read_dir(cache.dir()).unwrap().collect();
         assert_eq!(files.len(), 1);
@@ -252,5 +291,24 @@ mod tests {
         ));
         assert!(cache.cached_path(&cover).is_none());
         assert_eq!(std::fs::read_dir(cache.dir()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn image_types_the_app_cannot_show_are_refused_before_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let http = Arc::new(FakeTransport::new());
+        let cache = CoverCache::with_transport(dir.path(), http.clone()).unwrap();
+        let cover = Cover::new("https://assets.hardcover.app/a.avif");
+        http.push_with_headers(200, &[("content-type", "image/avif")], "AVIFDATA");
+        assert!(matches!(cache.fetch(&cover), Err(Error::Decode(_))));
+        assert_eq!(std::fs::read_dir(cache.dir()).unwrap().count(), 0);
+
+        // Parameters and case don't matter.
+        http.push_with_headers(
+            200,
+            &[("content-type", "Image/WebP; charset=binary")],
+            "WEBPDATA",
+        );
+        assert!(cache.fetch(&cover).is_ok());
     }
 }
