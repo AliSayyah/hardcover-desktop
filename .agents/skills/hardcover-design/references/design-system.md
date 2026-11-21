@@ -229,10 +229,14 @@ selection fill or a nested surface its own radius.
 | Sidebar | 240 wide | `w(rems(15.))` |
 | Shelf list | 384 wide by default, resizable from 272 (its filter, a small select and the inset) to 640 | `size::LIST`, `LIST_MIN`, `LIST_MAX` |
 | Rail (Home, full book page) | 272 wide | `w(rems(17.))` |
-| Next lane (a series row) | 240 wide | `size::NEXT_LANE` |
+| Next lane (a series row) | 240 wide, 24 after the row's body | `size::NEXT_LANE`, `NEXT_LANE_GAP` |
 | Strip item (a series row) | 40 wide | `size::STRIP_ITEM` |
 | Key column in a property list | 96; 72 in a rail | `w_24`, `w(rems(4.5))` |
 | Select | 168; small 128 | `size::SELECT`, `size::SELECT_SMALL` |
+| Number field (a page, a time) | 128 wide | `size::FIELD_NUMBER` |
+| Date field | 224 wide max | `size::FIELD_DATE_MAX` |
+| A book list's status chips | icon only below a 360 list | `size::LIST_COMPACT_BELOW` |
+| App icon (About) | 64 | `size::APP_ICON` |
 | Meter | 6 high beside words, 2 high inside a row; 400 wide max (160 in a row) | |
 | Prose | 640 wide max | `size::PROSE` |
 | Page content (Discover, Coming soon, Stats, Series, list, series and author pages) | fills the region inside the 32 inset; only reading text keeps the prose measure | `size::PAGE_INSET` |

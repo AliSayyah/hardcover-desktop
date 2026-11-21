@@ -65,10 +65,6 @@ use crate::ui::{
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
 
-/// Below this list width (360) a row's `StatusChip` shrinks to its icon: the
-/// widest chip ("Currently reading") would leave a title too little room.
-const COMPACT_BELOW: f32 = 22.5;
-
 /// Around the query field. `main` binds Down to [`EnterResults`] in
 /// `SearchField > Input`, over the input's own Down (a no-op on one line).
 pub const KEY_CONTEXT: &str = "SearchField";
@@ -814,7 +810,8 @@ impl SearchView {
                     .flex_1()
                     .min_h_0()
                     .on_prepaint(move |bounds, window, _| {
-                        let narrow = bounds.size.width < window.rem_size() * COMPACT_BELOW;
+                        let narrow = bounds.size.width
+                            < size::LIST_COMPACT_BELOW.to_pixels(window.rem_size());
                         if compact.replace(narrow) != narrow {
                             // The rows were drawn for the other width.
                             window.refresh();

@@ -401,7 +401,7 @@ impl Render for ProgressDialog {
                     })
                     .child(
                         Input::new(&self.input)
-                            .w_32()
+                            .w(size::FIELD_NUMBER)
                             .disabled(busy || !can_write)
                             .raised_field(busy || !can_write, cx),
                     )

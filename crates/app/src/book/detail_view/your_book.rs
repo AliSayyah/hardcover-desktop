@@ -34,7 +34,7 @@ use crate::format::{
 use crate::library::model::WriteKind;
 use crate::lists::book_lists;
 use crate::ui::kit::RaisedField as _;
-use crate::ui::kit::{SmallControl as _, SmallIconButton as _};
+use crate::ui::kit::{SmallControl as _, SmallIconButton as _, danger_menu_item};
 use crate::ui::{Block, Meter, PropertyList, RailSection, panel};
 
 impl BookDetailView {
@@ -466,7 +466,7 @@ impl BookDetailView {
             .icon(IconName::Ellipsis)
             .tooltip("Read actions")
             .disabled(disabled)
-            .dropdown_menu(move |menu, _, _| {
+            .dropdown_menu(move |menu, _, cx| {
                 let edit_view = view.clone();
                 let delete_view = view.clone();
                 let session = session.clone();
@@ -480,13 +480,11 @@ impl BookDetailView {
                         }),
                 )
                 .item(
-                    PopupMenuItem::new("Delete read…")
-                        .icon(IconName::Delete)
-                        .on_click(move |_, window, cx| {
-                            let _ = delete_view.update(cx, |this, cx| {
-                                this.confirm_delete_read(read_id, window, cx);
-                            });
-                        }),
+                    danger_menu_item("Delete read…", true, cx).on_click(move |_, window, cx| {
+                        let _ = delete_view.update(cx, |this, cx| {
+                            this.confirm_delete_read(read_id, window, cx);
+                        });
+                    }),
                 )
             })
     }

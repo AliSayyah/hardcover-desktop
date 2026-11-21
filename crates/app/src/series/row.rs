@@ -40,6 +40,7 @@ use crate::format::{count_text, needs_permission, progress_summary};
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::library::writes;
 use crate::ui::focus::{keyed_focus, reveal_when};
+use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{SeriesStrip, StripItem, TextButton};
 use crate::upcoming::row::add_to_want_to_read;
@@ -92,7 +93,7 @@ fn group_label(group: Group, count: usize, cx: &App) -> gpui_kit::Div {
 /// How wide the strip gets in a column `column` wide: the row less the lane
 /// and the gap before it.
 pub fn strip_width(column: Pixels, rem: Pixels) -> Pixels {
-    column - size::NEXT_LANE.to_pixels(rem) - rems(1.5).to_pixels(rem)
+    column - (size::NEXT_LANE + size::NEXT_LANE_GAP).to_pixels(rem)
 }
 
 /// How many books a row's strip shows in a column `column` wide: as many as
@@ -160,7 +161,7 @@ impl RenderOnce for SeriesRow {
         let row = h_flex()
             .w_full()
             .items_start()
-            .gap_6()
+            .gap(size::NEXT_LANE_GAP)
             .py(ROW_PADDING)
             .when(!first, |this| {
                 this.border_t(size::HAIRLINE).border_color(colors.border)
@@ -405,7 +406,7 @@ fn want_to_read(
         .small_control()
         .icon(IconName::Plus)
         .label("Want to read")
-        .ml(rems(-0.5))
+        .on_text_spine(true)
         .loading(adding)
         .disabled(adding || !can_write)
         .when(!can_write, |this| {

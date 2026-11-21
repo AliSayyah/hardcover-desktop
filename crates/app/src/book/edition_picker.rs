@@ -8,9 +8,7 @@ use crate::ui::Skeleton;
 use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::{
-    Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{Disableable as _, Icon, IconName, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
@@ -20,6 +18,7 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookId, EditionId, EditionSummary};
 
 use crate::app_state::Services;
+use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::edition_text;
 use crate::ui::kit::SmallControl as _;
@@ -157,14 +156,18 @@ impl EditionPicker {
                                             this.body()
                                         }
                                     })
-                                    .child(headline),
+                                    .child(WrappingText::new(headline)),
                             )
                             .when(!details.is_empty(), |this| {
-                                this.child(div().caption(cx).child(details.join(" · ")))
+                                this.child(
+                                    div()
+                                        .caption(cx)
+                                        .child(WrappingText::new(details.join(" · "))),
+                                )
                             }),
                     )
                     .when(current, |this| {
-                        this.child(Icon::new(IconName::Check).small().text_color(muted))
+                        this.child(Icon::new(IconName::Check).size_4().text_color(muted))
                     }),
             )
             .on_click(cx.listener(move |_, _, window, cx| {

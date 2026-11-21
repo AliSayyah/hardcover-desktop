@@ -82,6 +82,7 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::button::{ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::{Dialog, DialogContent, DialogFooter};
 use gpui_kit::component::list::{List, ListDelegate, ListState};
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarThumbStyle};
 use gpui_kit::component::select::{Select, SelectDelegate, SelectItem};
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -239,6 +240,22 @@ pub trait OnTextSpine: Styled + Sized {
 }
 
 impl OnTextSpine for Button {}
+
+/// A destructive menu command ("Remove from library…", "Delete read…"): its
+/// label and Delete icon in `danger`, as every destructive command is. The
+/// kit's menu items take no colour, so it is an element item. Disabled, it
+/// takes the kit's muted colour instead.
+pub fn danger_menu_item(label: impl Into<SharedString>, enabled: bool, cx: &App) -> PopupMenuItem {
+    let label = label.into();
+    let danger = enabled.then(|| colors(cx).danger);
+    PopupMenuItem::element(move |_, _| {
+        div()
+            .when_some(danger, gpui_kit::Styled::text_color)
+            .child(label.clone())
+    })
+    .icon(Icon::new(IconName::Delete).when_some(danger, gpui_kit::Styled::text_color))
+    .disabled(!enabled)
+}
 
 /// The kit's label inset in a button: `px_2p5`, and `px_2` when small.
 const KIT_INSET: gpui_kit::Rems = gpui_kit::rems(0.625);
