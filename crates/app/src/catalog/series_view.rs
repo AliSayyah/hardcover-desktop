@@ -13,9 +13,8 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::list::ListState;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement as _,
-    Render, SharedString, Styled as _, Subscription, Task, Window, div,
-    prelude::FluentBuilder as _,
+    AnyElement, Context, Entity, FocusHandle, IntoElement, ParentElement as _, Render,
+    SharedString, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{SeriesDetails, SeriesId};
@@ -26,12 +25,12 @@ use super::book_list::{
     reset_scroll, row_details,
 };
 use super::navigation::Page;
-use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::series_position_text;
 use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
+use crate::session::{self, SessionScope};
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{ExternalLink, PageHeader, Skeleton, TextButton};
 
@@ -129,10 +128,15 @@ impl SeriesView {
             self.pages.remove(&id);
         }
         self.loading = Some(id);
-        let client = Services::global(cx).client().clone();
+        let Some(session) = SessionScope::current(cx) else {
+            return;
+        };
+        let page = session.interactive(move |client| client.series(id));
         // Replacing the task drops the fetch for a page no longer shown.
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = cx.background_spawn(async move { client.series(id) }).await;
+            let Some(result) = page.await else {
+                return;
+            };
             let _ = this.update_in(cx, |this, window, cx| {
                 if this.loading == Some(id) {
                     this.loading = None;
@@ -143,7 +147,7 @@ impl SeriesView {
                     // records a refused scope.
                     (Some(Loaded::Ready(fetched)), result) => {
                         if let Err(e) = &result {
-                            Services::error_message(e, Some(READ_CATALOG), cx);
+                            session::error_message(e, Some(READ_CATALOG), cx);
                         }
                         fetched.refetched(result, cx)
                     }
@@ -152,7 +156,7 @@ impl SeriesView {
                         false
                     }
                     (_, Err(e)) => {
-                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        let message = session::error_message(&e, Some(READ_CATALOG), cx);
                         this.pages.insert(id, Loaded::Failed(message.into()));
                         false
                     }
@@ -354,9 +358,8 @@ mod tests {
     use std::time::Duration;
 
     use gpui_kit::component::IndexPath;
-    use gpui_kit::{TestAppContext, VisualTestContext};
+    use gpui_kit::{AppContext as _, TestAppContext, VisualTestContext};
     use hardcover_core::BookId;
-    use hardcover_core::auth::GrantedScopes;
     use hardcover_core::store::LibraryCache;
 
     use super::*;
@@ -389,13 +392,13 @@ mod tests {
     #[gpui_kit::test]
     fn a_page_fetched_again_keeps_the_selected_book(cx: &mut TestAppContext) {
         let id = demo_series();
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
         cx.update(|cx| {
             gpui_kit::init(cx);
-            let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
-            let client = hardcover_core::demo::client();
-            cx.set_global(Services::new(client, None, cache, GrantedScopes::all()));
+            session.install(cx);
         });
-        let model = cx.new(|_| LibraryModel::new());
+        let model = cx.new(|_| LibraryModel::new(session));
         let (view, cx) = cx.add_window_view(|window, cx| SeriesView::new(model, window, cx));
         cx.update(|window, cx| view.update(cx, |view, cx| view.show(id, window, cx)));
         settle(cx);

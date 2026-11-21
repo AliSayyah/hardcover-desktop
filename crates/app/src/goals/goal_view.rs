@@ -19,7 +19,6 @@ use hardcover_core::{Date, Goal, GoalId, GoalMetric, NewGoal};
 
 use super::model::GoalsModel;
 use super::sidebar::pace_percent;
-use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{
@@ -27,6 +26,7 @@ use crate::format::{
     retargeted_description,
 };
 use crate::library::model::LibraryModel;
+use crate::session;
 use crate::ui::Meter;
 use crate::ui::kit::{OnTextSpine as _, RaisedField as _};
 use crate::ui::kit::{open_alert_dialog, open_dialog};
@@ -180,7 +180,7 @@ impl GoalView {
             )
         });
         cx.spawn_in(window, async move |this, cx| {
-            if let Err(message) = task.await {
+            if let Some(Err(message)) = task.await {
                 let _ = this.update(cx, |this, cx| {
                     this.error = Some(message);
                     cx.notify();
@@ -215,7 +215,7 @@ impl GoalView {
                     let task = goals.update(cx, |m, cx| m.delete(id, cx));
                     window
                         .spawn(cx, async move |cx| {
-                            if let Err(message) = task.await {
+                            if let Some(Err(message)) = task.await {
                                 let _ = cx.update(|window, cx| {
                                     window.push_notification(
                                         Notification::error(message)
@@ -301,8 +301,7 @@ impl GoalView {
         label_width: Pixels,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let services = Services::global(cx);
-        let can_write = services.has_scope(WRITE_GOALS);
+        let can_write = session::has_scope(cx, WRITE_GOALS);
         let editable = goal.conditions.to_input().is_some();
         let writing = self.goals.read(cx).is_writing();
         let changed = self.new_target(goal, cx).is_some();
@@ -409,7 +408,7 @@ impl Render for GoalView {
                     .child("This goal no longer exists."),
             );
         };
-        let can_write = Services::global(cx).has_scope(WRITE_GOALS);
+        let can_write = session::has_scope(cx, WRITE_GOALS);
         let writing = self.goals.read(cx).is_writing();
         // Dialogs don't inherit the shell's family, so the roles set it.
         v_flex()
@@ -548,7 +547,10 @@ impl NewGoalView {
         };
         let task = self.goals.update(cx, |m, cx| m.create(goal, cx));
         cx.spawn_in(window, async move |this, cx| {
-            let result = task.await;
+            // Dropped because the session ended: the dialog goes with it.
+            let Some(result) = task.await else {
+                return;
+            };
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => window.close_dialog(cx),
                 Err(message) => {
@@ -564,7 +566,7 @@ impl NewGoalView {
 impl Render for NewGoalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let writing = self.goals.read(cx).is_writing();
-        let can_write = Services::global(cx).has_scope(WRITE_GOALS);
+        let can_write = session::has_scope(cx, WRITE_GOALS);
         let metric = METRICS[self.metric].0.clone();
         let unit = goal_unit(&metric, 2.0).to_owned();
         let view = cx.entity().downgrade();

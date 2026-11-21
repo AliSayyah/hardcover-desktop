@@ -22,7 +22,6 @@ use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{BookId, Date, ReadingStatus, UpcomingBook};
 
 use super::schedule::{release_text, series_text, soon_text};
-use crate::app_state::Services;
 use crate::catalog::navigation::Page;
 use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverSize};
@@ -30,6 +29,7 @@ use crate::design::{TypeRoles as _, colors};
 use crate::format::needs_permission;
 use crate::library::model::LibraryModel;
 use crate::library::writes;
+use crate::session;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{Lane, TextButton};
 
@@ -67,7 +67,7 @@ impl RenderOnce for UpcomingRow {
         let library = self.library.read(cx);
         let status = library.entry_for_book(id).map(|e| e.status);
         let adding = library.is_adding(id);
-        let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
+        let can_write = session::has_scope(cx, WRITE_LIBRARY);
         let soon = soon_text(self.book.release_date, self.today);
         let series = series_text(&self.book);
 
@@ -140,5 +140,5 @@ pub fn add_to_want_to_read(
     window: &mut Window,
     cx: &mut App,
 ) {
-    writes::add_to_library(library, book, ReadingStatus::WantToRead, window, cx);
+    writes::add_to_library(&library, book, ReadingStatus::WantToRead, window, cx);
 }

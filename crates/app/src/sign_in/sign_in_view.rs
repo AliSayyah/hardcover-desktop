@@ -35,6 +35,7 @@ use super::{KEYRING_UNAVAILABLE, SAVED_SIGN_IN_UNREADABLE};
 use crate::app_state::{Restored, restore_session};
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::error_message;
+use crate::io::{self, Priority};
 use crate::ui::kit::RaisedField as _;
 
 /// How long to wait for the browser before giving up.
@@ -109,8 +110,11 @@ impl SignInView {
         }
         *retrying = true;
         cx.notify();
+        let restored = io::run(Priority::Interactive, restore_session);
         self.task = Some(cx.spawn(async move |this, cx| {
-            let restored = cx.background_spawn(async move { restore_session() }).await;
+            let Some(restored) = restored.await else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 match restored {
                     Ok(Some(Restored {
@@ -146,19 +150,19 @@ impl SignInView {
             let config = OAuthConfig::default();
             // The keyring first: without one the sign-in can't be kept, and
             // the user should hear so before approving in the browser.
-            let pending = cx
-                .background_spawn({
-                    let config = config.clone();
-                    async move {
-                        KeyringTokenStore::check_available()?;
-                        let store = KeyringTokenStore::for_client(config.client_id())?;
-                        Ok::<_, Error>((store, begin_sign_in(&config)?))
-                    }
-                })
-                .await;
+            let pending = io::run(Priority::Interactive, {
+                let config = config.clone();
+                move || {
+                    KeyringTokenStore::check_available()?;
+                    let store = KeyringTokenStore::for_client(config.client_id())?;
+                    Ok::<_, Error>((store, begin_sign_in(&config)?))
+                }
+            })
+            .await;
             let (store, pending) = match pending {
-                Ok(p) => p,
-                Err(e) => {
+                Some(Ok(p)) => p,
+                None => return,
+                Some(Err(e)) => {
                     let _ = this.update(cx, |this, cx| this.fail(&e, cx));
                     return;
                 }
@@ -179,21 +183,24 @@ impl SignInView {
                 cancel.cancel();
                 return;
             }
-            let result = cx
-                .background_spawn({
-                    let cancel = cancel.clone();
-                    async move { finish_sign_in(pending, config, store, &cancel) }
-                })
-                .await;
+            // The browser may take minutes: a thread of its own, not one of
+            // the I/O threads.
+            let Some(result) = io::run_on_own_thread("sign-in", {
+                let cancel = cancel.clone();
+                move || finish_sign_in(pending, config, store, &cancel)
+            })
+            .await
+            else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| match result {
                 // Cancelled just as the sign-in landed: forget it.
                 Ok((session, _)) if cancel.is_cancelled() => {
-                    cx.background_spawn(async move {
+                    io::spawn(Priority::Interactive, move || {
                         if let Err(e) = session.sign_out() {
                             eprintln!("hardcover: dropping a cancelled sign-in: {e}");
                         }
-                    })
-                    .detach();
+                    });
                     this.state = State::Idle { error: None };
                     cx.notify();
                 }

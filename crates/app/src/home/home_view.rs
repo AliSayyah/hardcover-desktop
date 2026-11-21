@@ -30,25 +30,21 @@ use std::sync::Arc;
 
 use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, h_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight,
-    HighlightStyle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render,
-    RenderImage, SharedString, Styled as _, StyledText, Subscription, Window, div,
-    prelude::FluentBuilder as _,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, FontWeight, HighlightStyle,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, RenderImage,
+    SharedString, Styled as _, StyledText, Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_LIBRARY};
-use hardcover_core::{
-    Client, Date, Error, Goal, GoalMetric, LibraryEntry, Rating, ReadingStatus, UserBookId,
-};
+use hardcover_core::{Date, Goal, GoalMetric, LibraryEntry, Rating, ReadingStatus, UserBookId};
 
 use super::coming_soon::coming_soon_section;
 use super::digest::{
     Digest, Reading, SeriesNext, ToRate, UP_NEXT_IN_RAIL, compute, finished_per_month,
     finishing_by, to_rate,
 };
-use crate::app_state::{Services, release_cover_image};
+use crate::app_state::release_cover_image;
 use crate::bidi::is_rtl;
 use crate::book::progress_dialog::open_progress;
 use crate::book::star_rating::StarRating;
@@ -63,8 +59,9 @@ use crate::format::{
 };
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
-use crate::library::model::{LibraryModel, WriteKind};
+use crate::library::model::{LibraryModel, LibraryWrite, WriteKind};
 use crate::library::writes;
+use crate::session;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
@@ -156,7 +153,7 @@ impl HomeView {
     /// The goal Home shows: the current one counted in books, else the first
     /// current one. The sidebar lists them all.
     fn goal(&self, today: Date, cx: &App) -> Option<Goal> {
-        if !Services::global(cx).has_scope(READ_GOALS) {
+        if !session::has_scope(cx, READ_GOALS) {
             return None;
         }
         let goals = self.goals.read(cx);
@@ -183,40 +180,6 @@ impl HomeView {
         art
     }
 
-    /// Runs a write on `id` in the background; the model applies the entry it
-    /// returns. A failure is shown as a notification.
-    fn write(
-        &mut self,
-        id: UserBookId,
-        kind: WriteKind,
-        failure_title: &'static str,
-        op: impl FnOnce(&Client) -> Result<LibraryEntry, Error> + Send + 'static,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let model = self.model.clone();
-        if !model.update(cx, |m, cx| m.begin_write(id, kind, cx)) {
-            return;
-        }
-        let client = Services::global(cx).client().clone();
-        cx.spawn_in(window, async move |_, cx| {
-            let result = cx.background_spawn(async move { op(&client) }).await;
-            model.update(cx, |m, cx| {
-                m.end_write(id, cx);
-                if let Ok(entry) = &result {
-                    m.apply_written(entry.clone(), cx);
-                }
-            });
-            if let Err(error) = result {
-                let _ = cx.update(|window, cx| {
-                    let message = Services::error_message(&error, Some(WRITE_LIBRARY), cx);
-                    window.push_notification(Notification::error(message).title(failure_title), cx);
-                });
-            }
-        })
-        .detach();
-    }
-
     fn set_status(
         &mut self,
         id: UserBookId,
@@ -224,7 +187,7 @@ impl HomeView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        writes::set_status(self.model.clone(), id, status, window, cx);
+        writes::set_status(&self.model, id, status, window, cx);
     }
 
     fn rate(
@@ -246,14 +209,13 @@ impl HomeView {
         self.rated_here.insert(id);
         self.saving_ratings.insert(id, rating);
         // Sending the status keeps Hardcover from starting a new read.
-        self.write(
+        let write = LibraryWrite::entry(
             id,
             WriteKind::Rating,
             "Couldn't save the rating",
             move |client| client.set_rating(id, rating, keep),
-            window,
-            cx,
         );
+        drop(self.model.update(cx, |m, cx| m.write(write, window, cx)));
     }
 
     /// Asks before finishing a book: the read ends today, and moving the
@@ -345,7 +307,7 @@ impl HomeView {
     ) -> [AnyElement; 2] {
         let id = entry.user_book_id;
         let pending = self.model.read(cx).pending_write(id);
-        let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
+        let can_write = session::has_scope(cx, WRITE_LIBRARY);
         let disabled_reason = (!can_write).then(|| needs_permission(WRITE_LIBRARY));
         let model = self.model.clone();
         let entry_for_dialog = entry.clone();
@@ -818,7 +780,7 @@ impl HomeView {
     ) -> AnyElement {
         let id = entry.user_book_id;
         let pending = self.model.read(cx).pending_write(id);
-        let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
+        let can_write = session::has_scope(cx, WRITE_LIBRARY);
         let author = authors_text(&entry.book.authors);
         RailSection::new("Up next")
             .child(
@@ -948,7 +910,7 @@ impl Render for HomeView {
         let digest = self.digest(today, cx);
         let goal = self.goal(today, cx);
         let model = self.model.read(cx);
-        let (rate_rows, unrated) = if Services::global(cx).has_scope(WRITE_LIBRARY) {
+        let (rate_rows, unrated) = if session::has_scope(cx, WRITE_LIBRARY) {
             to_rate(model.entries(), today, &self.rated_here)
         } else {
             (Vec::new(), 0)

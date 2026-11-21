@@ -30,7 +30,6 @@ use hardcover_core::{ListBook, ListBookId, ListId, OffsetPage, UserList};
 use super::list_dialog::open_edit_list;
 use super::model::{ListsEvent, ListsModel};
 use crate::RemoveFromList;
-use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::catalog::book_list::{
     ListPane, follow_pane, load_failed, page_body, page_header_scrolling, page_list, page_loading,
@@ -41,6 +40,7 @@ use crate::design::{TypeRoles as _, size};
 use crate::format::{authors_text, needs_permission};
 use crate::library::book_row::BookRow;
 use crate::library::model::LibraryModel;
+use crate::session::{self, SessionScope};
 use crate::ui::kit::{SmallControl as _, SmallIconButton as _};
 use crate::ui::kit::{open_alert_dialog, row_action};
 use crate::ui::{
@@ -134,18 +134,21 @@ impl ListBooks {
             return;
         }
         let offset = page.next_offset;
+        let Some(session) = SessionScope::current(cx) else {
+            return;
+        };
+        let books = session.interactive(move |client| client.list_books(id, offset));
         page.loading = true;
         page.error = None;
-        let client = Services::global(cx).client().clone();
         cx.notify();
         // Replacing the task drops a fetch for a list no longer shown.
         self.fetch = Some(cx.spawn_in(window, async move |state, cx| {
-            let result = cx
-                .background_spawn(async move { client.list_books(id, offset) })
-                .await;
+            let Some(result) = books.await else {
+                return;
+            };
             let _ = state.update_in(cx, |state, _, cx| {
                 let message = match &result {
-                    Err(e) => Some(Services::error_message(e, Some(READ_LISTS), cx).into()),
+                    Err(e) => Some(session::error_message(e, Some(READ_LISTS), cx).into()),
                     Ok(_) => None,
                 };
                 let delegate = state.delegate_mut();
@@ -235,7 +238,7 @@ fn remove_book(
     let task = lists.update(cx, |m, cx| m.remove_rows(list, book_id, vec![row], cx));
     window
         .spawn(cx, async move |cx| {
-            if let Err(message) = task.await {
+            if let Some(Err(message)) = task.await {
                 let _ = cx.update(|window, cx| {
                     window.push_notification(
                         Notification::error(message).title("Couldn't remove the book"),
@@ -268,7 +271,7 @@ impl ListDelegate for ListBooks {
         let lists = self.lists.read(cx);
         let ranked = lists.list(list).is_some_and(|l| l.ranked);
         let busy = lists.is_busy(book.book.id);
-        let can_write = Services::global(cx).has_scope(WRITE_LISTS);
+        let can_write = session::has_scope(cx, WRITE_LISTS);
         let status = self
             .library
             .read(cx)
@@ -516,7 +519,7 @@ impl ListView {
                     let task = lists.update(cx, |m, cx| m.delete(id, cx));
                     window
                         .spawn(cx, async move |cx| {
-                            if let Err(message) = task.await {
+                            if let Some(Err(message)) = task.await {
                                 let _ = cx.update(|window, cx| {
                                     window.push_notification(
                                         Notification::error(message)
@@ -533,7 +536,7 @@ impl ListView {
     }
 
     fn list_actions(&self, list: &UserList, cx: &mut Context<Self>) -> Option<gpui_kit::Div> {
-        let can_write = Services::global(cx).has_scope(WRITE_LISTS);
+        let can_write = session::has_scope(cx, WRITE_LISTS);
         let writing = self.lists.read(cx).is_writing();
         let permission: Option<SharedString> =
             (!can_write).then(|| needs_permission(WRITE_LISTS).into());

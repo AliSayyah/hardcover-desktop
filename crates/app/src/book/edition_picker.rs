@@ -10,17 +10,17 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::{Disableable as _, Icon, IconName, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
-    Task, Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, Context, ElementId, Entity, EventEmitter, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Task, Window, div,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookId, EditionId, EditionSummary};
 
-use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::edition_text;
+use crate::session::{self, SessionScope};
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_dialog;
 
@@ -74,16 +74,19 @@ impl EditionPicker {
         if self.loading || !self.has_more {
             return;
         }
+        let Some(session) = SessionScope::current(cx) else {
+            return;
+        };
+        let book = self.book;
         let offset = self.next_offset;
+        let page = session.interactive(move |client| client.book_editions(book, offset));
         self.loading = true;
         self.error = None;
         cx.notify();
-        let client = Services::global(cx).client().clone();
-        let book = self.book;
         self.fetch = Some(cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { client.book_editions(book, offset) })
-                .await;
+            let Some(result) = page.await else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
@@ -99,7 +102,7 @@ impl EditionPicker {
                     }
                     Err(e) => {
                         this.error =
-                            Some(Services::error_message(&e, Some(READ_CATALOG), cx).into());
+                            Some(session::error_message(&e, Some(READ_CATALOG), cx).into());
                     }
                 }
                 cx.notify();

@@ -7,13 +7,13 @@
 
 use std::time::Duration;
 
-use gpui_kit::{AppContext as _, Context, Entity, SharedString, Subscription, Task};
+use gpui_kit::{Context, Entity, SharedString, Subscription, Task};
 use hardcover_core::auth::scopes::{READ_GOALS, WRITE_GOALS};
 use hardcover_core::{Date, Error, Goal, GoalId, LibraryEntry, NewGoal};
 
-use crate::app_state::Services;
 use crate::format::requested_scope;
 use crate::library::model::{LibraryModel, SyncStatus};
+use crate::session::SessionScope;
 
 /// How long after a library change to reload: Hardcover recalculates goal
 /// progress after a write, and several writes in a row need one reload.
@@ -31,6 +31,7 @@ pub enum GoalsStatus {
 }
 
 pub struct GoalsModel {
+    session: SessionScope,
     goals: Vec<Goal>,
     status: GoalsStatus,
     /// A load has finished (or failed) at least once. Reloads keep the old
@@ -46,7 +47,11 @@ pub struct GoalsModel {
 }
 
 impl GoalsModel {
-    pub fn new(library: &Entity<LibraryModel>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        session: SessionScope,
+        library: &Entity<LibraryModel>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let subscription = cx.observe(library, |this, library, cx| {
             let library = library.read(cx);
             let revision = library.revision();
@@ -57,6 +62,7 @@ impl GoalsModel {
             }
         });
         Self {
+            session,
             seen_revision: library.read(cx).revision(),
             goals: Vec::new(),
             status: GoalsStatus::Idle,
@@ -123,14 +129,16 @@ impl GoalsModel {
 
     /// Loads the goals, keeping the ones shown until the new ones arrive.
     pub fn load(&mut self, cx: &mut Context<Self>) {
-        if !Services::global(cx).has_scope(READ_GOALS) {
+        if !self.session.allows(READ_GOALS) {
             return;
         }
         self.status = GoalsStatus::Loading;
         cx.notify();
-        let client = Services::global(cx).client().clone();
+        let goals = self.session.background(|client| client.goals());
         self.load_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { client.goals() }).await;
+            let Some(result) = goals.await else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| match result {
                 Ok(goals) => {
                     this.goals = goals;
@@ -146,12 +154,13 @@ impl GoalsModel {
                     this.goals.clear();
                     this.status = GoalsStatus::Idle;
                     let scope = requested_scope(scope.as_deref()).unwrap_or(READ_GOALS);
-                    Services::scope_refused(scope, cx);
+                    this.session.scope_refused(scope, cx);
                     cx.notify();
                 }
                 Err(e) => {
                     this.loaded_once = true;
-                    this.status = GoalsStatus::Failed(Services::error_message(&e, None, cx).into());
+                    let message = this.session.error_message(&e, None, cx);
+                    this.status = GoalsStatus::Failed(message.into());
                     cx.notify();
                 }
             });
@@ -159,7 +168,7 @@ impl GoalsModel {
     }
 
     fn schedule_reload(&mut self, cx: &mut Context<Self>) {
-        if !Services::global(cx).has_scope(READ_GOALS) {
+        if !self.session.allows(READ_GOALS) {
             return;
         }
         self.reload_task = Some(cx.spawn(async move |this, cx| {
@@ -170,31 +179,38 @@ impl GoalsModel {
 
     // ----- writes -----
 
-    /// Runs one goal write in the background and applies its result. `Err`
-    /// carries the message to show; the goals are unchanged then.
+    /// Runs one goal write and applies its result. Resolves to `None` if the
+    /// write was dropped because the session ended (nothing to show), else
+    /// to `Err` with the message to show; the goals are unchanged then.
     fn write<T: Send + 'static>(
         &mut self,
         run: impl FnOnce(&hardcover_core::Client) -> Result<T, Error> + Send + 'static,
         apply: impl FnOnce(&mut Self, T) + 'static,
         cx: &mut Context<Self>,
-    ) -> Task<Result<(), SharedString>> {
-        if self.writing {
-            return Task::ready(Err(
-                "Another change is still being saved. Try again in a moment.".into(),
-            ));
+    ) -> Task<Option<Result<(), SharedString>>> {
+        if !self.session.is_alive() {
+            return Task::ready(None);
         }
-        if !Services::global(cx).has_scope(WRITE_GOALS) {
-            return Task::ready(Err(crate::format::needs_permission(WRITE_GOALS).into()));
+        if self.writing {
+            return Task::ready(Some(Err(
+                "Another change is still being saved. Try again in a moment.".into(),
+            )));
+        }
+        if !self.session.has_scope(WRITE_GOALS) {
+            return Task::ready(Some(Err(
+                crate::format::needs_permission(WRITE_GOALS).into()
+            )));
         }
         self.writing = true;
         cx.notify();
-        let client = Services::global(cx).client().clone();
+        let call = self.session.interactive(run);
         cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { run(&client) }).await;
+            let result = call.await;
             this.update(cx, |this, cx| {
                 this.writing = false;
                 cx.notify();
-                match result {
+                // Dropped: the session ended (or the call panicked).
+                Some(match result? {
                     Ok(value) => {
                         // A load that started before the write would bring
                         // back the old goals; the write's result is newer.
@@ -209,10 +225,11 @@ impl GoalsModel {
                         apply(this, value);
                         Ok(())
                     }
-                    Err(e) => Err(Services::error_message(&e, Some(WRITE_GOALS), cx).into()),
-                }
+                    Err(e) => Err(this.session.error_message(&e, Some(WRITE_GOALS), cx).into()),
+                })
             })
-            .unwrap_or(Ok(()))
+            .ok()
+            .flatten()
         })
     }
 
@@ -220,7 +237,7 @@ impl GoalsModel {
         &mut self,
         goal: NewGoal,
         cx: &mut Context<Self>,
-    ) -> Task<Result<(), SharedString>> {
+    ) -> Task<Option<Result<(), SharedString>>> {
         self.write(
             move |client| client.create_goal(&goal),
             |this, created| {
@@ -239,7 +256,7 @@ impl GoalsModel {
         id: GoalId,
         edit: impl FnOnce(&mut Goal) + Send + 'static,
         cx: &mut Context<Self>,
-    ) -> Task<Result<(), SharedString>> {
+    ) -> Task<Option<Result<(), SharedString>>> {
         self.write(
             move |client| client.update_goal(id, edit),
             |this, saved| {
@@ -253,7 +270,11 @@ impl GoalsModel {
         )
     }
 
-    pub fn delete(&mut self, id: GoalId, cx: &mut Context<Self>) -> Task<Result<(), SharedString>> {
+    pub fn delete(
+        &mut self,
+        id: GoalId,
+        cx: &mut Context<Self>,
+    ) -> Task<Option<Result<(), SharedString>>> {
         self.write(
             move |client| client.delete_goal(id),
             move |this, ()| this.goals.retain(|g| g.id != id),
@@ -270,6 +291,26 @@ fn sort(goals: &mut [Goal]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A goal write that lands after signing out is dropped: nothing to
+    /// show, rather than a silent success.
+    #[gpui_kit::test]
+    fn a_write_landing_after_sign_out_is_dropped(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), None);
+        let library = cx.new(|_| LibraryModel::new(session.clone()));
+        let goals = cx.new(|cx| GoalsModel::new(session.clone(), &library, cx));
+        // The call runs inline; its result waits to be picked up.
+        let task = goals.update(cx, |m, cx| m.delete(GoalId::new(1), cx));
+        session.end();
+        let task = cx.foreground_executor().spawn(task);
+        cx.run_until_parked();
+        assert_eq!(gpui_kit::block_on(task), None);
+        assert!(
+            !goals.read_with(cx, |m, _| m.is_writing()),
+            "the write ended"
+        );
+    }
     use hardcover_core::{
         BookId, BookSummary, GoalMetric, ReadId, ReadSession, ReadingStatus, UserBookId, UserId,
     };

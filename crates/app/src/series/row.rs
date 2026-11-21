@@ -29,7 +29,6 @@ use hardcover_core::{Date, ReadingStatus, UserBookId};
 use super::progress::{
     Group, Mark, NextKind, SeriesBook, SeriesSummary, lane_caption, reading_line,
 };
-use crate::app_state::Services;
 use crate::bidi::is_rtl;
 use crate::book::progress_dialog::open_progress;
 use crate::catalog::navigation::Page;
@@ -39,6 +38,7 @@ use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{count_text, needs_permission, progress_summary};
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::library::writes;
+use crate::session;
 use crate::ui::focus::{keyed_focus, reveal_when};
 use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::SmallControl as _;
@@ -298,7 +298,7 @@ fn next_lane(
     let model = library.read(cx);
     let entry = book.entry.and_then(|e| model.entry(e)).cloned();
     let pending = book.entry.and_then(|e| model.pending_write(e));
-    let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
+    let can_write = session::has_scope(cx, WRITE_LIBRARY);
     let reason = (!can_write).then(|| needs_permission(WRITE_LIBRARY));
 
     let book_details = match kind {
@@ -424,7 +424,7 @@ fn want_to_read(
 /// reading" does; the library applies the entry the write returns. A
 /// failure is shown as a notification.
 fn start_reading(library: Entity<LibraryModel>, id: UserBookId, window: &mut Window, cx: &mut App) {
-    writes::set_status(library, id, ReadingStatus::CurrentlyReading, window, cx);
+    writes::set_status(&library, id, ReadingStatus::CurrentlyReading, window, cx);
 }
 
 /// A row while the series load: a skeleton name line and a strip of

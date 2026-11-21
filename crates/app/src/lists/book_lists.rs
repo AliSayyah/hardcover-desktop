@@ -16,15 +16,14 @@ use hardcover_core::{BookId, BookSummary, EditionSummary, LibraryEntry};
 
 use super::list_dialog::open_new_list;
 use super::model::ListsModel;
-use crate::app_state::Services;
 use crate::design::{TypeRoles as _, size};
 use crate::format::needs_permission;
+use crate::session;
 use crate::ui::kit::open_alert_dialog;
 
 /// The model, when the session can read lists.
 fn readable(cx: &App) -> Option<Entity<ListsModel>> {
-    let services = cx.try_global::<Services>()?;
-    services.has_scope(READ_LISTS).then_some(())?;
+    session::has_scope(cx, READ_LISTS).then_some(())?;
     ListsModel::global(cx)
 }
 
@@ -37,7 +36,7 @@ pub fn book_shown(book: BookId, cx: &mut App) {
 
 /// Shows a failed list change as a notification.
 fn notify_failure(
-    task: Task<Result<(), SharedString>>,
+    task: Task<Option<Result<(), SharedString>>>,
     title: &'static str,
     window: &mut Window,
     cx: &mut App,
@@ -48,7 +47,7 @@ fn notify_failure(
 /// Shows a list change's outcome: always a failure, and success when
 /// `success` says what to show.
 fn notify_result(
-    task: Task<Result<(), SharedString>>,
+    task: Task<Option<Result<(), SharedString>>>,
     title: &'static str,
     success: Option<&'static str>,
     window: &mut Window,
@@ -56,7 +55,11 @@ fn notify_result(
 ) {
     window
         .spawn(cx, async move |cx| {
-            let note = match task.await {
+            // `None`: dropped because the session ended.
+            let Some(result) = task.await else {
+                return;
+            };
+            let note = match result {
                 Err(message) => Notification::error(message).title(title),
                 Ok(()) => match success {
                     Some(text) => Notification::success(text),
@@ -80,7 +83,7 @@ pub fn lists_button(book: &BookSummary, cx: &App) -> Option<AnyElement> {
             .dropdown_caret(true)
             .dropdown_menu(move |menu, _, cx| {
                 let model = lists.read(cx);
-                let can_write = Services::global(cx).has_scope(WRITE_LISTS);
+                let can_write = session::has_scope(cx, WRITE_LISTS);
                 let busy = model.is_busy(book.id);
                 let known = model.rows_for(book.id).is_some();
                 // Capped at half the window; many lists scroll.
@@ -201,7 +204,6 @@ pub fn confirm_owned(entry: &LibraryEntry, window: &mut Window, cx: &mut App) {
 pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
     let lists = readable(cx)?;
     let model = lists.read(cx);
-    let services = Services::global(cx);
     let book = entry.book.id;
     let rows = model.owned_rows(book);
     let owned = rows.as_ref().is_some_and(|r| !r.is_empty());
@@ -211,10 +213,10 @@ pub fn owned_control(entry: &LibraryEntry, cx: &App) -> Option<AnyElement> {
     // a list change (write:lists).
     let (allowed, reason): (bool, Option<SharedString>) = match (&rows, owned) {
         (None, _) => (false, Some("Checking your Owned list…".into())),
-        (Some(_), true) if !services.has_scope(WRITE_LISTS) => {
+        (Some(_), true) if !session::has_scope(cx, WRITE_LISTS) => {
             (false, Some(needs_permission(WRITE_LISTS).into()))
         }
-        (Some(_), false) if !services.has_scope(WRITE_LIBRARY) => {
+        (Some(_), false) if !session::has_scope(cx, WRITE_LIBRARY) => {
             (false, Some(needs_permission(WRITE_LIBRARY).into()))
         }
         (Some(_), false) if edition.is_none() => (false, Some("Choose an edition first".into())),

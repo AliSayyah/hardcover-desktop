@@ -31,11 +31,11 @@ use super::book_list::{
     load_failed, new_list, page_body, page_header, page_header_scrolling, page_list, read_summary,
     replace_rows, reset_scroll, row_details,
 };
-use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
+use crate::session::{self, SessionScope};
 use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
@@ -223,10 +223,15 @@ impl AuthorView {
             self.pages.remove(&id);
         }
         self.loading = Some(id);
-        let client = Services::global(cx).client().clone();
+        let Some(session) = SessionScope::current(cx) else {
+            return;
+        };
+        let page = session.interactive(move |client| client.author(id));
         // Replacing the task drops the fetch for a page no longer shown.
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = cx.background_spawn(async move { client.author(id) }).await;
+            let Some(result) = page.await else {
+                return;
+            };
             let _ = this.update_in(cx, |this, window, cx| {
                 if this.loading == Some(id) {
                     this.loading = None;
@@ -237,7 +242,7 @@ impl AuthorView {
                     // records a refused scope.
                     (Some(Loaded::Ready(fetched)), result) => {
                         if let Err(e) = &result {
-                            Services::error_message(e, Some(READ_CATALOG), cx);
+                            session::error_message(e, Some(READ_CATALOG), cx);
                         }
                         fetched.refetched(result, cx)
                     }
@@ -246,7 +251,7 @@ impl AuthorView {
                         false
                     }
                     (_, Err(e)) => {
-                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        let message = session::error_message(&e, Some(READ_CATALOG), cx);
                         this.pages.insert(id, Loaded::Failed(message.into()));
                         false
                     }

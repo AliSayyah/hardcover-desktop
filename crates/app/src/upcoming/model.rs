@@ -6,13 +6,13 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use gpui_kit::{AppContext as _, Context, Entity, SharedString, Subscription, Task};
+use gpui_kit::{Context, Entity, SharedString, Subscription, Task};
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookId, Date, SeriesId, UpcomingBook};
 
 use super::schedule::{unreleased, watched_series};
-use crate::app_state::Services;
 use crate::library::model::{LibraryModel, SyncStatus};
+use crate::session::SessionScope;
 
 /// How long the series must stay changed before reloading, so a run of
 /// writes costs one request.
@@ -30,6 +30,7 @@ pub enum UpcomingStatus {
 }
 
 pub struct UpcomingModel {
+    session: SessionScope,
     library: Entity<LibraryModel>,
     books: Vec<UpcomingBook>,
     status: UpcomingStatus,
@@ -43,7 +44,11 @@ pub struct UpcomingModel {
 }
 
 impl UpcomingModel {
-    pub fn new(library: Entity<LibraryModel>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        session: SessionScope,
+        library: Entity<LibraryModel>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let subscription = cx.observe(&library, |this, library, cx| {
             let library = library.read(cx);
             if !library.is_loaded() {
@@ -64,6 +69,7 @@ impl UpcomingModel {
             }
         });
         Self {
+            session,
             library,
             books: Vec::new(),
             status: UpcomingStatus::Idle,
@@ -100,7 +106,7 @@ impl UpcomingModel {
     /// ones shown until the answer arrives. Waits for the library to load.
     pub fn load(&mut self, cx: &mut Context<Self>) {
         let library = self.library.read(cx);
-        if !library.is_loaded() || !Services::global(cx).has_scope(READ_CATALOG) {
+        if !library.is_loaded() || !self.session.allows(READ_CATALOG) {
             return;
         }
         let series = watched_series(library.entries());
@@ -108,13 +114,15 @@ impl UpcomingModel {
         self.reload_task = None;
         self.status = UpcomingStatus::Loading;
         cx.notify();
-        let client = Services::global(cx).client().clone();
         let today = crate::dates::today();
+        let books = self
+            .session
+            .background(move |client| client.upcoming_in_series(&series, today));
         // Replacing the task drops a load still running: its series are older.
         self.load_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { client.upcoming_in_series(&series, today) })
-                .await;
+            let Some(result) = books.await else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(books) => {
@@ -123,7 +131,7 @@ impl UpcomingModel {
                         this.status = UpcomingStatus::Loaded;
                     }
                     Err(e) => {
-                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        let message = this.session.error_message(&e, Some(READ_CATALOG), cx);
                         this.status = UpcomingStatus::Failed(message.into());
                     }
                 }

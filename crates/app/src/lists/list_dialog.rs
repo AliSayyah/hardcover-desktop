@@ -16,10 +16,10 @@ use hardcover_core::auth::scopes::WRITE_LISTS;
 use hardcover_core::{BookSummary, ListDraft, ListId, Privacy};
 
 use super::model::ListsModel;
-use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::needs_permission;
+use crate::session;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::open_dialog;
 
@@ -180,11 +180,14 @@ impl ListDialog {
             Mode::Edit(id) => {
                 let id = *id;
                 let task = self.lists.update(cx, |m, cx| m.update(id, draft, cx));
-                cx.spawn(async move |_, _| task.await.map(|()| None))
+                cx.spawn(async move |_, _| task.await.map(|r| r.map(|()| None)))
             }
         };
         cx.spawn_in(window, async move |this, cx| {
-            let result = task.await;
+            // Dropped because the session ended: the dialog goes with it.
+            let Some(result) = task.await else {
+                return;
+            };
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(warning) => {
                     window.close_dialog(cx);
@@ -239,7 +242,7 @@ impl ListDialog {
 impl Render for ListDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let writing = self.lists.read(cx).is_writing();
-        let can_write = Services::global(cx).has_scope(WRITE_LISTS);
+        let can_write = session::has_scope(cx, WRITE_LISTS);
         let colors = colors(cx);
         let (privacy, ranked) = self.options(writing, cx);
         let (commit, adds): (&str, Option<String>) = match &self.mode {

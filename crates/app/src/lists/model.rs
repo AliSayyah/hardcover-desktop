@@ -5,6 +5,8 @@
 //! Everything here needs `read:lists`; without it the model stays empty and
 //! the views hide the lists. Any view reaches the model through
 //! [`ListsModel::global`], so the book page needs no new constructor argument.
+//! The model belongs to one session ([`SessionScope`]): once it ends,
+//! nothing more is sent and results that land are dropped.
 
 use std::collections::{HashMap, HashSet};
 
@@ -17,8 +19,9 @@ use hardcover_core::{
     ListMemberships, OWNED_LIST_SLUG, UserList,
 };
 
-use crate::app_state::Services;
 use crate::format::{needs_permission, requested_scope};
+use crate::library::model::STILL_SAVING;
+use crate::session::SessionScope;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum ListsStatus {
@@ -45,6 +48,7 @@ pub enum ListsEvent {
 }
 
 pub struct ListsModel {
+    session: SessionScope,
     /// The Owned list first, then by name.
     lists: Vec<UserList>,
     status: ListsStatus,
@@ -83,21 +87,11 @@ struct ListsGlobal(WeakEntity<ListsModel>);
 
 impl Global for ListsGlobal {}
 
-/// The session's services, or `None` once signed out: a result that lands
-/// after signing out is dropped.
-fn services(cx: &App) -> Option<&Services> {
-    cx.try_global::<Services>()
-}
-
-fn can_read(cx: &App) -> bool {
-    services(cx).is_some_and(|s| s.has_scope(READ_LISTS))
-}
-
 impl ListsModel {
     /// Creates the model for a new workspace, replacing any earlier one. The
     /// caller owns it.
-    pub fn init(cx: &mut App) -> Entity<Self> {
-        let model = cx.new(|_| Self::new());
+    pub fn init(session: SessionScope, cx: &mut App) -> Entity<Self> {
+        let model = cx.new(|_| Self::new(session));
         cx.set_global(ListsGlobal(model.downgrade()));
         model
     }
@@ -114,8 +108,9 @@ impl ListsModel {
         cx.try_global::<ListsGlobal>()?.0.upgrade()
     }
 
-    fn new() -> Self {
+    fn new(session: SessionScope) -> Self {
         Self {
+            session,
             lists: Vec::new(),
             status: ListsStatus::Idle,
             loaded_once: false,
@@ -220,17 +215,17 @@ impl ListsModel {
 
     /// Loads the lists, keeping the ones shown until the new ones arrive.
     pub fn load(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = services(cx)
-            .filter(|s| s.has_scope(READ_LISTS))
-            .map(|s| s.client().clone())
-        else {
+        if !self.session.allows(READ_LISTS) {
             return;
-        };
+        }
         self.status = ListsStatus::Loading;
         cx.notify();
         let generation = self.generation;
+        let lists = self.session.background(|client| client.lists());
         self.load_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { client.lists() }).await;
+            let Some(result) = lists.await else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 if this.generation != generation && result.is_ok() {
                     this.load(cx);
@@ -266,11 +261,12 @@ impl ListsModel {
                 self.pending_books.clear();
                 self.status = ListsStatus::Idle;
                 let scope = requested_scope(scope.as_deref()).unwrap_or(READ_LISTS);
-                Services::scope_refused(scope, cx);
+                self.session.scope_refused(scope, cx);
             }
             e => {
                 self.loaded_once = true;
-                self.status = ListsStatus::Failed(Services::error_message(&e, None, cx).into());
+                let message = self.session.error_message(&e, None, cx);
+                self.status = ListsStatus::Failed(message.into());
             }
         }
     }
@@ -279,7 +275,7 @@ impl ListsModel {
     /// (Refresh, or a new grant). The old index answers until the new one
     /// arrives; this also retries one that failed.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
-        if !can_read(cx) {
+        if !self.session.allows(READ_LISTS) {
             return;
         }
         self.load(cx);
@@ -310,17 +306,15 @@ impl ListsModel {
     }
 
     fn load_memberships(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = services(cx)
-            .filter(|s| s.has_scope(READ_LISTS))
-            .map(|s| s.client().clone())
-        else {
+        if !self.session.allows(READ_LISTS) {
             return;
-        };
+        }
         let generation = self.generation;
+        let index = self.session.background(|client| client.list_memberships());
         self.memberships_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { client.list_memberships() })
-                .await;
+            let Some(result) = index.await else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 this.memberships_task = None;
                 if this.generation != generation && result.is_ok() {
@@ -332,7 +326,7 @@ impl ListsModel {
                     // The lists themselves report the failure; the book page
                     // keeps its list controls waiting, and Refresh retries.
                     Err(e) => {
-                        let _ = Services::error_message(&e, Some(READ_LISTS), cx);
+                        let _ = this.session.error_message(&e, Some(READ_LISTS), cx);
                     }
                 }
                 // Complete or not, the index (old or new) now decides which
@@ -385,18 +379,18 @@ impl ListsModel {
         if !needed {
             return;
         }
-        let Some(client) = services(cx)
-            .filter(|s| s.has_scope(READ_LISTS))
-            .map(|s| s.client().clone())
-        else {
+        if !self.session.allows(READ_LISTS) {
             return;
-        };
+        }
         self.book_rows_loading.insert(book);
         let generation = self.generation;
+        let rows = self
+            .session
+            .interactive(move |client| client.book_list_memberships(book));
         let task = cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { client.book_list_memberships(book) })
-                .await;
+            let Some(result) = rows.await else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 this.book_rows_loading.remove(&book);
                 match result {
@@ -407,7 +401,7 @@ impl ListsModel {
                     // Looked up again after the next index load (Refresh).
                     Err(e) => {
                         this.pending_books.insert(book);
-                        let _ = Services::error_message(&e, Some(READ_LISTS), cx);
+                        let _ = this.session.error_message(&e, Some(READ_LISTS), cx);
                     }
                 }
                 cx.notify();
@@ -475,42 +469,45 @@ impl ListsModel {
 
     // ----- list writes -----
 
-    /// Runs one list write in the background. `Err` carries the message to
-    /// show; the lists are unchanged then.
+    /// Runs one list write. Resolves to `None` if it was dropped because
+    /// the session ended (nothing to show), else to `Err` with the message
+    /// to show; the lists are unchanged then.
     fn write_list<T: Send + 'static, R: 'static>(
         &mut self,
         run: impl FnOnce(&Client) -> Result<T, Error> + Send + 'static,
         apply: impl FnOnce(&mut Self, T, &mut Context<Self>) -> R + 'static,
         cx: &mut Context<Self>,
-    ) -> Task<Result<R, SharedString>> {
+    ) -> Task<Option<Result<R, SharedString>>> {
+        if !self.session.is_alive() {
+            return Task::ready(None);
+        }
         if self.writing {
-            return Task::ready(Err(
+            return Task::ready(Some(Err(
                 "Another change is still being saved. Try again in a moment.".into(),
-            ));
+            )));
         }
-        let Some(services) = services(cx) else {
-            return Task::ready(Err(SIGNED_OUT.into()));
-        };
-        if !services.has_scope(WRITE_LISTS) {
-            return Task::ready(Err(needs_permission(WRITE_LISTS).into()));
+        if !self.session.has_scope(WRITE_LISTS) {
+            return Task::ready(Some(Err(needs_permission(WRITE_LISTS).into())));
         }
-        let client = services.client().clone();
         self.writing = true;
         self.generation += 1;
         cx.notify();
+        let call = self.session.interactive(run);
         cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { run(&client) }).await;
+            let result = call.await;
             this.update(cx, |this, cx| {
                 this.writing = false;
                 // A load that started while the write ran may predate it too.
                 this.generation += 1;
                 cx.notify();
-                match result {
+                // Dropped: the session ended (or the call panicked).
+                Some(match result? {
                     Ok(value) => Ok(apply(this, value, cx)),
-                    Err(e) => Err(Services::error_message(&e, Some(WRITE_LISTS), cx).into()),
-                }
+                    Err(e) => Err(this.session.error_message(&e, Some(WRITE_LISTS), cx).into()),
+                })
             })
-            .unwrap_or_else(|_| Err("The window closed before the change was saved.".into()))
+            .ok()
+            .flatten()
         })
     }
 
@@ -521,7 +518,7 @@ impl ListsModel {
         draft: ListDraft,
         then_add: Option<BookId>,
         cx: &mut Context<Self>,
-    ) -> Task<Result<Option<SharedString>, SharedString>> {
+    ) -> Task<Option<Result<Option<SharedString>, SharedString>>> {
         self.write_list(
             move |client| {
                 let list = client.create_list(&draft)?;
@@ -547,7 +544,7 @@ impl ListsModel {
                 }
                 sort(&mut this.lists);
                 cx.emit(ListsEvent::BookAdded(id));
-                failure.map(|e| Services::error_message(&e, Some(WRITE_LISTS), cx).into())
+                failure.map(|e| this.session.error_message(&e, Some(WRITE_LISTS), cx).into())
             },
             cx,
         )
@@ -561,9 +558,9 @@ impl ListsModel {
         id: ListId,
         draft: ListDraft,
         cx: &mut Context<Self>,
-    ) -> Task<Result<(), SharedString>> {
+    ) -> Task<Option<Result<(), SharedString>>> {
         let Some(list) = self.list(id) else {
-            return Task::ready(Err("This list no longer exists.".into()));
+            return Task::ready(Some(Err("This list no longer exists.".into())));
         };
         let edit = ListEdit::between(list, &draft);
         self.write_list(
@@ -579,7 +576,11 @@ impl ListsModel {
         )
     }
 
-    pub fn delete(&mut self, id: ListId, cx: &mut Context<Self>) -> Task<Result<(), SharedString>> {
+    pub fn delete(
+        &mut self,
+        id: ListId,
+        cx: &mut Context<Self>,
+    ) -> Task<Option<Result<(), SharedString>>> {
         self.write_list(
             move |client| client.delete_list(id),
             move |this, (), cx| {
@@ -598,8 +599,9 @@ impl ListsModel {
 
     // ----- book writes -----
 
-    /// Runs one change to `book`'s lists in the background.
-    /// `apply` may still fail the write, e.g. when only part of it went through.
+    /// Runs one change to `book`'s lists, resolving as
+    /// [`Self::write_list`] does. `apply` may still fail the write, e.g.
+    /// when only part of it went through.
     fn write_book<T: Send + 'static>(
         &mut self,
         book: BookId,
@@ -607,34 +609,34 @@ impl ListsModel {
         run: impl FnOnce(&Client) -> Result<T, Error> + Send + 'static,
         apply: impl FnOnce(&mut Self, T, &mut Context<Self>) -> Result<(), SharedString> + 'static,
         cx: &mut Context<Self>,
-    ) -> Task<Result<(), SharedString>> {
+    ) -> Task<Option<Result<(), SharedString>>> {
+        if !self.session.is_alive() {
+            return Task::ready(None);
+        }
         if self.busy_books.contains(&book) {
-            return Task::ready(Err(
-                "Another change to this book is still being saved. Try again in a moment.".into(),
-            ));
+            return Task::ready(Some(Err(STILL_SAVING.into())));
         }
-        let Some(services) = services(cx) else {
-            return Task::ready(Err(SIGNED_OUT.into()));
-        };
-        if !services.has_scope(scope) {
-            return Task::ready(Err(needs_permission(scope).into()));
+        if !self.session.has_scope(scope) {
+            return Task::ready(Some(Err(needs_permission(scope).into())));
         }
-        let client = services.client().clone();
         self.busy_books.insert(book);
         self.generation += 1;
         cx.notify();
+        let call = self.session.interactive(run);
         cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { run(&client) }).await;
+            let result = call.await;
             this.update(cx, |this, cx| {
                 this.busy_books.remove(&book);
                 this.generation += 1;
                 cx.notify();
-                match result {
+                // Dropped: the session ended (or the call panicked).
+                Some(match result? {
                     Ok(value) => apply(this, value, cx),
-                    Err(e) => Err(Services::error_message(&e, Some(scope), cx).into()),
-                }
+                    Err(e) => Err(this.session.error_message(&e, Some(scope), cx).into()),
+                })
             })
-            .unwrap_or_else(|_| Err("The window closed before the change was saved.".into()))
+            .ok()
+            .flatten()
         })
     }
 
@@ -644,7 +646,7 @@ impl ListsModel {
         list: ListId,
         book: BookId,
         cx: &mut Context<Self>,
-    ) -> Task<Result<(), SharedString>> {
+    ) -> Task<Option<Result<(), SharedString>>> {
         self.write_book(
             book,
             WRITE_LISTS,
@@ -664,9 +666,9 @@ impl ListsModel {
         list: ListId,
         book: BookId,
         cx: &mut Context<Self>,
-    ) -> Task<Result<(), SharedString>> {
+    ) -> Task<Option<Result<(), SharedString>>> {
         let Some(rows) = self.rows_for(book) else {
-            return Task::ready(Err("Your lists are still loading.".into()));
+            return Task::ready(Some(Err("Your lists are still loading.".into())));
         };
         let rows: Vec<ListBookId> = rows
             .iter()
@@ -684,7 +686,7 @@ impl ListsModel {
         book: BookId,
         rows: Vec<ListBookId>,
         cx: &mut Context<Self>,
-    ) -> Task<Result<(), SharedString>> {
+    ) -> Task<Option<Result<(), SharedString>>> {
         self.write_book(
             book,
             WRITE_LISTS,
@@ -704,7 +706,7 @@ impl ListsModel {
                     cx.emit(ListsEvent::BookRemoved { list, row });
                 }
                 match failed {
-                    Some(e) => Err(Services::error_message(&e, Some(WRITE_LISTS), cx).into()),
+                    Some(e) => Err(this.session.error_message(&e, Some(WRITE_LISTS), cx).into()),
                     None => Ok(()),
                 }
             },
@@ -720,18 +722,18 @@ impl ListsModel {
         edition: Option<EditionId>,
         owned: bool,
         cx: &mut Context<Self>,
-    ) -> Task<Result<(), SharedString>> {
+    ) -> Task<Option<Result<(), SharedString>>> {
         if !owned {
             let (Some(list), Some(rows)) = (self.owned_list().map(|l| l.id), self.owned_rows(book))
             else {
-                return Task::ready(Err("Your Owned list is still loading.".into()));
+                return Task::ready(Some(Err("Your Owned list is still loading.".into())));
             };
             return self.remove_rows(list, book, rows.iter().map(|r| r.id).collect(), cx);
         }
         let Some(edition) = edition else {
-            return Task::ready(Err(
+            return Task::ready(Some(Err(
                 "Choose an edition first. Hardcover marks editions as owned, not books.".into(),
-            ));
+            )));
         };
         self.write_book(
             book,
@@ -758,8 +760,6 @@ impl ListsModel {
     }
 }
 
-const SIGNED_OUT: &str = "You signed out before the change could be saved.";
-
 /// The Owned list first, then by name, as the sidebar shows them.
 fn sort(lists: &mut [UserList]) {
     lists.sort_by(|a, b| {
@@ -773,6 +773,38 @@ fn sort(lists: &mut [UserList]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn session() -> SessionScope {
+        SessionScope::for_tests(hardcover_core::demo::client(), None)
+    }
+
+    fn draft(name: &str) -> ListDraft {
+        ListDraft {
+            name: name.to_owned(),
+            description: String::new(),
+            privacy: None,
+            ranked: false,
+        }
+    }
+
+    /// A list write that lands after signing out is dropped: nothing to
+    /// show, rather than an error about a closed window.
+    #[gpui_kit::test]
+    fn a_write_landing_after_sign_out_is_dropped(cx: &mut gpui_kit::TestAppContext) {
+        let session = session();
+        let model = cx.new(|_| ListsModel::new(session.clone()));
+        // The call runs inline; its result waits to be picked up.
+        let task = model.update(cx, |m, cx| m.create(draft("Picks"), None, cx));
+        session.end();
+        let task = cx.foreground_executor().spawn(task);
+        cx.run_until_parked();
+        assert_eq!(gpui_kit::block_on(task), None);
+        assert!(model.read_with(cx, |m, _| m.lists().is_empty()));
+
+        // And nothing is sent once it ended.
+        let task = model.update(cx, |m, cx| m.create(draft("More"), None, cx));
+        assert_eq!(gpui_kit::block_on(task), None);
+    }
 
     fn list(id: i64, name: &str, slug: &str) -> UserList {
         let mut l = UserList::new(ListId::new(id), name);
@@ -804,7 +836,7 @@ mod tests {
 
     #[test]
     fn membership_is_unknown_until_the_index_says() {
-        let mut m = ListsModel::new();
+        let mut m = ListsModel::new(session());
         m.loaded_once = true;
         m.lists_known = true;
         m.status = ListsStatus::Loaded;
@@ -829,7 +861,7 @@ mod tests {
 
     #[test]
     fn local_rows_keep_counts_without_counting_twice() {
-        let mut m = ListsModel::new();
+        let mut m = ListsModel::new(session());
         m.lists = vec![list(2, "Picks", "picks")];
         m.memberships = Some(ListMemberships {
             rows: Vec::new(),
@@ -850,7 +882,7 @@ mod tests {
 
     #[test]
     fn a_row_known_from_the_book_lookup_is_not_counted_again() {
-        let mut m = ListsModel::new();
+        let mut m = ListsModel::new(session());
         let mut picks = list(2, "Picks", "picks");
         picks.books_count = 5;
         m.lists = vec![picks];
@@ -871,7 +903,7 @@ mod tests {
 
     #[test]
     fn books_asked_about_early_are_looked_up_once_a_cut_short_index_lands() {
-        let mut m = ListsModel::new();
+        let mut m = ListsModel::new(session());
         let (a, b) = (BookId::new(10), BookId::new(11));
         m.pending_books.extend([a, b]);
         // No index yet (still loading, or it failed): they keep waiting.
@@ -895,7 +927,7 @@ mod tests {
 
     #[test]
     fn reload_skips_an_index_nobody_needed_and_looks_the_shown_book_up_again() {
-        let mut m = ListsModel::new();
+        let mut m = ListsModel::new(session());
         assert!(!m.plan_reload());
 
         let book = BookId::new(10);
@@ -912,7 +944,7 @@ mod tests {
 
     #[test]
     fn the_first_owned_edition_shows_owned_before_the_lists_reload() {
-        let mut m = ListsModel::new();
+        let mut m = ListsModel::new(session());
         m.lists_known = true;
         m.status = ListsStatus::Loaded;
         m.lists = vec![list(2, "Picks", "picks")];
@@ -938,14 +970,14 @@ mod tests {
 
     #[test]
     fn the_first_owned_edition_adds_nothing_while_the_lists_are_unknown() {
-        let mut m = ListsModel::new();
+        let mut m = ListsModel::new(session());
         assert!(!m.add_owned_placeholder(ListId::new(7)));
         assert_eq!(m.lists, []);
     }
 
     #[test]
     fn a_list_page_gives_way_when_the_list_is_gone_or_unreadable() {
-        let mut m = ListsModel::new();
+        let mut m = ListsModel::new(session());
         let id = ListId::new(2);
         // A refused scope leaves the lists Idle and empty.
         assert!(m.is_gone(id));

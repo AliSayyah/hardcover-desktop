@@ -12,13 +12,13 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::{App, AppContext as _, Context, Entity, SharedString, Subscription, Task};
+use gpui_kit::{App, Context, Entity, SharedString, Subscription, Task};
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookId, Date, SeriesId, TrackedSeries, TrackedSeriesLoad};
 
 use super::progress::{SeriesSummary, started_series, summaries};
-use crate::app_state::Services;
 use crate::library::model::{LibraryModel, SyncStatus};
+use crate::session::SessionScope;
 use crate::upcoming::model::UpcomingModel;
 
 /// How long the started series must stay changed before reloading, so a run
@@ -40,6 +40,7 @@ pub enum SeriesStatus {
 type SummaryKey = (u64, u64, u64, Date);
 
 pub struct SeriesModel {
+    session: SessionScope,
     library: Entity<LibraryModel>,
     upcoming: Entity<UpcomingModel>,
     series: Vec<TrackedSeries>,
@@ -56,6 +57,7 @@ pub struct SeriesModel {
 
 impl SeriesModel {
     pub fn new(
+        session: SessionScope,
         library: Entity<LibraryModel>,
         upcoming: Entity<UpcomingModel>,
         cx: &mut Context<Self>,
@@ -83,6 +85,7 @@ impl SeriesModel {
             cx.observe(&upcoming, |_, _, cx| cx.notify()),
         ];
         Self {
+            session,
             library,
             upcoming,
             series: Vec::new(),
@@ -139,7 +142,7 @@ impl SeriesModel {
     /// arrives. Waits for the library to load.
     pub fn load(&mut self, cx: &mut Context<Self>) {
         let library = self.library.read(cx);
-        if !library.is_loaded() || !Services::global(cx).has_scope(READ_CATALOG) {
+        if !library.is_loaded() || !self.session.allows(READ_CATALOG) {
             return;
         }
         let ids = started_series(library.entries());
@@ -147,16 +150,18 @@ impl SeriesModel {
         self.reload_task = None;
         self.status = SeriesStatus::Loading;
         cx.notify();
-        let client = Services::global(cx).client().clone();
+        let load = self
+            .session
+            .background(move |client| client.tracked_series(&ids));
         // Replacing the task drops a load still running: its series are older.
-        // A load that lands after signing out finds the model gone.
+        // A load that lands after signing out is dropped.
         self.load_task = Some(cx.spawn(async move |this, cx| {
-            let load = cx
-                .background_spawn(async move { client.tracked_series(&ids) })
-                .await;
+            let Some(load) = load.await else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 let failed = load.error.as_ref().map(|e| {
-                    SharedString::from(Services::error_message(e, Some(READ_CATALOG), cx))
+                    SharedString::from(this.session.error_message(e, Some(READ_CATALOG), cx))
                 });
                 if let Some(series) = merge_load(&this.series, load) {
                     this.series = series;

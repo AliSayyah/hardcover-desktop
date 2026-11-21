@@ -16,18 +16,18 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, SharedString,
-    Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
+    AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Subscription,
+    Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_SOCIAL;
 use hardcover_core::{BookId, CommunityReview, UserBookId};
 
 use super::{BookDetailView, Details};
-use crate::app_state::Services;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, date_text, rating_text};
 use crate::freshness::Stamp;
+use crate::session::{self, SessionScope};
 use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{Avatar, Block, BylineLink, RowSpacing, Sequence, Skeleton, Stars};
@@ -76,11 +76,7 @@ impl BookDetailView {
     /// Starts the fetch when `read:social` is granted while a book is shown
     /// ("Sign in again…" keeps the pane as it is).
     pub(super) fn observe_review_scope(cx: &mut Context<Self>) -> Subscription {
-        cx.observe_global::<Services>(|this, cx| {
-            if cx.has_global::<Services>() {
-                this.load_community_reviews(cx);
-            }
-        })
+        session::observe_grant(cx, Self::load_community_reviews)
     }
 
     /// The pane moved to another book: drops a fetch for the old one and
@@ -107,7 +103,7 @@ impl BookDetailView {
     /// Fetches the first page if there is none, or again if it is stale.
     /// Replacing more than one page needs `shown_again`.
     pub(super) fn revalidate_reviews(&mut self, shown_again: bool, cx: &mut Context<Self>) {
-        if !Services::global(cx).has_scope(READ_SOCIAL) {
+        if !session::has_scope(cx, READ_SOCIAL) {
             return;
         }
         let Some(book) = self.book(cx) else { return };
@@ -156,16 +152,19 @@ impl BookDetailView {
         let state = self.community_reviews.books.get(&id);
         let first = replace || state.is_none_or(|s| !s.loaded);
         let offset = state.filter(|_| !first).map_or(0, |s| s.next_offset);
-        let user = self.model.read(cx).user().map(|u| u.id);
-        let client = Services::global(cx).client().clone();
+        // Only the signed-in account's own id: a cached one may be another's.
+        let user = self.model.read(cx).verified_user_id();
+        let Some(session) = SessionScope::current(cx).cloned() else {
+            return;
+        };
         self.community_reviews.loading = Some(id);
         // Replacing the task cancels a fetch for a book no longer shown.
         self.community_reviews.task = Some(cx.spawn(async move |this, cx| {
             if let Some(delay) = delay {
                 cx.background_executor().timer(delay).await;
             }
-            let result = cx
-                .background_spawn(async move {
+            let Some(result) = session
+                .background(move |client| {
                     // Before the first sync the library doesn't know whose it is.
                     let me = match user {
                         Some(me) => me,
@@ -181,7 +180,10 @@ impl BookDetailView {
                     };
                     hardcover_core::Result::Ok((page, total))
                 })
-                .await;
+                .await
+            else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 if this.community_reviews.loading == Some(id) {
                     this.community_reviews.loading = None;
@@ -189,7 +191,7 @@ impl BookDetailView {
                 let error = result
                     .as_ref()
                     .err()
-                    .map(|e| SharedString::from(Services::error_message(e, Some(READ_SOCIAL), cx)));
+                    .map(|e| SharedString::from(session::error_message(e, Some(READ_SOCIAL), cx)));
                 let state = this.community_reviews.books.entry(id).or_default();
                 if first {
                     state.fetched = Some(Stamp::now(cx));
@@ -241,7 +243,7 @@ impl BookDetailView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !Services::global(cx).has_scope(READ_SOCIAL) {
+        if !session::has_scope(cx, READ_SOCIAL) {
             return None;
         }
         let muted = colors(cx).fg_muted;

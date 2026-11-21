@@ -11,8 +11,8 @@ use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LISTS};
 
 use super::list_dialog::open_new_list;
 use super::model::{ListsModel, ListsStatus};
-use crate::app_state::Services;
 use crate::format::{count_text, needs_permission};
+use crate::session;
 use crate::ui::{NavRow, sidebar_label};
 
 /// Opens a list as the workspace's destination.
@@ -27,14 +27,13 @@ pub fn lists_section(
     cx: &App,
 ) -> Option<Div> {
     let model = lists.read(cx);
-    let services = Services::global(cx);
-    if !services.has_scope(READ_LISTS)
+    if !session::has_scope(cx, READ_LISTS)
         || matches!(model.status(), ListsStatus::Idle)
         || !model.has_loaded()
     {
         return None;
     }
-    let can_write = services.has_scope(WRITE_LISTS);
+    let can_write = session::has_scope(cx, WRITE_LISTS);
     let rows = model.lists().iter().map(move |list| {
         let (id, count) = (list.id, list.books_count);
         let select = select.clone();

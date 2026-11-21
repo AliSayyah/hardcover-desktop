@@ -25,7 +25,7 @@ use hardcover_core::store::LibraryCache;
 use hardcover_core::{ListId, ReadingStatus};
 
 use crate::about::open_about;
-use crate::app_state::{CoverService, Services, Startup, startup};
+use crate::app_state::{CoverService, Startup, startup};
 use crate::book::detail_view::{BookDetailView, Subject};
 use crate::catalog::author_view::AuthorView;
 use crate::catalog::discover_view::DiscoverView;
@@ -38,6 +38,7 @@ use crate::freshness;
 use crate::goals::model::GoalsModel;
 use crate::goals::sidebar::GoalsSection;
 use crate::home::home_view::HomeView;
+use crate::io::{self, Priority};
 use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
 use crate::lists::list_view::ListView;
@@ -46,6 +47,7 @@ use crate::lists::sidebar::lists_section;
 use crate::search::search_view::SearchView;
 use crate::series::model::SeriesModel;
 use crate::series::tracker_view::SeriesTrackerView;
+use crate::session::{self, SessionScope};
 use crate::settings_view::{SettingsView, SignOutRequested};
 use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
@@ -93,10 +95,12 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // The user waits on it, so it goes ahead of anything else.
+        let started = io::run(Priority::Interactive, || (startup(), CoverService::open()));
         cx.spawn_in(window, async move |this, cx| {
-            let (startup, covers) = cx
-                .background_spawn(async move { (startup(), CoverService::open()) })
-                .await;
+            let Some((startup, covers)) = started.await else {
+                return;
+            };
             let _ = this.update_in(cx, |this, window, cx| {
                 cx.set_global(covers);
                 match startup {
@@ -107,8 +111,8 @@ impl Shell {
                         scopes,
                     } => {
                         this.cache.clone_from(&cache);
-                        let services = Services::new(client, session, cache, scopes);
-                        this.enter_workspace(services, window, cx);
+                        let session = SessionScope::new(client, session, cache, scopes);
+                        this.enter_workspace(session, window, cx);
                     }
                     Startup::SignedOut { cache } => {
                         this.cache = cache;
@@ -129,9 +133,15 @@ impl Shell {
         }
     }
 
-    fn enter_workspace(&mut self, services: Services, window: &mut Window, cx: &mut Context<Self>) {
-        cx.set_global(services);
-        let workspace = cx.new(|cx| Workspace::new(window, cx));
+    /// Signs in: the session lives as long as the workspace built for it.
+    fn enter_workspace(
+        &mut self,
+        session: SessionScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        session.install(cx);
+        let workspace = cx.new(|cx| Workspace::new(session, window, cx));
         self.subscription = Some(cx.subscribe_in(
             &workspace,
             window,
@@ -150,9 +160,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if cx.has_global::<Services>() {
-            cx.remove_global::<Services>();
-        }
+        SessionScope::uninstall(cx);
         ListsModel::release(cx);
         let sign_in = cx.new(|cx| {
             if keyring_unavailable {
@@ -164,13 +172,13 @@ impl Shell {
         self.subscription =
             Some(
                 cx.subscribe_in(&sign_in, window, |this, _, event: &SignedIn, window, cx| {
-                    let services = Services::new(
+                    let session = SessionScope::new(
                         event.client.clone(),
                         Some(event.session.clone()),
                         this.cache.clone(),
                         event.scopes.clone(),
                     );
-                    this.enter_workspace(services, window, cx);
+                    this.enter_workspace(session, window, cx);
                 }),
             );
         sign_in.update(cx, |view, cx| view.focus(window, cx));
@@ -216,6 +224,8 @@ pub enum Destination {
 pub struct SignedOut;
 
 pub struct Workspace {
+    /// The sign-in this workspace serves; ended first thing on signing out.
+    session: SessionScope,
     focus_handle: FocusHandle,
     model: Entity<LibraryModel>,
     destination: Destination,
@@ -270,10 +280,10 @@ impl Focusable for Workspace {
 }
 
 impl Workspace {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let model = cx.new(|_| LibraryModel::new());
+    fn new(session: SessionScope, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let model = cx.new(|_| LibraryModel::new(session.clone()));
         // Before the views: the book page finds the lists through the global.
-        let lists = ListsModel::init(cx);
+        let lists = ListsModel::init(session.clone(), cx);
         let list_page = cx.new(|cx| ListView::new(lists.clone(), model.clone(), window, cx));
         let library = cx.new(|cx| LibraryView::new(model.clone(), window, cx));
         let search = cx.new(|cx| SearchView::new(&model, window, cx));
@@ -287,14 +297,15 @@ impl Workspace {
             page
         });
         let navigator = Navigator::init(cx);
-        let reauthorize = cx.new(|_| Reauthorize::new(model.clone()));
-        let goals = cx.new(|cx| GoalsModel::new(&model, cx));
+        let reauthorize = cx.new(|_| Reauthorize::new(session.clone(), model.clone()));
+        let goals = cx.new(|cx| GoalsModel::new(session.clone(), &model, cx));
         let sidebar_scroll = ScrollHandle::new();
         let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
-        let upcoming = cx.new(|cx| UpcomingModel::new(model.clone(), cx));
+        let upcoming = cx.new(|cx| UpcomingModel::new(session.clone(), model.clone(), cx));
         let upcoming_page = cx.new(|cx| UpcomingView::new(upcoming.clone(), model.clone(), cx));
         let home = cx.new(|cx| HomeView::new(model.clone(), goals.clone(), upcoming.clone(), cx));
-        let series = cx.new(|cx| SeriesModel::new(model.clone(), upcoming.clone(), cx));
+        let series =
+            cx.new(|cx| SeriesModel::new(session.clone(), model.clone(), upcoming.clone(), cx));
         let series_view = cx
             .new(|cx| SeriesTrackerView::new(series.clone(), model.clone(), &upcoming, window, cx));
         model.update(cx, LibraryModel::start);
@@ -311,6 +322,7 @@ impl Workspace {
             }
         });
         let mut workspace = Self {
+            session,
             focus_handle: cx.focus_handle(),
             model,
             destination: Destination::Home,
@@ -643,7 +655,7 @@ impl Workspace {
 
     /// The session now holds a new grant: features it adds come alive.
     fn on_reauthorized(&mut self, event: &Reauthorized, cx: &mut Context<Self>) {
-        Services::set_scopes(event.scopes.clone(), cx);
+        self.session.set_scopes(event.scopes.clone(), cx);
         self.goals.update(cx, GoalsModel::load);
         self.lists.update(cx, ListsModel::reload);
         self.upcoming.update(cx, UpcomingModel::load);
@@ -705,23 +717,26 @@ impl Workspace {
         // A "Sign in again…" still waiting on the browser must not sign the
         // user back in once the session is gone.
         self.reauthorize.update(cx, Reauthorize::cancel);
+        // Nothing more goes out for this session, and nothing that lands is
+        // applied, whichever model or view asked for it.
+        self.session.end();
+        // The sync, the writes and the review fetches go, and the cache is
+        // cleared after every write already sent to it, so nothing of this
+        // account is written back.
+        let cleared = self.model.update(cx, LibraryModel::end_session);
+        let auth = self.session.auth().cloned();
+        let revoked = io::run(Priority::Interactive, move || {
+            if let Some(auth) = auth
+                && let Err(e) = auth.sign_out()
+            {
+                // Signed out locally either way; only the revoke failed.
+                eprintln!("hardcover: sign-out: {e}");
+            }
+        });
         cx.notify();
-        let services = Services::global(cx).clone();
         cx.spawn(async move |this, cx| {
-            cx.background_spawn(async move {
-                if let Some(session) = services.session()
-                    && let Err(e) = session.sign_out()
-                {
-                    // Signed out locally either way; only the revoke failed.
-                    eprintln!("hardcover: sign-out: {e}");
-                }
-                if let Some(cache) = services.cache()
-                    && let Err(e) = cache.clear()
-                {
-                    eprintln!("hardcover: could not clear the library cache: {e}");
-                }
-            })
-            .await;
+            cleared.await;
+            revoked.await;
             let _ = this.update(cx, |_, cx| cx.emit(SignedOut));
         })
         .detach();
@@ -813,7 +828,7 @@ impl Workspace {
             .then(|| self.goals_section.clone());
         let lists = self.sidebar_lists(cx);
         // Hidden without the catalogue, which the page reads.
-        let series_row = Services::global(cx).has_scope(READ_CATALOG).then(|| {
+        let series_row = session::has_scope(cx, READ_CATALOG).then(|| {
             let today = crate::dates::today();
             let count = self.series.update(cx, |s, cx| {
                 s.is_loaded().then(|| {
@@ -909,10 +924,9 @@ impl Workspace {
                         self.sidebar_scroll.max_offset().y > gpui_kit::Pixels::ZERO,
                         |this| this.border_t(size::HAIRLINE).border_color(colors.border),
                     )
-                    .when(
-                        self.reauthorize.read(cx).is_needed(Services::global(cx)),
-                        |this| this.child(self.reauthorize.clone()),
-                    )
+                    .when(self.reauthorize.read(cx).is_needed(), |this| {
+                        this.child(self.reauthorize.clone())
+                    })
                     .children(Self::render_update(cx))
                     .child(self.render_account(cx)),
             )
@@ -1069,10 +1083,9 @@ impl Workspace {
         let reauthorize = self.reauthorize.clone();
         let offer_permissions = {
             let notice = self.reauthorize.read(cx);
-            notice.is_dismissed() && {
-                let services = Services::global(cx);
-                services.session().is_some() && !services.missing_scopes().is_empty()
-            }
+            notice.is_dismissed()
+                && self.session.auth().is_some()
+                && !self.session.missing_scopes().is_empty()
         };
         AccountRow::new("account", avatar, username, status)
             .focus(&self.account_focus)
@@ -1248,7 +1261,7 @@ impl Render for Workspace {
                 this.show(Destination::Discover, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowSeries, window, cx| {
-                if Services::global(cx).has_scope(READ_CATALOG) {
+                if session::has_scope(cx, READ_CATALOG) {
                     this.show(Destination::Series, window, cx);
                 }
             }))

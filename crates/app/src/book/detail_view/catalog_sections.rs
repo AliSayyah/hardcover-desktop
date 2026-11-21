@@ -11,8 +11,8 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, Pixels, SharedString,
-    Styled as _, Window, div, prelude::FluentBuilder as _,
+    AnyElement, Context, IntoElement, ParentElement as _, Pixels, SharedString, Styled as _,
+    Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookDetails, BookId, BookSummary, RatingBucket};
@@ -20,7 +20,7 @@ use hardcover_core::{BookDetails, BookId, BookSummary, RatingBucket};
 use super::header::HEADER_GENRES;
 use super::your_book::paragraphs;
 use super::{BookDetailView, Details};
-use crate::app_state::{Services, release_cover_medium};
+use crate::app_state::release_cover_medium;
 use crate::bidi::WrappingText;
 use crate::catalog::navigation::Page;
 use crate::chip::{TagChip, TagGroup, tag_groups};
@@ -28,6 +28,7 @@ use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{average_rating_text, count_text};
 use crate::freshness::Fetched;
+use crate::session::{self, SessionScope};
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{
     Block, CoverShelf, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars, TextButton,
@@ -85,13 +86,18 @@ impl BookDetailView {
             self.similar.remove(&id);
         }
         self.similar_loading = Some(id);
-        let client = Services::global(cx).client().clone();
+        let Some(session) = SessionScope::current(cx).cloned() else {
+            return;
+        };
         // Replacing the task cancels the fetch for a book no longer shown.
         self.similar_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SIMILAR_DELAY).await;
-            let result = cx
-                .background_spawn(async move { client.books_by_ids(&ids) })
-                .await;
+            let Some(result) = session
+                .background(move |client| client.books_by_ids(&ids))
+                .await
+            else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
                 if this.similar_loading == Some(id) {
                     this.similar_loading = None;
@@ -100,7 +106,7 @@ impl BookDetailView {
                 match (this.similar.get_mut(&id), result) {
                     (Some(Similar::Ready(fetched)), result) => {
                         if let Err(e) = &result {
-                            Services::error_message(e, Some(READ_CATALOG), cx);
+                            session::error_message(e, Some(READ_CATALOG), cx);
                         }
                         fetched.refetched(result, cx);
                     }
@@ -109,7 +115,7 @@ impl BookDetailView {
                             .insert(id, Similar::Ready(Fetched::new(books, cx)));
                     }
                     (_, Err(e)) => {
-                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        let message = session::error_message(&e, Some(READ_CATALOG), cx);
                         this.similar.insert(id, Similar::Failed(message.into()));
                     }
                 }

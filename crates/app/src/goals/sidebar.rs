@@ -13,9 +13,9 @@ use hardcover_core::{Date, Goal};
 
 use super::goal_view::{open_goal, open_new_goal};
 use super::model::{GoalsModel, GoalsStatus};
-use crate::app_state::Services;
 use crate::format::{goal_pace, goal_period, goal_progress, needs_permission};
 use crate::library::model::LibraryModel;
+use crate::session;
 use crate::ui::{GoalRow, NavRow, sidebar_label};
 
 pub struct GoalsSection {
@@ -41,7 +41,7 @@ impl GoalsSection {
     /// and they have loaded (or failed to) at least once.
     pub fn is_visible(&self, cx: &App) -> bool {
         let model = self.goals.read(cx);
-        Services::global(cx).has_scope(READ_GOALS)
+        session::has_scope(cx, READ_GOALS)
             && !matches!(model.status(), GoalsStatus::Idle)
             && model.has_loaded()
     }
@@ -74,7 +74,7 @@ impl Render for GoalsSection {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let today = crate::dates::today();
         let model = self.goals.read(cx);
-        let can_write = Services::global(cx).has_scope(WRITE_GOALS);
+        let can_write = session::has_scope(cx, WRITE_GOALS);
         let goals = self.goals.clone();
         let library = self.library.clone();
 
