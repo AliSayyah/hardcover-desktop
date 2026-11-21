@@ -35,7 +35,8 @@ use super::{
     date_line, greeting, panel, see_all, sidebar_label,
 };
 use crate::bidi::WrappingText;
-use crate::chip::StatusChip;
+use crate::chip::genre::GENRES;
+use crate::chip::{StatusChip, TagChip, TagGroup, TagRow, tag_groups};
 use crate::cover::{Cover, CoverSize};
 use crate::design::type_roles::Family;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
@@ -116,6 +117,7 @@ impl Render for Gallery {
             .child(series_strips(cx))
             .child(list_rows(cx))
             .child(blocks_and_properties(cx))
+            .child(chips_and_tags())
             .child(skeletons())
             .child(kit_fixes(&self.input, cx))
             .child(empty(cx))
@@ -549,6 +551,93 @@ fn blocks_and_properties(cx: &App) -> AnyElement {
                     .action(div().caption(cx).child("12 reviews"))
                     .child(reviews),
             ),
+    )
+}
+
+fn chips_and_tags() -> AnyElement {
+    let statuses = [
+        ReadingStatus::WantToRead,
+        ReadingStatus::CurrentlyReading,
+        ReadingStatus::Read,
+        ReadingStatus::Paused,
+        ReadingStatus::DidNotFinish,
+        ReadingStatus::Ignored,
+    ];
+    // Every genre icon, then genres that match none (one in Persian).
+    let genres = GENRES
+        .iter()
+        .map(|genre| TagChip::genre(genre.example))
+        .chain(["General", "ادبیات فارسی"].map(TagChip::genre));
+    // The pane is as narrow as 240 inside its inset; one tag is longer
+    // than that and ends in an ellipsis.
+    let tags = |id: &'static str, long: bool| {
+        Block::new("Tags")
+            .action(
+                Button::new(id)
+                    .ghost()
+                    .small_control()
+                    .label("Show 16 more"),
+            )
+            .child(tag_groups([
+                TagGroup::new(
+                    "Genres",
+                    [
+                        "Fantasy",
+                        "Mystery",
+                        "Magical Realism",
+                        "Literary Fiction",
+                        "Literature & Fiction",
+                        "رمان",
+                    ]
+                    .map(TagChip::genre),
+                ),
+                TagGroup::new(
+                    "Moods",
+                    [
+                        "mysterious",
+                        "reflective",
+                        "adventurous",
+                        "emotional",
+                        "dark",
+                        "hopeful",
+                    ]
+                    .map(TagChip::new),
+                ),
+                TagGroup::new(
+                    "Content warnings",
+                    [
+                        "kidnapping",
+                        "Mental illness",
+                        "confinement",
+                        "Death",
+                        "خشونت",
+                    ]
+                    .map(|t| TagChip::new(t).warning(true)),
+                ),
+                TagGroup::new(
+                    "Other tags",
+                    [
+                        "Loveable Characters",
+                        "Strong Character Development",
+                        "Character driven",
+                        "شخصیت‌پردازی قوی",
+                    ]
+                    .map(TagChip::new)
+                    .into_iter()
+                    .chain(long.then(|| {
+                        TagChip::new("An extraordinarily long tag that never fits on one line")
+                    })),
+                ),
+            ]))
+    };
+    specimen(
+        "Chips and tags",
+        v_flex()
+            .gap_6()
+            .child(h_flex().gap_1p5().children(statuses.map(StatusChip)))
+            .child(div().max_w(size::PROSE).child(TagRow::new(genres)))
+            .child(div().max_w(size::PROSE).child(tags("g-tags", false)))
+            .child(div().w(rems(15.)).child(tags("g-tags-narrow", true))),
     )
 }
 

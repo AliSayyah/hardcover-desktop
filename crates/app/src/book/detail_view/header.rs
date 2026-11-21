@@ -29,7 +29,7 @@ use crate::app_state::{Services, release_cover_image};
 use crate::bidi::{WrappingText, is_rtl};
 use crate::book::star_rating::StarRating;
 use crate::catalog::navigation::Page;
-use crate::chip::{TagChip, status_icon};
+use crate::chip::{TagChip, TagRow, status_icon};
 use crate::cover::{Cover, CoverArt, CoverSize, detail_art};
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{
@@ -147,11 +147,9 @@ impl BookDetailView {
             })
             .when(!genres.is_empty(), |this| {
                 this.child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap_1()
+                    div()
                         .pt_2()
-                        .children(genres.into_iter().map(TagChip::new)),
+                        .child(TagRow::new(genres.into_iter().map(TagChip::genre))),
                 )
             });
         // The action row sits at the cover's foot, or 16 under the info

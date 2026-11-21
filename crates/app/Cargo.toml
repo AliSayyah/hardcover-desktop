@@ -30,6 +30,8 @@ unicode-bidi-mirroring = "0.4"
 gpui-base = { version = "0.10", features = ["test-support"] }
 gpui-component = { version = "0.10", features = ["test-support"] }
 gpui-pre = { version = "=0.3.12", features = ["test-support"] }
+# Reads the demo catalogue in the genre icon test (`chip::genre`).
+serde_json = "1"
 # The demo client, for the library model's sync tests.
 hardcover-core = { path = "../hardcover-core", features = ["demo"] }
 tempfile = "3"

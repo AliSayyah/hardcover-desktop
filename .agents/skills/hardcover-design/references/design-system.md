@@ -83,13 +83,14 @@ selected row.
 | `cloth-ink` | `#F4ECDD` | `#F4ECDD` | Type and stamp on a cloth cover |
 
 Accent is used on progress, the primary commit, the focus ring, the selected
-sidebar icon, links that open the browser, and the brand icon. Nothing else.
+sidebar icon, links that open the browser, the brand icon, and a genre
+chip's icon. Nothing else.
 
 Contrast, checked over every surface alone, hovered and selected:
 - `fg-muted` is at least 4.7:1 in both themes (WCAG AA), so it may carry
   information;
 - `fg-faint` is about 3.7:1, so it must never carry anything a reader needs;
-- accent on paper is at least 5:1.
+- accent on paper is at least 5:1, and on a chip at least 5.3:1.
 
 A new colour role needs the same check. The mockup's console audit does it.
 
@@ -170,6 +171,7 @@ One scale, named by the relationship it expresses.
 | --- | --- | --- | --- |
 | `s-2` | 2 | `gap_0p5` | Optical; gap between list rows; stars |
 | `s-4` | 4 | `gap_1` | Parts of one control; title to author |
+| `s-6` | 6 | `gap_1p5` | Chips in a wrapped group, both ways; a tag group's label to its chips |
 | `s-8` | 8 | `gap_2` | Closely related controls; icon to label; sidebar inset |
 | `s-12` | 12 | `gap_3` | One group: cover to text in a row; list header |
 | `s-16` | 16 | `gap_4` | Groups in a section; panel and list inset |
@@ -345,8 +347,20 @@ The two kinds:
 - **StatusChip:** a book's library status at the end of a catalogue row, with
   its shelf's sidebar icon. The icons are book-open, inbox, circle-check,
   pause, ban and eye-off.
-- **TagChip:** a catalogue tag. A content warning adds the warning icon in
-  `warning`, which is the only colour a chip ever carries.
+- **TagChip:** a catalogue tag.
+  - A genre adds an icon chosen from its name, in `accent`: rocket for
+    science fiction, wand-sparkles for fantasy, heart for romance, and so on
+    (`chip::genre`, about 40 genres, matched on normalised words with the
+    common variants: "Sci-Fi", "SF", "YA", "Children's", "Non-Fiction"). A
+    genre that matches none has no icon; an icon is never guessed.
+  - A content warning adds the warning icon in `warning`.
+  - Moods and other tags have no icon.
+  - Those two icon colours are the only colours a chip ever carries; the
+    pill and its text stay neutral.
+  - The icon sits on the chip's leading (left) side, a right-to-left tag
+    too: the interface isn't mirrored.
+- **Wrapped chips** (`TagRow`): chips that wrap across a width sit 6 apart
+  both ways (`s-6`), in the header and in the Tags block alike.
 
 Never colour-code chips, and never use a badge for ordinary metadata.
 
@@ -621,7 +635,7 @@ out there exactly as it did before this rule.
   - the facts: muted and tabular ("2021 · 476 pages");
   - Hardcover's average: a 12 px muted star and "4.51 average · 9,223
     ratings";
-  - the tags: TagChips, 4 apart;
+  - the genres: genre TagChips (with their icons), wrapped 6 apart;
   - at the foot of the cover, the action row: the status menu button, then
     the rating control (20 px stars and "Rate"), 16 apart.
 - **Then one panel, 24 below:**
@@ -636,6 +650,11 @@ out there exactly as it did before this rule.
   (a property list: Edition, Owned, Privacy, Added). The other existing
   blocks (your review, reads, lists, series, other readers' reviews,
   similar books) follow the same pattern.
+- **Tags:** the genres past the header's first six, then moods, content
+  warnings and other tags, each a group, 16 apart: the group's name
+  ("Content warnings") in `label`, and 6 below it its chips, wrapped 6 apart
+  across the block's width. Each group shows six until the block's small
+  ghost "Show N more" (then "Show fewer").
 
 ### Full book page (over Discover, search, a series or an author)
 

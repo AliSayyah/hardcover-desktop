@@ -3175,6 +3175,7 @@ dependencies = [
  "gpui-pre",
  "hardcover-core",
  "image",
+ "serde_json",
  "tempfile",
  "unicode-bidi",
  "unicode-bidi-mirroring",

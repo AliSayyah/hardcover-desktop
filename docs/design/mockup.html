@@ -101,6 +101,7 @@
   /* Spacing: one scale, named by relationship */
   --s-2: 2px;   /* optical */
   --s-4: 4px;   /* parts of one control */
+  --s-6: 6px;   /* chips in a wrapped group; a tag group's label to its chips */
   --s-8: 8px;   /* closely related */
   --s-12: 12px; /* one group */
   --s-16: 16px; /* groups in a section; panel inset */
@@ -241,6 +242,12 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 
 .chip { display: inline-flex; align-items: center; gap: var(--s-4); height: var(--h-chip); padding: 0 var(--s-8); border-radius: var(--r-pill); background: var(--chip); color: var(--fg-muted); font-size: var(--t-12); font-weight: 500; white-space: nowrap; flex: none; }
 .chip svg.warn { color: var(--warning); }
+.chip svg.genre { color: var(--accent); }
+/* Wrapped chips sit 6 apart both ways; the Tags block's groups 16 apart,
+   each label 6 above its chips. */
+.tag-row { display: flex; flex-wrap: wrap; gap: var(--s-6); }
+.tag-groups { display: flex; flex-direction: column; gap: var(--s-16); }
+.tag-groups .label { margin-bottom: var(--s-6); }
 
 .stars { display: inline-flex; gap: var(--s-2); align-items: center; flex: none; }
 .star { position: relative; width: 16px; height: 16px; }
@@ -347,7 +354,7 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .bh-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s-4); }
 .bh-by { font-size: var(--t-16); line-height: var(--l-16); margin-bottom: var(--s-4); }
 .bh-fact { color: var(--fg-muted); display: flex; gap: var(--s-4); align-items: center; }
-.bh-tags { display: flex; gap: var(--s-4); flex-wrap: wrap; margin-top: var(--s-8); }
+.bh-tags { display: flex; gap: var(--s-6); flex-wrap: wrap; margin-top: var(--s-8); }
 .actbar { display: flex; align-items: center; gap: var(--s-16); margin-top: auto; padding-top: var(--s-16); }
 .bh + .panel { margin-top: var(--s-24); }
 .start-panel { display: flex; align-items: center; gap: var(--s-12); }
@@ -503,10 +510,27 @@ const P = {
   left: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
   ext: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
   layers: '<path d="M7 2h10"/><path d="M5 6h14"/><rect width="18" height="12" x="3" y="10" rx="2"/>',
+  rocket: '<path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09"/><path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05"/>',
+  orbit: '<path d="M20.341 6.484A10 10 0 0 1 10.266 21.85"/><path d="M3.659 17.516A10 10 0 0 1 13.74 2.152"/><circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>',
+  compass: '<circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/>',
+  wand: '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>',
+  bookmarked: '<path d="M10 2v8l3-3 3 3V2"/><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/>',
+  landmark: '<path d="M10 18v-7"/><path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M3 22h18"/><path d="M6 18v-7"/>',
+  sparkles: '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/>',
   warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
 };
 const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</svg>`;
+// A genre's chip carries the icon its name maps to (chip::genre in the app),
+// in accent; a genre that maps to none has no icon. Only the genres the
+// mockup shows are listed.
+const GENRE_ICON = { "Science Fiction": "rocket", "Space": "orbit", "Adventure": "compass", "Fantasy": "wand", "High Fantasy": "wand", "Epic Fantasy": "wand", "Literary Fiction": "bookmarked", "Classics": "landmark", "Mystery": "search", "Magical Realism": "sparkles" };
+const genreChip = g => `<span class="chip">${GENRE_ICON[g] ? ic(GENRE_ICON[g], "xs genre") : ""}${g}</span>`;
+const tagChip = t => `<span class="chip">${t}</span>`;
+const warnChip = t => `<span class="chip">${ic("warn", "xs warn")}${t}</span>`;
+// The Tags block: each group's label above its chips, which wrap across the
+// block. Genres show here only past the header's first six.
+const tagsBlock = (groups, more) => `<div class="block">${blockH("Tags", more ? `<span class="btn sm ghost">Show ${more} more</span>` : "")}<div class="tag-groups">${groups.map(([label, chips]) => `<div><div class="label">${label}</div><div class="tag-row">${chips.join("")}</div></div>`).join("")}</div></div>`;
 const STAR = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><polygon points="12 2.6 14.85 8.55 21.4 9.35 16.6 13.85 17.85 20.35 12 17.15 6.15 20.35 7.4 13.85 2.6 9.35 9.15 8.55"/></svg>';
 // own: gold; cat: the muted text colour (catalogue figures)
 function stars(v, kind = "own", size = "") {
@@ -620,7 +644,7 @@ function bookHeader(b, size, opts = {}) {
       ${b.s ? `<div><span class="textbtn">${b.s}</span></div>` : ""}
       <div class="bh-fact num">${facts}</div>
       ${b.r && !opts.noAverage ? `<div class="bh-fact num">${star1()}${b.r} average · ${b.rc.toLocaleString("en")} ratings</div>` : ""}
-      ${b.g ? `<div class="bh-tags">${b.g.map(g => `<span class="chip">${g}</span>`).join("")}</div>` : ""}
+      ${b.g ? `<div class="bh-tags">${b.g.map(genreChip).join("")}</div>` : ""}
       <div class="actbar">${opts.actions || ""}</div>
     </div></div>`;
 }
@@ -667,6 +691,7 @@ function library(kind) {
         ${progress("Page 312 of 476", 66, "Started Nov 1 · 16 pages a day · done around Dec 1")}
         <div class="block">${blockH("Notes", `<span class="btn sm ghost">${ic("pencil", "xs")}Edit</span>`)}<div>Borrowed from the library, due back on the 30th.</div></div>
         <div class="block">${blockH("About this book")}<div class="prose">A schoolteacher wakes up alone on a spaceship light-years from home, with no memory of how he got there, and slowly realises he may be Earth's last chance against a microbe that is dimming the sun.</div></div>
+        ${tagsBlock([["Moods", ["adventurous", "funny", "hopeful", "inspiring"].map(tagChip)], ["Content warnings", ["Death", "Grief"].map(warnChip)], ["Other tags", ["Strong Character Development", "Plot driven", "Loveable Characters"].map(tagChip)]])}
         <div class="block">${blockH("Details")}${details()}</div>
       </div>
     </div>`;
@@ -726,6 +751,7 @@ function bookPage() {
         ${bookHeader(B.wok, "xxl", { title: "d-30", noAverage: true, actions: statusBtn("book", "Currently reading") + rate })}
         ${progress("Page 418 of 1,007", 42, "Started Oct 20 · 13 pages a day · done around Jan 4")}
         <div class="block">${blockH("About this book")}<div class="prose">On a storm-scoured world, a slave soldier, a scholar with a secret and a highprince haunted by visions are drawn toward a war older than any of them know. The first book of the Stormlight Archive.</div></div>
+        ${tagsBlock([["Moods", ["adventurous", "emotional", "tense", "dark", "hopeful", "reflective"].map(tagChip)], ["Content warnings", ["Violence", "Slavery", "Death", "Suicidal thoughts", "War"].map(warnChip)], ["Other tags", ["Strong Character Development", "Complex World", "Character driven", "Diverse Characters"].map(tagChip)]], 9)}
         <div class="block">${blockH("Your review", `<span class="btn sm">${ic("pencil", "xs")}Write a review…</span>`)}<div class="muted">No review yet.</div></div>
         <div class="block">${blockH("Similar books")}<div class="shelf lg">${[B.mist, B.dune, B.hob, B.circe, B.moby, B.fw].map(b => `<div class="it">${cover(b, "lg", true)}<div class="tt strong clamp-2">${b.t}</div></div>`).join("")}</div></div>
       </div>
@@ -941,6 +967,8 @@ function over(theme, top, host) {
 }
 // Every fill text can sit on: each host, alone and under hover and selected.
 const fills = theme => HOSTS.flatMap(h => [tv(theme, h), over(theme, "--hover", h), over(theme, "--selected", h)]);
+// A chip on each host: accent carries a genre's icon there.
+const chips = theme => HOSTS.map(h => over(theme, "--chip", h));
 const worst = (theme, fg, on) => Math.min(...(on || fills(theme)).map(s => contrast(tv(theme, fg), s)));
 const plain = (theme, ...names) => names.map(n => tv(theme, n));
 
@@ -957,7 +985,7 @@ function tokensTheme(theme, themeName) {
       ${sw("border", "--border", "hairlines")}${sw("border-strong", "--border-strong", "control outlines")}${sw("track", "--track", "empty progress")}${sw("star-empty", "--star-empty", "an unfilled star")}
     </div></div>
     <div><h4>Ink: contrast is the lowest over bg, sidebar, surface and raised, each alone, hovered and selected</h4><div class="sw">
-      ${ink("fg", "--fg", "text")}${ink("fg-muted", "--fg-muted", "secondary text, counts")}${ink("fg-faint", "--fg-faint", "placeholder, disabled only", plain(theme, "--bg", "--raised"))}${ink("accent", "--accent", "links, selected icon")}
+      ${ink("fg", "--fg", "text")}${ink("fg-muted", "--fg-muted", "secondary text, counts")}${ink("fg-faint", "--fg-faint", "placeholder, disabled only", plain(theme, "--bg", "--raised"))}${ink("accent", "--accent", "links, selected icon, genre icons", [...fills(theme), ...chips(theme)])}
       ${sw("accent", "--accent", "progress, primary commit", "--accent-fg")}${sw("accent-soft", "--accent-soft", "the avatar")}${sw("ring", "--ring", "focus ring, 2 px")}${sw("gold", "--gold", "your rating only")}
       ${ink("danger", "--danger", "destructive", plain(theme, "--bg", "--raised"))}${ink("warning", "--warning", "content-warning icon", [over(theme, "--chip", "--bg")])}
     </div></div>
@@ -975,9 +1003,9 @@ function tokensTheme(theme, themeName) {
       <span class="row-c g-8">${stars(4.51, "cat")}<span class="small muted">Hardcover average</span></span>
       <span class="row-c g-8">${stars(0, "own")}<span class="small muted">unrated</span></span>
     </div></div>
-    <div><h4>Chips: neutral; the icon's shape tells statuses apart</h4><div class="wrap c" style="gap:var(--s-4)">
+    <div><h4>Chips: neutral; the icon's shape tells statuses apart; a genre's icon in accent, a warning's in warning; 6 apart when they wrap</h4><div class="wrap c" style="gap:var(--s-6)">
       ${statuses.map(([i, l]) => `<span class="chip">${ic(i, "xs")}${l}</span>`).join("")}
-      <span class="chip">Fantasy</span><span class="chip">${ic("warn", "xs warn")}Violence</span>
+      ${["Fantasy", "Science Fiction", "Mystery", "Classics", "General"].map(genreChip).join("")}${tagChip("hopeful")}${warnChip("Violence")}
     </div></div>
     <div><h4>Control states: one treatment each, on every control</h4>
       <div class="wrap" style="gap:var(--s-16)">
@@ -1242,9 +1270,9 @@ const shots = [
   ["Discover, wide (2560)", "light · a catalogue page keeps its list's frame and shows the selected book in the pane beside it, with its rail; a click selects, Enter or a double click opens the full page", "light", 1000, discoverWide(), 2560],
   ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail; Coming soon closes the main column (scrolled content shown in full)", "light", 1020, home()],
   ["Home", "dark", "dark", 1020, home()],
-  ["Library: Currently reading", "light · the book's tools sit in a bar above it; status and rating first, then progress", "light", 800, library("cr")],
+  ["Library: Currently reading", "light · the book's tools sit in a bar above it; status and rating first, then progress", "light", 980, library("cr")],
   ["Library: Want to read", "dark · a Persian title, a book with no cover, a hovered row · Start reading sits in the panel that holds progress once the book is started", "dark", 800, library("wtr")],
-  ["Book page over Discover", "light · the rail starts at the top; scrolled content shown in full", "light", 920, bookPage()],
+  ["Book page over Discover", "light · the rail starts at the top; scrolled content shown in full", "light", 1140, bookPage()],
   ["Book page, scrolled to Reviews", "dark · other readers' reviews: a byline that opens their profile, muted stars, a collapsed long review, a spoiler, a Persian review", "dark", 900, reviewsPage()],
   ["Coming soon", "light · the full list over Home, grouped by month, then by year", "light", 760, upcomingPage()],
   ["Series", "light · the default filter, Not finished: finished series are left out, and a line at the foot says how many", "light", 1150, seriesPage()],
@@ -1253,7 +1281,7 @@ const shots = [
   ["The marks under each book", "light · drawn at 2× · the icon and position carry the state; colour never does", "light", 330, legend()],
   ["Series: empty", "light · nobody has started a series yet", "light", 760, seriesEmpty()],
   ["Library: empty states", "light · a filter with no matches and no book selected, in the app's own copy", "light", 760, library("none")],
-  ["Tokens: colour, elevation and states", "both themes", null, 2300, tokensTheme("light", "Light") + tokensTheme("dark", "Dark")],
+  ["Tokens: colour, elevation and states", "both themes", null, 2344, tokensTheme("light", "Light") + tokensTheme("dark", "Dark")],
   ["Tokens: type, space, shape and size", "the same in both themes", null, 1328, tokensScales()],
 ];
 const ONLY = null; // e.g. [4, 5] to render only some shots while checking
@@ -1278,7 +1306,7 @@ document.fonts.ready.then(() => {
   const ok = ["600 16px Literata", "16px Inter", "16px Vazirmatn"].map(f => `${f}: ${document.fonts.check(f)}`);
   console.log("fonts", ok.join(", "));
   for (const t of ["light", "dark"]) {
-    const line = [["--fg"], ["--fg-muted", [...fills(t), over(t, "--chip", "--bg"), over(t, "--chip", "--sidebar")]], ["--fg-faint", plain(t, "--bg", "--raised")], ["--accent"], ["--danger", plain(t, "--bg", "--raised")], ["--warning", [over(t, "--chip", "--bg")]]]
+    const line = [["--fg"], ["--fg-muted", [...fills(t), over(t, "--chip", "--bg"), over(t, "--chip", "--sidebar")]], ["--fg-faint", plain(t, "--bg", "--raised")], ["--accent", [...fills(t), ...chips(t)]], ["--danger", plain(t, "--bg", "--raised")], ["--warning", [over(t, "--chip", "--bg")]]]
       .map(([fg, on]) => `${fg.slice(2)} ${worst(t, fg, on).toFixed(2)}`).join(", ");
     console.log(`contrast ${t} (lowest over the fills each is used on): ${line}; accent-fg on accent ${contrast(tv(t, "--accent-fg"), tv(t, "--accent")).toFixed(2)}`);
     // State fills must step the same way on every host: rest < hover < selected in distance from the host.

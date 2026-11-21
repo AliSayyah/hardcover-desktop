@@ -8,15 +8,22 @@
 //!   `StatusIconChip` is its compact form, for a row too narrow for the
 //!   name: the icon alone on the pill, the name in its tooltip.
 //! - `TagChip`: one catalogue tag (a genre, a mood, a content warning) on the
-//!   book page. Content warnings carry the warning icon in `warning`, the
-//!   only colour a chip ever has.
+//!   book page. A genre carries an icon chosen from its name
+//!   ([`genre::genre_icon`]) in `accent`, a content warning the warning icon
+//!   in `warning`: the only two colours a chip ever has. Moods and other
+//!   tags have no icon.
+//! - `TagRow`: chips wrapping across the width, 6 apart both ways (`s-6`):
+//!   the book header's genres and each group of the Tags block.
+//! - `TagGroup`: one group of the Tags block, its label (`label` role) 6
+//!   above its `TagRow`; `tag_groups` stacks them 16 apart.
+
+pub mod genre;
 
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{Icon, IconName, Sizable as _};
+use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    App, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
-    prelude::FluentBuilder as _,
+    AnyElement, App, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
+    RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
 };
 use hardcover_core::ReadingStatus;
 
@@ -82,42 +89,133 @@ impl RenderOnce for StatusIconChip {
     }
 }
 
+/// What a tag is, which decides its icon.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TagKind {
+    Plain,
+    Genre,
+    Warning,
+}
+
 /// One catalogue tag. A long one is cut short with an ellipsis.
 #[derive(IntoElement)]
 pub struct TagChip {
     text: SharedString,
-    warning: bool,
+    kind: TagKind,
 }
 
 impl TagChip {
+    /// A mood or another tag: no icon.
     pub fn new(text: impl Into<SharedString>) -> Self {
         Self {
             text: text.into(),
-            warning: false,
+            kind: TagKind::Plain,
+        }
+    }
+
+    /// A genre: the icon its name maps to, in `accent`, or none when the
+    /// name matches no genre.
+    pub fn genre(text: impl Into<SharedString>) -> Self {
+        Self {
+            kind: TagKind::Genre,
+            ..Self::new(text)
         }
     }
 
     /// Marks a content warning with the warning icon.
     pub fn warning(mut self, warning: bool) -> Self {
-        self.warning = warning;
+        if warning {
+            self.kind = TagKind::Warning;
+        } else if self.kind == TagKind::Warning {
+            self.kind = TagKind::Plain;
+        }
         self
     }
 }
 
 impl RenderOnce for TagChip {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = colors(cx);
+        // On the chip's leading (left) side, whatever the tag's direction:
+        // the interface is never mirrored (`hardcover-design`,
+        // Right-to-left text).
+        let icon: Option<AnyElement> = match self.kind {
+            TagKind::Plain => None,
+            TagKind::Genre => genre::genre_icon(&self.text).map(|icon| {
+                Icon::new(icon)
+                    .xsmall()
+                    .flex_shrink_0()
+                    .text_color(colors.accent)
+                    .into_any_element()
+            }),
+            TagKind::Warning => Some(
+                Icon::new(IconName::TriangleAlert)
+                    .xsmall()
+                    .flex_shrink_0()
+                    .text_color(colors.warning)
+                    .into_any_element(),
+            ),
+        };
         pill(cx)
             .flex_shrink(1.)
             .max_w_full()
             .min_w_0()
-            .when(self.warning, |this| {
-                this.child(
-                    Icon::new(IconName::TriangleAlert)
-                        .xsmall()
-                        .flex_shrink_0()
-                        .text_color(colors(cx).warning),
-                )
-            })
+            .children(icon)
             .child(div().min_w_0().truncate().child(self.text))
     }
+}
+
+/// Tags wrapping across the width, 6 apart both ways (`s-6`, the gap of a
+/// wrapped chip group).
+#[derive(IntoElement)]
+pub struct TagRow(Vec<TagChip>);
+
+impl TagRow {
+    pub fn new(chips: impl IntoIterator<Item = TagChip>) -> Self {
+        Self(chips.into_iter().collect())
+    }
+}
+
+impl RenderOnce for TagRow {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        h_flex()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .gap_1p5()
+            .children(self.0)
+    }
+}
+
+/// One group of the Tags block ("Genres", "Moods", "Content warnings",
+/// "Other tags"): its label in the `label` role, 6 above its chips, which
+/// take the block's whole width.
+#[derive(IntoElement)]
+pub struct TagGroup {
+    label: SharedString,
+    row: TagRow,
+}
+
+impl TagGroup {
+    pub fn new(label: impl Into<SharedString>, chips: impl IntoIterator<Item = TagChip>) -> Self {
+        Self {
+            label: label.into(),
+            row: TagRow::new(chips),
+        }
+    }
+}
+
+impl RenderOnce for TagGroup {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        v_flex()
+            .w_full()
+            .gap_1p5()
+            .child(div().label(cx).child(self.label))
+            .child(self.row)
+    }
+}
+
+/// The Tags block's groups, 16 apart (`s-16`, groups in a section).
+pub fn tag_groups(groups: impl IntoIterator<Item = TagGroup>) -> Div {
+    v_flex().w_full().gap_4().children(groups)
 }
