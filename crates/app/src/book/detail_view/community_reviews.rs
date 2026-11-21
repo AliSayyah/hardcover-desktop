@@ -14,7 +14,8 @@ use std::collections::HashSet;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Context, IntoElement, ParentElement as _, Styled as _, Subscription, Window, div,
+    AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Subscription,
+    Window, div,
     prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_SOCIAL;
@@ -28,7 +29,7 @@ use crate::resource::Demand;
 use crate::session;
 use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::SmallControl as _;
-use crate::ui::{Avatar, Block, BylineLink, RowSpacing, Sequence, Skeleton, Stars};
+use crate::ui::{Avatar, Block, BylineLink, LoadFailed, RowSpacing, Sequence, Skeleton, Stars};
 
 /// A collapsed review shows about this many lines...
 const COLLAPSED_LINES: usize = 6;
@@ -100,20 +101,14 @@ impl BookDetailView {
             }
             None => (None, None, None, false),
         };
-        let retry = |id: &'static str, cx: &mut Context<Self>| {
-            Button::new(id)
-                .small_control()
-                .label("Try again")
-                .on_click(cx.listener(|this, _, _, cx| this.more_reviews(cx)))
+        let retry = |id: &'static str, message: SharedString, cx: &mut Context<Self>| {
+            LoadFailed::new(id, message).on_retry(cx.listener(|this, _, _, cx| this.more_reviews(cx)))
         };
         let body: AnyElement = match &state {
             None => match first_error {
-                Some(message) if !loading => h_flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(div().body().text_color(muted).child(message))
-                    .child(retry("retry-reviews", cx))
-                    .into_any_element(),
+                Some(message) if !loading => {
+                    retry("retry-reviews", message, cx).into_any_element()
+                }
                 // Waiting out the delay or loading: the shape of two reviews.
                 _ => placeholder(loading).into_any_element(),
             },
@@ -136,28 +131,16 @@ impl BookDetailView {
                                 .map(|review| self.render_community_review(review, cx)),
                         ),
                 )
-                .when(state.has_more || more_error.is_some(), |this| {
-                    this.child(
-                        h_flex()
-                            .flex_wrap()
-                            .gap_2()
-                            .items_center()
-                            .when_some(more_error.clone().filter(|_| !loading), |this, e| {
-                                this.child(div().body().text_color(muted).child(e))
-                                    .child(retry("retry-more-reviews", cx))
-                            })
-                            .when(more_error.is_none() || loading, |this| {
-                                this.child(
-                                    Button::new("more-reviews")
-                                        .small_control()
-                                        .label("Show more reviews")
-                                        .loading(loading)
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| this.more_reviews(cx)),
-                                        ),
-                                )
-                            }),
-                    )
+                .map(|this| match more_error.clone().filter(|_| !loading) {
+                    Some(error) => this.child(retry("retry-more-reviews", error, cx)),
+                    None if state.has_more => this.child(
+                        Button::new("more-reviews")
+                            .small_control()
+                            .label("Show more reviews")
+                            .loading(loading)
+                            .on_click(cx.listener(|this, _, _, cx| this.more_reviews(cx))),
+                    ),
+                    None => this,
                 })
                 .into_any_element(),
         };

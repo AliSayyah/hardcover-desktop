@@ -33,7 +33,7 @@ use crate::session;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
-use crate::ui::{Block, ExternalLink, Skeleton};
+use crate::ui::{Block, ExternalLink, LoadFailed, Skeleton};
 
 /// What the editor holds, or held when it was opened.
 #[derive(Debug, Clone, PartialEq)]
@@ -463,16 +463,8 @@ impl BookDetailView {
             }
             self.render_saved_review(entry, review, cx)
         } else if let Some(error) = error.clone().filter(|_| !fetched) {
-            h_flex()
-                .flex_wrap()
-                .gap_2()
-                .child(div().body().text_color(muted).child(error))
-                .child(
-                    Button::new("retry-review")
-                        .small_control()
-                        .label("Try again")
-                        .on_click(cx.listener(|this, _, _, cx| this.retry_review(cx))),
-                )
+            LoadFailed::new("retry-review", error)
+                .on_retry(cx.listener(|this, _, _, cx| this.retry_review(cx)))
                 .into_any_element()
         } else if !fetched {
             // Not fetched yet: a pulse only while the request runs.
@@ -492,23 +484,11 @@ impl BookDetailView {
         };
         // A review shown from before a failed refetch may be out of date.
         let refresh_failed = error.filter(|_| fetched).map(|error| {
-            h_flex()
-                .flex_wrap()
-                .gap_2()
-                .items_center()
-                .child(
-                    div()
-                        .min_w_0()
-                        .body()
-                        .text_color(muted)
-                        .child(format!("Couldn't refresh your review. {error}")),
-                )
-                .child(
-                    Button::new("refresh-review")
-                        .small_control()
-                        .label("Try again")
-                        .on_click(cx.listener(|this, _, _, cx| this.retry_review(cx))),
-                )
+            LoadFailed::new(
+                "refresh-review",
+                format!("Couldn't refresh your review. {error}"),
+            )
+            .on_retry(cx.listener(|this, _, _, cx| this.retry_review(cx)))
         });
         Block::new("Your review")
             .when_some(action, crate::ui::Block::action)

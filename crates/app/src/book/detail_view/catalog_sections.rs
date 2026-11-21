@@ -29,8 +29,8 @@ use crate::resource::Demand;
 use crate::resource::catalog::SIMILAR_FETCHED;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{
-    Block, CoverShelf, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars, TextButton,
-    books_that_fit,
+    Block, CoverShelf, Lane, LoadFailed, Meter, RailSection, Skeleton, SkeletonText, Stars,
+    TextButton, books_that_fit,
 };
 
 /// Similar books shown in one column (the narrow pane, the page without a
@@ -116,16 +116,8 @@ impl BookDetailView {
                     .child("No description on Hardcover")
                     .into_any_element(),
             },
-            (None, Some(message)) if !loading => h_flex()
-                .flex_wrap()
-                .gap_2()
-                .child(div().body().text_color(muted).child(message))
-                .child(
-                    Button::new("retry-details")
-                        .small_control()
-                        .label("Try again")
-                        .on_click(cx.listener(|this, _, _, cx| this.retry_details(cx))),
-                )
+            (None, Some(message)) if !loading => LoadFailed::new("retry-details", message)
+                .on_retry(cx.listener(|this, _, _, cx| this.retry_details(cx)))
                 .into_any_element(),
             // In flight: the placeholder pulses. Waiting out the delay, it
             // holds still: a pulse while arrowing past books would redraw
@@ -340,7 +332,6 @@ impl BookDetailView {
         if details.similar_book_ids.is_empty() {
             return None;
         }
-        let muted = colors(cx).fg_muted;
         let (books, error, loading) = match &self.catalog {
             Some(catalog) => {
                 let store = catalog.similar.read(cx).resource();
@@ -373,16 +364,8 @@ impl BookDetailView {
                         }),
                 )
                 .into_any_element(),
-            (None, Some(message)) if !loading => h_flex()
-                .flex_wrap()
-                .gap_2()
-                .child(div().body().text_color(muted).child(message))
-                .child(
-                    Button::new("retry-similar")
-                        .small_control()
-                        .label("Try again")
-                        .on_click(cx.listener(|this, _, _, cx| this.retry_similar(cx))),
-                )
+            (None, Some(message)) if !loading => LoadFailed::new("retry-similar", message)
+                .on_retry(cx.listener(|this, _, _, cx| this.retry_similar(cx)))
                 .into_any_element(),
             // Waiting out the delay or loading: the strip's shape, still.
             _ => h_flex()
