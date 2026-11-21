@@ -363,6 +363,30 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .props .v { display: flex; align-items: center; gap: var(--s-8); min-width: 0; }
 .rail .props .k { width: var(--w-key-s); }
 
+/* ---------- Wide windows: surplus width holds more content, never wider rows ---------- */
+.home.wide { max-width: 1840px; }
+.cols3 { display: flex; gap: var(--s-32); align-items: stretch; }
+.cols3 > .fill { flex: 1 1 0; max-width: 720px; }
+.pane.wide { max-width: 1112px; }
+.pane.wide .cols { gap: var(--s-24); }
+/* Stats: one 768 column; on a wide region two (each 544 to 768), the figures one row across both, 32 apart. */
+.stats { max-width: 768px; }
+.stats.wide { max-width: 1568px; }
+.figs { display: flex; flex-wrap: wrap; gap: var(--s-24); }
+.stats.wide .figs { gap: var(--s-24) var(--s-32); }
+.figs > div { flex: 1 1 160px; min-width: 0; }
+.cols2 { display: flex; gap: var(--s-32); align-items: flex-start; }
+.cols2 > .fill { flex: 1 1 0; max-width: 768px; display: flex; flex-direction: column; gap: var(--s-32); }
+.chart { height: 192px; display: flex; gap: var(--s-8); align-items: stretch; background: repeating-linear-gradient(to top, var(--track) 0 1px, transparent 1px 48px); }
+.chart.short { height: 160px; }
+.chart .b { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: var(--s-2); font-size: var(--t-12); line-height: var(--l-12); }
+.chart .b i { width: 60%; background: var(--accent); border-radius: 2px 2px 0 0; display: block; }
+.chart-x { display: flex; gap: var(--s-8); margin-top: var(--s-4); }
+.chart-x span { flex: 1; text-align: center; font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); }
+.shelfrow { display: flex; align-items: center; gap: var(--s-8); height: var(--h-control); max-width: var(--w-list); }
+.shelfrow svg { color: var(--fg-muted); }
+.shelfrow .n { width: 48px; text-align: right; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.wide-note { position: absolute; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-faint); font-size: var(--t-12); }
 /* ---------- Full book page ---------- */
 .page { padding: var(--s-32); }
 .page .cols { gap: var(--s-24); }
@@ -725,6 +749,138 @@ function bookPage() {
     </div></div></div>`;
 }
 
+// ---------- Wide windows: Home in three columns (from 1536); the pane gains the page's rail ----------
+function homeWide() {
+  const row = (b, pct, meta) => `<div class="cr">${cover(b, "md", true)}<div class="fill">
+      <div class="title-18 one-line">${b.t}</div><div class="muted one-line">${b.a}</div>
+      <div class="progline"><div class="bar"><i style="width:${pct}%"></i></div><span class="small muted num">${pct}%</span></div>
+      <div class="small muted num mt-4">${meta}</div>
+    </div><div class="acts"><span class="btn sm">Update progress…</span><span class="btn sm ghost">Mark as read…</span></div></div>`;
+  const rateRow = (b, when) => `<div class="seq-row">${cover(b, "sm")}<div class="fill"><div class="strong one-line"><span class="textbtn">${b.t}</span></div><div class="muted one-line num">${b.a} · finished ${when}</div></div>${stars(0, "own")}</div>`;
+  return sidebar("home") + `<div class="main"><div class="scroll home wide">
+    <div class="muted">Friday, November 20</div>
+    <div class="display d-30">Good evening</div>
+    <div class="cols3 mt-24">
+      <div class="fill">
+        <div class="section">Continue reading</div>
+        <div class="hero mt-12">${cover(B.phm, "xl", true)}<div class="hero-body">
+          <div class="display d-24">${B.phm.t}</div>
+          <div class="muted mt-4">${B.phm.a}</div>
+          <div class="prog">
+            <div class="row-b"><span class="strong num">Page 312 of 476</span><span class="muted num push">66%</span></div>
+            <div class="bar"><i style="width:66%"></i></div>
+            <div class="muted num">16 pages a day · done around Dec 1</div>
+          </div>
+          <div class="row-c g-8 mt-16"><span class="btn">Update progress…</span><span class="btn ghost">Mark as read…</span></div>
+        </div></div>
+        ${row(B.wok, 42, "Page 418 of 1,007 · 13 pages a day · done around Jan 4")}
+        ${row(B.ah, 40, "Page 121 of 305 · Last updated 8 days ago")}
+        <div class="cr">${cover(B.ij, "sm")}
+          <div class="fill"><div class="strong one-line">${B.ij.t}</div><div class="small muted num">Paused at page 230 of 1,104 · since Oct 1</div></div>
+          <span class="chip">${ic("pause", "xs")}Paused</span>
+        </div>
+      </div>
+      <div class="fill">
+        <div class="row-c"><span class="section">Coming soon</span><span class="btn sm ghost push">See all 5</span></div>
+        <div class="col mt-8">${UP.map(upRow).join("")}</div>
+        <div class="row-c mt-24"><span class="section">Rate what you finished</span></div>
+        <div class="col mt-8">${rateRow(B.kts, "Nov 2")}${rateRow(B.circe, "Oct 18")}</div>
+      </div>
+      <div class="rail">
+        <div class="label">2026 reading goal</div>
+        <div class="figure"><span class="display d-30">9</span><span class="muted">of 12 books</span></div>
+        <div class="bar mt-12"><i style="width:75%"></i><b style="left:88.8%"></b></div>
+        <div class="muted mt-12">2 behind pace, 3 to go in 41 days. <span class="strong ink">Project Hail Mary</span> should finish in time.</div>
+        <div class="hair"></div>
+        <div class="label">Up next</div>
+        <div class="row-c g-16 mt-12">${cover(B.dm, "md", true)}
+          <div class="col fill">
+            <div class="small muted">Next in Dune · #2</div>
+            <div class="title-18">${B.dm.t}</div>
+            <div class="muted">${B.dm.a}</div>
+            <span class="btn sm start mt-8">Start reading</span>
+          </div>
+        </div>
+        <div class="hair"></div>
+        <div class="label">Newest on Want to read</div>
+        <div class="shelf mt-12">${[B.fw, B.tat, B.ml].map(b => `<div class="it">${cover(b, "md")}<div class="tt clamp-2">${b.t}</div></div>`).join("")}</div>
+      </div>
+    </div>
+  </div></div>`;
+}
+// Series, wide: the column grows past 896 only as far as the longest series' strip needs (at most
+// 1280, 23 books), so a long series shows every book; the lanes stay 240 and lined up.
+function seriesWide() {
+  const dresden = ["Storm Front", "Fool Moon", "Grave Peril", "Summer Knight", "Death Masks", "Blood Rites", "Dead Beat", "Proven Guilty", "White Night", "Small Favor", "Turn Coat", "Changes", "Ghost Story", "Cold Days", "Skin Game", "Peace Talks", "Battle Ground"]
+    .map(t => ({ t, a: "Jim Butcher" }));
+  const long = { name: "The Dresden Files", a: "Jim Butcher", g: "progress", when: "Last finished Oct 30",
+    books: dresden.map((b, i) => [b, i + 1, i < 5 ? "read" : i === 5 ? "wtr" : "none"]),
+    next: { kind: "start", b: dresden[5], pos: 6 } };
+  const rows = [long, ...SERIES.filter(x => x.g === "progress")];
+  const width = Math.min(1280, Math.max(896, long.books.length * 44 - 4 + 24 + 240));
+  return sidebar("series", 6) + `<div class="main"><div class="scroll page"><div class="series-page" style="max-width:${width}px">
+    ${pageHead().replace('<span class="muted num">5</span>', '<span class="muted num">6</span>')}
+    <div class="row-b g-8 group-label"><span class="label">In progress</span><span class="small muted num">3</span></div>
+    <div class="col">${rows.map(rowB).join("")}</div>
+  </div></div></div>`;
+}
+function statsWide(wide = true) {
+  const fig = (v, l) => `<div><div class="display d-30 num">${v}</div><div class="muted">${l}</div></div>`;
+  const bars = (data, cls = "") => {
+    const max = Math.max(...data.map(([, n]) => n));
+    return `<div class="chart ${cls}">${data.map(([, n]) => `<div class="b">${n ? `<span class="num">${n.toLocaleString("en")}</span><i style="height:${Math.round(n / max * 80)}%"></i>` : ""}</div>`).join("")}</div>
+      <div class="chart-x">${data.map(([k]) => `<span>${k}</span>`).join("")}</div>`;
+  };
+  const years = [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026];
+  const books = [3, 7, 11, 9, 14, 12, 16, 9], pages = [960, 2410, 3880, 3020, 4870, 4150, 5390, 3511];
+  const ratings = ["½", "1", "1½", "2", "2½", "3", "3½", "4", "4½", "5"].map((k, i) => [k, [0, 0, 0, 1, 2, 4, 9, 14, 11, 6][i]]);
+  const shelves = [["book", "Currently reading", 3], ["inbox", "Want to read", 8], ["check", "Read", 81], ["pause", "Paused", 1], ["ban", "Did not finish", 2], ["eyeoff", "Ignored", 1]];
+  const perYear = `<div class="col g-12"><div class="section">Finished per year</div>
+      <div class="label">Books</div>${bars(years.map((y, i) => [y, books[i]]))}
+      <div class="label mt-12">Pages</div>${bars(years.map((y, i) => [y, pages[i]]))}
+      <div class="muted">Plus 2 books finished before 2019.</div></div>`;
+  const yours = `<div class="col g-12"><div class="section">Your ratings</div>
+      <div class="muted">4.1 on average from 47 ratings</div>${bars(ratings, "short")}</div>`;
+  const shelf = `<div class="col g-12"><div class="section">Shelves</div>
+      <div class="col">${shelves.map(([i, l, n]) => `<div class="shelfrow">${ic(i)}<span class="fill">${l}</span><span class="n">${n}</span></div>`).join("")}</div></div>`;
+  const body = wide ? `<div class="cols2"><div class="fill">${perYear}</div><div class="fill">${yours}${shelf}</div></div>` : `${perYear}${yours}${shelf}`;
+  return sidebar("stats") + `<div class="main"><div class="scroll page"><div class="stats${wide ? " wide" : ""} col" style="gap:var(--s-32)">
+    <div><div class="page-title">Stats</div><div class="muted mt-4">From your library on this computer.</div></div>
+    <div class="figs">${fig("9", "books finished in 2026")}${fig("3,511", "pages read in 2026")}${fig("16", "days to finish, on average")}${fig("4.1", "average rating")}</div>
+    ${body}
+  </div></div></div>`;
+}
+function libraryWide() {
+  const r = (b, pct, sel) => `<div class="row${sel ? " sel" : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line">${b.a}</div></div><div class="trail">${pct}%<div class="bar thin"><i style="width:${pct}%"></i></div></div></div>`;
+  return sidebar("cr") + shelf("Currently reading", 3, `<div class="rows">${r(B.phm, 66, true) + r(B.wok, 42) + r(B.ah, 40)}</div>`) + `<div class="detail">
+    <div class="objbar" style="max-width:1112px"><span class="push"></span>${bookTools}</div>
+    <div class="pane wide"><div class="cols">
+      <div class="fill">
+        ${bookHeader(B.phm, "xl", { actions: statusBtn("book", "Currently reading") + rate })}
+        ${progress("Page 312 of 476", 66, "Started Nov 1 · 16 pages a day · done around Dec 1")}
+        <div class="block">${blockH("About this book")}<div class="prose">A schoolteacher wakes up alone on a spaceship light-years from home, with no memory of how he got there, and slowly realises he may be Earth's last chance against a microbe that is dimming the sun.</div></div>
+        <div class="block">${blockH("Your review", `<span class="btn sm">${ic("pencil", "xs")}Write a review…</span>`)}<div class="muted">No review yet.</div></div>
+        <div class="block">${blockH("Reviews", `<span class="small muted num">12 reviews</span>`)}<div class="col">${REVIEWS.slice(0, 2).map(v => review(v)).join("")}</div></div>
+      </div>
+      <div class="rail">
+        <div class="label">On Hardcover</div>
+        <div class="figure"><span class="display d-30 num">4.51</span>${stars(4.51, "cat")}</div>
+        <div class="muted num mt-4">9,223 ratings · 19,561 readers</div>
+        <span class="link row-c g-4 start mt-12">Open on Hardcover ${ic("ext", "xs")}</span>
+        <div class="hair"></div>
+        <div class="label">Details</div>
+        <div class="mt-12">${details("Sep 2, 2026")}</div>
+        <div class="hair"></div>
+        <div class="row-c"><span class="label">Reads</span><span class="btn sm ghost push">${ic("plus", "xs")}Add a past read…</span></div>
+        <div class="reads mt-8"><div class="r">${ic("book")}<div class="col"><span>Current read</span><span class="small muted num">Nov 1, 2026 – now · page 312</span></div></div></div>
+        <div class="hair"></div>
+        <div class="row-c"><span class="label">Notes</span><span class="btn sm ghost push">${ic("pencil", "xs")}Edit</span></div>
+        <div class="mt-8">Borrowed from the library, due back on the 30th.</div>
+      </div>
+    </div></div>
+  </div>`;
+}
+
 // ---------- Token sheets: built from the same variables the screens use ----------
 const probes = {};
 for (const t of ["light", "dark"]) { const p = document.createElement("div"); p.className = "theme-" + t; p.style.display = "none"; document.body.append(p); probes[t] = p; }
@@ -1034,6 +1190,11 @@ function legend() {
 }
 
 const shots = [
+  ["Home, wide (2560)", "dark · a 4K monitor at 1.5: Continue reading, then Coming soon and Rate what you finished in a second column, then the rail · each column at most 720, so actions stay by their books", "dark", 1000, homeWide(), 2560],
+  ["Home, wide (1600)", "light · the laptop panel: the same three columns, each narrower", "light", 1000, homeWide(), 1600],
+  ["Series, wide (2560)", "light · the column grows past 896 only as far as the longest series needs (here 17 books: 1008), at most 1280; the strip takes the width, the next lanes stay 240 and lined up · short series alone keep 896", "light", 760, seriesWide(), 2560],
+  ["Stats, wide (2560)", "dark · two columns (each 544 to 768): Finished per year; Your ratings, then Shelves · the figures one row across both, 32 apart, so the third starts on the second column's spine", "dark", 860, statsWide(), 2560],
+  ["Library, wide (2560)", "dark · the book pane takes the full page's rail (On Hardcover, Details, Reads, Notes) once the pane is wide enough for both", "dark", 1000, libraryWide(), 2560],
   ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail; Coming soon closes the main column (scrolled content shown in full)", "light", 1020, home()],
   ["Home", "dark", "dark", 1020, home()],
   ["Library: Currently reading", "light · the book's tools sit in a bar above it; status and rating first, then progress", "light", 800, library("cr")],
@@ -1052,14 +1213,14 @@ const shots = [
 ];
 const ONLY = null; // e.g. [4, 5] to render only some shots while checking
 const sheet = document.getElementById("sheet");
-shots.forEach(([title, sub, theme, h, html], i) => {
+shots.forEach(([title, sub, theme, h, html, w = 1200], i) => {
   if (ONLY && !ONLY.includes(i)) return;
-  sheet.insertAdjacentHTML("beforeend", `<section><div class="cap">${title} <span>· ${sub}</span></div><div class="frame" data-h="${h}"><div class="win theme-${theme || "light"}" data-name="${i} ${title}" style="height:${h}px">${html}</div></div></section>`);
+  sheet.insertAdjacentHTML("beforeend", `<section><div class="cap">${title} <span>· ${sub}</span></div><div class="frame" data-h="${h}" data-w="${w}"><div class="win theme-${theme || "light"}" data-name="${i} ${title}" style="height:${h}px;width:${w}px">${html}</div></div></section>`);
 });
 
 function fit() {
   document.querySelectorAll(".frame").forEach(f => {
-    const s = Math.min(1, f.parentElement.clientWidth / 1200);
+    const s = Math.min(1, f.parentElement.clientWidth / f.dataset.w);
     f.style.height = (f.dataset.h * s) + "px";
     f.firstElementChild.style.transform = `scale(${s})`;
   });
@@ -1087,7 +1248,7 @@ document.fonts.ready.then(() => {
       if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) clipped.push(`${w.dataset.name}: .${el.className.split(" ").join(".")} ${el.scrollWidth}x${el.scrollHeight} in ${el.clientWidth}x${el.clientHeight}`);
     });
     const bottom = Math.max(...[...w.querySelectorAll("*")].filter(e => !e.children.length && !e.closest(".sb") && !e.classList.contains("hair")).map(e => e.getBoundingClientRect().bottom)) - w.getBoundingClientRect().top;
-    const scale = w.getBoundingClientRect().width / 1200;
+    const scale = w.getBoundingClientRect().width / w.clientWidth;
     console.log(`window ${w.dataset.name}: content ends at ${Math.round(bottom / scale)} of ${w.clientHeight}`);
   });
   console.log(clipped.length ? "CLIPPED\n" + clipped.join("\n") : "no clipped regions");
