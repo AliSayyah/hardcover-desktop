@@ -3175,7 +3175,6 @@ dependencies = [
  "gpui-pre",
  "hardcover-core",
  "image",
- "raw-window-handle",
  "serde_json",
  "tempfile",
  "unicode-bidi",
@@ -3183,7 +3182,6 @@ dependencies = [
  "uuid",
  "wayland-client",
  "wayland-protocols",
- "x11rb",
 ]
 
 [[package]]

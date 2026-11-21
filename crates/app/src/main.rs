@@ -143,12 +143,12 @@ fn main() {
         println!("hardcover-desktop {}", env!("CARGO_PKG_VERSION"));
         return;
     }
-    // The outputs' sizes, read on a thread of their own while the app starts:
-    // the window's size depends on them (`ui_scale`).
-    let scale = ui_scale::Probe::start();
     // Resolved before anything else: once an update replaces the binary,
     // /proc/self/exe names the deleted file, and restarting must use this path.
     let exe = std::env::current_exe().ok();
+    // The outputs' sizes, read on a thread of their own while the app starts:
+    // the window's size depends on them (`ui_scale`).
+    let scale = ui_scale::Probe::start();
     // A small file, read before the event loop starts (the one exception to
     // keeping core calls off the UI thread): the first frame needs the theme.
     let (prefs, prefs_path) = preferences::load();

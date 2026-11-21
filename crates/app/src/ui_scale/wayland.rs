@@ -109,13 +109,10 @@ fn socket_path() -> Result<PathBuf, String> {
 }
 
 pub fn read_outputs() -> Result<Vec<Output>, String> {
+    // A compositor that stops answering holds this thread: `roundtrip` waits
+    // in `poll` with no timeout. `main` waits for the first read only briefly,
+    // and the UI never waits for one.
     let stream = UnixStream::connect(socket_path()?).map_err(|e| e.to_string())?;
-    // A compositor that stops answering must not hold the thread for ever.
-    let timeout = Some(std::time::Duration::from_secs(2));
-    stream
-        .set_read_timeout(timeout)
-        .and_then(|()| stream.set_write_timeout(timeout))
-        .map_err(|e| e.to_string())?;
     let connection = Connection::from_socket(stream).map_err(|e| e.to_string())?;
     let (globals, mut queue) =
         registry_queue_init::<State>(&connection).map_err(|e| e.to_string())?;

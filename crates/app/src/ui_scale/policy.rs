@@ -2,7 +2,7 @@
 //! gets, which output the window is on, and the window sizes. Tested here;
 //! the probes and GPUI are in the parent module.
 
-/// What the compositor (or the X server) says about one monitor.
+/// What the compositor says about one monitor.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Output {
     /// The connector's name (`DP-1`, `eDP-1`): GPUI's Wayland display uuid
@@ -14,11 +14,8 @@ pub struct Output {
     /// The current mode in device pixels, in the panel's own orientation.
     pub mode: (i32, i32),
     /// The size in logical pixels (`zxdg_output_v1`), rotated with the
-    /// output. Wayland only.
+    /// output.
     pub logical: Option<(i32, i32)>,
-    /// Where the monitor is, in device pixels of the root window (X11 only:
-    /// a window is matched to its monitor by position there).
-    pub origin: Option<(i32, i32)>,
 }
 
 /// The reference setup a logical pixel is measured against: a 24"
@@ -153,19 +150,6 @@ pub fn choose_by_scale(
     }
 }
 
-/// Which X11 monitor holds `point` (device pixels of the root window): the
-/// window's centre. X11 has one scale for every monitor, so position is all
-/// there is to go by.
-pub fn choose_by_position(outputs: &[Output], point: (f64, f64)) -> Option<usize> {
-    outputs.iter().position(|o| {
-        o.origin.is_some_and(|(x, y)| {
-            let (x, y) = (f64::from(x), f64::from(y));
-            let (w, h) = (f64::from(o.mode.0), f64::from(o.mode.1));
-            point.0 >= x && point.0 < x + w && point.1 >= y && point.1 < y + h
-        })
-    })
-}
-
 /// `HARDCOVER_UI_SCALE`: a factor between 0.5 and 3, else nothing.
 pub fn parse_forced(value: &str) -> Option<f64> {
     value
@@ -275,16 +259,15 @@ mod tests {
                 (f64::from(mode.0) / scale).round() as i32,
                 (f64::from(mode.1) / scale).round() as i32,
             )),
-            origin: None,
         }
     }
 
     /// The owner's two monitors, as Hyprland reports them.
     fn owners_monitor() -> Output {
-        named("DP-1", (597, 336), (3840, 2160), 1.5)
+        named("HDMI-A-1", (600, 340), (3840, 2160), 1.5)
     }
     fn owners_laptop() -> Output {
-        named("eDP-1", (345, 215), (2560, 1600), 1.6)
+        named("eDP-1", (340, 220), (2560, 1600), 1.6)
     }
 
     #[test]
@@ -364,7 +347,7 @@ mod tests {
     #[test]
     fn the_named_output_wins_when_it_is_at_the_windows_scale() {
         let outputs = [owners_laptop(), owners_monitor()];
-        assert_eq!(choose_by_scale(&outputs, |n| n == "DP-1", 1.5), Some(1));
+        assert_eq!(choose_by_scale(&outputs, |n| n == "HDMI-A-1", 1.5), Some(1));
         assert_eq!(choose_by_scale(&outputs, |n| n == "eDP-1", 1.6), Some(0));
     }
 
@@ -393,19 +376,6 @@ mod tests {
         let mut monitor = owners_monitor();
         monitor.logical = None;
         assert_eq!(choose_by_scale(&[monitor], |_| true, 1.5), None);
-    }
-
-    #[test]
-    fn x11_monitors_are_found_by_position() {
-        let at = |x, y, mode| Output {
-            mode,
-            origin: Some((x, y)),
-            ..Default::default()
-        };
-        let outputs = [at(0, 0, (2560, 1600)), at(2560, 0, (3840, 2160))];
-        assert_eq!(choose_by_position(&outputs, (100., 100.)), Some(0));
-        assert_eq!(choose_by_position(&outputs, (2560., 2000.)), Some(1));
-        assert_eq!(choose_by_position(&outputs, (100., 1700.)), None);
     }
 
     #[test]

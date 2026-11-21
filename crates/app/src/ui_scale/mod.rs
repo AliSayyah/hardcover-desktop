@@ -11,18 +11,23 @@
 //! in [`policy`].
 //!
 //! **Facts.** GPUI drops the outputs' millimetres, so they come from a
-//! connection of our own: on Wayland, every `wl_output`'s name, size in mm
-//! and current mode, and its logical size from `zxdg_output_v1`; on X11,
-//! every RandR monitor's size in px and mm and where it is. Each read takes
+//! Wayland connection of our own: every `wl_output`'s name, size in mm and
+//! current mode, and its logical size from `zxdg_output_v1`. Each read takes
 //! about a millisecond and runs off the UI thread: once in a thread started
 //! at the top of `main` (its result sizes the window), again in the
 //! background when the window's display changes.
 //!
-//! **Which monitor.** On Wayland an output qualifies only if its own scale
-//! (mode ÷ logical size) is the window's: GPUI's display (a v5 uuid of the
-//! output's name) when it qualifies, else the one output that does, else the
-//! factor stays as it is. On X11 every monitor has the window's scale, and
-//! the window's centre (read from the X server) picks the monitor.
+//! **Which monitor.** An output qualifies only if its own scale (mode ÷
+//! logical size) is the window's: GPUI's display (a v5 uuid of the output's
+//! name) when it qualifies, else the one output that does, else the factor
+//! stays as it is.
+//!
+//! **X11** gets a factor of 1. RandR has each monitor's mm, but GPUI's X11
+//! window bounds are inside the window manager's frame, so finding the
+//! window's monitor means asking the X server on every move; and with no
+//! logical sizes, the window would open at the design size and keep a
+//! minimum too small for a larger factor. Not worth it until someone runs
+//! the app on X11 with a large monitor.
 //!
 //! **When.** On the window's bounds and display changes, which is where a new
 //! desktop scale shows; the work is done only when the (output, scale) pair
@@ -37,20 +42,20 @@
 //! doesn't work: Hyprland keeps a floating window's size when GPUI resizes
 //! its surface (GPUI then draws the new size inside the old frame), and a
 //! tiling compositor decides the size anyway. So a window that lands on a
-//! monitor with another factor keeps the size it opened at. On X11 the window
-//! opens at the design size, as no output has a logical size there.
+//! monitor with another factor keeps the size it opened at. Seen on a
+//! visible window too: Hyprland kept its 1500 × 1000 frame.
 //!
 //! **Failure.** No socket, a missing protocol or sizes that can't be trusted
 //! give a factor of 1, silently (a debug build logs one line).
 //!
 //! `HARDCOVER_UI_SCALE=<k>` forces a factor (`1` turns the feature off and
-//! reads nothing); `HARDCOVER_UI_SCALE_DEBUG=1` logs every decision.
+//! reads nothing; any factor opens the window at the design size times it,
+//! not bounded by a monitor); `HARDCOVER_UI_SCALE_DEBUG=1` logs every
+//! decision.
 
 pub mod policy;
 #[cfg(target_os = "linux")]
 mod wayland;
-#[cfg(target_os = "linux")]
-mod x11;
 
 use std::sync::mpsc;
 use std::time::Duration;
@@ -82,27 +87,10 @@ fn note_failure(why: &str) {
     }
 }
 
-/// The window system GPUI picks, by the same rule: Wayland, then X11.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Platform {
-    Wayland,
-    X11,
-    None,
-}
-
-impl Platform {
-    fn detect() -> Self {
-        let set = |name| std::env::var_os(name).is_some_and(|v| !v.is_empty());
-        if !cfg!(target_os = "linux") {
-            Self::None
-        } else if set("WAYLAND_DISPLAY") {
-            Self::Wayland
-        } else if set("DISPLAY") {
-            Self::X11
-        } else {
-            Self::None
-        }
-    }
+/// Whether GPUI runs on Wayland, by its own rule: `WAYLAND_DISPLAY` set
+/// (else X11, which gets a factor of 1).
+fn on_wayland() -> bool {
+    cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
 }
 
 fn forced() -> Option<f64> {
@@ -118,68 +106,50 @@ fn forced() -> Option<f64> {
     k
 }
 
-/// What a read finds: the outputs, and on X11 the window's centre in device
-/// pixels of the root window.
-struct Facts {
-    outputs: Vec<Output>,
-    centre: Option<(f64, f64)>,
-}
-
 /// Reads the outputs. Blocking: never on the UI thread.
-fn read(platform: Platform, x11_window: Option<u32>) -> Result<Facts, String> {
+fn read() -> Result<Vec<Output>, String> {
     #[cfg(target_os = "linux")]
-    match platform {
-        Platform::Wayland => wayland::read_outputs().map(|outputs| Facts {
-            outputs,
-            centre: None,
-        }),
-        Platform::X11 => x11::read(x11_window),
-        Platform::None => Err("no window system".into()),
+    {
+        wayland::read_outputs()
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (platform, x11_window);
         Err("not Linux".into())
     }
 }
 
 /// The first read, started at the top of `main`.
 pub struct Probe {
-    platform: Platform,
     forced: Option<f64>,
-    first: Option<mpsc::Receiver<Result<Facts, String>>>,
+    first: Option<mpsc::Receiver<Result<Vec<Output>, String>>>,
 }
 
 impl Probe {
     /// Starts reading the outputs on a thread of its own, unless a factor is
-    /// forced.
+    /// forced or GPUI won't run on Wayland.
     pub fn start() -> Self {
-        let platform = Platform::detect();
         let forced = forced();
-        let first = (forced.is_none() && platform != Platform::None).then(|| {
+        let first = (forced.is_none() && on_wayland()).then(|| {
             let (send, receive) = mpsc::channel();
             let spawned = std::thread::Builder::new()
                 .name("ui-scale".into())
                 .spawn(move || {
-                    let _ = send.send(read(platform, None));
+                    let _ = send.send(read());
                 });
             if let Err(e) = spawned {
                 note_failure(&e.to_string());
             }
             receive
         });
-        Self {
-            platform,
-            forced,
-            first,
-        }
+        Self { forced, first }
     }
 
     /// Waits a moment for the first read, and works out the window's opening
     /// sizes from it.
     pub fn finish(self) -> Start {
+        let follow = self.first.is_some();
         let outputs = match self.first.map(|r| r.recv_timeout(FIRST_READ_WAIT)) {
-            Some(Ok(Ok(facts))) => facts.outputs,
+            Some(Ok(Ok(outputs))) => outputs,
             Some(Ok(Err(why))) => {
                 note_failure(&why);
                 Vec::new()
@@ -193,8 +163,7 @@ impl Probe {
         let opening = policy::opening(&outputs, self.forced);
         debug!("opening {opening:?} from {outputs:?}");
         Start {
-            platform: self.platform,
-            forced: self.forced,
+            follow,
             outputs,
             opening,
         }
@@ -203,8 +172,9 @@ impl Probe {
 
 /// The first read's result, for `main` to open the window with.
 pub struct Start {
-    platform: Platform,
-    forced: Option<f64>,
+    /// Whether the factor follows the window's monitor: on Wayland, unless a
+    /// factor is forced.
+    follow: bool,
     outputs: Vec<Output>,
     opening: Opening,
 }
@@ -225,10 +195,7 @@ impl Start {
 
 /// Keeps the window's factor in step with its monitor.
 struct UiScale {
-    platform: Platform,
     outputs: Vec<Output>,
-    /// The window's centre, on X11.
-    centre: Option<(f64, f64)>,
     /// Bumped by every read, so a new read is evaluated even on the same
     /// output and scale.
     generation: u64,
@@ -240,8 +207,6 @@ struct UiScale {
     read_again: bool,
     /// A window scale no output had, read again for already.
     reread_for: Option<u32>,
-    /// The X window, for its position.
-    x11_window: Option<u32>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -253,36 +218,27 @@ impl Global for UiScaleGlobal {}
 /// when the window opens, before its first frame.
 pub fn follow(start: Start, window: &mut Window, cx: &mut App) {
     let Start {
-        platform,
-        forced,
+        follow,
         outputs,
         opening,
     } = start;
     apply(opening.k, window, cx);
-    if forced.is_some() || platform == Platform::None {
+    if !follow {
         return;
     }
-    let x11_window = (platform == Platform::X11)
-        .then(|| x11_window_id(window))
-        .flatten();
     let entity = cx.new(|cx: &mut Context<UiScale>| UiScale {
-        platform,
         outputs,
-        centre: None,
         generation: 0,
         evaluated: None,
         applied: opening.k,
         reading: false,
         read_again: false,
         reread_for: None,
-        x11_window,
+        // The desktop's scale arrives after the display (the fractional
+        // scale comes later than `wl_surface.enter`), and only a bounds
+        // observer sees it change.
         _subscriptions: vec![cx.observe_window_bounds(window, |this, window, cx| {
-            if this.platform == Platform::X11 {
-                // The window may have moved to another monitor.
-                this.read(window, cx);
-            } else {
-                this.evaluate(window, cx);
-            }
+            this.evaluate(window, cx);
         })],
     });
     let weak = entity.downgrade();
@@ -292,7 +248,7 @@ pub fn follow(start: Start, window: &mut Window, cx: &mut App) {
     });
     entity.update(cx, |this, cx| {
         this._subscriptions.push(display);
-        if this.outputs.is_empty() || this.platform == Platform::X11 {
+        if this.outputs.is_empty() {
             this.read(window, cx);
         } else {
             this.evaluate(window, cx);
@@ -301,51 +257,34 @@ pub fn follow(start: Start, window: &mut Window, cx: &mut App) {
     cx.set_global(UiScaleGlobal(entity));
 }
 
-/// The X window's id, from GPUI's raw handle.
-fn x11_window_id(window: &Window) -> Option<u32> {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    match HasWindowHandle::window_handle(window).ok()?.as_raw() {
-        RawWindowHandle::Xcb(handle) => Some(handle.window.get()),
-        RawWindowHandle::Xlib(handle) => u32::try_from(handle.window).ok(),
-        _ => None,
-    }
-}
-
 /// v5 of the output's name: how GPUI names a Wayland display.
 fn uuid_of(name: &str) -> uuid::Uuid {
     uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, name.as_bytes())
 }
 
 impl UiScale {
-    /// Reads the outputs (and on X11 the window's place) in the background,
-    /// then evaluates. One read at a time; a request meanwhile reads again
-    /// once it lands.
+    /// Reads the outputs in the background, then evaluates. One read at a
+    /// time; a request meanwhile reads again once it lands.
     fn read(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.reading {
             self.read_again = true;
             return;
         }
         self.reading = true;
-        let (platform, x11_window) = (self.platform, self.x11_window);
         let this = cx.weak_entity();
         window
             .spawn(cx, async move |cx| {
-                let facts = cx
-                    .background_spawn(async move { read(platform, x11_window) })
-                    .await;
+                let outputs = cx.background_spawn(async move { read() }).await;
                 let _ = cx.update(|window, cx| {
                     let _ = this.update(cx, |this, cx| {
                         this.reading = false;
-                        match facts {
-                            Ok(facts) => {
-                                this.outputs = facts.outputs;
-                                this.centre = facts.centre;
+                        match outputs {
+                            Ok(outputs) => {
+                                this.outputs = outputs;
                                 this.generation += 1;
                                 this.evaluate(window, cx);
                             }
-                            Err(why) => {
-                                debug!("reading the outputs failed: {why}");
-                            }
+                            Err(why) => debug!("reading the outputs failed: {why}"),
                         }
                         if std::mem::take(&mut this.read_again) {
                             this.read(window, cx);
@@ -358,24 +297,14 @@ impl UiScale {
 
     fn evaluate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let scale = f64::from(window.scale_factor());
-        let chosen = match self.platform {
-            Platform::Wayland => {
-                let uuid = window.display(cx).and_then(|d| d.uuid().ok());
-                policy::choose_by_scale(&self.outputs, |name| uuid == Some(uuid_of(name)), scale)
-            }
-            Platform::X11 => self
-                .centre
-                .and_then(|centre| policy::choose_by_position(&self.outputs, centre)),
-            Platform::None => None,
-        };
+        let uuid = window.display(cx).and_then(|d| d.uuid().ok());
+        let chosen =
+            policy::choose_by_scale(&self.outputs, |name| uuid == Some(uuid_of(name)), scale);
         let Some(ix) = chosen else {
             // An output added since the last read isn't known yet: read again,
             // once for this scale. Until then the factor stays.
-            if self.platform == Platform::X11 {
-                debug!("no monitor holds the window's centre {:?}", self.centre);
-            }
             let bits = window.scale_factor().to_bits();
-            if self.platform == Platform::Wayland && self.reread_for != Some(bits) {
+            if self.reread_for != Some(bits) {
                 self.reread_for = Some(bits);
                 debug!("no output at scale {scale}; reading again");
                 self.read(window, cx);
