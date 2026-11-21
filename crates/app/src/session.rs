@@ -347,6 +347,39 @@ mod tests {
         assert_eq!(gpui_kit::block_on(call), None);
     }
 
+    /// On the real I/O threads: a call running when the session ends has its
+    /// result dropped, and one sent afterwards never runs.
+    #[test]
+    fn on_the_io_threads_an_ended_session_runs_and_applies_nothing() {
+        let session = SessionScope::new(
+            hardcover_core::demo::client(),
+            None,
+            None,
+            GrantedScopes::all(),
+        );
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (started_tx, started) = std::sync::mpsc::channel::<()>();
+        let running = session.interactive(move |_| {
+            started_tx.send(()).unwrap();
+            held.recv().unwrap();
+            42
+        });
+        started
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the call started");
+        session.end();
+        release.send(()).unwrap();
+        assert_eq!(gpui_kit::block_on(running), None);
+
+        let ran = Arc::new(AtomicBool::new(false));
+        let after = session.interactive({
+            let ran = ran.clone();
+            move |_| ran.store(true, Ordering::Release)
+        });
+        assert_eq!(gpui_kit::block_on(after), None);
+        assert!(!ran.load(Ordering::Acquire));
+    }
+
     #[test]
     fn a_scope_change_is_seen_through_every_clone() {
         let session = session();

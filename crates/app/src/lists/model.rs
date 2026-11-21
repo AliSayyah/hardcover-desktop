@@ -494,18 +494,20 @@ impl ListsModel {
         cx.notify();
         let call = self.session.interactive(run);
         cx.spawn(async move |this, cx| {
-            let result = call.await?;
+            let result = call.await;
             this.update(cx, |this, cx| {
                 this.writing = false;
                 // A load that started while the write ran may predate it too.
                 this.generation += 1;
                 cx.notify();
-                match result {
+                // Dropped: the session ended (or the call panicked).
+                Some(match result? {
                     Ok(value) => Ok(apply(this, value, cx)),
                     Err(e) => Err(this.session.error_message(&e, Some(WRITE_LISTS), cx).into()),
-                }
+                })
             })
             .ok()
+            .flatten()
         })
     }
 
@@ -622,17 +624,19 @@ impl ListsModel {
         cx.notify();
         let call = self.session.interactive(run);
         cx.spawn(async move |this, cx| {
-            let result = call.await?;
+            let result = call.await;
             this.update(cx, |this, cx| {
                 this.busy_books.remove(&book);
                 this.generation += 1;
                 cx.notify();
-                match result {
+                // Dropped: the session ended (or the call panicked).
+                Some(match result? {
                     Ok(value) => apply(this, value, cx),
                     Err(e) => Err(this.session.error_message(&e, Some(scope), cx).into()),
-                }
+                })
             })
             .ok()
+            .flatten()
         })
     }
 

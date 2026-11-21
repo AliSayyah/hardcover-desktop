@@ -205,11 +205,12 @@ impl GoalsModel {
         cx.notify();
         let call = self.session.interactive(run);
         cx.spawn(async move |this, cx| {
-            let result = call.await?;
+            let result = call.await;
             this.update(cx, |this, cx| {
                 this.writing = false;
                 cx.notify();
-                match result {
+                // Dropped: the session ended (or the call panicked).
+                Some(match result? {
                     Ok(value) => {
                         // A load that started before the write would bring
                         // back the old goals; the write's result is newer.
@@ -225,9 +226,10 @@ impl GoalsModel {
                         Ok(())
                     }
                     Err(e) => Err(this.session.error_message(&e, Some(WRITE_GOALS), cx).into()),
-                }
+                })
             })
             .ok()
+            .flatten()
         })
     }
 
@@ -289,6 +291,26 @@ fn sort(goals: &mut [Goal]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A goal write that lands after signing out is dropped: nothing to
+    /// show, rather than a silent success.
+    #[gpui_kit::test]
+    fn a_write_landing_after_sign_out_is_dropped(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), None);
+        let library = cx.new(|_| LibraryModel::new(session.clone()));
+        let goals = cx.new(|cx| GoalsModel::new(session.clone(), &library, cx));
+        // The call runs inline; its result waits to be picked up.
+        let task = goals.update(cx, |m, cx| m.delete(GoalId::new(1), cx));
+        session.end();
+        let task = cx.foreground_executor().spawn(task);
+        cx.run_until_parked();
+        assert_eq!(gpui_kit::block_on(task), None);
+        assert!(
+            !goals.read_with(cx, |m, _| m.is_writing()),
+            "the write ended"
+        );
+    }
     use hardcover_core::{
         BookId, BookSummary, GoalMetric, ReadId, ReadSession, ReadingStatus, UserBookId, UserId,
     };

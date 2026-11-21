@@ -208,10 +208,13 @@ mod tests {
         let first = blocker(&pool);
         let second = blocker(&pool);
         let done = submit(&pool, Priority::Interactive, || 42);
-        let answer = std::thread::spawn(move || done.recv_blocking());
-        std::thread::sleep(Duration::from_millis(200));
-        assert!(answer.is_finished(), "the interactive job didn't wait");
-        assert_eq!(answer.join().unwrap(), Ok(42));
+        let (answer_tx, answer) = mpsc::channel();
+        std::thread::spawn(move || answer_tx.send(done.recv_blocking()));
+        assert_eq!(
+            answer.recv_timeout(Duration::from_secs(5)),
+            Ok(Ok(42)),
+            "the interactive job ran with the background ones blocked"
+        );
         first.send(()).unwrap();
         second.send(()).unwrap();
     }

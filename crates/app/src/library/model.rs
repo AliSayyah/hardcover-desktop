@@ -110,6 +110,13 @@ impl ReviewSlot {
         }
     }
 
+    /// A fetch started as `generation` brought nothing; the next one may go.
+    fn abandon_fetch(&mut self, generation: u64) {
+        if self.generation == generation {
+            self.fetching = false;
+        }
+    }
+
     /// A review write returned `review`; any fetch still running is older.
     fn written(&mut self, review: Review, generation: u64) {
         self.review = Some(review);
@@ -331,6 +338,7 @@ impl LibraryModel {
         let me = session.background(Client::me);
         self.sync_task = Some(cx.spawn(async move |this, cx| {
             let Some(me) = me.await else {
+                let _ = this.update(cx, Self::sync_stopped);
                 return;
             };
             let user = match me {
@@ -363,10 +371,24 @@ impl LibraryModel {
                 }
             }
             let Some(fetched) = fetch.await else {
+                let _ = this.update(cx, Self::sync_stopped);
                 return;
             };
             let _ = this.update(cx, |this, cx| this.finish_sync(fetched, cx));
         }));
+    }
+
+    /// The sync's call resolved to nothing: the session ended, which leaves
+    /// nothing to do, or the call panicked, which mustn't leave the sync
+    /// running for good.
+    fn sync_stopped(&mut self, cx: &mut Context<Self>) {
+        if self.session.is_alive() {
+            self.sync = SyncStatus::Failed {
+                message: "The sync stopped unexpectedly. Try again.".into(),
+                offline: false,
+            };
+            cx.notify();
+        }
     }
 
     /// Syncs if the last sync started more than [`SYNC_AGAIN_AFTER`] ago,
@@ -569,15 +591,17 @@ impl LibraryModel {
         let call = self.session.interactive(call);
         let window = window.window_handle();
         let task = cx.spawn(async move |this, cx| {
-            let Some(result) = call.await else {
-                let _ = tx.try_send(WriteOutcome::Ended);
-                return;
-            };
+            let result = call.await;
             let outcome = this.update(cx, |this, cx| {
+                // Whatever happened, the write is over.
                 if let Some(write) = this.writes.remove(&target) {
                     write.task.detach();
                 }
                 cx.notify();
+                // The session ended (or the call panicked): nothing to apply.
+                let Some(result) = result else {
+                    return WriteOutcome::Ended;
+                };
                 match result {
                     Ok(value) => {
                         this.apply(target, value.applied(), cx);
@@ -680,13 +704,18 @@ impl LibraryModel {
         cx.notify();
         let fetch = self.session.interactive(move |client| client.review(id));
         let task = cx.spawn(async move |this, cx| {
-            let Some(result) = fetch.await else {
-                return;
-            };
+            let result = fetch.await;
             let _ = this.update(cx, |this, cx| {
                 if let Some(task) = this.review_tasks.remove(&id) {
                     task.detach();
                 }
+                let Some(result) = result else {
+                    // The session ended, or the call panicked.
+                    if let Some(slot) = this.reviews.get_mut(&id) {
+                        slot.abandon_fetch(generation);
+                    }
+                    return;
+                };
                 let result = result.map_err(|e| {
                     this.session
                         .error_message(&e, Some(READ_LIBRARY), cx)
@@ -1062,6 +1091,138 @@ mod tests {
         let cached = fresh.read_with(window, |m, _| m.cache.as_ref().map(|c| c.ask(load_cached)));
         let cached = gpui_kit::block_on(cached.unwrap()).flatten();
         assert!(cached.is_none());
+    }
+
+    /// A demo entry and a status it isn't on.
+    fn entry_and_other_status(
+        model: &Entity<LibraryModel>,
+        cx: &mut gpui_kit::TestAppContext,
+    ) -> (LibraryEntry, ReadingStatus) {
+        let entry = model.read_with(cx, |m, _| m.entries()[0].clone());
+        let status = if entry.status == ReadingStatus::Read {
+            ReadingStatus::Paused
+        } else {
+            ReadingStatus::Read
+        };
+        (entry, status)
+    }
+
+    fn status_write(id: UserBookId, status: ReadingStatus) -> LibraryWrite<LibraryEntry> {
+        LibraryWrite::entry(
+            id,
+            WriteKind::Status,
+            "Couldn't change the status",
+            move |client| client.set_status(id, status),
+        )
+        .reported_by_caller()
+    }
+
+    #[gpui_kit::test]
+    fn a_write_is_applied_saved_and_ended(cx: &mut gpui_kit::TestAppContext) {
+        let (model, _, cache) = demo_model(cx);
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let (entry, status) = entry_and_other_status(&model, cx);
+        let id = entry.user_book_id;
+        let window = cx.add_empty_window();
+        let (saved, busy) = window.update(|window, cx| {
+            model.update(cx, |m, cx| {
+                let saved = m.write(status_write(id, status), window, cx);
+                // One write per entry at a time.
+                let busy = m.write(status_write(id, ReadingStatus::WantToRead), window, cx);
+                (saved, busy)
+            })
+        });
+        let (saved, busy) = (
+            window.foreground_executor().spawn(saved),
+            window.foreground_executor().spawn(busy),
+        );
+        window.run_until_parked();
+        assert!(matches!(gpui_kit::block_on(busy), WriteOutcome::Busy));
+        assert!(matches!(gpui_kit::block_on(saved), WriteOutcome::Saved(e) if e.status == status));
+        model.read_with(window, |m, _| {
+            assert_eq!(m.pending_write(id), None);
+            assert_eq!(m.entry(id).map(|e| e.status), Some(status));
+        });
+        let user = model.read_with(window, |m, _| m.verified_user_id().unwrap());
+        let cached = cache.load_library(user).unwrap();
+        assert_eq!(
+            cached
+                .iter()
+                .find(|e| e.user_book_id == id)
+                .map(|e| e.status),
+            Some(status)
+        );
+    }
+
+    #[gpui_kit::test]
+    fn a_failed_write_changes_nothing_and_ends(cx: &mut gpui_kit::TestAppContext) {
+        let (model, _, _) = demo_model(cx);
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let (entry, _) = entry_and_other_status(&model, cx);
+        let id = entry.user_book_id;
+        let window = cx.add_empty_window();
+        let failed = window.update(|window, cx| {
+            model.update(cx, |m, cx| {
+                let write = LibraryWrite::entry(
+                    id,
+                    WriteKind::Status,
+                    "Couldn't change the status",
+                    |_| Err::<LibraryEntry, _>(Error::Api("refused".into())),
+                )
+                .reported_by_caller();
+                m.write(write, window, cx)
+            })
+        });
+        let failed = window.foreground_executor().spawn(failed);
+        window.run_until_parked();
+        assert!(matches!(
+            gpui_kit::block_on(failed),
+            WriteOutcome::Failed {
+                error: Error::Api(_),
+                ..
+            }
+        ));
+        model.read_with(window, |m, _| {
+            assert_eq!(m.pending_write(id), None, "a failure ends the write too");
+            assert_eq!(m.entry(id), Some(&entry));
+        });
+    }
+
+    /// The session ended, and the results land before the model is told
+    /// (`end_session`): they are dropped on their own.
+    #[gpui_kit::test]
+    fn results_landing_after_the_session_ended_are_dropped_by_the_session(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        let (model, session, cache) = demo_model(cx);
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let (entry, status) = entry_and_other_status(&model, cx);
+        let id = entry.user_book_id;
+        let user = model.read_with(cx, |m, _| m.verified_user_id().unwrap());
+        let before = cache.load_library(user).unwrap();
+        let revision = model.read_with(cx, |m, _| m.revision());
+        let window = cx.add_empty_window();
+        let outcome = window.update(|window, cx| {
+            model.update(cx, |m, cx| {
+                m.sync(cx);
+                m.write(status_write(id, status), window, cx)
+            })
+        });
+        session.end();
+        let outcome = window.foreground_executor().spawn(outcome);
+        window.run_until_parked();
+        assert!(matches!(gpui_kit::block_on(outcome), WriteOutcome::Ended));
+        model.read_with(window, |m, _| {
+            assert_eq!(m.pending_write(id), None);
+            assert_eq!(m.revision(), revision, "nothing applied");
+        });
+        assert!(
+            same_entries(&cache.load_library(user).unwrap(), &before),
+            "nothing cached"
+        );
     }
 
     #[gpui_kit::test]
