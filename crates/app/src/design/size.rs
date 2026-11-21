@@ -51,7 +51,9 @@ pub const ACTION_LANE: Rems = rems(8.5);
 pub const NEXT_LANE: Rems = rems(15.);
 /// One book in a series strip: an sm cover with its marks under it (40).
 pub const STRIP_ITEM: Rems = rems(2.5);
-/// The widest the Series destination's column gets (896).
+/// The Series destination's column (896): its width up to the default
+/// window, and the least it keeps when the region is wider (see
+/// [`SERIES_COLUMN_MAX`]).
 pub const SERIES_COLUMN: Rems = rems(56.);
 
 /// A meter with words beside it (6).
@@ -117,6 +119,10 @@ pub const COLUMN_MAX: Rems = rems(45.);
 /// included: two [`COLUMN_MAX`] columns and the [`RAIL`], 32 apart. Beyond
 /// it, paper.
 pub const HOME_WIDE_MAX: Rems = rems(2. * COLUMN_MAX.0 + 2. * 2. + RAIL.0 + 2. * PAGE_INSET.0);
+/// The widest the Series destination's column gets (1280): room for a
+/// strip of 23 books beside the [`NEXT_LANE`]. It grows past
+/// [`SERIES_COLUMN`] only as far as the longest series needs.
+pub const SERIES_COLUMN_MAX: Rems = rems(80.);
 
 /// The widest prose and readers' words get (640).
 pub const PROSE: Rems = rems(40.);
