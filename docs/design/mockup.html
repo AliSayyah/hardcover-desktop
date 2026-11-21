@@ -323,7 +323,8 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .seq-row .when { flex: none; display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
 .seq-row .lane { width: 136px; flex: none; display: flex; justify-content: flex-end; }
 .group-label { padding-top: var(--s-24); padding-bottom: var(--s-4); }
-.list-page { max-width: 768px; }
+/* Catalogue pages fill their region; only the intro line keeps the prose measure. */
+.list-page > .muted { max-width: var(--w-prose); }
 /* Readers' words: Inter, a little more leading than body, never the book's serif. */
 .reader { font-size: var(--t-14); line-height: 22px; max-width: var(--w-prose); }
 .reader p { margin: 0 0 var(--s-8); }
@@ -385,21 +386,19 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .split > .text { width: var(--w-prose); flex: none; }
 .split > .side { flex: 1 1 0; min-width: 0; }
 .shelf.wrap { flex-wrap: wrap; row-gap: var(--s-24); }
-/* Stats: one 768 column; on a wide region two (each 544 to 768), the figures one row across both, 32 apart. */
-.stats { max-width: 768px; }
-.stats.wide { max-width: 1568px; }
+/* Stats: one column filling the region; on a wide region two (each at least 544, filling its half), the figures one row across both, 32 apart. */
 .figs { display: flex; flex-wrap: wrap; gap: var(--s-24); }
 .stats.wide .figs { gap: var(--s-24) var(--s-32); }
 .figs > div { flex: 1 1 160px; min-width: 0; }
 .cols2 { display: flex; gap: var(--s-32); align-items: flex-start; }
-.cols2 > .fill { flex: 1 1 0; max-width: 768px; display: flex; flex-direction: column; gap: var(--s-32); }
+.cols2 > .fill { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: var(--s-32); }
 .chart { height: 192px; display: flex; gap: var(--s-8); align-items: stretch; background: repeating-linear-gradient(to top, var(--track) 0 1px, transparent 1px 48px); }
 .chart.short { height: 160px; }
 .chart .b { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: var(--s-2); font-size: var(--t-12); line-height: var(--l-12); }
-.chart .b i { width: 60%; background: var(--accent); border-radius: 2px 2px 0 0; display: block; }
+.chart .b i { width: 60%; max-width: 48px; background: var(--accent); border-radius: 2px 2px 0 0; display: block; }
 .chart-x { display: flex; gap: var(--s-8); margin-top: var(--s-4); }
 .chart-x span { flex: 1; text-align: center; font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); }
-.shelfrow { display: flex; align-items: center; gap: var(--s-8); height: var(--h-control); max-width: var(--w-list); }
+.shelfrow { display: flex; align-items: center; gap: var(--s-8); height: var(--h-control); }
 .shelfrow svg { color: var(--fg-muted); }
 .shelfrow .n { width: 48px; text-align: right; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
 .wide-note { position: absolute; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-faint); font-size: var(--t-12); }
@@ -429,7 +428,6 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .demo-list .nav.focus { margin: 3px 0; }
 .boxed { border: 1px solid var(--border); border-radius: var(--r-box); }
 /* ---------- Series ---------- */
-.series-page { max-width: 896px; }
 .series-page .group-label { padding-top: var(--s-24); padding-bottom: var(--s-4); }
 /* A series row is a sequence row: no fill, a hairline between rows, 16 above and below. */
 .sr { display: flex; gap: var(--s-24); align-items: flex-start; padding: var(--s-16) 0; border-top: 1px solid var(--border); }
@@ -841,8 +839,8 @@ function homeWide() {
     </div>
   </div></div>`;
 }
-// Series, wide: the column grows past 896 only as far as the longest series' strip needs (at most
-// 1280, 23 books), so a long series shows every book; the lanes stay 240 and lined up.
+// Series, wide: the column fills the region; the strip shows as many books as fit (45 at 2560), and
+// the lanes stay 240 and lined up on the trailing edge.
 function seriesWide() {
   const dresden = ["Storm Front", "Fool Moon", "Grave Peril", "Summer Knight", "Death Masks", "Blood Rites", "Dead Beat", "Proven Guilty", "White Night", "Small Favor", "Turn Coat", "Changes", "Ghost Story", "Cold Days", "Skin Game", "Peace Talks", "Battle Ground"]
     .map(t => ({ t, a: "Jim Butcher" }));
@@ -850,8 +848,7 @@ function seriesWide() {
     books: dresden.map((b, i) => [b, i + 1, i < 5 ? "read" : i === 5 ? "wtr" : "none"]),
     next: { kind: "start", b: dresden[5], pos: 6 } };
   const rows = [long, ...SERIES.filter(x => x.g === "progress")];
-  const width = Math.min(1280, Math.max(896, long.books.length * 44 - 4 + 24 + 240));
-  return sidebar("series", 6) + `<div class="main"><div class="scroll page"><div class="series-page" style="max-width:${width}px">
+  return sidebar("series", 6) + `<div class="main"><div class="scroll page"><div class="series-page">
     ${pageHead().replace('<span class="muted num">5</span>', '<span class="muted num">6</span>')}
     <div class="row-b g-8 group-label"><span class="label">In progress</span><span class="small muted num">3</span></div>
     <div class="col">${rows.map(rowB).join("")}</div>
@@ -1017,9 +1014,9 @@ function libraryFluid() {
   </div>`;
 }
 
-// A catalogue page (Discover, a series, an author, a list) on a wide window: the list keeps its frame
-// (768 inside the 32 inset) and the selected book shows in the pane beside it, which takes its rail
-// once it is wide enough. A click selects; Enter or a double click opens the full page.
+// A catalogue page (Discover, a series, an author, a list) on a wide window: the list is 704 (the
+// prose measure inside the 32 inset) and the selected book shows in the pane beside it, which takes
+// the rest, and its rail once it is wide enough. A click selects; Enter or a double click opens the full page.
 function discoverWide() {
   const r = (b, meta, chip, sel) => `<div class="row${sel ? " sel focus" : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line num">${meta}</div></div>${chip ? `<span class="chip">${ic(chip[0], "xs")}${chip[1]}</span>` : ""}</div>`;
   const rows = [
@@ -1034,7 +1031,7 @@ function discoverWide() {
   ].join("");
   const mist = { ...B.mist, p: 541, y: 2006, r: 4.46, rc: 5802, g: ["Fantasy", "Adventure"], s: "The Mistborn Saga #1" };
   return sidebar("discover") + `<div class="main" style="flex-direction:row">
-    <div class="scroll page" style="width:832px;flex:none"><div class="list-page">
+    <div class="scroll page" style="width:704px;flex:none"><div class="list-page">
       <div class="page-title">Discover</div>
       <div class="muted mt-4">The books the most readers finished on Hardcover in the last month.</div>
       <div class="col mt-16" style="gap:var(--s-2);margin-left:calc(-1 * var(--s-8))">${rows}</div>
@@ -1379,10 +1376,10 @@ const shots = [
   ["Proposed: Library, fluid (2560)", "light · the pane fills the window · the header, progress and rail as now · reading text keeps its 640 measure (About, Your review, Reviews); the width beside it holds Tags and Similar books, which add covers as it grows", "light", 1400, libraryFluid(), 2560],
   ["Home, wide (2560)", "dark · a 4K monitor at 1.5: Continue reading, then Coming soon and Rate what you finished in a second column, then the rail · each column at most 720, so actions stay by their books", "dark", 1000, homeWide(), 2560],
   ["Home, wide (1600)", "light · the laptop panel: the same three columns, each narrower", "light", 1000, homeWide(), 1600],
-  ["Series, wide (2560)", "light · the column grows past 896 only as far as the longest series needs (here 17 books: 1008), at most 1280; the strip takes the width, the next lanes stay 240 and lined up · short series alone keep 896", "light", 760, seriesWide(), 2560],
-  ["Stats, wide (2560)", "dark · two columns (each 544 to 768): Finished per year; Your ratings, then Shelves · the figures one row across both, 32 apart, so the third starts on the second column's spine", "dark", 860, statsWide(), 2560],
+  ["Series, wide (2560)", "light · the column fills the region; the strip takes the width (here all 17 books; up to 45 fit), the next lanes stay 240 and lined up on the trailing edge", "light", 760, seriesWide(), 2560],
+  ["Stats, wide (2560)", "dark · two columns, each filling its half: Finished per year; Your ratings, then Shelves · charts fill their column, bars at most 48 · the figures one row across both, 32 apart, so the third starts on the second column's spine", "dark", 860, statsWide(), 2560],
   ["Library, wide (2560)", "dark · the book pane takes the full page's rail (On Hardcover, Details, Reads, Notes) once the pane is wide enough for both", "dark", 1000, libraryWide(), 2560],
-  ["Discover, wide (2560)", "light · a catalogue page keeps its list's frame and shows the selected book in the pane beside it, with its rail; a click selects, Enter or a double click opens the full page", "light", 1000, discoverWide(), 2560],
+  ["Discover, wide (2560)", "light · a catalogue page's list is 704 beside the pane (the prose measure and its inset); the selected book shows in the pane, which takes the rest, with its rail; a click selects, Enter or a double click opens the full page", "light", 1000, discoverWide(), 2560],
   ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail; Coming soon closes the main column (scrolled content shown in full)", "light", 1020, home()],
   ["Home", "dark", "dark", 1020, home()],
   ["Library: Currently reading", "light · the book's tools sit in a bar above it; status and rating first, then progress", "light", 980, library("cr")],
