@@ -185,6 +185,7 @@ fn main() {
             if std::env::var_os("HARDCOVER_GALLERY").is_some() {
                 gpui_kit::open_window(options, cx, |window, cx| {
                     preferences::follow_theme(window, cx);
+                    ui_scale::follow(window, cx);
                     cx.new(|cx| ui::gallery::Gallery::new(window, cx))
                 })
                 .expect("failed to open window");
