@@ -364,8 +364,9 @@ impl BookDetailView {
             .into_any_element()
     }
 
-    /// The book's tools, for the object bar: the "Lists" menu button and, for
-    /// a book in the library, "more".
+    /// The book's tools, for the object bar: the "Lists" menu button and
+    /// "more": "Open on Hardcover" for any book with a page there, then, for
+    /// a book in the library, its library commands.
     pub(super) fn render_tools(
         &self,
         book: &BookSummary,
@@ -373,73 +374,94 @@ impl BookDetailView {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut tools: Vec<AnyElement> = book_lists::lists_button(book, cx).into_iter().collect();
-        if let Some(entry) = entry {
+        let url = book.web_url();
+        if url.is_none() && entry.is_none() {
+            return tools;
+        }
+        // The library commands, while nothing else on the entry is saving.
+        let library = entry.map(|entry| {
             let busy = self
                 .model
                 .read(cx)
                 .pending_write(entry.user_book_id)
                 .is_some();
-            let can_write = Self::can_write(cx);
-            let has_edition = entry.edition.is_some();
-            // With `read:lists` the Owned switch under Details replaces this.
+            // With `read:lists` the Owned switch under Details replaces the
+            // one-way "Add to Owned list…".
             let one_way_owned = book_lists::offers_one_way_owned(cx);
             let owning = ListsModel::global(cx).is_some_and(|l| l.read(cx).is_busy(entry.book.id));
-            let owned_entry = entry.clone();
-            let view = cx.entity().downgrade();
-            tools.push(
-                Button::new("book-more")
-                    .ghost()
-                    .icon(IconName::Ellipsis)
-                    .tooltip("More actions")
-                    .disabled(busy)
-                    .dropdown_menu(move |menu, _, cx| {
-                        // Disabled, the kit's muted colour shows instead.
-                        let danger = can_write.then(|| colors(cx).danger);
-                        let remove_view = view.clone();
-                        let owned_entry = owned_entry.clone();
-                        let menu = if one_way_owned {
-                            menu.item(
-                                PopupMenuItem::new("Add to Owned list…")
-                                    .disabled(!has_edition || owning || !can_write)
-                                    .on_click(move |_, window, cx| {
-                                        book_lists::confirm_owned(&owned_entry, window, cx);
-                                    }),
-                            )
-                            // Ownership is per edition on Hardcover. Without
-                            // write:library the last row says why, for both.
-                            .when(can_write && !has_edition, |menu| {
-                                menu.item(reason_row("Choose an edition first"))
-                            })
-                            .separator()
-                        } else {
-                            menu
-                        };
-                        // The destructive command, in danger and set apart:
-                        // the kit's menu items take no colour, so it is an
-                        // element item, its icon coloured too.
+            (entry.clone(), busy, one_way_owned, owning)
+        });
+        let can_write = Self::can_write(cx);
+        let view = cx.entity().downgrade();
+        tools.push(
+            Button::new("book-more")
+                .ghost()
+                .icon(IconName::Ellipsis)
+                .tooltip("More actions")
+                .dropdown_menu(move |menu, _, cx| {
+                    let menu = match url.clone() {
+                        Some(url) => menu.item(
+                            PopupMenuItem::new("Open on Hardcover")
+                                .icon(IconName::ExternalLink)
+                                .on_click(move |_, _, cx| cx.open_url(&url)),
+                        ),
+                        None => menu,
+                    };
+                    let Some((entry, busy, one_way_owned, owning)) = library.clone() else {
+                        return menu;
+                    };
+                    let has_edition = entry.edition.is_some();
+                    // Disabled, the kit's muted colour shows instead.
+                    let danger = (can_write && !busy).then(|| colors(cx).danger);
+                    let remove_view = view.clone();
+                    let menu = if url.is_some() {
+                        menu.separator()
+                    } else {
+                        menu
+                    };
+                    let menu = if one_way_owned {
+                        let owned_entry = entry.clone();
                         menu.item(
-                            PopupMenuItem::element(move |_, _| {
-                                div()
-                                    .when_some(danger, gpui_kit::Styled::text_color)
-                                    .child("Remove from library…")
-                            })
-                            .icon(
-                                Icon::new(IconName::Delete)
-                                    .when_some(danger, gpui_kit::Styled::text_color),
-                            )
-                            .disabled(!can_write)
-                            .on_click(move |_, window, cx| {
-                                let _ = remove_view
-                                    .update(cx, |this, cx| this.confirm_remove(window, cx));
-                            }),
+                            PopupMenuItem::new("Add to Owned list…")
+                                .disabled(!has_edition || owning || !can_write || busy)
+                                .on_click(move |_, window, cx| {
+                                    book_lists::confirm_owned(&owned_entry, window, cx);
+                                }),
                         )
-                        .when(!can_write, |menu| {
-                            menu.item(reason_row(needs_permission(WRITE_LIBRARY)))
+                        // Ownership is per edition on Hardcover. Without
+                        // write:library the last row says why, for both.
+                        .when(can_write && !has_edition, |menu| {
+                            menu.item(reason_row("Choose an edition first"))
                         })
+                        .separator()
+                    } else {
+                        menu
+                    };
+                    // The destructive command, in danger and set apart: the
+                    // kit's menu items take no colour, so it is an element
+                    // item, its icon coloured too.
+                    menu.item(
+                        PopupMenuItem::element(move |_, _| {
+                            div()
+                                .when_some(danger, gpui_kit::Styled::text_color)
+                                .child("Remove from library…")
+                        })
+                        .icon(
+                            Icon::new(IconName::Delete)
+                                .when_some(danger, gpui_kit::Styled::text_color),
+                        )
+                        .disabled(!can_write || busy)
+                        .on_click(move |_, window, cx| {
+                            let _ =
+                                remove_view.update(cx, |this, cx| this.confirm_remove(window, cx));
+                        }),
+                    )
+                    .when(!can_write, |menu| {
+                        menu.item(reason_row(needs_permission(WRITE_LIBRARY)))
                     })
-                    .into_any_element(),
-            );
-        }
+                })
+                .into_any_element(),
+        );
         tools
     }
 }
