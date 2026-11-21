@@ -29,8 +29,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString, Size,
-    Styled as _, Subscription, Window, div, px, rems, size as pt_size,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Rems, Render, SharedString,
+    Size, Styled as _, Subscription, Window, div, px, rems, size as pt_size,
 };
 use hardcover_core::Date;
 
@@ -42,16 +42,24 @@ use crate::library::model::LibraryModel;
 use crate::ui::focus::{keyed_focus, reveal_when};
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
-use crate::ui::{EmptyState, PageHeader};
+use crate::ui::{EmptyState, PageHeader, region_width};
 use crate::upcoming::model::UpcomingModel;
 
 /// Skeleton rows while the first load runs.
 const SKELETON_ROWS: usize = 3;
-/// The page's inset (32).
-const INSET: f32 = 2.;
+/// Above the header (32).
+const HEADER_ABOVE: Rems = rems(2.);
+/// Between the title and the filters, beside it or wrapped under it (16).
+const FILTERS_GAP: Rems = rems(1.);
+/// Above the failure line (16).
+const FAILED_ABOVE: Rems = rems(1.);
+/// Above the "nothing shown" line and the foot's line (24).
+const LINE_ABOVE: Rems = rems(1.5);
 /// The narrowest the title and its line get beside the filters; below it the
 /// filters wrap under them.
-const TITLE_MIN: f32 = 22.;
+const TITLE_MIN: Rems = rems(22.);
+/// Between the filter field and the select (8).
+const BETWEEN_FILTERS: Rems = rems(0.5);
 
 /// One choice of the filter select, with its count.
 #[derive(Clone)]
@@ -297,19 +305,21 @@ impl SeriesTrackerView {
             0
         };
         items.push(Item::Foot { hidden });
+        let body_line = px(TypeRole::Body.scale().1);
         let sizes: Vec<Size<Pixels>> = items
             .iter()
             .map(|item| {
                 let height = match item {
                     Item::Header => header_height(wrapped, rem),
-                    // 16 above, the small button's line (24).
-                    Item::Failed(_) => rems(1. + 1.5).to_pixels(rem),
-                    // 24 above, one line (20).
-                    Item::Nothing => rems(1.5 + 1.25).to_pixels(rem),
+                    // The small button is taller than the line beside it.
+                    Item::Failed(_) => (FAILED_ABOVE + size::CONTROL_SMALL).to_pixels(rem),
+                    Item::Nothing => LINE_ABOVE.to_pixels(rem) + body_line,
                     Item::Row(_, label) => row_height(label.is_some(), rem),
-                    Item::Foot { hidden: 0 } => rems(INSET).to_pixels(rem),
-                    // 24 above the line, the small button (24), the inset.
-                    Item::Foot { .. } => rems(1.5 + 1.5 + INSET).to_pixels(rem),
+                    // The page's inset under the last row.
+                    Item::Foot { hidden: 0 } => size::PAGE_INSET.to_pixels(rem),
+                    Item::Foot { .. } => {
+                        (LINE_ABOVE + size::CONTROL_SMALL + size::PAGE_INSET).to_pixels(rem)
+                    }
                 };
                 pt_size(px(0.), height)
             })
@@ -322,10 +332,7 @@ impl SeriesTrackerView {
     /// The width the column gets: the window less the sidebar and the
     /// insets. It fills the region.
     fn column_width(window: &Window) -> Pixels {
-        let rem = window.rem_size();
-        window.viewport_size().width
-            - size::SIDEBAR.to_pixels(rem)
-            - rems(2. * INSET).to_pixels(rem)
+        region_width(window, size::PAGE_INSET)
     }
 
     fn header(
@@ -354,22 +361,22 @@ impl SeriesTrackerView {
             .track_focus(&focus)
             .relative()
             .flex_none()
-            .pt_8()
+            .pt(HEADER_ABOVE)
             .child(reveal)
             .child(
                 h_flex()
                     .flex_wrap()
                     .items_center()
-                    .gap_4()
+                    .gap(FILTERS_GAP)
                     .child(
-                        div().flex_1().min_w(rems(TITLE_MIN)).child(
+                        div().flex_1().min_w(TITLE_MIN).child(
                             title.line("The series you've started, and what's next in each."),
                         ),
                     )
                     .child(
                         h_flex()
                             .flex_none()
-                            .gap_2()
+                            .gap(BETWEEN_FILTERS)
                             .child(
                                 div().w(size::SELECT).child(
                                     Input::new(&self.filter_input)
@@ -408,7 +415,7 @@ impl SeriesTrackerView {
         column()
             .child(
                 h_flex()
-                    .pt_6()
+                    .pt(LINE_ABOVE)
                     .gap_2()
                     .child(
                         div()
@@ -439,7 +446,7 @@ impl SeriesTrackerView {
             "Every series you've started is finished.".to_owned()
         };
         div()
-            .pt_6()
+            .pt(LINE_ABOVE)
             .body()
             .text_color(colors(cx).fg_muted)
             .child(text)
@@ -448,22 +455,26 @@ impl SeriesTrackerView {
 
 /// Whether the filters wrap under the title in a column `column` wide.
 fn header_wraps(column: Pixels, rem: Pixels) -> bool {
-    let beside = rems(TITLE_MIN + 1.).to_pixels(rem)
-        + size::SELECT.to_pixels(rem) * 2.
-        + rems(0.5).to_pixels(rem);
+    let beside = (TITLE_MIN + FILTERS_GAP + size::SELECT * 2. + BETWEEN_FILTERS).to_pixels(rem);
     column < beside
 }
 
-/// The header's height: 32 above the title (28), 4, the line (20); the
-/// filters (32) beside them, or 16 under them when they wrap.
+/// The header's height: the title and its line, the filters (a control)
+/// beside them, or under them when they wrap.
 fn header_height(wrapped: bool, rem: Pixels) -> Pixels {
-    let title = 2. + 1.75 + 0.25 + 1.25;
-    rems(if wrapped { title + 1. + 2. } else { title }).to_pixels(rem)
+    let title = PageHeader::height(1, rem);
+    let filters = size::CONTROL.to_pixels(rem);
+    let below = if wrapped {
+        title + FILTERS_GAP.to_pixels(rem) + filters
+    } else {
+        title.max(filters)
+    };
+    HEADER_ABOVE.to_pixels(rem) + below
 }
 
-/// The page's column: inset 32 on the sides, filling the page.
+/// The page's column: inset on the sides, filling the page.
 fn column() -> gpui_kit::Div {
-    div().flex().flex_col().w_full().px(rems(INSET))
+    div().flex().flex_col().w_full().px(size::PAGE_INSET)
 }
 
 impl Render for SeriesTrackerView {
@@ -529,7 +540,7 @@ impl Render for SeriesTrackerView {
                     .map(|ix| match &items[ix] {
                         Item::Header => this.header(Some(shown), window, cx).into_any_element(),
                         Item::Failed(message) => column()
-                            .pt_4()
+                            .pt(FAILED_ABOVE)
                             .child(Self::failed(message.clone(), cx))
                             .into_any_element(),
                         Item::Nothing => column()

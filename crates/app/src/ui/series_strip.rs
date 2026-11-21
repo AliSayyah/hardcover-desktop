@@ -36,8 +36,11 @@ use hardcover_core::ReadingStatus;
 use super::Meter;
 use crate::chip::status_icon;
 use crate::cover::{Cover, CoverSize};
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::status_label;
+
+/// Between the books, and between a book's cover, line and caption (4).
+const GAP: gpui_kit::Rems = gpui_kit::rems(0.25);
 
 /// An empty place for a book. See the module doc.
 #[derive(IntoElement)]
@@ -230,7 +233,7 @@ impl StripItem {
             .flex_col()
             .flex_none()
             .items_center()
-            .gap_1()
+            .gap(GAP)
             .w(size::STRIP_ITEM)
             .child(body)
             .child(line)
@@ -286,10 +289,17 @@ impl SeriesStrip {
         self
     }
 
+    /// How tall a strip is: an sm cover, the line and the caption, [`GAP`]
+    /// apart. The tracker's virtual list sizes its rows from it.
+    pub fn height(rem: gpui_kit::Pixels) -> gpui_kit::Pixels {
+        (CoverSize::Sm.height() + GAP * 2. + size::METER_THIN).to_pixels(rem)
+            + gpui_kit::px(TypeRole::Caption.scale().1)
+    }
+
     /// How many items fit in `width`, counting the gaps between them.
     pub fn capacity(width: gpui_kit::Pixels, rem: gpui_kit::Pixels) -> usize {
         let item = size::STRIP_ITEM.to_pixels(rem);
-        let gap = gpui_kit::rems(0.25).to_pixels(rem);
+        let gap = GAP.to_pixels(rem);
         let fits = ((width + gap) / (item + gap)).floor();
         if fits.is_finite() && fits > 0. {
             #[expect(
@@ -311,7 +321,7 @@ impl RenderOnce for SeriesStrip {
         div()
             .flex()
             .items_start()
-            .gap_1()
+            .gap(GAP)
             .children(self.items.into_iter().map(|item| item.render(cx)))
             .when(more > 0, |this| {
                 this.child(

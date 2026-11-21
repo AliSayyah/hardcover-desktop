@@ -70,7 +70,7 @@ use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, CoverShelf, Greeting, Lane, Meter, MonthBars, RailSection, RowSpacing, SectionHeader,
     Sequence, Skeleton, TextButton, Tier, books_that_fit, content_column_width, date_line,
-    empty_state, greeting_at, see_all, tier,
+    empty_state, greeting_at, region_width, see_all, tier,
 };
 use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
@@ -980,9 +980,7 @@ impl Render for HomeView {
         // The sidebar is fixed, so the columns get the rest of the window
         // less the page's insets.
         let rem = window.rem_size();
-        let width = window.viewport_size().width
-            - size::SIDEBAR.to_pixels(rem)
-            - size::PAGE_INSET.to_pixels(rem) * 2.;
+        let width = region_width(window, size::PAGE_INSET);
         let has_second = rate.is_some() || coming_soon.is_some();
         let tier = home_tier(width, rem, has_second);
 
@@ -1015,10 +1013,9 @@ impl Render for HomeView {
         let columns = if tier == Tier::Three {
             // Coming soon leads the second column; Rate what you finished
             // and the newest on Want to read follow it.
-            Columns::new(reading).second(column(vec![coming_soon, rate, want_in_column]))
+            Columns::new(tier, reading).second(column(vec![coming_soon, rate, want_in_column]))
         } else {
-            Columns::new(column(vec![Some(reading), rate, coming_soon]))
-                .folded(tier == Tier::Folded)
+            Columns::new(tier, column(vec![Some(reading), rate, coming_soon]))
         };
         root.scroll_y_revealing_focus()
             .child(

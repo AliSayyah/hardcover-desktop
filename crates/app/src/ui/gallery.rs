@@ -31,8 +31,8 @@ use super::{
     AccountRow, Avatar, Block, BylineLink, Columns, CoverShelf, CoverSlot, EmptyState,
     ExternalLink, GoalRow, Greeting, Lane, ListRow, Meter, MonthBars, NavRow, ObjectBar,
     PageHeader, PropertyList, Rail, RailSection, RowSpacing, SectionHeader, Sequence, SeriesStrip,
-    Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton, blocks, books_that_fit,
-    brand_row, date_line, greeting, panel, see_all, sidebar_label,
+    Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton, Tier, blocks,
+    books_that_fit, brand_row, date_line, greeting, panel, see_all, sidebar_label,
 };
 use crate::bidi::WrappingText;
 use crate::chip::genre::GENRES;
@@ -923,17 +923,20 @@ fn shelf_and_columns(window: &Window, cx: &App) -> AnyElement {
             .child(one_row)
             .child(grid)
             .child(
-                Columns::new(main())
+                Columns::new(Tier::Three, main())
                     .second(column("The second column, sharing the width"))
                     .wide_gap()
                     .rail([section()]),
             )
-            .child(Columns::new(main()).wide_gap().rail([section()]))
             .child(
-                Columns::new(main())
+                Columns::new(Tier::Rail, main())
                     .wide_gap()
-                    .rail([section(), RailSection::new("Up next")])
-                    .folded(true),
+                    .rail([section()]),
+            )
+            .child(
+                Columns::new(Tier::Folded, main())
+                    .wide_gap()
+                    .rail([section(), RailSection::new("Up next")]),
             ),
     )
 }

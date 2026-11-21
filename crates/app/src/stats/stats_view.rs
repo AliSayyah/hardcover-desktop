@@ -42,7 +42,7 @@ use crate::chip::status_icon;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{books_count_text, count_text, status_label};
 use crate::library::model::LibraryModel;
-use crate::ui::{Lane, PageHeader, SectionHeader, empty_state};
+use crate::ui::{Lane, PageHeader, SectionHeader, empty_state, region_width};
 
 pub struct StatsView {
     model: Entity<LibraryModel>,
@@ -110,9 +110,7 @@ impl Render for StatsView {
                 .into_any_element();
         }
         let rem = window.rem_size();
-        let width = window.viewport_size().width
-            - size::SIDEBAR.to_pixels(rem)
-            - size::PAGE_INSET.to_pixels(rem) * 2.;
+        let width = region_width(window, size::PAGE_INSET);
         let wide = two_columns(width, rem);
         let years = years_shown(chart_column(width, rem), rem);
         let bar = size::CHART_BAR_MAX.to_pixels(rem);

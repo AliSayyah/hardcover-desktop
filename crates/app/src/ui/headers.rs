@@ -2,9 +2,12 @@
 //! destination or page, Home's greeting, and the title of a section on a
 //! page.
 //!
-//! - [`PageHeader`]: a destination's `page-title` ("Currently reading"), with
-//!   its count beside it in `fg-muted` and an optional muted line under it
-//!   ("5 books still to come in the series on your shelves").
+//! - [`PageHeader`]: a destination's or page's `page-title` ("Currently
+//!   reading"), with its count beside it in `fg-muted`, the page's tools on
+//!   its trailing edge, and lines under it, 4 apart: muted ones ("5 books
+//!   still to come in the series on your shelves"), facts, or anything else
+//!   (a byline). A catalogue name wraps ([`PageHeader::wraps`]); a
+//!   destination's title is cut.
 //! - [`Greeting`]: Home's header: the date in `fg-muted` over the greeting
 //!   in `display-30`. [`greeting`] and [`date_line`] give the words.
 //! - [`SectionHeader`]: a `section` title on Home or a page ("Continue
@@ -15,12 +18,13 @@ use chrono::{Datelike as _, NaiveDate};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::h_flex;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, ElementId, IntoElement, ParentElement as _, RenderOnce,
-    SharedString, Styled as _, Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, ClickEvent, ElementId, IntoElement, ParentElement as _, Pixels, Rems,
+    RenderOnce, SharedString, Styled as _, Window, div, prelude::FluentBuilder as _, px, rems,
 };
 
 use super::kit::SmallControl as _;
 use super::reveal::probe;
+use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
 /// A destination's title. See the module doc.
@@ -28,20 +32,33 @@ use crate::design::{TypeRole, TypeRoles as _, colors, size};
 /// ```ignore
 /// PageHeader::new("Currently reading").count(3)
 /// PageHeader::new("Coming soon").line("5 books still to come in the series on your shelves")
+/// // A catalogue page: a name that may wrap, its tools, its facts.
+/// PageHeader::new(list.name.clone())
+///     .wraps()
+///     .actions(tools)
+///     .facts("12 books · Ranked")
+///     .under(byline)
 /// ```
 #[derive(IntoElement)]
 pub struct PageHeader {
     title: SharedString,
     count: Option<SharedString>,
-    line: Option<SharedString>,
+    wraps: bool,
+    actions: Option<AnyElement>,
+    lines: Vec<AnyElement>,
 }
+
+/// Between the title and each line under it (4).
+const LINE_GAP: Rems = rems(0.25);
 
 impl PageHeader {
     pub fn new(title: impl Into<SharedString>) -> Self {
         Self {
             title: title.into(),
             count: None,
-            line: None,
+            wraps: false,
+            actions: None,
+            lines: Vec::new(),
         }
     }
 
@@ -51,48 +68,110 @@ impl PageHeader {
         self
     }
 
-    /// One muted line under the title. A page that fills a wide window
-    /// keeps it at the reading measure (`size::PROSE`).
-    pub fn line(mut self, line: impl Into<SharedString>) -> Self {
-        self.line = Some(line.into());
+    /// Lets the title wrap ([`WrappingText`]) instead of being cut: a
+    /// catalogue name (a series, a list), which may be long or Persian.
+    pub fn wraps(mut self) -> Self {
+        self.wraps = true;
         self
+    }
+
+    /// The page's tools on the title's trailing edge, at its top.
+    pub fn actions(mut self, actions: impl IntoElement) -> Self {
+        self.actions = Some(actions.into_any_element());
+        self
+    }
+
+    /// A muted line under the title, at most the reading measure
+    /// (`size::PROSE`) wide. Lines stack in the order they are added.
+    pub fn line(self, line: impl Into<SharedString>) -> Self {
+        let line = div().max_w(size::PROSE).body().child(line.into());
+        self.muted(line)
+    }
+
+    /// A muted line of facts under the title, in tabular figures ("12
+    /// books · 3 more in the series · Ongoing").
+    pub fn facts(self, facts: impl Into<SharedString>) -> Self {
+        let line = div().body().tabular().child(facts.into());
+        self.muted(line)
+    }
+
+    /// Anything else under the title: a byline, a summary in `fg`.
+    pub fn under(mut self, line: impl IntoElement) -> Self {
+        self.lines.push(line.into_any_element());
+        self
+    }
+
+    fn muted(mut self, line: gpui_kit::Div) -> Self {
+        // The colour is set when drawn, from the theme.
+        self.lines.push(MutedLine(line).into_any_element());
+        self
+    }
+
+    /// How tall a header is whose title and `lines` lines of `body` text
+    /// each take one line: what a virtual list sizes its first item from.
+    pub fn height(lines: usize, rem: Pixels) -> Pixels {
+        let (_, title) = TypeRole::PageTitle.scale();
+        let (_, line) = TypeRole::Body.scale();
+        #[expect(clippy::cast_precision_loss, reason = "a handful of lines")]
+        let lines = lines as f32;
+        px(title) + (LINE_GAP.to_pixels(rem) + px(line)) * lines
+    }
+}
+
+/// A line of [`PageHeader`] in `fg-muted`.
+#[derive(IntoElement)]
+struct MutedLine(gpui_kit::Div);
+
+impl RenderOnce for MutedLine {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        self.0.text_color(colors(cx).fg_muted)
     }
 }
 
 impl RenderOnce for PageHeader {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let muted = colors(cx).fg_muted;
+        let title = if self.wraps {
+            div()
+                .page_title()
+                .min_w_0()
+                .child(WrappingText::new(self.title))
+        } else {
+            div().page_title().min_w_0().truncate().child(self.title)
+        };
+        let title = h_flex()
+            .gap_2()
+            .min_w_0()
+            .child(title)
+            .when_some(self.count, |this, count| {
+                this.child(
+                    div()
+                        .flex_none()
+                        .body()
+                        .baseline_on(TypeRole::Body, TypeRole::PageTitle)
+                        .tabular()
+                        .text_color(muted)
+                        .child(count),
+                )
+            });
+        let title = match self.actions {
+            Some(actions) => h_flex()
+                .items_start()
+                .justify_between()
+                .gap_4()
+                .min_w_0()
+                .child(title)
+                .child(div().flex_none().child(actions))
+                .into_any_element(),
+            None => title.into_any_element(),
+        };
         div()
             .flex()
             .flex_col()
-            .gap_1()
+            .gap(LINE_GAP)
             .min_w_0()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .min_w_0()
-                    .child(div().page_title().min_w_0().truncate().child(self.title))
-                    .when_some(self.count, |this, count| {
-                        this.child(
-                            div()
-                                .flex_none()
-                                .body()
-                                .baseline_on(TypeRole::Body, TypeRole::PageTitle)
-                                .tabular()
-                                .text_color(muted)
-                                .child(count),
-                        )
-                    }),
-            )
-            .when_some(self.line, |this, line| {
-                this.child(
-                    div()
-                        .max_w(size::PROSE)
-                        .body()
-                        .text_color(muted)
-                        .child(line),
-                )
-            })
+            .child(title)
+            .children(self.lines)
     }
 }
 
@@ -228,6 +307,72 @@ fn see_all_label(count: Option<u32>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::test_support::host;
+    use gpui_kit::{InteractiveElement as _, TestAppContext};
+
+    const LONG: &str = "The Exceedingly Long and Winding Chronicle of the Northern Reaches";
+
+    /// A header drawn in a box `width` wide.
+    fn measure(
+        cx: &mut TestAppContext,
+        width: f32,
+        build: impl Fn() -> PageHeader + 'static,
+    ) -> gpui_kit::Bounds<Pixels> {
+        let cx = host(cx, move |_, _| {
+            div()
+                .w(px(width))
+                .child(div().debug_selector(|| "header".into()).child(build()))
+                .into_any_element()
+        });
+        cx.debug_bounds("header").expect("the header is drawn")
+    }
+
+    /// A catalogue name wraps onto more lines instead of being cut.
+    #[gpui_kit::test]
+    fn a_wrapping_title_takes_more_lines(cx: &mut TestAppContext) {
+        let rem = px(16.);
+        let cut = measure(cx, 320., || PageHeader::new(LONG));
+        assert_eq!(cut.size.height, PageHeader::height(0, rem));
+        let wrapped = measure(cx, 320., || PageHeader::new(LONG).wraps());
+        assert!(
+            wrapped.size.height >= PageHeader::height(0, rem) * 2.,
+            "{wrapped:?}"
+        );
+    }
+
+    /// Lines stack 4 apart under the title, and the height a virtual list
+    /// sizes the header from is the one it draws.
+    #[gpui_kit::test]
+    fn lines_stack_under_the_title(cx: &mut TestAppContext) {
+        let header = measure(cx, 800., || {
+            PageHeader::new("Series")
+                .count(4)
+                .line("The series you've started.")
+                .facts("4 books · Ongoing")
+        });
+        assert_eq!(header.size.height, PageHeader::height(2, px(16.)));
+    }
+
+    /// The page's tools sit on the title's trailing edge, at its top.
+    #[gpui_kit::test]
+    fn actions_sit_at_the_trailing_edge(cx: &mut TestAppContext) {
+        let cx = host(cx, |_, _| {
+            div()
+                .w(px(600.))
+                .child(
+                    PageHeader::new(LONG).wraps().actions(
+                        div()
+                            .w(px(80.))
+                            .h(px(24.))
+                            .debug_selector(|| "action".into()),
+                    ),
+                )
+                .into_any_element()
+        });
+        let action = cx.debug_bounds("action").expect("the actions are drawn");
+        assert_eq!(action.right(), px(600.));
+        assert_eq!(action.top(), px(0.));
+    }
 
     #[test]
     fn the_greeting_follows_the_hour() {

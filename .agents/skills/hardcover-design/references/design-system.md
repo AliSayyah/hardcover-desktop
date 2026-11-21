@@ -131,7 +131,7 @@ Every size has a fixed line height.
 
 | Role | Family, weight | Size / line | In code | Use |
 | --- | --- | --- | --- | --- |
-| `page-title` | Inter 600 | 20 / 28 | `.page_title()` | A destination's title: "Currently reading" |
+| `page-title` | Inter 600 | 20 / 28 | `.page_title()` | A destination's or page's title: "Currently reading" (always through `ui::PageHeader`; a catalogue name wraps, a destination's is cut) |
 | `section` | Inter 600 | 16 / 24 | `.section()` | A section on a page: "Continue reading" |
 | `byline` | Inter 500 | 16 / 24 | `.byline()` | A book's author and series under its title in the header |
 | `heading` | Inter 600 | 14 / 20 | `.heading()` | A block in a pane: "About this book", "Details" |
@@ -643,10 +643,13 @@ every width below (the tiers' thresholds included) is in design px too.
   may be wider.
 - **Tiers come from the region.** Each layout picks its tier from the width
   its own region gets: the window less the sidebar, less any list beside it,
-  less its insets. Never from the raw window width. The choice is a pure
-  function with unit tests (`ui::columns::tier`, like `folds`), pinned at
-  800 and 1200 (today's layout), on both sides of each threshold, and at
-  1600 and 2560.
+  less its insets. Never from the raw window width. One helper gives that
+  width beside the sidebar (`ui::region_width`); a screen never subtracts
+  the sidebar itself. The choice is a pure function with unit tests
+  (`ui::columns::tier`, like `folds`), pinned at 800 and 1200 (today's
+  layout), on both sides of each threshold, and at 1600 and 2560. The tier
+  is what `Columns` is built from, so a second column can't sit beside the
+  main one except in the three-column tier.
 - **Tiers by screen:**
   - **Home:** fills its region in every tier. Two content columns of at
     least 448 beside the rail (a 1536 window) give it three columns:

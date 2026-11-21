@@ -69,7 +69,10 @@ use crate::library::writes;
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::ui::kit::open_alert_dialog;
-use crate::ui::{Columns, EmptyState, ObjectBar, ObjectTools, blocks, folds, main_column_width};
+use crate::ui::{
+    Columns, EmptyState, ObjectBar, ObjectTools, Tier, blocks, folds, main_column_width,
+    region_width,
+};
 
 mod catalog_sections;
 mod community_reviews;
@@ -1197,7 +1200,7 @@ impl BookDetailView {
             .child(header)
             .children(entry.and_then(|entry| self.render_panel(entry, cx)))
             .child(blocks.tab_group().tab_index(1));
-        Columns::new(main).rail(rail).folded(folded)
+        Columns::new(Tier::rail(folded), main).rail(rail)
     }
 
     /// The full page: the columns in the page's inset; the rail folds under
@@ -1213,9 +1216,7 @@ impl BookDetailView {
         // The page is the window less the sidebar and its own insets: GPUI
         // has no container queries.
         let rem = window.rem_size();
-        let width = window.viewport_size().width
-            - size::SIDEBAR.to_pixels(rem)
-            - size::PAGE_INSET.to_pixels(rem) * 2.;
+        let width = region_width(window, size::PAGE_INSET);
         let folded = folds(width, rem, false);
         let side = side_width(main_column_width(width, rem, false, folded), rem)
             .map(|side| catalog_sections::similar_in_side(side, rem));
