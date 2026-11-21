@@ -1008,6 +1008,8 @@ commit that fixes it.
 - The kit's controls (buttons, inputs, selects, switches) draw a 3 px focus
   ring, not 2: the width is a private constant of the kit. The app's own
   rows, text buttons and components draw 2.
-- A chart's labels (Stats, the goal's months) are a fixed 10 px: the kit's
-  charts set their text size in px, so they don't follow the interface
-  scale.
+- Some of the kit's own measures are px, so they don't follow the
+  interface scale (`ui_scale`) and look a little small at 1.25: a chart's
+  labels (Stats, the goal's months) are a fixed 10 px; a segmented tab
+  bar's height and padding (Search's tabs, Discover's periods, the progress
+  dialog's units); a dialog's margins.
