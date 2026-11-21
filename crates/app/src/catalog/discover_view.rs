@@ -214,7 +214,7 @@ impl DiscoverView {
         self.rows.show(
             self.period,
             books.as_ref(),
-            Self::rows,
+            |books| Self::rows(books),
             false,
             &self.list,
             window,
@@ -223,7 +223,7 @@ impl DiscoverView {
     }
 
     /// The list's rows for a period's books.
-    fn rows(books: &Vec<BookSummary>) -> Vec<CatalogRow> {
+    fn rows(books: &[BookSummary]) -> Vec<CatalogRow> {
         books
             .iter()
             .map(|book| CatalogRow {

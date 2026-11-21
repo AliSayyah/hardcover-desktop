@@ -375,12 +375,12 @@ impl Workspace {
         let updates = Updates::global(cx).clone();
         let mut syncing = false;
         self.subscriptions = vec![
-            cx.observe_in(&self.model, window, move |this, model, window, cx| {
+            cx.observe(&self.model, move |this, model, cx| {
                 // A sync that ended made the own reviews stale: the one shown
                 // is fetched again, the hidden ones when next shown.
                 let now = *model.read(cx).sync_status() == SyncStatus::Syncing;
                 if std::mem::replace(&mut syncing, now) && !now {
-                    this.revalidate_visible(false, window, cx);
+                    this.revalidate_visible(false, cx);
                 }
                 cx.notify();
             }),
@@ -389,7 +389,7 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     this.model.update(cx, LibraryModel::sync_if_stale);
-                    this.revalidate_visible(false, window, cx);
+                    this.revalidate_visible(false, cx);
                 }
             }),
             cx.observe(&updates, |_, _, cx| cx.notify()),
@@ -492,7 +492,7 @@ impl Workspace {
                 });
             }
         }
-        self.revalidate_visible(true, window, cx);
+        self.revalidate_visible(true, cx);
         cx.notify();
     }
 
@@ -502,12 +502,7 @@ impl Workspace {
     /// shown, so only these are asked, on Refresh, when the window becomes
     /// active, when a sync ends (it makes the reader's own reviews stale),
     /// and when a page or destination is shown again (`shown_again`).
-    fn revalidate_visible(
-        &mut self,
-        shown_again: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn revalidate_visible(&mut self, shown_again: bool, cx: &mut Context<Self>) {
         match self.pages.current() {
             Some(Page::Series(_)) => self
                 .series_page
@@ -558,7 +553,7 @@ impl Workspace {
         if self.pages.current().is_some() {
             self.show_page(window, cx);
         } else {
-            self.revalidate_visible(true, window, cx);
+            self.revalidate_visible(true, cx);
             self.focus_destination(window, cx);
             cx.notify();
         }
@@ -577,7 +572,7 @@ impl Workspace {
             Some(Page::Upcoming) => {}
             None => return,
         }
-        self.revalidate_visible(true, window, cx);
+        self.revalidate_visible(true, cx);
         self.focus_page(window, cx);
         cx.notify();
     }
@@ -680,9 +675,9 @@ impl Workspace {
         cx.notify();
     }
 
-    fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn refresh(&mut self, cx: &mut Context<Self>) {
         resource::refresh_all(cx);
-        self.revalidate_visible(true, window, cx);
+        self.revalidate_visible(true, cx);
         self.model.update(cx, LibraryModel::sync);
         self.goals.update(cx, GoalsModel::load);
         self.lists.update(cx, ListsModel::reload);
@@ -1277,7 +1272,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.show(Destination::Search, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &Refresh, window, cx| this.refresh(window, cx)))
+            .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh(cx)))
             .on_action(cx.listener(|this, _: &GoBack, window, cx| this.go_back(window, cx)))
             .on_action(
                 cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),

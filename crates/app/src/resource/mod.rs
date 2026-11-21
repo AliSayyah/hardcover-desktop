@@ -8,7 +8,7 @@
 //! key ([`Resource::request`]) with a [`Demand`] is all a caller does; the
 //! resource decides:
 //!
-//! - **Never fetched, or stale** (older than [`STALE_AFTER`], or asked for
+//! - **Never fetched, or stale** (older than [`stamp::STALE_AFTER`], or asked for
 //!   before the last Refresh): fetch, keeping the value shown meanwhile.
 //! - **In flight:** nothing more, unless the request in flight started
 //!   before the last Refresh: then it is started again, so Refresh never
@@ -31,7 +31,7 @@
 //! from it aren't rebuilt and their selection doesn't move.
 //!
 //! A resource is a plain value inside its owner entity (a model, or a
-//! [`Shared`] store), which it reaches through a [`Binding`]: the task of a
+//! [`catalog::Shared`] store), which it reaches through a [`Binding`]: the task of a
 //! fetch updates the owner, and the binding's `landed` hook tells the owner
 //! what changed. The catalogue's resources, shared by every view, are in
 //! [`Catalog`].
@@ -54,9 +54,12 @@ use std::time::SystemTime;
 use gpui_kit::{App, Context, SharedString, Task};
 use hardcover_core::Client;
 
-pub use catalog::{Catalog, Paged, ReviewPages, Shared, SharedChanged};
+pub use catalog::{Catalog, Paged, SharedChanged};
 pub use follow::{Debounce, LibraryFollow};
-pub use stamp::{STALE_AFTER, Stamp, refresh_all};
+#[cfg(test)]
+use stamp::STALE_AFTER;
+use stamp::Stamp;
+pub use stamp::refresh_all;
 
 use crate::io::Priority;
 use crate::session::SessionScope;
@@ -269,6 +272,7 @@ where
         self
     }
 
+    #[cfg(test)]
     pub fn session(&self) -> &SessionScope {
         &self.session
     }

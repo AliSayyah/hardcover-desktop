@@ -386,7 +386,7 @@ mod tests {
     use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 
     use super::super::tests::{BOOK, demo_pane, settle};
-    use crate::resource::ReviewPages;
+    use crate::resource::catalog::ReviewPages;
 
     fn reviews(view: &Entity<BookDetailView>, cx: &mut VisualTestContext) -> ReviewPages {
         view.read_with(cx, |view, cx| {

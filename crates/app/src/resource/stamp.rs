@@ -49,10 +49,6 @@ impl Stamp {
         Self { at, generation }
     }
 
-    pub fn is_stale(self, cx: &App) -> bool {
-        self.is_stale_at(SystemTime::now(), generation(cx))
-    }
-
     /// Asked for before the Refresh generation `generation`.
     pub(super) fn predates(self, generation: u64) -> bool {
         self.generation != generation

@@ -76,7 +76,7 @@ use crate::library::writes;
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::resource::{Catalog, Demand, SharedChanged};
-use crate::session::{self, SessionScope};
+use crate::session;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, EmptyState, ObjectBar, ObjectTools, Tier, blocks, folds, main_column_width,
@@ -1263,6 +1263,8 @@ mod tests {
     use gpui_kit::{TestAppContext, VisualTestContext, px};
     use hardcover_core::store::LibraryCache;
 
+    use crate::session::SessionScope;
+
     /// Project Hail Mary in the demo catalogue: more than a page of reviews.
     pub(super) const BOOK: BookId = BookId::new(427_578);
 
@@ -1371,6 +1373,33 @@ mod tests {
         });
         settle(cx);
         assert_eq!(started(cx), before, "nothing fetched again");
+    }
+
+    /// A sync makes the reader's own reviews stale, but only the view shown
+    /// fetches its review again (the workspace asks it to): a hidden book
+    /// view sends nothing.
+    #[gpui_kit::test]
+    fn a_sync_fetches_the_own_review_only_where_shown(cx: &mut TestAppContext) {
+        let (view, cx) = demo_pane(cx);
+        let model = view.read_with(cx, |view, _| view.model.clone());
+        model.update(cx, |m, cx| m.start(cx));
+        settle(cx);
+        let entry = model.read_with(cx, |m, _| m.entries()[0].clone());
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.set_subject(Some(Subject::Entry(entry.user_book_id)), window, cx);
+            });
+        });
+        settle(cx);
+        let asked = |cx: &mut VisualTestContext| model.read_with(cx, |m, _| m.reviews().started());
+        let before = asked(cx);
+        assert!(before >= 1, "the review was asked for when shown");
+
+        model.update(cx, |m, cx| m.sync(cx));
+        settle(cx);
+        assert_eq!(asked(cx), before, "not while hidden");
+        view.update(cx, |view, cx| view.revalidate(false, cx));
+        assert_eq!(asked(cx), before + 1, "shown: fetched again");
     }
 
     /// D14: the Reviews block doesn't wait on the details; when they fail,

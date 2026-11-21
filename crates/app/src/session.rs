@@ -38,9 +38,6 @@ struct Inner {
     client: Client,
     /// `None` when signed in with the development token or in the demo.
     auth: Option<Arc<Session>>,
-    /// `None` if the cache could not be opened; the app then works online
-    /// only.
-    cache: Option<Arc<LibraryCache>>,
     /// The cache's own thread, which every write to it goes through, in
     /// order; `None` without a cache, and once it was cleared on signing
     /// out ([`SessionScope::clear_cache`]).
@@ -100,14 +97,12 @@ impl SessionScope {
         io: Io,
     ) -> Self {
         let cache_worker = cache
-            .clone()
             .and_then(|cache| CacheWorker::start(cache, io))
             .map(Rc::new);
         Self {
             inner: Rc::new(Inner {
                 client,
                 auth,
-                cache,
                 cache_worker: RefCell::new(cache_worker),
                 alive: Arc::new(AtomicBool::new(true)),
                 io,
@@ -156,10 +151,6 @@ impl SessionScope {
     /// The OAuth session; `None` with a personal token or in the demo.
     pub fn auth(&self) -> Option<&Arc<Session>> {
         self.inner.auth.as_ref()
-    }
-
-    pub fn cache(&self) -> Option<&Arc<LibraryCache>> {
-        self.inner.cache.as_ref()
     }
 
     /// The cache's worker, which runs reads and writes in the order they

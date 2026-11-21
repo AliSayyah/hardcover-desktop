@@ -28,11 +28,6 @@ impl Debounce {
             let _ = this.update(cx, run);
         }));
     }
-
-    /// Forgets a call still waiting.
-    pub fn cancel(&mut self) {
-        self.task = None;
-    }
 }
 
 /// What [`LibraryFollow::check`] found.

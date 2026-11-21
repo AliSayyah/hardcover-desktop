@@ -854,6 +854,26 @@ mod tests {
         (model, session, cache)
     }
 
+    /// A fetch of the reader's own review that started before a write of it
+    /// is dropped, even after a sync made every review stale meanwhile.
+    #[gpui_kit::test]
+    fn an_own_review_fetch_older_than_a_write_is_dropped(cx: &mut gpui_kit::TestAppContext) {
+        let (model, _, _) = demo_model(cx);
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let id = model.read_with(cx, |m, _| m.entries()[0].user_book_id);
+        model.update(cx, |m, cx| {
+            m.request_review(id, Demand::Shown, cx);
+            m.apply_review(id, review("Written here"), cx);
+            m.reviews.invalidate_all_but(|_| false);
+        });
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| {
+            let shown = m.reviews().value(&id).map(|r| (**r).clone());
+            assert_eq!(shown, Some(review("Written here")));
+        });
+    }
+
     /// Signs out as the workspace does: the session ends, then the model.
     fn sign_out(
         model: &Entity<LibraryModel>,
