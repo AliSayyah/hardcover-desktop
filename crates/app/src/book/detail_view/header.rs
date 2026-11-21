@@ -75,21 +75,17 @@ impl BookDetailView {
     /// The header. `with_rail`: the page's rail beside it holds Hardcover's
     /// average, so the header leaves it out.
     pub(super) fn render_header(
-        &mut self,
+        &self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         with_rail: bool,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let page = self.tools_in_bar;
         let muted = colors(cx).fg_muted;
-        let cover_url = entry
-            .and_then(|e| e.cover())
-            .or(book.cover.as_ref())
-            .map(|c| c.url.clone());
-        let art = self.load_cover(cover_url, window, cx);
+        let art = self.art.clone();
         let size = if page { CoverSize::Xxl } else { CoverSize::Xl };
 
         let facts = book_facts(book, entry, details);
@@ -188,7 +184,7 @@ impl BookDetailView {
     fn render_contributors(
         book: &BookSummary,
         details: Option<&BookDetails>,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let contributors = details.map_or_default(|d| d.contributors.as_slice());
         let authors: Vec<&Contributor> = contributors.iter().filter(|c| c.is_author()).collect();
@@ -254,7 +250,7 @@ impl BookDetailView {
         &self,
         entry: &LibraryEntry,
         window: &Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let busy = pending.is_some();
@@ -349,12 +345,7 @@ impl BookDetailView {
     }
 
     /// "Add to library", a menu of the statuses to add the book with.
-    fn render_add(
-        &self,
-        book: &BookSummary,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_add(&self, book: &BookSummary, window: &Window, cx: &Context<Self>) -> AnyElement {
         let adding = self.model.read(cx).is_adding(book.id);
         let can_write = Self::can_write(cx);
         let view = cx.entity().downgrade();
@@ -393,7 +384,7 @@ impl BookDetailView {
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         window: &Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Vec<AnyElement> {
         let mut tools: Vec<AnyElement> = book_lists::lists_button(book, cx).into_iter().collect();
         let url = book.web_url();

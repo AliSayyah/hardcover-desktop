@@ -42,7 +42,7 @@ impl BookDetailView {
         &self,
         entry: &LibraryEntry,
         window: &Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Option<AnyElement> {
         match entry.status {
             ReadingStatus::CurrentlyReading | ReadingStatus::Paused => {
@@ -59,7 +59,7 @@ impl BookDetailView {
         &self,
         entry: &LibraryEntry,
         window: &Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let progress = progress_summary(entry);
@@ -145,7 +145,7 @@ impl BookDetailView {
         &self,
         entry: &LibraryEntry,
         window: &Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let can_write = Self::can_write(cx);
@@ -186,7 +186,7 @@ impl BookDetailView {
         &self,
         entry: &LibraryEntry,
         in_rail: bool,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let busy = pending.is_some();
@@ -264,7 +264,7 @@ impl BookDetailView {
         entry: &LibraryEntry,
         in_rail: bool,
         window: &Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let can_write = Self::can_write(cx);
@@ -364,7 +364,7 @@ impl BookDetailView {
         read: &ReadSession,
         disabled: bool,
         window: &Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> impl IntoElement {
         let view = cx.entity().downgrade();
         let session = read.clone();

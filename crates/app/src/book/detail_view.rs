@@ -71,6 +71,7 @@ use self::review_section::YourReview;
 use self::similar_books::{SideGrid, SimilarBooks};
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
+use crate::cover::CoverArt;
 use crate::design::size;
 use crate::format::read_dates_text;
 use crate::library::model::{
@@ -238,6 +239,8 @@ pub struct BookDetailView {
     /// The cover URL last requested and its image once loaded, released when
     /// the pane moves to another cover.
     cover: Option<(String, Option<Arc<RenderImage>>)>,
+    /// The cover as loaded for this frame.
+    art: CoverArt,
     /// "Show all tags" was pressed for the book shown.
     tags_expanded: bool,
     /// The full book page, under the object bar the shell draws: the book's
@@ -333,6 +336,7 @@ impl BookDetailView {
             read_dialog: None,
             shown: None,
             cover: None,
+            art: CoverArt::None,
             similar_books,
             similar_side,
             tags_expanded: false,
@@ -898,12 +902,16 @@ impl BookDetailView {
 }
 
 impl BookDetailView {
-    /// The subject's entry and book, if there is a subject.
-    fn shown_book(&self, cx: &App) -> Option<(BookSummary, Option<LibraryEntry>)> {
-        let entry = self.entry(self.model.read(cx)).cloned();
-        let book = match (&self.subject, &entry) {
-            (_, Some(entry)) => entry.book.clone(),
-            (Some(Subject::Book(book)), None) => book.clone(),
+    /// The subject's book and entry, if there is a subject: borrowed from
+    /// the model, so a frame clones neither.
+    fn shown_book<'a>(
+        &'a self,
+        model: &'a LibraryModel,
+    ) -> Option<(&'a BookSummary, Option<&'a LibraryEntry>)> {
+        let entry = self.entry(model);
+        let book = match (&self.subject, entry) {
+            (_, Some(entry)) => &entry.book,
+            (Some(Subject::Book(book)), None) => book,
             _ => return None,
         };
         Some((book, entry))
@@ -912,12 +920,12 @@ impl BookDetailView {
     /// The pane: its bar over one scrolling column of the header, the panel
     /// and every block; or, when it is wide, over the page's columns.
     fn render_pane(
-        &mut self,
+        &self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let layout = self.layout.get();
         let content = if layout.rail {
@@ -968,12 +976,12 @@ impl BookDetailView {
 
     /// The narrow pane's one column: the header, the panel and every block.
     fn render_column(
-        &mut self,
+        &self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let header = self.render_header(book, entry, details, false, window, cx);
         let mut column: Vec<AnyElement> = Vec::new();
@@ -1009,14 +1017,14 @@ impl BookDetailView {
     /// a side column. The caller wraps them in its inset as a tab group.
     #[allow(clippy::too_many_arguments)]
     fn render_columns(
-        &mut self,
+        &self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         folded: bool,
         side: Option<SideGrid>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Columns {
         let header = self.render_header(book, entry, details, true, window, cx);
         let about = self.render_about(book, cx);
@@ -1085,12 +1093,12 @@ impl BookDetailView {
     /// The full page: the columns in the page's inset; the rail folds under
     /// the main column when the page is too narrow.
     fn render_page(
-        &mut self,
+        &self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         // The page is the window less the sidebar and its own insets: GPUI
         // has no container queries.
@@ -1125,8 +1133,9 @@ impl ObjectTools for BookDetailView {
         if !self.tools_in_bar {
             return Vec::new();
         }
-        match self.shown_book(cx) {
-            Some((book, entry)) => self.render_tools(&book, entry.as_ref(), window, cx),
+        let model = self.model.read(cx);
+        match self.shown_book(model) {
+            Some((book, entry)) => self.render_tools(book, entry, window, cx),
             None => Vec::new(),
         }
     }
@@ -1134,17 +1143,27 @@ impl ObjectTools for BookDetailView {
 
 impl Render for BookDetailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let shown = self.shown_book(cx);
-        let Some((book, entry)) = shown else {
-            self.load_cover(None, window, cx);
+        // The cover first: loading it needs the context mutably, and the
+        // rest borrows the book and the entry from the model.
+        let cover_url = self
+            .shown_book(self.model.read(cx))
+            .and_then(|(book, entry)| {
+                entry
+                    .and_then(|e| e.cover())
+                    .or(book.cover.as_ref())
+                    .map(|c| c.url.clone())
+            });
+        self.art = self.load_cover(cover_url, window, cx);
+        let cx: &Context<Self> = cx;
+        let Some((book, entry)) = self.shown_book(self.model.read(cx)) else {
             return EmptyState::new(IconName::BookOpen, "Select a book to see its details")
                 .into_any_element();
         };
         let details = self.details(book.id, cx);
         if self.tools_in_bar {
-            self.render_page(&book, entry.as_ref(), details.as_deref(), window, cx)
+            self.render_page(book, entry, details.as_deref(), window, cx)
         } else {
-            self.render_pane(&book, entry.as_ref(), details.as_deref(), window, cx)
+            self.render_pane(book, entry, details.as_deref(), window, cx)
         }
     }
 }

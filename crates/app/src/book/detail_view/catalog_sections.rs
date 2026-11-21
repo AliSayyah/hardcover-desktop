@@ -32,7 +32,7 @@ impl BookDetailView {
     // ----- blocks -----
 
     /// About this book: the description in `prose`, or why there is none.
-    pub(super) fn render_about(&self, book: &BookSummary, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_about(&self, book: &BookSummary, cx: &Context<Self>) -> AnyElement {
         let muted = colors(cx).fg_muted;
         let (details, error, loading) = match &self.catalog {
             Some(catalog) => {
@@ -77,7 +77,7 @@ impl BookDetailView {
     pub(super) fn render_tags(
         &self,
         details: Option<&BookDetails>,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Option<AnyElement> {
         let details = details?;
         /// Which chips a group's tags get.
@@ -151,7 +151,7 @@ impl BookDetailView {
     /// Also known as: the book's other titles, muted.
     pub(super) fn render_other_titles(
         details: Option<&BookDetails>,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Option<AnyElement> {
         let titles = &details?.alternative_titles;
         if titles.is_empty() {
@@ -186,7 +186,7 @@ impl BookDetailView {
         book: &BookSummary,
         details: Option<&BookDetails>,
         in_rail: bool,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Option<AnyElement> {
         let muted = colors(cx).fg_muted;
         let average = book
@@ -272,7 +272,7 @@ fn plural(n: u32, one: &str, many: &str) -> String {
 /// The ratings breakdown: a row per star level, its share of the most
 /// common level as a bar, and its count. Hardcover's figures, so muted ink
 /// on `track`, not the accent of progress.
-fn render_breakdown(details: &BookDetails, cx: &mut Context<BookDetailView>) -> AnyElement {
+fn render_breakdown(details: &BookDetails, cx: &Context<BookDetailView>) -> AnyElement {
     let colors = colors(cx);
     let buckets = &details.ratings_distribution;
     let max = buckets.iter().map(|b| b.count).max().unwrap_or(1).max(1);
