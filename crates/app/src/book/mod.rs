@@ -3,5 +3,6 @@
 pub mod detail_view;
 pub mod edition_picker;
 pub mod progress_dialog;
+pub mod progress_input;
 pub mod read_dialog;
 pub mod star_rating;
