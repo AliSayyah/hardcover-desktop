@@ -49,6 +49,7 @@ use crate::series::model::SeriesModel;
 use crate::series::tracker_view::SeriesTrackerView;
 use crate::session::{self, SessionScope};
 use crate::settings_view::{SettingsView, SignOutRequested};
+use crate::sidebar_keys::SidebarKeys;
 use crate::sign_in::reauthorize::{Reauthorize, Reauthorized};
 use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::stats::stats_view::StatsView;
@@ -247,6 +248,8 @@ pub struct Workspace {
     /// The sidebar's destinations, which scroll between the brand and the
     /// account; a row that gains focus scrolls into view in it.
     sidebar_scroll: ScrollHandle,
+    /// The destinations' keys: one Tab stop, the arrows inside.
+    sidebar_keys: Entity<SidebarKeys>,
     /// The account row's focus: where the account menu, and the dialogs it
     /// opens, give focus back.
     account_focus: FocusHandle,
@@ -300,6 +303,7 @@ impl Workspace {
         let reauthorize = cx.new(|_| Reauthorize::new(session.clone(), model.clone()));
         let goals = cx.new(|cx| GoalsModel::new(session.clone(), &model, cx));
         let sidebar_scroll = ScrollHandle::new();
+        let sidebar_keys = cx.new(|cx| SidebarKeys::new(window, cx));
         let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
         let upcoming = cx.new(|cx| UpcomingModel::new(session.clone(), model.clone(), cx));
         let upcoming_page = cx.new(|cx| UpcomingView::new(upcoming.clone(), model.clone(), cx));
@@ -341,6 +345,7 @@ impl Workspace {
             goals,
             goals_section,
             sidebar_scroll,
+            sidebar_keys,
             account_focus: cx.focus_handle().tab_stop(true),
             lists,
             list_page,
@@ -907,8 +912,9 @@ impl Workspace {
             .border_color(colors.border)
             .child(div().flex_none().px_2().pt_2().child(brand_row(cx)))
             .child(
-                div()
-                    .id("sidebar-destinations")
+                self.sidebar_keys
+                    .read(cx)
+                    .wrap(div().id("sidebar-destinations"))
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()

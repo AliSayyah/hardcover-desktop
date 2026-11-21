@@ -535,6 +535,13 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   row does the same with why a sync failed, under the sync line. A
   disabled row can't take focus; a missing permission is also the
   sidebar's "Sign in again" notice, which can.
+- **Keyboard:** the destinations, from Home to "New list…", are one stop in
+  the Tab order however many lists the reader has, so the page is never
+  dozens of presses away. Tab enters on the row the sidebar was left from
+  (Home until then); Up and Down move between rows, stopping at the ends,
+  Home and End go to the first and the last, Enter and Space press the
+  row, and Tab or Shift+Tab leaves. The account row at the foot is a stop
+  of its own.
 
 ### Popovers, menus and dialogs
 
