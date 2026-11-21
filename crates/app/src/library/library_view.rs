@@ -24,7 +24,7 @@ use hardcover_core::{ReadingStatus, UserBookId};
 
 use super::book_row::{BookRow, loading_rows};
 use super::collection::{SortOrder, shelf_rows};
-use super::model::{LibraryModel, SyncStatus};
+use super::model::LibraryModel;
 use crate::book::detail_view::{BookDetailView, Subject};
 use crate::chip::status_icon;
 use crate::design::{colors, size};
@@ -50,10 +50,15 @@ impl SelectItem for SortOption {
 
 /// The empty state the list shows, decided by the view.
 #[derive(Clone)]
-struct EmptyCopy {
-    icon: IconName,
-    title: SharedString,
-    description: SharedString,
+enum Empty {
+    /// Nothing on the shelf, or nothing matching the filter.
+    Copy {
+        icon: IconName,
+        title: SharedString,
+        description: SharedString,
+    },
+    /// The library has never loaded: why, with "Try again".
+    Failed(SharedString),
 }
 
 /// Rows of one shelf for the virtualized list: the entries' ids, each row
@@ -62,7 +67,7 @@ pub struct ShelfDelegate {
     model: Entity<LibraryModel>,
     rows: Vec<UserBookId>,
     loading: bool,
-    empty: EmptyCopy,
+    empty: Empty,
     focus: RowFocus,
 }
 
@@ -114,11 +119,17 @@ impl ListDelegate for ShelfDelegate {
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
-        empty_state(
-            self.empty.icon.clone(),
-            self.empty.title.clone(),
-            self.empty.description.clone(),
-        )
+        match &self.empty {
+            Empty::Copy {
+                icon,
+                title,
+                description,
+            } => empty_state(icon.clone(), title.clone(), description.clone()).into_any_element(),
+            Empty::Failed(message) => {
+                crate::library::load_failed("shelf-retry", &self.model, message.clone())
+                    .into_any_element()
+            }
+        }
     }
 
     fn render_loading(
@@ -134,6 +145,17 @@ impl ListDelegate for ShelfDelegate {
     }
 }
 
+/// What the shelf's rows and empty state were built from.
+#[derive(Clone, PartialEq)]
+struct RowsKey {
+    revision: u64,
+    status: ReadingStatus,
+    query: SharedString,
+    order: SortOrder,
+    loading: bool,
+    failure: Option<SharedString>,
+}
+
 pub struct LibraryView {
     model: Entity<LibraryModel>,
     status: ReadingStatus,
@@ -145,7 +167,7 @@ pub struct LibraryView {
     /// The selected entry per shelf, so switching shelves keeps each one's place.
     selection: HashMap<ReadingStatus, UserBookId>,
     /// Inputs of the rows currently in the list, to skip needless rebuilds.
-    rows_key: Option<(u64, ReadingStatus, SharedString, SortOrder)>,
+    rows_key: Option<RowsKey>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -163,7 +185,7 @@ impl LibraryView {
                     model: model.clone(),
                     rows: Vec::new(),
                     loading: true,
-                    empty: EmptyCopy {
+                    empty: Empty::Copy {
                         icon: IconName::Inbox,
                         title: SharedString::default(),
                         description: SharedString::default(),
@@ -304,9 +326,18 @@ impl LibraryView {
     fn refresh_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.filter.read(cx).value();
         let model = self.model.read(cx);
-        let key = (model.revision(), self.status, query.clone(), self.order);
-        let loading = !model.is_loaded();
-        if self.rows_key.as_ref() == Some(&key) && !loading {
+        let failure = model.load_failure().cloned();
+        // Loading until the library loads, unless its first sync failed.
+        let loading = !model.is_loaded() && failure.is_none();
+        let key = RowsKey {
+            revision: model.revision(),
+            status: self.status,
+            query: query.clone(),
+            order: self.order,
+            loading,
+            failure: failure.clone(),
+        };
+        if self.rows_key.as_ref() == Some(&key) {
             return;
         }
         let entries = model.entries();
@@ -315,22 +346,16 @@ impl LibraryView {
             .map(|ix| entries[ix].user_book_id)
             .collect();
         let shelf_name = status_label(self.status);
-        let empty = if !query.trim().is_empty() {
-            EmptyCopy {
+        let empty = if let Some(message) = failure {
+            Empty::Failed(message)
+        } else if !query.trim().is_empty() {
+            Empty::Copy {
                 icon: IconName::Search,
                 title: "No matches".into(),
                 description: format!("No books in {shelf_name} match “{}”.", query.trim()).into(),
             }
-        } else if let SyncStatus::Failed { message, .. } = model.sync_status()
-            && entries.is_empty()
-        {
-            EmptyCopy {
-                icon: IconName::CircleAlert,
-                title: "Couldn't load your library".into(),
-                description: message.clone(),
-            }
         } else {
-            EmptyCopy {
+            Empty::Copy {
                 icon: status_icon(self.status),
                 title: format!("No books in {shelf_name}").into(),
                 description: match self.status {
@@ -392,7 +417,9 @@ struct ShelfPane {
 
 impl Render for ShelfPane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let count = self.model.read(cx).count(self.status);
+        let model = self.model.read(cx);
+        // No count until the library has loaded: 0 would say it's empty.
+        let count = model.is_loaded().then(|| model.count(self.status));
         let colors = colors(cx);
         v_flex()
             .size_full()
@@ -405,11 +432,10 @@ impl Render for ShelfPane {
                     .py_3()
                     .border_b_1()
                     .border_color(colors.border)
-                    .child(
-                        h_flex()
-                            .h(size::CONTROL)
-                            .child(PageHeader::new(status_label(self.status)).count(count)),
-                    )
+                    .child(h_flex().h(size::CONTROL).child(match count {
+                        Some(count) => PageHeader::new(status_label(self.status)).count(count),
+                        None => PageHeader::new(status_label(self.status)),
+                    }))
                     .child(
                         // As the list narrows the sort gives way first, down
                         // to a small select; the filter keeps a usable width,

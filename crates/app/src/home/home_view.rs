@@ -988,8 +988,18 @@ impl Render for HomeView {
         let now = crate::dates::now();
         let today = now.date_naive();
         let header = Greeting::new(date_line(today), greeting_at(&now));
-        let loaded = self.model.read(cx).is_loaded();
+        let model = self.model.read(cx);
+        let (loaded, failure) = (model.is_loaded(), model.load_failure().cloned());
         let root = div().id("home").track_focus(&self.focus_handle).size_full();
+        if let Some(message) = failure {
+            return root
+                .child(crate::library::load_failed(
+                    "home-retry",
+                    &self.model,
+                    message,
+                ))
+                .into_any_element();
+        }
         if !loaded {
             return root
                 .child(

@@ -445,6 +445,16 @@ impl Render for SeriesTrackerView {
         let rem = window.rem_size();
         let column_width = Self::column_width(window);
 
+        if let Some(message) = self.library.read(cx).load_failure().cloned() {
+            return root
+                .child(self.header(None, cx))
+                .child(div().flex_1().min_h_0().child(crate::library::load_failed(
+                    "series-library-retry",
+                    &self.library,
+                    message,
+                )))
+                .into_any_element();
+        }
         if !loaded || summaries.is_empty() {
             let body: AnyElement = match status {
                 SeriesStatus::Failed(message) if !loaded => {

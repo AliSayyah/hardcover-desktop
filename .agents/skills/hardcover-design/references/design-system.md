@@ -596,7 +596,7 @@ Each state has one treatment, on every control. Hover is never the only cue.
 | Focus-visible | A 2 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
 | Disabled | 50% opacity, with no hover or pressed response. When the reason isn't obvious, say it beside the control or in its tooltip (`format::needs_permission`) |
 | Loading | `skeleton` shapes where the content will be, pulsing between 100% and 50% opacity. Covers show a skeleton until the image lands. A button running its action keeps its label, shows its loading state and refuses repeat clicks. No spinner in a list |
-| Error | Say what happened and how to recover, next to the thing that failed (`session::error_message`) |
+| Error | Say what happened and how to recover, next to the thing that failed (`session::error_message`): one muted sentence with a small "Try again" (`ui::LoadFailed`); where the whole region has nothing else to show (the library never loaded), the same in the empty state's place, titled ("Couldn't load your library"), and counts that would read 0 read "—" |
 
 Switching between content that is already loaded is immediate: no skeleton,
 no transition.

@@ -131,11 +131,21 @@ impl StatsView {
 
 impl Render for StatsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let loaded = self.model.read(cx).is_loaded();
+        let model = self.model.read(cx);
+        let (loaded, failure) = (model.is_loaded(), model.load_failure().cloned());
         let root = div()
             .id("stats")
             .track_focus(&self.focus_handle)
             .size_full();
+        if let Some(message) = failure {
+            return root
+                .child(crate::library::load_failed(
+                    "stats-retry",
+                    &self.model,
+                    message,
+                ))
+                .into_any_element();
+        }
         if !loaded {
             return root.child(loading_page()).into_any_element();
         }

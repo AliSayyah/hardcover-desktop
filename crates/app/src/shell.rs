@@ -820,7 +820,12 @@ impl Workspace {
                 Destination::Shelf(status),
                 action.as_ref(),
             )
-            .count(count_text(model.count(status)))
+            // Until the library has loaded, 0 would say a shelf is empty.
+            .count(if model.is_loaded() {
+                count_text(model.count(status))
+            } else {
+                "—".to_owned()
+            })
         });
         let goals = self
             .goals_section

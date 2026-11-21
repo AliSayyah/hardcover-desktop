@@ -162,6 +162,9 @@ pub struct LibraryModel {
     by_book: HashMap<BookId, usize>,
     counts: HashMap<ReadingStatus, usize>,
     /// True once the cache or a sync has delivered entries (possibly none).
+    /// A first sync that fails leaves it false: never loaded, which the
+    /// views show as the failure ([`Self::load_failure`]), not as an empty
+    /// library.
     loaded: bool,
     /// Bumped whenever the entries change.
     revision: u64,
@@ -258,6 +261,16 @@ impl LibraryModel {
 
     pub fn is_loaded(&self) -> bool {
         self.loaded
+    }
+
+    /// Why the library has never loaded: nothing was cached and the first
+    /// sync failed. The views show it with "Try again" ([`Self::sync`]) in
+    /// place of their empty states.
+    pub fn load_failure(&self) -> Option<&SharedString> {
+        match &self.sync {
+            SyncStatus::Failed { message, .. } if !self.loaded => Some(message),
+            _ => None,
+        }
     }
 
     pub fn revision(&self) -> u64 {
@@ -511,8 +524,13 @@ impl LibraryModel {
                         .into(),
                     offline,
                 };
-                // Without a cache there is nothing to show but the failure.
-                self.loaded = true;
+                // Without a cache there is nothing to show but the failure:
+                // the pages a first sync showed so far are only part of the
+                // library, so they go too.
+                if self.fill_during_sync && self.sync_fetched > 0 {
+                    self.set_entries(Vec::new());
+                    self.loaded = false;
+                }
             }
         }
         cx.notify();
@@ -1009,6 +1027,27 @@ mod tests {
             m.sync_if_stale(cx);
             assert_eq!(*m.sync_status(), SyncStatus::Synced);
         });
+    }
+
+    #[gpui_kit::test]
+    fn a_failed_first_sync_is_never_loaded_not_an_empty_library(cx: &mut gpui_kit::TestAppContext) {
+        let offline = hardcover_core::demo::Faults::parse("offline").unwrap();
+        let session = SessionScope::for_tests(hardcover_core::demo::client_with(&offline), None);
+        cx.update(|cx| session.install(cx));
+        let model = cx.new(|_| LibraryModel::new(session));
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let never_loaded = |m: &LibraryModel| {
+            assert!(!m.is_loaded(), "nothing has loaded");
+            assert!(m.load_failure().is_some(), "the views show why");
+            assert!(m.entries().is_empty());
+        };
+        model.read_with(cx, |m, _| never_loaded(m));
+
+        // Try again (a sync) that fails too leaves it the same.
+        model.update(cx, LibraryModel::sync);
+        cx.run_until_parked();
+        model.read_with(cx, |m, _| never_loaded(m));
     }
 
     #[gpui_kit::test]
