@@ -19,6 +19,7 @@ macro_rules! user_book_fields {
   id user_id status_id rating date_added updated_at privacy_setting_id private_notes
   book {
     ...BookSummaryFields
+    audio_seconds
     book_series(order_by: [{featured: desc}, {position: asc_nulls_last}]) {
       position featured series { id name slug }
     }
@@ -26,7 +27,7 @@ macro_rules! user_book_fields {
   edition { ...EditionFields }
   user_book_reads(order_by: {id: desc}) {
     id started_at finished_at progress progress_pages progress_seconds edition_id
-    edition { id title pages audio_seconds edition_format }
+    edition { id title pages audio_seconds edition_format reading_format_id }
   }
 }
 "
@@ -38,7 +39,7 @@ macro_rules! edition_fields {
     () => {
         "fragment EditionFields on editions {
   id title pages audio_seconds edition_format release_date isbn_13 cached_image
-  reading_format { format } publisher { name } language { language }
+  reading_format_id reading_format { format } publisher { name } language { language }
 }
 "
     };
@@ -284,9 +285,9 @@ pub(crate) const PROGRESS_CONTEXT: &str =
   user_books(where: {id: {_eq: $id}}, limit: 1) {
     id status_id
     book { pages audio_seconds }
-    edition { pages audio_seconds }
+    edition { pages audio_seconds reading_format_id }
     user_book_reads(where: $reads, order_by: {id: desc}, limit: 1) {
-      id edition { pages audio_seconds }
+      id edition { pages audio_seconds reading_format_id }
     }
   }
 }

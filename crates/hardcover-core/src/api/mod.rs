@@ -1799,13 +1799,9 @@ fn progress_fields(
                     "progress {pct}% is outside 0..=100"
                 )));
             }
-            let fraction = f64::from(pct) / 100.0;
             match ctx.and_then(ProgressContext::length) {
-                Some(Length::Pages(total)) => {
-                    m.insert("progress_pages".into(), json!(scale(fraction, total)));
-                }
-                Some(Length::Seconds(total)) => {
-                    m.insert("progress_seconds".into(), json!(scale(fraction, total)));
+                Some(length) => {
+                    return progress_fields(length.position_at(f64::from(pct)), None);
                 }
                 None => {
                     return Err(Error::InvalidInput(
@@ -1832,10 +1828,10 @@ fn moved_read_fields(
         .filter(|e| e.id == edition)
         .and_then(EditionSummary::length);
     if let (Some(pct), Some(length)) = (read.progress_percent, length) {
-        let fraction = f64::from(pct.clamp(0.0, 100.0)) / 100.0;
+        let units = length.units_at(f64::from(pct.clamp(0.0, 100.0)));
         let (pages, seconds) = match length {
-            Length::Pages(total) => (Some(scale(fraction, total)), None),
-            Length::Seconds(total) => (None, Some(scale(fraction, total))),
+            Length::Pages(_) => (Some(units), None),
+            Length::Seconds(_) => (None, Some(units)),
         };
         m.insert("progress_pages".into(), json!(pages));
         m.insert("progress_seconds".into(), json!(seconds));
@@ -1892,23 +1888,6 @@ fn list_draft_object(name: &str, draft: &ListDraft) -> Value {
         "description": draft.description.trim(),
         "ranked": draft.ranked,
     })
-}
-
-/// `fraction` of `total`, to the nearest unit. An unfinished read never lands
-/// on the last unit: progress at the end may finish the read on Hardcover and
-/// move the book to Read, which changing the edition must not do.
-fn scale(fraction: f64, total: u32) -> u32 {
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "a progress fraction in 0..=1 rounds to an unsigned unit count no larger than total"
-    )]
-    let units = (fraction * f64::from(total)).round() as u32;
-    if fraction < 1.0 {
-        units.min(total.saturating_sub(1))
-    } else {
-        units.min(total)
-    }
 }
 
 fn retry_after(resp: &HttpResponse) -> Option<Duration> {
