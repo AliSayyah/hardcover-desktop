@@ -706,10 +706,7 @@ mod tests {
     fn a_word_wider_than_the_line_is_cut_short_never_split() {
         // "Edgedancer" under an md cover: its own line, ending in "…", and
         // no "er" starting the next.
-        assert_eq!(
-            lines("Hitchhiker's Guide", 8., None),
-            ["Hitchhi…", "Guide"]
-        );
+        assert_eq!(lines("Hitchhiker's Guide", 8., None), ["Hitchhi…", "Guide"]);
         assert_eq!(lines("Edgedancer", 8., Some(2)), ["Edgedan…"]);
         // With a clamp, the cut word still ends in an ellipsis.
         assert_eq!(lines("Supercalifragilistic", 6., Some(1)), ["Super…"]);

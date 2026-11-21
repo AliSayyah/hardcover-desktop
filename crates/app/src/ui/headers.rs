@@ -18,8 +18,8 @@ use chrono::{Datelike as _, NaiveDate};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::h_flex;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, ElementId, IntoElement, ParentElement as _, Pixels, Rems,
-    RenderOnce, SharedString, Styled as _, Window, div, prelude::FluentBuilder as _, rems,
+    AnyElement, App, ClickEvent, ElementId, IntoElement, ParentElement as _, Rems, RenderOnce,
+    SharedString, Styled as _, Window, div, prelude::FluentBuilder as _, rems,
 };
 
 use super::kit::SmallControl as _;
@@ -108,8 +108,11 @@ impl PageHeader {
     }
 
     /// How tall a header is whose title and `lines` lines of `body` text
-    /// each take one line: what a virtual list sizes its first item from.
-    pub fn height(lines: usize, rem: Pixels) -> Pixels {
+    /// each take one line, which the layout tests check against. No header
+    /// sits inside a virtual list any more (the series tracker's stays above
+    /// it), so nothing else needs it.
+    #[cfg(test)]
+    pub fn height(lines: usize, rem: gpui_kit::Pixels) -> gpui_kit::Pixels {
         #[expect(clippy::cast_precision_loss, reason = "a handful of lines")]
         let lines = lines as f32;
         (TypeRole::PageTitle.line_height() + (LINE_GAP + TypeRole::Body.line_height()) * lines)
@@ -316,7 +319,7 @@ mod tests {
         cx: &mut TestAppContext,
         width: f32,
         build: impl Fn() -> PageHeader + 'static,
-    ) -> gpui_kit::Bounds<Pixels> {
+    ) -> gpui_kit::Bounds<gpui_kit::Pixels> {
         let cx = host(cx, move |_, _| {
             div()
                 .w(px(width))

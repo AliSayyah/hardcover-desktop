@@ -21,6 +21,7 @@ mod icons;
 mod io;
 mod library;
 mod lists;
+mod notify;
 mod preferences;
 mod search;
 mod series;

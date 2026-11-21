@@ -1051,6 +1051,8 @@ commit that fixes it.
   than disabled radios; a form's radios are disabled only while it saves.
 - The `DatePicker`'s field stays paper.
 - A dialog keeps the kit's shadow.
+- A notification's action button ("Undo" after a book comes off a list)
+  is the kit's small size, so its label is 14 px, not 12.
 - The kit's controls (buttons, inputs, selects, switches) draw a 3 px focus
   ring, not 2: the width is a private constant of the kit. The app's own
   rows, text buttons and components draw 2.

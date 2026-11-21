@@ -6,10 +6,10 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, Sizable as _, h_flex};
 use gpui_kit::{
-    AnyElement, App, Entity, IntoElement, ParentElement as _, SharedString, Styled as _, Task,
-    Window, div,
+    AnyElement, App, Entity, IntoElement, ParentElement as _, SharedString, Styled as _, Window,
+    div,
 };
 use hardcover_core::auth::scopes::{READ_LISTS, WRITE_LIBRARY, WRITE_LISTS};
 use hardcover_core::{BookId, BookSummary, EditionSummary, LibraryEntry};
@@ -18,6 +18,7 @@ use super::list_dialog::open_new_list;
 use super::model::ListsModel;
 use crate::design::{TypeRoles as _, size};
 use crate::format::needs_permission;
+use crate::notify::{notify_failure, notify_outcome};
 use crate::session;
 use crate::ui::kit::open_alert_dialog;
 
@@ -32,43 +33,6 @@ pub fn book_shown(book: BookId, cx: &mut App) {
     if let Some(lists) = readable(cx) {
         lists.update(cx, |m, cx| m.ensure_book(book, cx));
     }
-}
-
-/// Shows a failed list change as a notification.
-fn notify_failure(
-    task: Task<Option<Result<(), SharedString>>>,
-    title: &'static str,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    notify_result(task, title, None, window, cx);
-}
-
-/// Shows a list change's outcome: always a failure, and success when
-/// `success` says what to show.
-fn notify_result(
-    task: Task<Option<Result<(), SharedString>>>,
-    title: &'static str,
-    success: Option<&'static str>,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    window
-        .spawn(cx, async move |cx| {
-            // `None`: dropped because the session ended.
-            let Some(result) = task.await else {
-                return;
-            };
-            let note = match result {
-                Err(message) => Notification::error(message).title(title),
-                Ok(()) => match success {
-                    Some(text) => Notification::success(text),
-                    None => return,
-                },
-            };
-            let _ = cx.update(|window, cx| window.push_notification(note, cx));
-        })
-        .detach();
 }
 
 /// The "Lists" button and its menu, or `None` without `read:lists`.
@@ -105,7 +69,7 @@ pub fn lists_button(book: &BookSummary, cx: &App) -> Option<AnyElement> {
                                     if on {
                                         m.remove(id, book_id, cx)
                                     } else {
-                                        m.add(id, book_id, cx)
+                                        m.add(id, book_id, None, cx)
                                     }
                                 });
                                 notify_failure(task, "Couldn't change the list", window, cx);
@@ -182,10 +146,10 @@ pub fn confirm_owned(entry: &LibraryEntry, window: &mut Window, cx: &mut App) {
             .on_ok(move |_, window, cx| {
                 let task = lists.update(cx, |m, cx| m.set_owned(book, Some(edition), true, cx));
                 let success = one_way.then_some("Added to your Owned list on Hardcover.");
-                notify_result(
+                notify_outcome(
                     task,
                     "Couldn't add it to your Owned list",
-                    success,
+                    move |(), _, _| success.map(Notification::success),
                     window,
                     cx,
                 );

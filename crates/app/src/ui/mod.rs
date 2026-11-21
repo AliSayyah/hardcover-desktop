@@ -31,6 +31,7 @@
 //! | [`Meter`] | Progress: 6 px beside words, 2 px in a row, with an optional pace tick |
 //! | [`MonthBars`] | Books finished in each month of a year, the counts over the bars: Home's reading goal |
 //! | [`EmptyState`], [`empty_state`] | A region with nothing to show: icon, title, one sentence, a button |
+//! | [`LoadFailed`] | A load that failed: one muted sentence and "Try again", or the whole region's empty state when nothing else can show |
 //! | [`Skeleton`], [`SkeletonText`], [`SkeletonRow`] | Content still loading: pulsing shapes, lines, a row |
 //! | [`TextButton`] | In-app navigation inside content: a book title, an author, a series |
 //! | [`ExternalLink`] | Something that opens the browser: "Open on Hardcover" (accent, underlined, the external-link icon) |
@@ -56,6 +57,7 @@ pub mod focus;
 pub mod gallery;
 mod headers;
 pub mod kit;
+mod load_failed;
 mod meter;
 mod month_bars;
 mod nav_row;
@@ -81,6 +83,7 @@ pub use self::{
     empty_state::{EmptyState, empty_state, empty_state_with_action},
     external_link::ExternalLink,
     headers::{Greeting, PageHeader, SectionHeader, date_line, greeting_at, see_all},
+    load_failed::LoadFailed,
     meter::Meter,
     month_bars::MonthBars,
     nav_row::NavRow,

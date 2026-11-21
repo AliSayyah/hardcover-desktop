@@ -830,13 +830,13 @@ impl Workspace {
         // Hidden without the catalogue, which the page reads.
         let series_row = session::has_scope(cx, READ_CATALOG).then(|| {
             let today = crate::dates::today();
-            let count = self.series.update(cx, |s, cx| {
-                s.is_loaded().then(|| {
-                    s.summaries(today, cx)
-                        .iter()
-                        .filter(|s| !s.group.is_finished())
-                        .count()
-                })
+            let series = self.series.read(cx);
+            let count = series.is_loaded().then(|| {
+                series
+                    .summaries(today, cx)
+                    .iter()
+                    .filter(|s| !s.group.is_finished())
+                    .count()
             });
             nav_row(
                 "nav-series",

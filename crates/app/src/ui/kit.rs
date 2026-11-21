@@ -62,6 +62,8 @@
 //!   reach, so it stays paper.
 //! - **A dialog's shadow** is set after its style is applied, so it keeps
 //!   the kit's.
+//! - **A notification's action** ("Undo") is built with the kit's own
+//!   `Size::Small` after the app's style, so its label is 14 px, not 12.
 //! - **The kit's focus ring** is 3 px, not the system's 2: its width is a
 //!   private constant. The app's own rows, text buttons and components draw
 //!   2 (`ui::focus`).

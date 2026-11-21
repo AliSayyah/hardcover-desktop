@@ -1,5 +1,7 @@
 //! A list's page: its name, details and books in the list's order. Enter or a
-//! click opens a book; Delete or a row's remove button takes it off the list.
+//! click opens a book; Delete (while the list has focus) or a row's remove
+//! button takes it off the list, and the notification that says so offers
+//! Undo.
 //! Books load a page at a time as the list scrolls. In a wide window the
 //! selected book shows in the book pane beside the list, and a click only
 //! selects (`catalog::book_list::ListPane`).
@@ -18,9 +20,9 @@ use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, IconName, IndexPath, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, IconName, IndexPath, h_flex, v_flex};
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window, div,
     prelude::FluentBuilder as _,
 };
@@ -32,23 +34,25 @@ use super::model::{ListsEvent, ListsModel};
 use crate::RemoveFromList;
 use crate::bidi::WrappingText;
 use crate::catalog::book_list::{
-    ListPane, follow_pane, load_failed, page_body, page_header_scrolling, page_list, page_loading,
-    reset_scroll, row_details, select_on_click,
+    ListPane, follow_pane, page_body, page_header_scrolling, page_list, page_loading, reset_scroll,
+    row_details, select_on_click,
 };
 use crate::catalog::navigation::{self, Page};
 use crate::design::{TypeRoles as _, size};
 use crate::format::{authors_text, needs_permission};
 use crate::library::book_row::BookRow;
 use crate::library::model::LibraryModel;
+use crate::notify::{notify_failure, notify_outcome};
 use crate::session::{self, SessionScope};
 use crate::ui::kit::{SmallControl as _, SmallIconButton as _};
 use crate::ui::kit::{open_alert_dialog, row_action};
 use crate::ui::{
-    ExternalLink, ListRow as _, PageHeader, RowFocus, empty_state, empty_state_with_action,
-    on_keyboard_entry, select_first_row,
+    ExternalLink, ListRow as _, LoadFailed, PageHeader, RowFocus, empty_state,
+    empty_state_with_action, on_keyboard_entry, select_first_row,
 };
 
-/// Key context of a list's page, where Delete takes the selected book off.
+/// Key context of a list's books, where Delete takes the selected book off
+/// while the list has focus.
 pub const KEY_CONTEXT: &str = "ListPage";
 
 /// The books of one list loaded so far.
@@ -226,7 +230,9 @@ impl ListBooks {
     }
 }
 
-/// Takes one row off `list`, with a notification if that fails.
+/// Takes one row off `list`. Once it's off, a notification says so with
+/// Undo, which puts the book back as the same edition; a failure is
+/// notified instead.
 fn remove_book(
     lists: &Entity<ListsModel>,
     list: ListId,
@@ -234,20 +240,51 @@ fn remove_book(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let (book_id, row) = (book.book.id, book.id);
+    let (book_id, row, edition) = (book.book.id, book.id, book.edition_id);
+    let title = book.book.title.clone();
+    let list_name = lists.read(cx).list(list).map(|l| l.name.clone());
     let task = lists.update(cx, |m, cx| m.remove_rows(list, book_id, vec![row], cx));
-    window
-        .spawn(cx, async move |cx| {
-            if let Some(Err(message)) = task.await {
-                let _ = cx.update(|window, cx| {
-                    window.push_notification(
-                        Notification::error(message).title("Couldn't remove the book"),
-                        cx,
-                    );
-                });
-            }
-        })
-        .detach();
+    let lists = lists.clone();
+    notify_outcome(
+        task,
+        "Couldn't remove the book",
+        move |(), _, _| {
+            let message = removed_text(&title, list_name.as_deref());
+            Some(
+                // One per list: removing another book replaces it.
+                Notification::new()
+                    .id1::<RemovedFromList>(SharedString::from(format!("removed-{list}")))
+                    .message(message)
+                    .action(move |_, _, cx| {
+                        let lists = lists.clone();
+                        let note = cx.entity().downgrade();
+                        Button::new("undo-remove")
+                            .label("Undo")
+                            .on_click(move |_, window, cx| {
+                                let task =
+                                    lists.update(cx, |m, cx| m.add(list, book_id, edition, cx));
+                                notify_failure(task, "Couldn't put the book back", window, cx);
+                                let _ = note.update(cx, |note, cx| note.dismiss(window, cx));
+                            })
+                    })
+                    // Undo is offered for a while, not until dismissed.
+                    .autohide(true),
+            )
+        },
+        window,
+        cx,
+    );
+}
+
+/// The notification id of "Removed … from …".
+struct RemovedFromList;
+
+/// What the notification says once a book is off a list.
+fn removed_text(title: &str, list: Option<&str>) -> String {
+    match list {
+        Some(list) => format!("Removed “{title}” from “{list}”."),
+        None => format!("Removed “{title}” from the list."),
+    }
 }
 
 impl ListDelegate for ListBooks {
@@ -494,8 +531,14 @@ impl ListView {
             .update(cx, |state, cx| state.delegate_mut().retry(window, cx));
     }
 
+    /// Delete: takes the selected book off the list, only while the list
+    /// itself has focus (not a row's own button, which says what it does).
     fn remove_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(ix) = self.list.read(cx).selected_index() else {
+        let list = self.list.read(cx);
+        if !list.focus_handle(cx).is_focused(window) {
+            return;
+        }
+        let Some(ix) = list.selected_index() else {
             return;
         };
         self.list.update(cx, |state, cx| {
@@ -517,19 +560,7 @@ impl ListView {
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
                     let task = lists.update(cx, |m, cx| m.delete(id, cx));
-                    window
-                        .spawn(cx, async move |cx| {
-                            if let Some(Err(message)) = task.await {
-                                let _ = cx.update(|window, cx| {
-                                    window.push_notification(
-                                        Notification::error(message)
-                                            .title("Couldn't delete the list"),
-                                        cx,
-                                    );
-                                });
-                            }
-                        })
-                        .detach();
+                    notify_failure(task, "Couldn't delete the list", window, cx);
                     true
                 })
         });
@@ -627,14 +658,10 @@ impl ListView {
                 ))
             })
             .when_some(error, |this, message| {
-                this.child(load_failed(
-                    message,
-                    Button::new("retry-list")
-                        .small_control()
-                        .label("Try again")
-                        .on_click(cx.listener(|this, _, window, cx| this.retry(window, cx))),
-                    cx,
-                ))
+                this.child(
+                    LoadFailed::new("retry-list", message)
+                        .on_retry(cx.listener(|this, _, window, cx| this.retry(window, cx))),
+                )
             })
     }
 }
@@ -644,22 +671,31 @@ impl Render for ListView {
         let list = self
             .current(cx)
             .and_then(|id| self.lists.read(cx).list(id).cloned());
-        let column = v_flex()
-            .id("list-page")
-            .key_context(KEY_CONTEXT)
-            .on_action(cx.listener(|this, _: &RemoveFromList, window, cx| {
-                this.remove_selected(window, cx);
-            }))
-            .size_full()
-            .min_w_0()
-            .when_some(list, |this, list| {
-                this.child(page_header_scrolling(
-                    "list-page-header",
-                    &self.header_scroll,
-                    self.render_header(&list, cx),
-                ))
-                .child(page_body().child(page_list(&self.list)))
-            });
+        let column =
+            v_flex()
+                .id("list-page")
+                .size_full()
+                .min_w_0()
+                .when_some(list, |this, list| {
+                    this.child(page_header_scrolling(
+                        "list-page-header",
+                        &self.header_scroll,
+                        self.render_header(&list, cx),
+                    ))
+                    .child(
+                        page_body().child(
+                            // Delete belongs to the list: with focus on the
+                            // header's buttons it must not take a book off.
+                            div()
+                                .size_full()
+                                .key_context(KEY_CONTEXT)
+                                .on_action(cx.listener(|this, _: &RemoveFromList, window, cx| {
+                                    this.remove_selected(window, cx);
+                                }))
+                                .child(page_list(&self.list)),
+                        ),
+                    )
+                });
         self.pane
             .layout(&self.list, ListBooks::book_at, column, window, cx)
     }
@@ -667,8 +703,94 @@ impl Render for ListView {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use super::*;
+    use crate::ui::test_support::{has_focus, press, redraw, shift_tab};
+    use gpui_kit::component::{Root, WindowExt as _};
+    use gpui_kit::{TestAppContext, VisualTestContext};
+    use hardcover_core::store::LibraryCache;
     use hardcover_core::{BookId, BookSummary};
+
+    fn settle(cx: &mut VisualTestContext) {
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        redraw(cx);
+    }
+
+    fn notifications(cx: &mut VisualTestContext) -> usize {
+        cx.update(|window, cx| window.notifications(cx).len())
+    }
+
+    #[gpui_kit::test]
+    fn delete_takes_a_book_off_only_while_the_list_has_focus(cx: &mut TestAppContext) {
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::bind_keys(cx);
+            crate::ui::kit::bind_keys(cx);
+            session.install(cx);
+        });
+        let lists = cx.update(|cx| ListsModel::init(session.clone(), cx));
+        let library = cx.new(|_| LibraryModel::new(session));
+        lists.update(cx, ListsModel::load);
+        cx.run_until_parked();
+        let id = lists.read_with(cx, |m, _| m.user_lists().next().map(|l| l.id).unwrap());
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| ListView::new(lists.clone(), library.clone(), window, cx));
+            Root::new(view, window, cx)
+        });
+        let view = view.read_with(cx, |root, _| {
+            root.view().clone().downcast::<ListView>().unwrap()
+        });
+        cx.update(|window, cx| view.update(cx, |v, cx| v.show(id, window, cx)));
+        settle(cx);
+
+        // A book selected, then Shift+Tab to the header's controls (Delete…,
+        // "Open on Hardcover"): Delete does nothing there.
+        cx.update(|window, cx| {
+            view.update(cx, |v, cx| {
+                v.focus(window, cx);
+                assert!(
+                    v.list.read(cx).selected_index().is_some(),
+                    "a book is selected"
+                );
+            });
+        });
+        redraw(cx);
+        shift_tab(cx);
+        let list_focused = cx.update(|window, cx| {
+            view.read(cx)
+                .list
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        });
+        assert!(!list_focused, "focus left the list");
+        assert!(has_focus(cx), "on a header control");
+        press(cx, "delete");
+        settle(cx);
+        assert_eq!(notifications(cx), 0, "nothing was asked of Hardcover");
+
+        // With the list focused, Delete asks. The demo refuses every write,
+        // so the answer is the failure's notification.
+        cx.update(|window, cx| view.update(cx, |v, cx| v.focus(window, cx)));
+        redraw(cx);
+        press(cx, "delete");
+        settle(cx);
+        assert_eq!(notifications(cx), 1);
+    }
+
+    #[test]
+    fn the_notification_names_the_book_and_the_list() {
+        assert_eq!(
+            removed_text("Dune", Some("Book club")),
+            "Removed “Dune” from “Book club”."
+        );
+        assert_eq!(removed_text("Dune", None), "Removed “Dune” from the list.");
+    }
 
     fn book(row: i64) -> ListBook {
         ListBook::new(
