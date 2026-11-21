@@ -346,9 +346,26 @@ fn install_replaces_the_files_and_cleans_up() {
 fn install_waits_for_the_installer_lock_on_the_prefix() {
     let (u, r) = serving_tarball("0.2.0");
     let prefix = old_install();
-    // What `install.sh` holds while it installs: `flock` on the prefix.
-    let held = fs::File::open(prefix.path()).unwrap();
-    held.lock().unwrap();
+    // `install.sh` itself takes the lock, as it does while it installs, and
+    // holds it until its input closes.
+    let mut held = std::process::Command::new("bash")
+        .args([
+            "-c",
+            r#"exec 9<"$1" && flock 9 && echo locked && read -r _"#,
+            "_",
+        ])
+        .arg(prefix.path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut said = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(held.stdout.take().unwrap()),
+        &mut said,
+    )
+    .unwrap();
+    assert_eq!(said, "locked\n");
 
     let target = tarball_target(prefix.path());
     let install = std::thread::spawn(move || u.install(&r, &v("0.1.0"), &target));
@@ -356,7 +373,8 @@ fn install_waits_for_the_installer_lock_on_the_prefix() {
     assert_eq!(binary(prefix.path()), "binary 0.1.0");
     assert_eq!(temp_files(prefix.path()), [] as [String; 0]);
 
-    held.unlock().unwrap();
+    drop(held.stdin.take());
+    held.wait().unwrap();
     install.join().unwrap().unwrap();
     assert_eq!(binary(prefix.path()), "binary 0.2.0");
 }

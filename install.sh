@@ -99,7 +99,8 @@ main() {
     for i in "${!copies[@]}"; do
         mv -fT -- "${copies[i]}" "${dests[i]}"
     done
-    sync -- "${!swept[@]}"
+    # Best effort: every file is in place by now.
+    sync -- "${!swept[@]}" || true
     echo "Installed Hardcover Desktop. Open it from your app launcher, or run $prefix/bin/hardcover-desktop."
     # The desktop entry runs the binary by name, so the session needs it on PATH.
     # Some distributions add ~/.local/bin only if it existed when you logged in.
