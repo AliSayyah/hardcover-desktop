@@ -38,6 +38,11 @@
 //! with every other book view: the view asks for its book's ([`Demand`]),
 //! waiting a moment after the book changes so arrowing through a list asks
 //! for nothing, and keeps only UI state.
+//!
+//! Other readers' reviews (`community_reviews.rs`), similar books
+//! (`similar_books.rs`), Notes (`notes.rs`) and Your review
+//! (`review_section.rs`) are views of their own, each following the stores
+//! it shows; the view hands them the book shown.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -63,9 +68,9 @@ use hardcover_core::{
 
 use self::community_reviews::CommunityReviews;
 use self::review_section::ReviewEditor;
+use self::similar_books::{SideGrid, SimilarBooks};
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
-use crate::app_state::release_cover_medium;
 use crate::design::size;
 use crate::format::read_dates_text;
 use crate::library::model::{
@@ -75,6 +80,7 @@ use crate::library::writes::{self, Ratings};
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::resource::{Catalog, Demand, SharedChanged};
+use crate::session;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, EmptyState, ObjectBar, ObjectTools, Tier, blocks, folds, main_column_width,
@@ -85,6 +91,7 @@ mod catalog_sections;
 mod community_reviews;
 mod header;
 mod review_section;
+mod similar_books;
 mod your_book;
 
 /// What the pane shows.
@@ -174,7 +181,7 @@ struct PaneLayout {
     /// The page's columns, with the rail ([`pane_has_rail`]).
     rail: bool,
     /// The blocks split beside the text: the similar books the side holds.
-    side: Option<catalog_sections::SideGrid>,
+    side: Option<SideGrid>,
 }
 
 impl PaneLayout {
@@ -186,7 +193,7 @@ impl PaneLayout {
                 side_width(main_column_width(columns, rem_size, false, false), rem_size)
             })
             .flatten()
-            .map(|side| catalog_sections::similar_in_side(side, rem_size));
+            .map(|side| similar_books::similar_in_side(side, rem_size));
         Self { rail, side }
     }
 }
@@ -220,9 +227,6 @@ pub struct BookDetailView {
     catalog: Option<Catalog>,
     /// Asks for what the book shows, a step at a time ([`SETTLE`]).
     settle: Option<Task<()>>,
-    /// The book whose similar books are due: asked for once its details
-    /// land, if they weren't in yet.
-    similar_due: Option<BookId>,
     privacy: Entity<SelectState<Vec<PrivacyOption>>>,
     notes: Entity<TextareaState>,
     /// The entry and saved notes the notes field was last filled from.
@@ -241,10 +245,6 @@ pub struct BookDetailView {
     /// The cover URL last requested and its image once loaded, released when
     /// the pane moves to another cover.
     cover: Option<(String, Option<Arc<RenderImage>>)>,
-    /// The cover URLs of the similar books shown, released when the view
-    /// moves to another book or goes away: browsing books would otherwise
-    /// keep every lg cover it passed for the run.
-    similar_covers: Vec<String>,
     /// "Show all tags" was pressed for the book shown.
     tags_expanded: bool,
     /// The full book page, under the object bar the shell draws: the book's
@@ -256,6 +256,10 @@ pub struct BookDetailView {
     review: ReviewEditor,
     /// Other readers' reviews, a view of their own.
     community_reviews: Entity<CommunityReviews>,
+    /// Similar books, a view of their own, and the side column's grid the
+    /// view hands it as it lays the blocks out.
+    similar_books: Entity<SimilarBooks>,
+    similar_side: Rc<Cell<Option<SideGrid>>>,
     /// Ratings asked for and not yet saved.
     ratings: Entity<Ratings>,
     /// The status menu's trigger, which its commands and their
@@ -276,6 +280,8 @@ impl BookDetailView {
         let (review, review_subscriptions) = ReviewEditor::new(window, cx);
         let ratings = cx.new(|cx| Ratings::new(model.clone(), window, cx));
         let community_reviews = cx.new(|cx| CommunityReviews::new(model.clone(), cx));
+        let similar_side = Rc::new(Cell::new(None));
+        let similar_books = cx.new(|cx| SimilarBooks::new(similar_side.clone(), window, cx));
         let mut subscriptions =
             vec![
                 cx.observe_in(&model, window, |this, _, window, cx| {
@@ -306,11 +312,8 @@ impl BookDetailView {
             ];
         subscriptions.extend(review_subscriptions);
         subscriptions.push(cx.observe(&ratings, |_, _, cx| cx.notify()));
-        subscriptions.push(cx.on_release_in(window, |this: &mut Self, window, cx| {
-            for url in this.similar_covers.drain(..) {
-                release_cover_medium(&url, Some(window), cx);
-            }
-        }));
+        // The Reviews block shows only with `read:social`.
+        subscriptions.push(session::observe_grant(cx, |_, cx| cx.notify()));
         // Restarting into an update asks first while this view holds drafts.
         let this = cx.entity().downgrade();
         crate::drafts::register(
@@ -331,7 +334,6 @@ impl BookDetailView {
             subject: None,
             catalog,
             settle: None,
-            similar_due: None,
             privacy,
             notes,
             notes_base: None,
@@ -342,7 +344,8 @@ impl BookDetailView {
             read_dialog: None,
             shown: None,
             cover: None,
-            similar_covers: Vec::new(),
+            similar_books,
+            similar_side,
             tags_expanded: false,
             tools_in_bar: false,
             layout: Rc::new(Cell::new(PaneLayout::default())),
@@ -388,7 +391,6 @@ impl BookDetailView {
     /// stores already hold shows at once, and only what is missing or
     /// stale is fetched.
     fn settle(&mut self, cx: &mut Context<Self>) {
-        self.similar_due = None;
         let Some(book) = self.book(cx).map(|b| b.id) else {
             self.settle = None;
             return;
@@ -420,10 +422,9 @@ impl BookDetailView {
                         .update(cx, |m, cx| m.request_review(entry, demand, cx));
                 }
             }
-            Fetch::Similar => {
-                self.similar_due = Some(book);
-                catalog.request_similar(book, demand, cx);
-            }
+            Fetch::Similar => self
+                .similar_books
+                .update(cx, |similar, cx| similar.fetch(demand, cx)),
             Fetch::Reviews => self
                 .community_reviews
                 .update(cx, |reviews, cx| reviews.fetch(demand, cx)),
@@ -438,11 +439,6 @@ impl BookDetailView {
                 &catalog.details,
                 |this, _, SharedChanged(id): &SharedChanged<BookId>, cx| {
                     if this.shows(*id, cx) {
-                        if this.similar_due == Some(*id)
-                            && let Some(catalog) = this.catalog.clone()
-                        {
-                            catalog.request_similar(*id, Demand::Active, cx);
-                        }
                         cx.notify();
                     }
                 },
@@ -461,6 +457,16 @@ impl BookDetailView {
     /// The "Reviews" block, left out without `read:social`.
     fn render_community_reviews(&self, cx: &App) -> Option<AnyElement> {
         CommunityReviews::visible(cx).then(|| self.community_reviews.clone().into_any_element())
+    }
+
+    /// The "Similar books" block, laid out as `side`'s grid or in one
+    /// column; left out when there are none.
+    fn render_similar(&self, side: Option<SideGrid>, cx: &App) -> Option<AnyElement> {
+        self.similar_side.set(side);
+        self.similar_books
+            .read(cx)
+            .shows(cx)
+            .then(|| self.similar_books.clone().into_any_element())
     }
 
     /// The book shown is `book`.
@@ -530,6 +536,8 @@ impl BookDetailView {
         let book = self.book(cx).map(|b| b.id);
         self.community_reviews
             .update(cx, |reviews, cx| reviews.set_book(book, cx));
+        self.similar_books
+            .update(cx, |similar, cx| similar.set_book(book, cx));
         let entry = self.entry(self.model.read(cx));
         let notes = entry.map(|e| (e.user_book_id, e.private_notes.clone()));
         let next = entry.map(Shown::of);
@@ -1075,7 +1083,7 @@ impl BookDetailView {
         }
         column.extend(Self::render_on_hardcover(book, details, false, cx));
         column.extend(self.render_community_reviews(cx));
-        column.extend(self.render_similar(book, details, None, cx));
+        column.extend(self.render_similar(None, cx));
 
         v_flex()
             .w_full()
@@ -1099,7 +1107,7 @@ impl BookDetailView {
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         folded: bool,
-        side: Option<catalog_sections::SideGrid>,
+        side: Option<SideGrid>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Columns {
@@ -1109,7 +1117,7 @@ impl BookDetailView {
         let other_titles = Self::render_other_titles(details, cx);
         let review = entry.map(|entry| self.render_review(entry, cx).into_any_element());
         let reviews = self.render_community_reviews(cx);
-        let similar = self.render_similar(book, details, side, cx);
+        let similar = self.render_similar(side, cx);
 
         // Keyboard order follows the task, not the tree: the header and
         // panel, then the rail beside them (your book), then the main
@@ -1183,7 +1191,7 @@ impl BookDetailView {
         let width = region_width(window, size::PAGE_INSET);
         let folded = folds(width, rem, false);
         let side = side_width(main_column_width(width, rem, false, folded), rem)
-            .map(|side| catalog_sections::similar_in_side(side, rem));
+            .map(|side| similar_books::similar_in_side(side, rem));
         let columns = self.render_columns(book, entry, details, folded, side, window, cx);
         div()
             .id(("book-detail", book.id.get().cast_unsigned()))
@@ -1220,7 +1228,6 @@ impl ObjectTools for BookDetailView {
 impl Render for BookDetailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let shown = self.shown_book(cx);
-        self.keep_similar_covers(shown.as_ref().map(|(book, _)| book.id), window, cx);
         let Some((book, entry)) = shown else {
             self.load_cover(None, window, cx);
             return EmptyState::new(IconName::BookOpen, "Select a book to see its details")
