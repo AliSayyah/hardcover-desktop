@@ -25,7 +25,7 @@
 
 use gpui_kit::{
     AnyElement, App, IntoElement, ParentElement as _, Pixels, RenderOnce, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _,
 };
 
 use super::TextButton;
@@ -92,12 +92,13 @@ impl CoverShelf {
 }
 
 impl RenderOnce for CoverShelf {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let fg = colors(cx).fg;
         let width = self.size.width();
         // The title breaks its own lines at the cover's width: GPUI's
         // wrapping would start the second line with the space it broke at.
-        let width_px = px(self.size.width_px());
+        // In px at the window's rem, as the column is.
+        let width_px = width.to_pixels(window.rem_size());
         div()
             .flex()
             .flex_row()
@@ -134,6 +135,8 @@ impl RenderOnce for CoverShelf {
 
 #[cfg(test)]
 mod tests {
+    use gpui_kit::px;
+
     use super::*;
 
     #[test]

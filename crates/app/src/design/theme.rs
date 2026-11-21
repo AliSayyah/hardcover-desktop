@@ -51,7 +51,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
-use gpui_kit::{App, Hsla, Rgba, SharedString};
+use gpui_kit::{App, Hsla, Rgba, SharedString, Window};
 
 use super::color::{Palette, channel_byte, solid};
 use crate::fonts;
@@ -76,6 +76,30 @@ pub fn init(bundled_fonts: bool, cx: &mut App) {
     // `Theme::update` doesn't reload a swapped config; `change` does, even
     // for the mode already showing.
     Theme::change(mode, None, cx);
+}
+
+/// Draws the interface `k` times larger than the design (`ui_scale`): the rem
+/// becomes `16 * k` px (gpui-component's `Root` sets the window's rem from the
+/// theme's `font_size` on every frame), and the kit's radii, whole pixels in
+/// the config, follow it. Both configs are rebuilt and the current mode
+/// applied again, so the factor holds through every later `Theme::change`.
+pub fn set_ui_scale(k: f32, window: &mut Window, cx: &mut App) {
+    let mode = Theme::update(cx, |theme| {
+        theme.light_theme = Rc::new(scaled(&theme.light_theme, k));
+        theme.dark_theme = Rc::new(scaled(&theme.dark_theme, k));
+        theme.mode
+    });
+    Theme::change(mode, Some(window), cx);
+}
+
+/// `config` at factor `k`.
+fn scaled(config: &ThemeConfig, k: f32) -> ThemeConfig {
+    let mut config = config.clone();
+    config.font_size = Some(16. * k);
+    let radius = |r: u8| (f32::from(r) * k).round() as usize;
+    config.radius = Some(radius(RADIUS));
+    config.radius_lg = Some(radius(RADIUS_LG));
+    config
 }
 
 /// A colour as the theme config reads it: `#RRGGBBAA`.
@@ -305,6 +329,20 @@ mod tests {
             assert_eq!(theme.radius_lg, gpui_kit::px(f32::from(RADIUS_LG)));
             assert_eq!(theme.font_family.as_ref(), fonts::INTER);
         }
+    }
+
+    #[test]
+    fn the_ui_scale_sets_the_rem_and_the_radii() {
+        let mut theme = Theme::default();
+        theme.apply_config(&Rc::new(scaled(&config(ThemeMode::Light, true), 1.25)));
+        assert_eq!(theme.font_size, gpui_kit::px(20.));
+        assert_eq!(theme.radius, gpui_kit::px(8.));
+        assert_eq!(theme.radius_lg, gpui_kit::px(10.));
+        // The palette is untouched.
+        assert!(close(theme.background, Palette::light().bg));
+        theme.apply_config(&Rc::new(scaled(&config(ThemeMode::Dark, true), 1.)));
+        assert_eq!(theme.font_size, gpui_kit::px(16.));
+        assert_eq!(theme.radius, gpui_kit::px(f32::from(RADIUS)));
     }
 
     #[test]

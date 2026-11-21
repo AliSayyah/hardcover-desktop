@@ -116,9 +116,14 @@ impl CoverSize {
         matches!(self, Self::Xs | Self::Sm)
     }
 
-    /// `r-cover-s` for xs and sm, `r-cover` from md.
-    pub(crate) fn radius(self) -> Pixels {
-        if self.is_small() { px(2.) } else { px(3.) }
+    /// `r-cover-s` for xs and sm, `r-cover` from md: 2 and 3 design px, so
+    /// they follow the rem with the cover.
+    pub(crate) fn radius(self) -> gpui_kit::Rems {
+        if self.is_small() {
+            rems(2. / 16.)
+        } else {
+            rems(3. / 16.)
+        }
     }
 
     /// The cloth cover's title size in px. It stands in for an image, so it
@@ -299,6 +304,7 @@ impl RenderOnce for Cover {
                     size,
                     &self.title,
                     self.author.as_ref(),
+                    window.rem_size(),
                     cx,
                 )),
             })
@@ -310,7 +316,7 @@ impl RenderOnce for Cover {
                         .top_0()
                         .bottom_0()
                         .left_0()
-                        .w(px(size.width_px() * 0.06))
+                        .w(rems(size.width_px() * 0.06 / 16.))
                         .rounded_l(radius)
                         .bg(linear_gradient(
                             90.,
@@ -351,9 +357,18 @@ pub fn initial(title: &str) -> Option<char> {
 }
 
 /// The cloth cover's content: an initial (xs, sm), or the stamped frame, the
-/// title, the rule and, from lg, the author.
-fn cloth(size: CoverSize, title: &str, author: Option<&SharedString>, cx: &App) -> AnyElement {
+/// title, the rule and, from lg, the author. Its measures are design px of
+/// the cover's own (`dp`), so it scales with the cover's rem-based box; the
+/// frame and the rules stay one device-independent pixel, as hairlines.
+fn cloth(
+    size: CoverSize,
+    title: &str,
+    author: Option<&SharedString>,
+    rem: Pixels,
+    cx: &App,
+) -> AnyElement {
     let ink = colors(cx).cloth_ink;
+    let dp = |design: f32| rem * (design / 16.);
     let w = size.width_px();
     let h = w * 1.5;
     let type_px = size.cloth_type();
@@ -367,17 +382,17 @@ fn cloth(size: CoverSize, title: &str, author: Option<&SharedString>, cx: &App) 
         .overflow_hidden()
         .type_family(Family::SerifText)
         .text_color(ink)
-        .text_size(px(type_px));
+        .text_size(dp(type_px));
 
     if size.is_small() {
         return base
             .justify_center()
-            .gap(px(3.))
+            .gap(dp(3.))
             .font_weight(FontWeight::SEMIBOLD)
-            .line_height(px(type_px))
+            .line_height(dp(type_px))
             .children(initial(title).map(|c| SharedString::from(c.to_string())))
             .when(size == CoverSize::Sm, |this| {
-                this.child(div().flex_none().w(px(8.)).h(px(1.)).bg(ink.opacity(0.6)))
+                this.child(div().flex_none().w(dp(8.)).h(px(1.)).bg(ink.opacity(0.6)))
             })
             .into_any_element();
     }
@@ -389,17 +404,17 @@ fn cloth(size: CoverSize, title: &str, author: Option<&SharedString>, cx: &App) 
     // Vazirmatn at the same size; Arabic script needs a 1.5 line height.
     let title_px = type_px;
     let title_line = if rtl { type_px * 1.5 } else { type_px * 1.2 };
-    base.pt(px(w * 0.16))
-        .px(px(w * 0.13))
-        .pb(px(w * 0.13))
+    base.pt(dp(w * 0.16))
+        .px(dp(w * 0.13))
+        .pb(dp(w * 0.13))
         // The blind-stamped frame, inset 5%.
         .child(
             div()
                 .absolute()
-                .top(px(h * 0.05))
-                .bottom(px(h * 0.05))
-                .left(px(w * 0.05))
-                .right(px(w * 0.05))
+                .top(dp(h * 0.05))
+                .bottom(dp(h * 0.05))
+                .left(dp(w * 0.05))
+                .right(dp(w * 0.05))
                 .rounded(px(1.))
                 .border_1()
                 .border_color(ink.opacity(0.28)),
@@ -409,12 +424,12 @@ fn cloth(size: CoverSize, title: &str, author: Option<&SharedString>, cx: &App) 
                 .w_full()
                 .flex_none()
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_size(px(title_px))
-                .line_height(px(title_line))
+                .text_size(dp(title_px))
+                .line_height(dp(title_line))
                 .child(
                     WrappingText::new(title.to_owned())
                         .centered()
-                        .width(px(content))
+                        .width(dp(content))
                         .line_clamp(CLOTH_TITLE_LINES)
                         .fit_words(CLOTH_MIN_SCALE),
                 ),
@@ -422,8 +437,8 @@ fn cloth(size: CoverSize, title: &str, author: Option<&SharedString>, cx: &App) 
         .child(
             div()
                 .flex_none()
-                .mt(px(content * 0.10))
-                .w(px(content * 0.24))
+                .mt(dp(content * 0.10))
+                .w(dp(content * 0.24))
                 .h(px(1.))
                 .bg(ink.opacity(0.6)),
         )
@@ -436,12 +451,12 @@ fn cloth(size: CoverSize, title: &str, author: Option<&SharedString>, cx: &App) 
                         .mt_auto()
                         .w_full()
                         .text_color(ink.opacity(0.85))
-                        .text_size(px(author_px))
-                        .line_height(px(author_px * 1.2))
+                        .text_size(dp(author_px))
+                        .line_height(dp(author_px * 1.2))
                         .child(
                             WrappingText::new(author)
                                 .centered()
-                                .width(px(content))
+                                .width(dp(content))
                                 .line_clamp(CLOTH_AUTHOR_LINES)
                                 .fit_words(CLOTH_MIN_SCALE),
                         ),
@@ -502,9 +517,9 @@ mod tests {
 
     #[test]
     fn small_covers_have_tighter_corners_and_no_lift() {
-        assert_eq!(CoverSize::Xs.radius(), px(2.));
-        assert_eq!(CoverSize::Sm.radius(), px(2.));
-        assert_eq!(CoverSize::Md.radius(), px(3.));
+        assert_eq!(CoverSize::Xs.radius(), rems(0.125));
+        assert_eq!(CoverSize::Sm.radius(), rems(0.125));
+        assert_eq!(CoverSize::Md.radius(), rems(0.1875));
         assert!(CoverSize::Sm.is_small() && !CoverSize::Md.is_small());
         assert!(!CoverSize::Md.cloth_has_author() && CoverSize::Lg.cloth_has_author());
     }

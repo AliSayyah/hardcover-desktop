@@ -78,12 +78,20 @@ Both need x86_64 Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora
 ### Installer
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/AliSayyah/hardcover-desktop/master/install.sh | bash
+curl -fsSL https://github.com/AliSayyah/hardcover-desktop/releases/latest/download/install.sh | bash
 ```
 
-It downloads the latest release, checks its signature, and installs `~/.local/bin/hardcover-desktop` with its desktop entry and icon, so **Hardcover Desktop** appears in your app launcher. It needs no sudo. Installed this way, the app keeps itself up to date. To check the signature it uses your `minisign`, or downloads minisign's own release and checks its checksum.
+That runs the installer published with the latest release. It downloads the release, checks its signature, and installs `~/.local/bin/hardcover-desktop` with its desktop entry and icon, so **Hardcover Desktop** appears in your app launcher. It needs no sudo. Installed this way, the app keeps itself up to date. To check the signature it uses your `minisign`, or downloads minisign's own release and checks its checksum.
 
-To install a tarball you already have, download `install.sh`, put the tarball's `.minisig` next to it and run `bash install.sh hardcover-desktop-<version>-x86_64-linux.tar.gz`. Or unpack it yourself, to the same place:
+The installer is signed too. To check it before running it, with [minisign](https://jedisct1.github.io/minisign/):
+
+```sh
+curl -fsSLO https://github.com/AliSayyah/hardcover-desktop/releases/latest/download/install.sh
+curl -fsSLO https://github.com/AliSayyah/hardcover-desktop/releases/latest/download/install.sh.minisig
+minisign -Vm install.sh -P RWQmH1HvOAVP+8piXBk3ZC+nqzBVFZFcynEg8NUsgQDCSYYAkrSkPRXW && bash install.sh
+```
+
+To install a tarball you already have, download the release's `install.sh`, put the tarball's `.minisig` next to it and run `bash install.sh hardcover-desktop-<version>-x86_64-linux.tar.gz`. Or unpack it yourself, to the same place:
 
 ```sh
 mkdir -p ~/.local

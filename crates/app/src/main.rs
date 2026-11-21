@@ -27,14 +27,13 @@ mod sign_in;
 mod star;
 mod stats;
 mod ui;
+mod ui_scale;
 mod upcoming;
 mod update;
 
 use gpui_kit::{
-    App, AppContext as _, KeyBinding, Size, TitlebarOptions, WindowBounds, WindowOptions, actions,
+    App, AppContext as _, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, actions,
 };
-
-use hardcover_core::update::InstallKind;
 
 use crate::book::star_rating;
 use crate::search::search_view;
@@ -199,6 +198,9 @@ fn main() {
     // Resolved before anything else: once an update replaces the binary,
     // /proc/self/exe names the deleted file, and restarting must use this path.
     let exe = std::env::current_exe().ok();
+    // The outputs' sizes, read on a thread of their own while the app starts:
+    // the window's size depends on them (`ui_scale`).
+    let scale = ui_scale::Probe::start();
     // A small file, read before the event loop starts (the one exception to
     // keeping core calls off the UI thread): the first frame needs the theme.
     let (prefs, prefs_path) = preferences::load();
@@ -210,26 +212,25 @@ fn main() {
             design::theme::init(bundled_fonts, cx);
             bind_keys(cx);
             ui::kit::bind_keys(cx);
-            let install = exe
-                .as_deref()
-                .map_or(InstallKind::Other, InstallKind::detect);
-            // An AppImage restarts from its file: the executable inside it is
-            // gone once this process exits.
-            if let Some(path) = install.restart_path().or(exe.as_deref()) {
-                cx.set_restart_path(path.to_owned());
+            // An AppImage's restart path replaces this once the first update
+            // check has worked out how the app was installed (`update`).
+            if let Some(path) = &exe {
+                cx.set_restart_path(path.clone());
             }
             preferences::init(prefs.clone(), prefs_path.clone(), cx);
-            update::init(install, cx);
+            update::init(exe.clone(), cx);
             #[cfg(not(feature = "demo"))]
             if let Some(primary) = instance {
                 show_on_later_launch(primary, cx);
             }
 
             // Window geometry is a platform boundary: logical pixels, not rems.
-            let size = Size::new(gpui_kit::px(1200.), gpui_kit::px(800.));
+            // The design's 1200 × 800 and 800 × 560, at the factor of the
+            // monitor the window is expected on (`ui_scale::policy::opening`).
+            let scale = scale.finish();
             let options = WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size, cx)),
-                window_min_size: Some(Size::new(gpui_kit::px(800.), gpui_kit::px(560.))),
+                window_bounds: Some(WindowBounds::centered(scale.window_size(), cx)),
+                window_min_size: Some(scale.min_window_size()),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Hardcover".into()),
                     ..Default::default()
@@ -243,6 +244,7 @@ fn main() {
             if std::env::var_os("HARDCOVER_GALLERY").is_some() {
                 gpui_kit::open_window(options, cx, |window, cx| {
                     preferences::follow_theme(window, cx);
+                    ui_scale::follow(scale, window, cx);
                     cx.new(|cx| ui::gallery::Gallery::new(window, cx))
                 })
                 .expect("failed to open window");
@@ -250,6 +252,7 @@ fn main() {
             }
             gpui_kit::open_window(options, cx, |window, cx| {
                 preferences::follow_theme(window, cx);
+                ui_scale::follow(scale, window, cx);
                 cx.new(|cx| shell::Shell::new(window, cx))
             })
             .expect("failed to open window");

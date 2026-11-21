@@ -54,8 +54,9 @@ A floor, not a substitute for the reference.
   - Fonts are static faces only: GPUI on Linux draws a variable font's
     default instance only.
 - **Tokens, not values.** No raw colours, and no `px(...)` for ordinary
-  layout. The exceptions are covered in the reference: hairlines, cover
-  geometry, and the window size.
+  layout: sizes are design px, and the app scales its rem on large monitors
+  (`ui_scale`), which raw px doesn't follow. The exceptions (hairlines,
+  focus rings, shadows) are covered in the reference.
 - **One accent, ink blue, spent scarcely.** It goes on progress, the default
   commit, focus, the selected sidebar icon, links that open the browser, and
   a genre chip's icon.
