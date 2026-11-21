@@ -12,7 +12,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, Pixels, SharedString,
-    Styled as _, div, prelude::FluentBuilder as _,
+    Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookDetails, BookId, BookSummary, RatingBucket};
@@ -20,13 +20,14 @@ use hardcover_core::{BookDetails, BookId, BookSummary, RatingBucket};
 use super::header::HEADER_GENRES;
 use super::your_book::paragraphs;
 use super::{BookDetailView, Details};
-use crate::app_state::Services;
+use crate::app_state::{Services, release_cover_medium};
 use crate::bidi::WrappingText;
 use crate::catalog::navigation::Page;
 use crate::chip::{TagChip, TagGroup, tag_groups};
 use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{average_rating_text, count_text};
+use crate::freshness::Fetched;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{
     Block, CoverShelf, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars, TextButton,
@@ -35,7 +36,8 @@ use crate::ui::{
 
 /// Similar books fetched for one book.
 pub(super) enum Similar {
-    Ready(Arc<Vec<BookSummary>>),
+    /// Kept for the run, fetched again when stale ([`crate::freshness`]).
+    Ready(Fetched<Arc<Vec<BookSummary>>>),
     Failed(SharedString),
 }
 
@@ -60,13 +62,15 @@ impl BookDetailView {
     pub(super) fn load_similar(&mut self, cx: &mut Context<Self>) {
         let Some(book) = self.book(cx) else { return };
         let id = book.id;
-        let Some(Details::Loaded(details)) = self.details.get(&id) else {
+        let Some(details) = self.details.get(&id).and_then(Details::loaded) else {
             return;
         };
-        if details.similar_book_ids.is_empty()
-            || matches!(self.similar.get(&id), Some(Similar::Ready(_)))
-            || self.similar_loading == Some(id)
-        {
+        let revalidating = match self.similar.get(&id) {
+            Some(Similar::Ready(fetched)) if !fetched.is_stale(cx) => return,
+            Some(Similar::Ready(_)) => true,
+            Some(Similar::Failed(_)) | None => false,
+        };
+        if details.similar_book_ids.is_empty() || self.similar_loading == Some(id) {
             return;
         }
         let ids: Vec<BookId> = details
@@ -76,7 +80,10 @@ impl BookDetailView {
             .filter(|b| *b != id)
             .take(SIMILAR_FETCHED)
             .collect();
-        self.similar.remove(&id);
+        // Stale books stay on screen while they are fetched again.
+        if !revalidating {
+            self.similar.remove(&id);
+        }
         self.similar_loading = Some(id);
         let client = Services::global(cx).client().clone();
         // Replacing the task cancels the fetch for a book no longer shown.
@@ -89,16 +96,52 @@ impl BookDetailView {
                 if this.similar_loading == Some(id) {
                     this.similar_loading = None;
                 }
-                let similar = match result {
-                    Ok(books) => Similar::Ready(Arc::new(books)),
-                    Err(e) => {
-                        Similar::Failed(Services::error_message(&e, Some(READ_CATALOG), cx).into())
+                let result = result.map(Arc::new);
+                match (this.similar.get_mut(&id), result) {
+                    (Some(Similar::Ready(fetched)), result) => {
+                        if let Err(e) = &result {
+                            Services::error_message(e, Some(READ_CATALOG), cx);
+                        }
+                        fetched.refetched(result, cx);
                     }
-                };
-                this.similar.insert(id, similar);
+                    (_, Ok(books)) => {
+                        this.similar
+                            .insert(id, Similar::Ready(Fetched::new(books, cx)));
+                    }
+                    (_, Err(e)) => {
+                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        this.similar.insert(id, Similar::Failed(message.into()));
+                    }
+                }
                 cx.notify();
             });
         }));
+    }
+
+    /// Releases the md/lg covers of similar books no longer shown, now that
+    /// `book` (if any) is: those of the book shown before, once it changes.
+    pub(super) fn keep_similar_covers(
+        &mut self,
+        book: Option<BookId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let shown: Vec<String> = match book.and_then(|id| self.similar.get(&id)) {
+            Some(Similar::Ready(books)) => books
+                .value()
+                .iter()
+                .filter_map(|b| b.cover.as_ref().map(|c| c.url.clone()))
+                .collect(),
+            _ => Vec::new(),
+        };
+        if shown == self.similar_covers {
+            return;
+        }
+        for url in std::mem::replace(&mut self.similar_covers, shown) {
+            if !self.similar_covers.contains(&url) {
+                release_cover_medium(&url, Some(window), cx);
+            }
+        }
     }
 
     fn retry_similar(&mut self, cx: &mut Context<Self>) {
@@ -116,19 +159,21 @@ impl BookDetailView {
     pub(super) fn render_about(&self, book: &BookSummary, cx: &mut Context<Self>) -> AnyElement {
         let muted = colors(cx).fg_muted;
         let body: AnyElement = match self.details.get(&book.id) {
-            Some(Details::Loaded(details)) => match details.description.as_deref().map(str::trim) {
-                Some(text) if !text.is_empty() => v_flex()
-                    .gap_2()
-                    .max_w(size::PROSE)
-                    .prose()
-                    .children(paragraphs(text).map(WrappingText::new))
-                    .into_any_element(),
-                _ => div()
-                    .body()
-                    .text_color(muted)
-                    .child("No description on Hardcover")
-                    .into_any_element(),
-            },
+            Some(Details::Loaded(details)) => {
+                match details.value().description.as_deref().map(str::trim) {
+                    Some(text) if !text.is_empty() => v_flex()
+                        .gap_2()
+                        .max_w(size::PROSE)
+                        .prose()
+                        .children(paragraphs(text).map(WrappingText::new))
+                        .into_any_element(),
+                    _ => div()
+                        .body()
+                        .text_color(muted)
+                        .child("No description on Hardcover")
+                        .into_any_element(),
+                }
+            }
             Some(Details::Failed(message)) => h_flex()
                 .flex_wrap()
                 .gap_2()
@@ -355,13 +400,16 @@ impl BookDetailView {
         }
         let muted = colors(cx).fg_muted;
         let body = match self.similar.get(&book.id) {
-            Some(Similar::Ready(books)) if books.is_empty() => return None,
+            Some(Similar::Ready(books)) if books.value().is_empty() => return None,
             Some(Similar::Ready(books)) => CoverShelf::new(CoverSize::Lg)
                 .when(side.is_some(), CoverShelf::grid)
                 .books(
                     books
+                        .value()
                         .iter()
-                        .take(side.map_or(SIMILAR_IN_COLUMN, |grid| grid.shown(books.len())))
+                        .take(
+                            side.map_or(SIMILAR_IN_COLUMN, |grid| grid.shown(books.value().len())),
+                        )
                         .map(|book| {
                             let id = book.id.get().cast_unsigned();
                             (

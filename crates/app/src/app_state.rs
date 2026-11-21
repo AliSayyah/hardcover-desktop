@@ -214,17 +214,23 @@ fn real_startup() -> Startup {
 
 /// Downloads at most this many covers at once.
 const COVER_DOWNLOADS: usize = 4;
-/// Height of decoded row thumbnails, in image pixels (2x the row's thumbnail).
-const THUMBNAIL_HEIGHT: u32 = 144;
+/// Height of decoded xs and sm covers (list rows, series strips), in image
+/// pixels. An sm cover is 48 px tall, so this is sharp up to 3x scale.
+pub(crate) const THUMBNAIL_HEIGHT: u32 = 144;
+/// Height of decoded md and lg covers (Home's rows and shelves, similar
+/// books), in image pixels. An lg cover is 120 px tall, so this is sharp up
+/// to 2.4x scale, and an md one (96 px) up to 3x.
+pub(crate) const MEDIUM_COVER_HEIGHT: u32 = 288;
 /// Height of the decoded detail cover, in image pixels. The cover is 12rem
 /// tall, so this is sharp up to 2.5x scale with the default rem.
 const COVER_HEIGHT: u32 = 480;
 /// Every height a cover is scaled to. A download is decoded once into all of
 /// them, and then deleted: the scaled copies are the cache.
-const SCALED_HEIGHTS: [u32; 2] = [THUMBNAIL_HEIGHT, COVER_HEIGHT];
+const SCALED_HEIGHTS: [u32; 3] = [THUMBNAIL_HEIGHT, MEDIUM_COVER_HEIGHT, COVER_HEIGHT];
 /// The most disk the cover cache may take. Past it, the copies used least
 /// recently are deleted at the next start, down to [`COVER_CACHE_TARGET`].
-/// A cover takes about 80 KB, so this holds some 3,000 covers.
+/// A cover takes about 110 KB at all three sizes, so this holds some 2,300
+/// covers.
 const COVER_CACHE_LIMIT: u64 = 256 * 1024 * 1024;
 const COVER_CACHE_TARGET: u64 = COVER_CACHE_LIMIT / 4 * 3;
 /// A copy is marked as used (its modification time set) at most this often,
@@ -294,6 +300,7 @@ impl CoverService {
         for url in failed {
             cx.remove_asset::<CoverFile>(&url);
             cx.remove_asset::<CoverThumbnail>(&url);
+            cx.remove_asset::<CoverMedium>(&url);
             cx.remove_asset::<CoverImage>(&url);
         }
     }
@@ -459,6 +466,20 @@ impl Asset for CoverThumbnail {
     }
 }
 
+/// An md or lg cover, scaled to [`MEDIUM_COVER_HEIGHT`]. Home's are library
+/// books and stay for the run; similar books are released when the book page
+/// moves on (see [`release_cover_medium`]).
+pub enum CoverMedium {}
+
+impl Asset for CoverMedium {
+    type Source = String;
+    type Output = Option<Arc<RenderImage>>;
+
+    fn load(url: String, cx: &mut App) -> impl Future<Output = Self::Output> + Send + 'static {
+        load_scaled(CoverService::loader(cx), url, MEDIUM_COVER_HEIGHT)
+    }
+}
+
 /// The detail pane's cover, scaled to [`COVER_HEIGHT`]. Unlike thumbnails it
 /// is released when the pane moves on (see [`release_cover_image`]).
 pub enum CoverImage {}
@@ -617,7 +638,7 @@ const SCALED_DIR: &str = "scaled";
 const SCALED_VERSION: &str = "v1";
 /// A temporary file older than this was left by a write that never finished.
 const STALE_TEMP_AGE: std::time::Duration = std::time::Duration::from_hours(1);
-/// JPEG quality of saved detail-size copies.
+/// JPEG quality of saved medium and detail copies.
 const SCALED_JPEG_QUALITY: u8 = 92;
 
 /// The cover scaled to `max_height`, from its saved copy when there is one.
@@ -638,7 +659,7 @@ fn load_or_decode(path: &Path, max_height: u32, deleted: &mut HashSet<PathBuf>) 
     }
     let source = match decode_source(path) {
         Ok(source) => source,
-        Err(SourceError::Missing) => return Loaded::NoSource,
+        Err(SourceError::Missing) => return from_larger_copy(path, max_height),
         Err(SourceError::Unreadable) => return Loaded::Failed,
         Err(SourceError::Undecodable) => {
             if deleted.insert(path.to_owned()) {
@@ -659,6 +680,27 @@ fn load_or_decode(path: &Path, max_height: u32, deleted: &mut HashSet<PathBuf>) 
     if saved {
         let _ = std::fs::remove_file(path);
     }
+    Loaded::Image(image)
+}
+
+/// The cover scaled to `max_height` from a larger saved copy, when the
+/// download is gone. A cache made before a size was added has the other
+/// copies only; this makes the new one without downloading the cover again.
+/// The copy is saved as usual. [`Loaded::NoSource`] when there is none.
+fn from_larger_copy(path: &Path, max_height: u32) -> Loaded {
+    let larger = SCALED_HEIGHTS
+        .into_iter()
+        .filter(|&h| h > max_height)
+        .flat_map(|h| ["qoi", "jpg"].map(|ext| scaled_path(path, h, ext)))
+        .flatten()
+        .find_map(|copy| decode_source(&copy).ok());
+    let Some(source) = larger else {
+        return Loaded::NoSource;
+    };
+    let Some(image) = scale(&source, max_height) else {
+        return Loaded::Failed;
+    };
+    save_scaled(path, max_height, &image);
     Loaded::Image(image)
 }
 
@@ -738,10 +780,10 @@ fn mark_used(path: &Path) {
     }
 }
 
-/// Saves a scaled cover next to the originals. Thumbnails are small, so they
-/// are kept lossless: QOI of the BGRA pixels as they are. Larger copies are
-/// high-quality JPEG when opaque, about a fifth of the size; a cover with
-/// transparency stays QOI.
+/// Saves a scaled cover next to the originals. Row thumbnails are small, so
+/// they are kept lossless: QOI of the BGRA pixels as they are. Larger copies
+/// (medium and detail) are high-quality JPEG when opaque, about a fifth of the
+/// size; a cover with transparency stays QOI.
 fn write_scaled(cover: &Path, max_height: u32, image: &RenderImage) -> std::io::Result<()> {
     use image::ImageEncoder as _;
 
@@ -831,7 +873,7 @@ fn tidy_cover_dir(cover_dir: &Path, decoder: &CoverDecoder) {
 }
 
 /// Deletes temporary files left by downloads that never finished, and
-/// downloads that have both scaled copies (a crash between saving the copies
+/// downloads that have every scaled copy (a crash between saving the copies
 /// and deleting it). Returns the other downloads, which earlier builds kept
 /// next to their copies, to be converted: decoding one at
 /// [`COVER_HEIGHT`] saves the copies it lacks and deletes it. SVGs are left
@@ -931,6 +973,19 @@ pub fn release_cover_image(
     }
 }
 
+/// Forgets an md or lg cover no view shows any more, and its texture. A view
+/// that still shows it loads it again from the saved copy. `window` is the
+/// window being updated, if any: GPUI can't reach it through `cx` then.
+pub fn release_cover_medium(url: &str, window: Option<&mut Window>, cx: &mut App) {
+    let url = url.to_owned();
+    // Already in the cache, since a view showed it: this starts no load.
+    let image = cx.fetch_asset::<CoverMedium>(&url).flatten();
+    cx.remove_asset::<CoverMedium>(&url);
+    if let Some(image) = image {
+        cx.drop_image(image, window);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -999,10 +1054,11 @@ mod tests {
 
         let reused = read_scaled(&cover, THUMBNAIL_HEIGHT).unwrap();
         assert_eq!(pixels(&reused), pixels(&decoded));
-        // The thumbnail and the detail copy, and no temporary files.
+        // The thumbnail, the medium and the detail copy, and no temporary
+        // files.
         assert_eq!(
             std::fs::read_dir(saved.parent().unwrap()).unwrap().count(),
-            2
+            3
         );
     }
 
@@ -1013,10 +1069,11 @@ mod tests {
         sample(&cover, 600, 900, false);
         let thumbnail = load(&cover, THUMBNAIL_HEIGHT).unwrap();
         assert!(!cover.exists(), "the download is deleted");
-        assert!(has_scaled(&cover, THUMBNAIL_HEIGHT));
-        assert!(has_scaled(&cover, COVER_HEIGHT));
+        for height in SCALED_HEIGHTS {
+            assert!(has_scaled(&cover, height));
+        }
 
-        // Both sizes come from the copies now, as the source decoded them.
+        // Every size come from the copies now, as the source decoded them.
         assert_eq!(
             pixels(&load(&cover, THUMBNAIL_HEIGHT).unwrap()),
             pixels(&thumbnail)
@@ -1035,6 +1092,38 @@ mod tests {
         std::fs::write(dir.path().join(SCALED_DIR), b"x").unwrap();
         assert!(load(&cover, THUMBNAIL_HEIGHT).is_some());
         assert!(cover.exists());
+    }
+
+    #[test]
+    fn a_size_missing_from_an_older_cache_is_made_from_a_larger_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let cover = dir.path().join("cover.jpg");
+        let source = dir.path().join("source.png");
+        sample(&source, 600, 900, false);
+        // The copies an older build saved, with the download deleted.
+        for height in [THUMBNAIL_HEIGHT, COVER_HEIGHT] {
+            write_scaled(&cover, height, &decode_scaled(&source, height).unwrap()).unwrap();
+        }
+
+        let medium = load(&cover, MEDIUM_COVER_HEIGHT).unwrap();
+        assert_eq!((pixels(&medium).0, pixels(&medium).1), (192, 288));
+        assert!(
+            has_scaled(&cover, MEDIUM_COVER_HEIGHT),
+            "saved for next time"
+        );
+        // Close to scaling the original: the detail copy is a JPEG.
+        let direct = decode_scaled(&source, MEDIUM_COVER_HEIGHT).unwrap();
+        let (_, _, made) = pixels(&medium);
+        let (_, _, expected) = pixels(&direct);
+        let worst = made
+            .iter()
+            .zip(&expected)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap();
+        assert!(worst <= 8, "off by {worst}");
+        // The thumbnail is still read from its own copy.
+        assert!(read_scaled(&cover, THUMBNAIL_HEIGHT).is_some());
     }
 
     #[test]

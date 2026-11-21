@@ -466,6 +466,13 @@ impl ListView {
         cx.notify();
     }
 
+    /// Fetches the book in the pane beside the list again where it is stale
+    /// ([`crate::freshness`]). The list's own books follow Refresh
+    /// (`ListsModel::reload`).
+    pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
+        self.pane.revalidate(shown_again, cx);
+    }
+
     pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         crate::ui::enter_list(&self.list, window, cx);
     }
