@@ -1367,7 +1367,7 @@ fn book_editions_pages_by_offset() {
         ]})),
     );
     let page = c.book_editions(BookId::new(1001), 50).unwrap();
-    // One row more than a page, so the last page is never a guess.
+    // One row more than a page, so a full last page isn't taken for more.
     assert_eq!(
         vars(&http, 0),
         json!({"bookId": 1001, "limit": EDITIONS_PER_PAGE + 1, "offset": 50})
@@ -2258,20 +2258,31 @@ fn lists_page_by_keyset_and_find_owned() {
 }
 
 #[test]
-fn memberships_stop_after_five_pages_and_say_so() {
+fn memberships_stop_after_six_requests_and_say_so() {
     let (c, http) = client(TestTokens::new(false));
     me_reply(&http);
-    for page in 0..5 {
-        let rows: Vec<Value> = (1..=1000)
+    let page_of = |page: i64| -> Vec<Value> {
+        (1..=1000)
             .map(|i| membership(page * 1000 + i, 1, i, None))
-            .collect();
-        http.push(200, &data(json!({ "list_books": rows })));
+            .collect()
+    };
+    // Five full pages and the empty one that finds the end: complete.
+    for page in 0..5 {
+        http.push(200, &data(json!({ "list_books": page_of(page) })));
     }
+    http.push(200, &data(json!({ "list_books": [] })));
     let all = c.list_memberships().unwrap();
     assert_eq!(all.rows.len(), 5000);
+    assert!(all.complete);
+    assert_eq!(vars(&http, 5)["afterId"], 4000);
+    // Rows still coming on the sixth request: incomplete, and no seventh.
+    for page in 0..6 {
+        http.push(200, &data(json!({ "list_books": page_of(page) })));
+    }
+    let all = c.list_memberships().unwrap();
+    assert_eq!(all.rows.len(), 6000);
     assert!(!all.complete);
     assert_eq!(http.remaining(), 0);
-    assert_eq!(vars(&http, 5)["afterId"], 4000);
 
     // An empty page ends it; a short one before it doesn't.
     http.push(
@@ -2731,7 +2742,7 @@ fn upcoming_in_series_merges_books_and_names_every_series() {
 #[test]
 fn a_failed_series_batch_keeps_the_others() {
     let (c, http) = client(TestTokens::new(false));
-    http.push(503, r#"{"error":"Service temporarily unavailable"}"#);
+    http.push(200, r#"{"errors":[{"message":"series 42: bad row"}]}"#);
     http.push(
         200,
         &data(
@@ -2745,7 +2756,21 @@ fn a_failed_series_batch_keeps_the_others() {
     assert_eq!(load.series.len(), 1);
     assert_eq!(load.series[0].id, SeriesId::new(78));
     assert_eq!(load.missing, ids[..25]);
-    assert!(matches!(load.error, Some(Error::Network(_))));
+    assert!(matches!(load.error, Some(Error::Api(_))));
+}
+
+/// A failure that would repeat for every batch (the network, the session,
+/// the rate limit) stops the load: the rest aren't sent, and are missing.
+#[test]
+fn a_lasting_series_failure_stops_the_batches() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push_err(Error::Timeout);
+    let ids: Vec<SeriesId> = (1..=60).map(SeriesId::new).collect();
+    let load = c.tracked_series(&ids);
+    assert_eq!(http.requests().len(), 1);
+    assert!(load.series.is_empty());
+    assert_eq!(load.missing, ids);
+    assert_eq!(load.error, Some(Error::Timeout));
 }
 
 #[test]

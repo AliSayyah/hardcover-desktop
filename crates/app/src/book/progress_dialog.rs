@@ -310,6 +310,13 @@ impl ProgressDialog {
                         return;
                     }
                     Ok(ProgressChange {
+                        progress_left_out: Some(Error::OutcomeUnknown),
+                        ..
+                    }) => Some(
+                        "Moved to Currently reading. Hardcover didn't confirm the progress, so it may have been saved. Refresh to check before trying again."
+                            .into(),
+                    ),
+                    Ok(ProgressChange {
                         progress_left_out: Some(error),
                         ..
                     }) => Some(
@@ -319,6 +326,8 @@ impl ProgressDialog {
                         )
                         .into(),
                     ),
+                    // Not a failure: the message says it may have been saved.
+                    Err(error @ Error::OutcomeUnknown) => Some(message(&error, cx).into()),
                     Err(error) => {
                         Some(format!("Couldn't update progress. {}", message(&error, cx)).into())
                     }

@@ -105,6 +105,9 @@ impl UreqTransport {
             .http_status_as_error(false)
             .https_only(true)
             .user_agent(USER_AGENT)
+            // A hung lookup then fails as unsent, not as a write whose
+            // outcome is unknown (see `map_ureq_error`).
+            .timeout_resolve(Some(Duration::from_secs(10)))
             .timeout_connect(Some(Duration::from_secs(10)))
             .build();
         Self {

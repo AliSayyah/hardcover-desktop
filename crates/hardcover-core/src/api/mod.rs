@@ -38,10 +38,12 @@ use wire::{
 /// GraphQL endpoint.
 pub const GRAPHQL_ENDPOINT: &str = "https://api.hardcover.app/v1/graphql";
 
-/// Library page size. One request per page; each costs one rate-limit token.
-/// Measured live on 834 entries (2026-11-21): 100 a page took 9 requests and
-/// 3.6 s, 500 took 2 requests and 1.3 s, 1,000 one request of 3.2 s. Every
-/// size returned all 834, so Hardcover doesn't cap the rows below 1,000.
+/// Library page size. One request per page, plus the empty one that ends
+/// the sync; each costs one rate-limit token. Measured live on 834 entries
+/// (2026-11-21, before the closing empty request): 100 a page took 9
+/// requests and 3.6 s, 500 took 2 requests and 1.3 s, 1,000 one request of
+/// 3.2 s. Every size returned all 834, so Hardcover doesn't cap the rows
+/// below 1,000.
 const LIBRARY_PAGE_SIZE: u32 = 500;
 /// Search results per page.
 pub const SEARCH_PER_PAGE: u32 = 25;
@@ -62,8 +64,9 @@ const LISTS_PAGE_SIZE: u32 = 100;
 /// List memberships per request: Hardcover returns at most 1,000 `list_books` rows.
 const MEMBERSHIPS_PAGE_SIZE: u32 = 1_000;
 /// Most requests [`Client::list_memberships`] makes, so a huge collection
-/// can't spend a minute of the rate limit at once.
-const MEMBERSHIPS_MAX_PAGES: usize = 5;
+/// can't spend a minute of the rate limit at once: five pages of rows and
+/// the (empty) request that finds the end.
+const MEMBERSHIPS_MAX_PAGES: usize = 6;
 /// Books per page in [`Client::list_books`].
 pub const LIST_BOOKS_PER_PAGE: u32 = 100;
 /// Reviews per page in [`Client::book_reviews`].
@@ -634,8 +637,10 @@ impl Client {
     ///
     /// A batch that fails doesn't throw away the others: its ids are in
     /// [`TrackedSeriesLoad::missing`], and the first failure in
-    /// [`TrackedSeriesLoad::error`]. A remembered rate-limit block refuses
-    /// the remaining batches at once, so they cost no requests.
+    /// [`TrackedSeriesLoad::error`]. Only a failure about that batch (an API
+    /// error, an unreadable answer) lets the rest go on; any other (network,
+    /// session, scope, rate limit) would repeat, so the batches not sent yet
+    /// are missing too.
     #[must_use]
     pub fn tracked_series(&self, ids: &[SeriesId]) -> TrackedSeriesLoad {
         #[derive(Deserialize)]
@@ -646,7 +651,8 @@ impl Client {
         ids.sort_unstable();
         ids.dedup();
         let mut load = TrackedSeriesLoad::default();
-        for batch in ids.chunks(TRACKED_SERIES_BATCH) {
+        let mut batches = ids.chunks(TRACKED_SERIES_BATCH);
+        while let Some(batch) = batches.next() {
             let fetched: Result<Data> = self.query(
                 "SeriesOverview",
                 queries::SERIES_OVERVIEW,
@@ -658,9 +664,19 @@ impl Client {
                     .series
                     .extend(data.series.into_iter().map(RawTrackedSeries::into_tracked)),
                 Err(e) => {
+                    // Only an answer about this batch is worth going on past;
+                    // a network, session, scope or rate-limit failure would
+                    // repeat for every batch, each at the cost of a request
+                    // or a timeout.
+                    let lasting = !matches!(e, Error::Api(_) | Error::Decode(_));
                     load.missing
                         .extend(batch.iter().copied().map(SeriesId::new));
                     load.error.get_or_insert(e);
+                    if lasting {
+                        load.missing
+                            .extend(batches.flatten().copied().map(SeriesId::new));
+                        break;
+                    }
                 }
             }
         }
@@ -1421,8 +1437,9 @@ impl Client {
     }
 
     /// Which of the user's books are on which of their lists, as one index:
-    /// one request per 1,000 rows, at most five. Past that the result is
-    /// marked incomplete; [`Client::book_list_memberships`] covers one book.
+    /// one request per 1,000 rows and one more to find the end, at most six.
+    /// Past that the result is marked incomplete;
+    /// [`Client::book_list_memberships`] covers one book.
     ///
     /// # Errors
     ///
@@ -1740,7 +1757,8 @@ impl Client {
     /// A page of other readers' reviews of `book`, the most liked first, then
     /// the newest. `me` (the signed-in user) is left out. `offset` is the
     /// previous page's [`ReviewsPage::next_offset`], 0 for the first. Asks
-    /// for one row more than a page, so `has_more` is never a guess. Needs
+    /// for one row more than a page, so a full last page isn't taken for
+    /// more. Needs
     /// `read:social`.
     ///
     /// # Errors
@@ -1912,9 +1930,11 @@ fn keyset_pages<R>(
     }
 }
 
-/// A page fetched by offset with `limit + 1` rows asked for, so `has_more`
-/// is never a guess. The offset moves on by the rows Hardcover sent, so a
-/// row `read` can't use (`None`) doesn't shift the next page.
+/// A page fetched by offset with `limit + 1` rows asked for, so a last page
+/// that happens to be full isn't taken for more (`has_more` would read false
+/// under a server cap below `limit + 1`; none is known). The offset moves on
+/// by the rows Hardcover sent, so a row `read` can't use (`None`) doesn't
+/// shift the next page.
 fn offset_page<R, T>(
     mut rows: Vec<R>,
     offset: u32,
