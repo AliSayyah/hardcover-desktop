@@ -8,10 +8,17 @@
 //!
 //! Controlled: the owner passes the value and receives requested changes.
 //!
-//! The stars are 20 px (16 in a row, [`StarRating::small`]), 2 apart, in `gold` (the user's own rating is the only
-//! gold in the app) over `star-empty`. Keyboard focus shows the system's ring
-//! (`ui::focus`). An unrated control reads "Rate" beside it; that word is the
-//! owner's to place.
+//! The stars are 20 px (16 in a row, [`StarRating::small`]), 2 apart, in
+//! `gold` (the user's own rating is the only gold in the app) over
+//! `star-empty`. The pointer's preview draws the stars a click would set as
+//! gold outlines over the empty star, so it never reads as a saved rating.
+//! Keyboard focus shows the system's ring (`ui::focus`). An unrated control
+//! reads "Rate" beside it; that word is the owner's to place.
+//!
+//! The pointer's targets are ten equal slices across the whole control,
+//! padding included: each half star is the control's full height, and the
+//! gaps between stars belong to the halves beside them, so no click lands
+//! on nothing.
 
 use std::rc::Rc;
 
@@ -20,18 +27,33 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
     App, ElementId, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _,
     RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, actions, div,
-    prelude::FluentBuilder as _, relative,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::Rating;
 
 use crate::design::colors;
 use crate::ui::focus::{FocusTreatment as _, control_radius, focus_visible};
-use crate::ui::{StarSize, render_star};
+use crate::ui::{StarInk, StarSize, render_star};
 
-/// Key context of the control; its bindings live in `main`.
+/// Key context of the control; [`key_bindings`] are its keys.
 pub const KEY_CONTEXT: &str = "StarRating";
 
 actions!(star_rating, [IncreaseRating, DecreaseRating, ClearRating]);
+
+/// The control's keys: Right and Up add half a star, Left and Down take one
+/// off, Backspace and Delete clear. `main` binds them.
+pub fn key_bindings() -> [gpui_kit::KeyBinding; 6] {
+    use gpui_kit::KeyBinding;
+    let context = Some(KEY_CONTEXT);
+    [
+        KeyBinding::new("right", IncreaseRating, context),
+        KeyBinding::new("up", IncreaseRating, context),
+        KeyBinding::new("left", DecreaseRating, context),
+        KeyBinding::new("down", DecreaseRating, context),
+        KeyBinding::new("backspace", ClearRating, context),
+        KeyBinding::new("delete", ClearRating, context),
+    ]
+}
 
 const STARS: u8 = 5;
 
@@ -164,11 +186,12 @@ impl RenderOnce for StarRating {
             }
         };
 
-        // A hover previews the value it would set, lighter than a set one.
+        // A hover previews the value it would set: outlines, not solid stars.
+        let gold = colors(cx).gold;
         let filled_color = if hovered.is_some() {
-            colors(cx).gold_preview
+            StarInk::Outline(gold)
         } else {
-            colors(cx).gold
+            StarInk::Solid(gold)
         };
         let empty_color = colors(cx).star_empty;
         let label = match value {
@@ -214,21 +237,23 @@ impl RenderOnce for StarRating {
                             }
                         }
                     })
-                    .children((1..=STARS).map(|n| {
-                        let half = |trailing| {
-                            half_star_target(
-                                n,
-                                trailing,
-                                value,
-                                hover.clone(),
-                                focus.clone(),
-                                request.clone(),
-                            )
-                        };
-                        render_star(n, shown, size, filled_color, empty_color)
-                            .child(half(false))
-                            .child(half(true))
-                    }))
+                    .children(
+                        (1..=STARS).map(|n| render_star(n, shown, size, filled_color, empty_color)),
+                    )
+                    .child(
+                        h_flex()
+                            .absolute()
+                            .inset_0()
+                            .children((1..=STARS * 2).map(|slice| {
+                                half_star_target(
+                                    f32::from(slice) / 2.,
+                                    value,
+                                    hover.clone(),
+                                    focus.clone(),
+                                    request.clone(),
+                                )
+                            })),
+                    )
             })
             .when(disabled, |this| {
                 this.opacity(0.5).children(
@@ -242,32 +267,20 @@ impl RenderOnce for StarRating {
     }
 }
 
+/// One of the ten slices across the control: a click sets `target` stars.
 fn half_star_target(
-    n: u8,
-    trailing: bool,
+    target: f32,
     value: Option<Rating>,
     hover: gpui_kit::Entity<Option<f32>>,
     focus: FocusHandle,
     request: Rc<impl Fn(Option<Rating>, &mut Window, &mut App) + 'static>,
 ) -> impl IntoElement {
-    let target = f32::from(n) - if trailing { 0.0 } else { 0.5 };
-
     div()
         .id(ElementId::from(SharedString::from(format!(
-            "{n}-{}",
-            if trailing { "end" } else { "start" }
+            "half-{target}"
         ))))
-        .absolute()
-        .top_0()
+        .flex_1()
         .h_full()
-        .w(relative(0.5))
-        .map(|this| {
-            if trailing {
-                this.right_0()
-            } else {
-                this.left_0()
-            }
-        })
         .on_mouse_move(move |_, _, cx| {
             hover.update(cx, |h, cx| {
                 if *h != Some(target) {
@@ -316,5 +329,39 @@ mod tests {
         assert_eq!(stepped_value(r(3.0), false), r(2.5));
         assert_eq!(stepped_value(r(0.5), false), None);
         assert_eq!(stepped_value(None, false), None);
+    }
+
+    /// The arrows step the rating by half a star; Delete clears it.
+    #[gpui_kit::test]
+    fn the_keys_step_by_half_a_star_and_delete_clears(cx: &mut gpui_kit::TestAppContext) {
+        use crate::ui::test_support::{host, press, redraw, tab};
+        use gpui_kit::IntoElement as _;
+        use std::cell::Cell;
+
+        let value = Rc::new(Cell::new(r(3.0)));
+        let cx = host(cx, {
+            let value = value.clone();
+            move |_, _| {
+                let set = value.clone();
+                StarRating::new("stars")
+                    .value(value.get())
+                    .on_change(move |rating, _, _| set.set(*rating))
+                    .into_any_element()
+            }
+        });
+        cx.update(|_, cx| cx.bind_keys(key_bindings()));
+        tab(cx);
+        let mut key = |name: &str| {
+            press(cx, name);
+            redraw(cx);
+            value.get()
+        };
+        assert_eq!(key("right"), r(3.5));
+        assert_eq!(key("up"), r(4.0));
+        assert_eq!(key("left"), r(3.5));
+        assert_eq!(key("down"), r(3.0));
+        assert_eq!(key("delete"), None);
+        assert_eq!(key("up"), r(0.5));
+        assert_eq!(key("backspace"), None);
     }
 }

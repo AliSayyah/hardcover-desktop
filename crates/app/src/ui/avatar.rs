@@ -10,7 +10,8 @@
 //! 3. their initials in `accent` on `accent-soft`.
 //!
 //! Initials are 12/600 at the 32 px size. A loading picture shows the
-//! initials until it lands.
+//! initials until it lands. Whichever it shows, a screen reader hears the
+//! person's name (an image named `name`).
 //!
 //! ```ignore
 //! Avatar::new(name)
@@ -19,8 +20,9 @@
 //! ```
 
 use gpui_kit::{
-    App, FontWeight, ImageSource, IntoElement, ObjectFit, ParentElement as _, RenderOnce,
-    SharedString, Styled as _, StyledImage as _, Window, div, img,
+    App, ElementId, FontWeight, ImageSource, InteractiveElement as _, IntoElement, ObjectFit,
+    ParentElement as _, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
+    Styled as _, StyledImage as _, Window, div, img,
 };
 
 use crate::cover_pipeline::{MEDIUM_COVER_HEIGHT, THUMBNAIL_HEIGHT, cover_file, load_cover};
@@ -122,6 +124,9 @@ impl RenderOnce for Avatar {
             }
         });
         let circle = div()
+            .id(ElementId::Name(format!("avatar-{}", self.name).into()))
+            .role(Role::Image)
+            .aria_label(self.name.clone())
             .flex()
             .flex_none()
             .items_center()

@@ -8,10 +8,8 @@ use std::sync::Arc;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::list::ListState;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{
-    Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::tab::TabBar;
+use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement as _,
     IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window,
@@ -29,6 +27,7 @@ use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
 use crate::ui::PageHeader;
 use crate::ui::kit::SmallControl as _;
+use crate::ui::kit::small_tab;
 
 /// The periods offered, in order.
 const PERIODS: [TrendingPeriod; 5] = [
@@ -294,9 +293,9 @@ impl DiscoverView {
                     .child(
                         TabBar::new("trending-period")
                             .segmented()
-                            .small()
+                            .small_control()
                             .selected_index(selected)
-                            .children(PERIODS.map(|p| Tab::new().label(period_label(p))))
+                            .children(PERIODS.map(|p| small_tab(period_label(p))))
                             .on_click(move |ix, window, cx| {
                                 let period = PERIODS[*ix];
                                 let _ =

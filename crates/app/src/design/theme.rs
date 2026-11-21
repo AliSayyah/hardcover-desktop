@@ -34,6 +34,11 @@
 //!   (the app's own is 2 px; the kit's width can't be set),
 //!   plus a 1 px accent edge, as the system's focus treatment asks.
 //! - `switch_thumb` is its own role: `raised` in light mode, `fg` in dark.
+//! - `info` and `success` are `fg-muted`: no second accent on a
+//!   notification's icon or a success check. `overlay` (the dialog
+//!   backdrop) is `scrim`.
+//! - `tab_bar` is the segmented bar's track, so a disabled segment reads
+//!   as not chosen (the app has no other tab bar).
 //!
 //! **Where the kit doesn't follow the theme:**
 //! - `Theme::input_background()` ignores the config: inputs are paper in
@@ -41,12 +46,11 @@
 //!   `RaisedField` puts them on `raised`.
 //! - Dialogs paint `background` (paper); `ui::kit::open_dialog` and
 //!   `open_alert_dialog` put them on `raised`.
-//! - The sidebar's menu hover is `sidebar_accent` at 80%, so it is 8%, not
-//!   5%, two steps from the 10% selected fill.
-//! - The segmented tab bar's sliding indicator is always `background`.
+//! - The segmented tab bar's sliding indicator is always `background`,
+//!   with the kit's small shadow.
 //! - The rest (menus, the Select dropdown, switches, radios, the
-//!   `DatePicker`, dialog shadows, a disabled segment) is listed in `ui::kit`'s module doc and
-//!   the system's "Kit limits".
+//!   `DatePicker`, dialog shadows, focus rings) is listed in `ui::kit`'s
+//!   module doc and the system's "Kit limits".
 
 use std::rc::Rc;
 
@@ -205,6 +209,19 @@ pub fn config(mode: ThemeMode, bundled_fonts: bool) -> ThemeConfig {
     c.button_danger_active = css(p.selected);
     c.warning = css(p.warning);
     c.warning_foreground = css(p.bg);
+    // The kit's info and success (a notification's icon, "Up to date") are
+    // neutral ink: the accent is spent elsewhere, and a green check would
+    // be a second accent.
+    c.info = css(p.fg_muted);
+    c.info_foreground = css(p.bg);
+    c.info_hover = css(solid(p.fg_muted, p.hover));
+    c.info_active = css(solid(p.fg_muted, p.selected));
+    c.success = css(p.fg_muted);
+    c.success_foreground = css(p.bg);
+    c.success_hover = css(solid(p.fg_muted, p.hover));
+    c.success_active = css(solid(p.fg_muted, p.selected));
+    // The dialog backdrop.
+    c.overlay = css(p.scrim);
 
     apply_collection_colors(c, p);
 
@@ -240,13 +257,16 @@ fn apply_collection_colors(c: &mut gpui_kit::component::ThemeConfigColors, p: &P
     c.switch_thumb = css(p.switch_thumb);
     c.scrollbar = css(clear);
     c.scrollbar_thumb = css(p.border_strong);
-    c.scrollbar_thumb_hover = css(p.fg_faint);
+    c.scrollbar_thumb_hover = css(p.fg_muted);
 
-    // Tabs: a segmented bar is a chip-filled track.
+    // Tabs: a segmented bar is a chip-filled track. The app's only tab
+    // bars are segmented, and the kit paints a disabled segment with
+    // `tab_bar`: the track, so it reads as not chosen.
+    let segment_track = css(solid(p.bg, p.chip));
     c.tab = css(p.bg);
     c.tab_active = css(p.bg);
-    c.tab_bar = css(p.bg);
-    c.tab_bar_segmented = css(solid(p.bg, p.chip));
+    c.tab_bar = segment_track.clone();
+    c.tab_bar_segmented = segment_track;
     c.tab_foreground = css(p.fg_muted);
     c.tab_active_foreground = css(p.fg);
 
@@ -319,12 +339,26 @@ mod tests {
                 ("switch_thumb", theme.switch_thumb, p.switch_thumb),
                 ("danger", theme.danger, p.danger),
                 ("warning", theme.warning, p.warning),
+                ("info", theme.info, p.fg_muted),
+                ("success", theme.success, p.fg_muted),
+                ("overlay", theme.overlay, p.scrim),
+                ("scrollbar_thumb", theme.scrollbar_thumb, p.border_strong),
+                (
+                    "scrollbar_thumb_hover",
+                    theme.scrollbar_thumb_hover,
+                    p.fg_muted,
+                ),
+                ("tab_bar", theme.tab_bar, solid(p.bg, p.chip)),
             ] {
                 assert!(close(got, want), "{mode:?} {field}: {got:?} != {want:?}");
                 // The kit's components read the token copy.
             }
             assert!(close(theme.tokens.button_hover.color, theme.button_hover));
             assert!(close(theme.tokens.list_hover.color, p.hover));
+            // The kit's success button and notification read these copies.
+            assert!(close(theme.tokens.success.color, p.fg_muted));
+            assert!(close(theme.tokens.info.color, p.fg_muted));
+            assert!(close(theme.tokens.tab_bar.color, solid(p.bg, p.chip)));
             assert_eq!(theme.radius, gpui_kit::px(f32::from(RADIUS)));
             assert_eq!(theme.radius_lg, gpui_kit::px(f32::from(RADIUS_LG)));
             assert_eq!(theme.font_family.as_ref(), fonts::INTER);

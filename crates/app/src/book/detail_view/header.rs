@@ -13,10 +13,10 @@
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
-use gpui_kit::component::{Disableable as _, Icon, IconName, Side, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, IconName, Side, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Window,
-    div, prelude::FluentBuilder as _, relative,
+    AnyElement, App, Context, ElementId, IntoElement, ParentElement as _, SharedString,
+    Styled as _, Window, div, prelude::FluentBuilder as _, relative,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{
@@ -40,7 +40,7 @@ use crate::library::model::WriteKind;
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::ui::TextButton;
-use crate::ui::kit::SmallIconButton as _;
+use crate::ui::kit::{SmallIconButton as _, danger_menu_item};
 
 /// Genres shown in the header. With more, every genre is in the Tags block.
 pub(super) const HEADER_GENRES: usize = 6;
@@ -213,7 +213,7 @@ impl BookDetailView {
                     .children(authors.iter().enumerate().map(|(i, c)| {
                         h_flex()
                             .min_w_0()
-                            .child(contributor_name(c, ("author", i), true))
+                            .child(contributor_name(c, "author", true))
                             .when(i + 1 < authors.len(), |this| {
                                 this.child(div().pr_1().child(","))
                             })
@@ -235,7 +235,7 @@ impl BookDetailView {
                             let role = c.role.clone().unwrap_or_default();
                             h_flex()
                                 .gap_1()
-                                .child(contributor_name(c, ("contributor", i), false))
+                                .child(contributor_name(c, "contributor", false))
                                 .child(if i + 1 < others.len() {
                                     format!("({role}),")
                                 } else {
@@ -409,8 +409,6 @@ impl BookDetailView {
                         return menu;
                     };
                     let has_edition = entry.edition.is_some();
-                    // Disabled, the kit's muted colour shows instead.
-                    let danger = (can_write && !busy).then(|| colors(cx).danger);
                     let remove_view = view.clone();
                     let menu = if url.is_some() {
                         menu.separator()
@@ -435,24 +433,14 @@ impl BookDetailView {
                     } else {
                         menu
                     };
-                    // The destructive command, in danger and set apart: the
-                    // kit's menu items take no colour, so it is an element
-                    // item, its icon coloured too.
+                    // The destructive command, in danger and set apart.
                     menu.item(
-                        PopupMenuItem::element(move |_, _| {
-                            div()
-                                .when_some(danger, gpui_kit::Styled::text_color)
-                                .child("Remove from library…")
-                        })
-                        .icon(
-                            Icon::new(IconName::Delete)
-                                .when_some(danger, gpui_kit::Styled::text_color),
-                        )
-                        .disabled(!can_write || busy)
-                        .on_click(move |_, window, cx| {
-                            let _ =
-                                remove_view.update(cx, |this, cx| this.confirm_remove(window, cx));
-                        }),
+                        danger_menu_item("Remove from library…", can_write && !busy, cx).on_click(
+                            move |_, window, cx| {
+                                let _ = remove_view
+                                    .update(cx, |this, cx| this.confirm_remove(window, cx));
+                            },
+                        ),
                     )
                     .when(!can_write, |menu| {
                         menu.item(reason_row(needs_permission(WRITE_LIBRARY)))
@@ -516,23 +504,43 @@ fn series_line(details: Option<&BookDetails>) -> Option<AnyElement> {
         Some(id) => TextButton::new("open-series", label)
             .opens(Page::Series(id))
             .into_any_element(),
-        None => div().body().child(label).into_any_element(),
+        None => div()
+            .body()
+            .min_w_0()
+            .child(WrappingText::new(label))
+            .into_any_element(),
     })
 }
 
 /// A contributor's name: a text button to their author page when the id is
 /// known. In the byline (Inter 500 at 16) or in the muted roles line (body).
-fn contributor_name(c: &Contributor, id: (&'static str, usize), byline: bool) -> AnyElement {
+/// The button's id comes from the author's id and role, `kind` telling the
+/// byline's authors from the other contributors, so it stays put as the
+/// list changes and one person in two roles gets two.
+fn contributor_name(c: &Contributor, kind: &'static str, byline: bool) -> AnyElement {
     fn style<S: gpui_kit::Styled>(this: S, byline: bool) -> S {
         if byline { this.byline() } else { this.body() }
     }
     match c.author_id {
         Some(author) => style(
-            TextButton::new(id, c.name.clone()).opens(Page::Author(author)),
+            TextButton::new(
+                ElementId::Name(
+                    format!(
+                        "{kind}-{}-{}",
+                        author.get(),
+                        c.role.as_deref().unwrap_or_default()
+                    )
+                    .into(),
+                ),
+                c.name.clone(),
+            )
+            .opens(Page::Author(author)),
             byline,
         )
         .into_any_element(),
-        None => style(div().child(c.name.clone()), byline).into_any_element(),
+        None => style(div().min_w_0(), byline)
+            .child(WrappingText::new(c.name.clone()))
+            .into_any_element(),
     }
 }
 

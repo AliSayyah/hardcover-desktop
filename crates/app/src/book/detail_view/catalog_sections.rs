@@ -511,11 +511,14 @@ fn render_breakdown(details: &BookDetails, cx: &mut Context<BookDetailView>) -> 
                     ),
                 )
                 .child(
-                    Meter::new(SharedString::from(format!("rating-{rating}")), percent)
-                        .muted()
-                        .flex_1()
-                        .w_auto()
-                        .accessibility_label(format!("{} stars", rating_label(rating))),
+                    Meter::new(
+                        SharedString::from(format!("rating-{rating}")),
+                        percent,
+                        format!("{} stars", rating_label(rating)),
+                    )
+                    .muted()
+                    .flex_1()
+                    .w_auto(),
                 )
                 .child(Lane::trailing().child(count_text(count)))
         }))

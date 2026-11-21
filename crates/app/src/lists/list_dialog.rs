@@ -17,6 +17,7 @@ use hardcover_core::{BookSummary, ListDraft, ListId, Privacy};
 
 use super::model::ListsModel;
 use crate::app_state::Services;
+use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::needs_permission;
 use crate::ui::kit::RaisedField as _;
@@ -59,7 +60,7 @@ pub fn open_edit_list(lists: Entity<ListsModel>, id: ListId, window: &mut Window
         let view = view.clone();
         move |dialog, window, _| {
             dialog
-                .title(title.clone())
+                .title(WrappingText::new(title.clone()))
                 .w(dialog_width(window))
                 .child(view.clone())
         }
@@ -293,7 +294,9 @@ impl Render for ListDialog {
                 this.child(
                     div()
                         .text_color(colors.fg_muted)
-                        .child(format!("“{title}” goes on the new list.")),
+                        .child(WrappingText::new(format!(
+                            "“{title}” goes on the new list."
+                        ))),
                 )
             })
             .when(!can_write, |this| {

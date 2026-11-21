@@ -15,7 +15,10 @@
 //! Its type is set like any element's (`.title_18()`, `.body_strong()`); it
 //! is `body-strong` until told otherwise. The label is one truncated line,
 //! or wraps with [`TextButton::wrap`], at most a few lines with
-//! [`TextButton::line_clamp`] (similar books' titles).
+//! [`TextButton::line_clamp`] (similar books' titles). A right-to-left label
+//! goes through `WrappingText` either way, clamped to one line when it
+//! doesn't wrap: GPUI lays even a single line out as if it read left to
+//! right, which puts a Persian title's brackets on the wrong side.
 
 use std::rc::Rc;
 
@@ -160,6 +163,16 @@ impl RenderOnce for TextButton {
                                     .when_some(width, WrappingText::width),
                             )
                             .into_any_element()
+                    } else if !underline {
+                        // GPUI lays a line out as if it read left to right,
+                        // so a Persian title's brackets and punctuation
+                        // land on the wrong side unless the bidirectional
+                        // layout places them: one line, cut at its end.
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .child(WrappingText::new(label).line_clamp(1))
+                            .into_any_element()
                     } else {
                         div().min_w_0().truncate().child(label).into_any_element()
                     }),
@@ -173,6 +186,34 @@ mod tests {
     use super::*;
     use crate::ui::test_support::{counter, host, press, tab};
     use gpui_kit::TestAppContext;
+
+    /// A long title in a narrow box stays one line inside it, Persian too
+    /// (laid out by `WrappingText`, which places its brackets).
+    #[gpui_kit::test]
+    fn a_long_title_keeps_one_line_in_a_narrow_box(cx: &mut TestAppContext) {
+        use gpui_kit::{InteractiveElement as _, ParentElement as _, Styled as _, div, px};
+        let one_line = crate::design::TypeRole::BodyStrong
+            .line_height()
+            .to_pixels(px(16.));
+        for title in [
+            "The Extraordinarily Long Title of a Book That Never Ends",
+            "ملت عشق (جلد اول) کتابی پرکشش و پر از امید و دوستی",
+        ] {
+            let cx = host(cx, move |_, _| {
+                div()
+                    .w(px(120.))
+                    .child(
+                        div()
+                            .debug_selector(|| "title".into())
+                            .child(TextButton::new("title", title)),
+                    )
+                    .into_any_element()
+            });
+            let bounds = cx.debug_bounds("title").expect("the title is drawn");
+            assert!(bounds.size.width <= px(120.), "{title}: {bounds:?}");
+            assert_eq!(bounds.size.height, one_line, "{title}");
+        }
+    }
 
     #[gpui_kit::test]
     fn tab_reaches_it_and_enter_and_space_press_it(cx: &mut TestAppContext) {

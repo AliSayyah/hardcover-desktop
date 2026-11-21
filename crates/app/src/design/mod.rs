@@ -12,6 +12,9 @@
 //!   draw in it.
 //! - [`type_roles`]: the type roles as style helpers (`.page_title()`,
 //!   `.body_strong()`, `.display_24()`, `.tabular()`, ...).
+//! - `contrast_audit` (tests only): the WCAG ratio of every token pair
+//!   that carries meaning, in both themes, so a token edit can't silently
+//!   break one.
 //! - [`size`]: the named sizes: control heights, chip, rail, list and sidebar
 //!   widths, meters, prose. Cover sizes are on [`crate::cover::CoverSize`].
 //!
@@ -20,6 +23,8 @@
 //! read.
 
 pub mod color;
+#[cfg(test)]
+mod contrast_audit;
 pub mod size;
 pub mod theme;
 pub mod type_roles;

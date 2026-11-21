@@ -37,15 +37,15 @@ use crate::catalog::book_list::{
     reset_scroll, row_details, select_on_click,
 };
 use crate::catalog::navigation::{self, Page};
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRoles as _, size};
 use crate::format::{authors_text, needs_permission};
 use crate::library::book_row::BookRow;
 use crate::library::model::LibraryModel;
 use crate::ui::kit::{SmallControl as _, SmallIconButton as _};
 use crate::ui::kit::{open_alert_dialog, row_action};
 use crate::ui::{
-    ExternalLink, ListRow as _, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
-    select_first_row,
+    ExternalLink, ListRow as _, PageHeader, RowFocus, empty_state, empty_state_with_action,
+    on_keyboard_entry, select_first_row,
 };
 
 /// Key context of a list's page, where Delete takes the selected book off.
@@ -569,7 +569,6 @@ impl ListView {
     }
 
     fn render_header(&self, list: &UserList, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted = colors(cx).fg_muted;
         let mut facts = vec![crate::format::books_count_text(list.books_count)];
         if list.ranked {
             facts.push("Ranked".into());
@@ -597,37 +596,18 @@ impl ListView {
                     .is_some_and(|p| !p.books.is_empty())
             });
         let actions = self.list_actions(list, cx);
+        let mut header = PageHeader::new(list.name.clone())
+            .wraps()
+            .facts(facts.join(" · "));
+        if let Some(actions) = actions {
+            header = header.actions(actions);
+        }
+        if list.is_owned() {
+            header = header.line("The editions you own. Mark a book owned, or not, from its page.");
+        }
         v_flex()
             .gap_4()
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(
-                        h_flex()
-                            .items_start()
-                            .justify_between()
-                            .gap_4()
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .page_title()
-                                    .child(WrappingText::new(list.name.clone())),
-                            )
-                            .children(actions),
-                    )
-                    .child(
-                        div()
-                            .body()
-                            .tabular()
-                            .text_color(muted)
-                            .child(facts.join(" · ")),
-                    )
-                    .when(list.is_owned(), |this| {
-                        this.child(div().body().text_color(muted).child(
-                            "The editions you own. Mark a book owned, or not, from its page.",
-                        ))
-                    }),
-            )
+            .child(header)
             .when_some(list.description.clone(), |this, text| {
                 this.child(
                     div()

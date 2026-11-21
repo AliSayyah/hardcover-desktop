@@ -31,7 +31,7 @@ pub fn open_about(window: &mut Window, cx: &mut App) {
                 .gap_4()
                 .pb_2()
                 .body()
-                .child(img(ICON.clone()).size_16())
+                .child(img(ICON.clone()).size(size::APP_ICON))
                 .child(
                     v_flex()
                         .items_center()

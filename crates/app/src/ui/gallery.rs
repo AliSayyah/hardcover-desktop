@@ -8,42 +8,55 @@
 //! ```
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::select::{SearchableVec, Select, SelectState};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{Disableable as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::tab::TabBar;
+use gpui_kit::component::{Disableable as _, IconName, IndexPath, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Window, div, rems,
+    ParentElement as _, Render, SharedString, Styled as _, Window, div,
+    prelude::FluentBuilder as _, rems,
 };
 use gpui_kit::{
-    FocusHandle, KeyDownEvent, ScrollHandle, StatefulInteractiveElement as _, point, px,
+    FocusHandle, KeyDownEvent, Keystroke, ScrollHandle, StatefulInteractiveElement as _, point, px,
 };
 
 use super::kit::{
     RaisedField as _, SmallControl as _, SmallIconButton as _, open_alert_dialog, open_dialog,
+    small_tab,
 };
 use super::reveal::RevealScroll as _;
 use super::{
-    AccountRow, Avatar, Block, BylineLink, Columns, CoverShelf, CoverSlot, EmptyState,
+    AccountRow, Avatar, AvatarSize, Block, BylineLink, Columns, CoverShelf, CoverSlot, EmptyState,
     ExternalLink, GoalRow, Greeting, Lane, ListRow, Meter, MonthBars, NavRow, ObjectBar,
     PageHeader, PropertyList, Rail, RailSection, RowSpacing, SectionHeader, Sequence, SeriesStrip,
-    Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton, blocks, books_that_fit,
-    brand_row, date_line, greeting, panel, see_all, sidebar_label,
+    Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton, Tier, blocks,
+    books_that_fit, brand_row, date_line, greeting, panel, see_all, sidebar_label,
 };
+use crate::app_state::CoverService;
 use crate::bidi::WrappingText;
+use crate::book::star_rating::StarRating;
 use crate::chip::genre::GENRES;
-use crate::chip::{StatusChip, TagChip, TagGroup, TagRow, tag_groups};
-use crate::cover::{Cover, CoverSize};
+use crate::chip::{StatusChip, StatusIconChip, TagChip, TagGroup, TagRow, tag_groups};
+use crate::cover::{Cover, CoverArt, CoverSize};
+
 use crate::design::type_roles::Family;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
-use hardcover_core::ReadingStatus;
+use hardcover_core::{Rating, ReadingStatus};
 
 pub struct Gallery {
     input: Entity<InputState>,
+    select: Entity<SelectState<SearchableVec<&'static str>>>,
+    date: Entity<DatePickerState>,
+    rating: Option<Rating>,
+    tab: usize,
     selected_nav: usize,
     focus: FocusHandle,
     scroll: ScrollHandle,
@@ -53,8 +66,31 @@ impl Gallery {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        // The covers and avatars below load through the app's cover
+        // pipeline, which the shell would otherwise open.
+        if cx.try_global::<CoverService>().is_none() {
+            cx.spawn(async move |this, cx| {
+                let covers = cx.background_spawn(async { CoverService::open() }).await;
+                let _ = this.update(cx, |_, cx| {
+                    cx.set_global(covers);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
         Self {
             input: cx.new(|cx| InputState::new(window, cx).placeholder("Filter")),
+            select: cx.new(|cx| {
+                SelectState::new(
+                    SearchableVec::new(vec!["Not finished", "Finished", "All series"]),
+                    Some(IndexPath::new(0)),
+                    window,
+                    cx,
+                )
+            }),
+            date: cx.new(|cx| DatePickerState::new(window, cx).date_format("%b %-d, %Y")),
+            rating: Rating::new(3.5),
+            tab: 1,
             selected_nav: 1,
             focus,
             scroll: ScrollHandle::new(),
@@ -120,6 +156,12 @@ impl Render for Gallery {
             .child(chips_and_tags())
             .child(skeletons())
             .child(kit_fixes(&self.input, cx))
+            .child(self.controls(cx))
+            // A cover asked for before the pipeline opens is missing for
+            // the run, so these wait for it.
+            .when(cx.has_global::<CoverService>(), |this| {
+                this.child(covers_and_avatars(cx))
+            })
             .child(empty(cx))
             .child(stars_and_links())
             .child(shelf_and_columns(window, cx))
@@ -163,13 +205,28 @@ impl Render for Gallery {
 fn headers() -> AnyElement {
     let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 20).expect("a valid date");
     specimen(
-        "Page header, greeting, section header",
+        "Page headers (a destination's; a catalogue page's, wrapping, with tools and facts), greeting, section header",
         v_flex()
             .gap_6()
             .child(PageHeader::new("Currently reading").count(1204_u32))
             .child(
                 PageHeader::new("Coming soon")
                     .line("5 books still to come in the series on your shelves"),
+            )
+            .child(
+                div().max_w(rems(28.)).child(
+                    PageHeader::new("کلیدر (جلد اول): The Long and Winding Northern Chronicle")
+                        .wraps()
+                        .actions(
+                            Button::new("g-header-tools")
+                                .ghost()
+                                .icon(IconName::Ellipsis)
+                                .tooltip("List actions")
+                                .small_icon_button(),
+                        )
+                        .facts("12 books · 3 more in the series · Ongoing")
+                        .line("The editions you own. Mark a book owned, or not, from its page."),
+                ),
             )
             .child(Greeting::new(date_line(date), greeting(9)))
             .child(SectionHeader::new("Coming soon").action(see_all(
@@ -193,7 +250,7 @@ fn meters(cx: &App) -> AnyElement {
                 .child(div().flex_1())
                 .child(div().body().tabular().text_color(c.fg_muted).child("66%")),
         )
-        .child(Meter::new("g-meter", 66.).accessibility_label("Reading progress"))
+        .child(Meter::new("g-meter", 66., "Reading progress"))
         .child(
             div()
                 .caption(cx)
@@ -205,25 +262,31 @@ fn meters(cx: &App) -> AnyElement {
             .gap_4()
             .child(progress)
             .child(
-                Meter::new("g-goal", 75.)
+                Meter::new("g-goal", 75., "Progress toward the goal")
                     .pace(Some(88.))
-                    .max_w(size::METER_MAX)
-                    .accessibility_label("Progress toward the goal"),
+                    .max_w(size::METER_MAX),
             )
-            .child(Meter::new("g-thin", 40.).thin().w(size::METER_IN_ROW))
-            .child(Meter::new("g-empty", 0.).thin().w(size::METER_IN_ROW))
             .child(
-                Meter::new("g-full", 120.)
+                Meter::new("g-thin", 40., "Reading progress")
+                    .thin()
+                    .w(size::METER_IN_ROW),
+            )
+            .child(
+                Meter::new("g-empty", 0., "Reading progress")
+                    .thin()
+                    .w(size::METER_IN_ROW),
+            )
+            .child(
+                Meter::new("g-full", 120., "Progress toward the goal")
                     .thin()
                     .pace(Some(100.))
                     .w(size::METER_IN_ROW),
             )
             // Hardcover's figures: a ratings breakdown row.
             .child(
-                Meter::new("g-muted", 62.)
+                Meter::new("g-muted", 62., "4 stars")
                     .muted()
-                    .max_w(size::METER_MAX)
-                    .accessibility_label("4 stars"),
+                    .max_w(size::METER_MAX),
             )
             .child(
                 div().w(size::RAIL).child(
@@ -311,33 +374,33 @@ fn series_strips(cx: &App) -> AnyElement {
     let legend = SeriesStrip::new()
         .item(
             StripItem::cover("g-s1", cover("Dune"))
-                .icon(IconName::CircleCheck)
+                .shelf(ReadingStatus::Read)
                 .position("1"),
         )
         .item(
             StripItem::cover("g-s2", cover("Dune Messiah"))
-                .icon(IconName::BookOpen)
+                .shelf(ReadingStatus::CurrentlyReading)
                 .position("2")
                 .progress(Some(42.))
                 .next(true),
         )
         .item(
             StripItem::cover("g-s3", cover("Children of Dune"))
-                .icon(IconName::Inbox)
+                .shelf(ReadingStatus::WantToRead)
                 .position("3"),
         )
         .item(
             StripItem::cover("g-s4", cover("God Emperor of Dune"))
-                .icon(IconName::Pause)
+                .shelf(ReadingStatus::Paused)
                 .position("4"),
         )
         .item(
             StripItem::cover("g-s5", cover("Heretics of Dune"))
-                .icon(IconName::Ban)
+                .shelf(ReadingStatus::DidNotFinish)
                 .position("5"),
         )
-        .item(StripItem::missing("g-s6").position("6"))
-        .item(StripItem::unreleased("g-s7", crate::icons::clock()).position("6.5"));
+        .item(StripItem::missing("g-s6", "Chapterhouse: Dune").position("6"))
+        .item(StripItem::unreleased("g-s7", "Untitled Dune #7").position("6.5"));
 
     // A Persian series of ten: two read, the third paused, the rest not in
     // the library, cut to six slots with "+N".
@@ -423,7 +486,7 @@ fn list_row(ix: usize, title: &'static str, selected: bool, focused: bool, cx: &
                     Lane::trailing()
                         .stacked()
                         .child(div().caption(cx).tabular().child("66%"))
-                        .child(Meter::new(("g-row-meter", ix), 66.).thin()),
+                        .child(Meter::new(("g-row-meter", ix), 66., "Reading progress").thin()),
                 ),
         )
 }
@@ -781,8 +844,10 @@ fn gallery_nav_rows(selected_nav: usize, cx: &mut Context<Gallery>) -> Vec<NavRo
             if let Some(count) = count {
                 row = row.count(count);
             }
+            // While Ctrl is held, a destination's shortcut replaces its count.
             if ix == 3 {
-                row = row.hint(Some(div().caption(cx).child("Ctrl 5")));
+                let ctrl_5 = Keystroke::parse("ctrl-5").expect("a valid keystroke");
+                row = row.hint(Some(Kbd::new(ctrl_5)));
             }
             row
         })
@@ -917,17 +982,153 @@ fn shelf_and_columns(window: &Window, cx: &App) -> AnyElement {
             .child(one_row)
             .child(grid)
             .child(
-                Columns::new(main())
+                Columns::new(Tier::Three, main())
                     .second(column("The second column, sharing the width"))
                     .wide_gap()
                     .rail([section()]),
             )
-            .child(Columns::new(main()).wide_gap().rail([section()]))
             .child(
-                Columns::new(main())
+                Columns::new(Tier::Rail, main())
                     .wide_gap()
-                    .rail([section(), RailSection::new("Up next")])
-                    .folded(true),
+                    .rail([section()]),
+            )
+            .child(
+                Columns::new(Tier::Folded, main())
+                    .wide_gap()
+                    .rail([section(), RailSection::new("Up next")]),
+            ),
+    )
+}
+
+impl Gallery {
+    /// The app's own controls and the kit's that the app restyles: the
+    /// rating (the only gold), the segmented tabs, a select and a date
+    /// field.
+    fn controls(&self, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity().downgrade();
+        let rating_view = view.clone();
+        let stars =
+            StarRating::new("g-stars")
+                .value(self.rating)
+                .on_change(move |rating, _, cx| {
+                    let _ = rating_view.update(cx, |this, cx| {
+                        this.rating = *rating;
+                        cx.notify();
+                    });
+                });
+        let small_stars = StarRating::new("g-stars-small").small().value(None);
+        let disabled_stars = StarRating::new("g-stars-disabled")
+            .value(Rating::new(4.))
+            .disabled(true)
+            .tooltip("Needs permission to change your library");
+        let tabs = TabBar::new("g-tabs")
+            .segmented()
+            .small_control()
+            .selected_index(self.tab)
+            .children(["Week", "Month", "Year", "All time"].map(small_tab))
+            .on_click(move |ix, _, cx| {
+                let _ = view.update(cx, |this, cx| {
+                    this.tab = *ix;
+                    cx.notify();
+                });
+            });
+        let disabled_tabs = TabBar::new("g-tabs-disabled")
+            .segmented()
+            .small_control()
+            .selected_index(0)
+            .child(small_tab("Page"))
+            .child(small_tab("Time").disabled(true))
+            .child(small_tab("%"));
+        specimen(
+            "Rating, segmented tabs, select, date field",
+            v_flex()
+                .gap_3()
+                .child(
+                    h_flex()
+                        .gap_6()
+                        .child(stars)
+                        .child(small_stars)
+                        .child(disabled_stars),
+                )
+                .child(h_flex().gap_4().child(tabs).child(disabled_tabs))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            div()
+                                .w(size::SELECT)
+                                .child(Select::new(&self.select).raised_field(false, cx)),
+                        )
+                        .child(
+                            div().w(size::SELECT_SMALL).child(
+                                Select::new(&self.select)
+                                    .small_control()
+                                    .raised_field(false, cx),
+                            ),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(size::FIELD_DATE_MAX)
+                                .child(DatePicker::new(&self.date).cleanable(false)),
+                        ),
+                ),
+        )
+    }
+}
+
+/// Covers with an image and loading, status icon chips, avatars with a
+/// picture and at xl, and a right-to-left text button.
+fn covers_and_avatars(cx: &App) -> AnyElement {
+    // A demo catalogue cover: the demo's cover cache fetches only those.
+    const COVER: &str =
+        "https://assets.hardcover.app/editions/3274049/8741341047797682-91mYu67RfUL._SL1500_.jpg";
+    let covers = h_flex()
+        .items_end()
+        .gap_4()
+        .child(Cover::new(CoverSize::Sm, "Project Hail Mary").thumbnail(Some(COVER)))
+        .child(
+            Cover::new(CoverSize::Md, "Project Hail Mary")
+                .thumbnail(Some(COVER))
+                .shadow(true),
+        )
+        .child(Cover::new(CoverSize::Md, "Loading").art(CoverArt::Loading))
+        .child(Cover::new(CoverSize::Sm, "Loading").art(CoverArt::Loading));
+    let chips = h_flex().gap_2().children(
+        [
+            ReadingStatus::WantToRead,
+            ReadingStatus::CurrentlyReading,
+            ReadingStatus::Read,
+            ReadingStatus::Paused,
+            ReadingStatus::DidNotFinish,
+        ]
+        .map(StatusIconChip),
+    );
+    let avatars = h_flex()
+        .items_end()
+        .gap_4()
+        .child(Avatar::new("Jane Quill").image(Some(COVER)))
+        .child(Avatar::new("Jane Quill").data_color(Some([0x2F, 0x6B, 0x4F])))
+        .child(Avatar::new("شیرین"))
+        .child(
+            Avatar::new("Jane Quill")
+                .image(Some(COVER))
+                .size(AvatarSize::Xl),
+        )
+        .child(Avatar::new("Jane Quill").size(AvatarSize::Xl));
+    specimen(
+        "Covers (image, loading), status icon chips, avatars, a right-to-left text button",
+        v_flex()
+            .gap_4()
+            .child(covers)
+            .child(chips)
+            .child(avatars)
+            .child(
+                h_flex()
+                    .gap_4()
+                    .body()
+                    .child(TextButton::new("g-rtl-button", "ملت عشق (جلد اول)"))
+                    .child(div().caption(cx).child("opens the book, like any title")),
             ),
     )
 }

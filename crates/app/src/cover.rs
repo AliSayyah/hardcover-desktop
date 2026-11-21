@@ -38,7 +38,7 @@ use std::sync::Arc;
 
 use gpui_kit::{
     AnyElement, App, ClickEvent, ElementId, FontWeight, InteractiveElement as _, IntoElement,
-    ObjectFit, ParentElement as _, Pixels, RenderImage, RenderOnce, SharedString,
+    ObjectFit, ParentElement as _, Pixels, RenderImage, RenderOnce, Role, SharedString,
     StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window, div, img,
     linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px, rems,
 };
@@ -259,6 +259,18 @@ impl Cover {
     pub fn opens(self, id: impl Into<ElementId>, page: Page) -> Self {
         self.on_click(id, move |_, _, cx| navigation::open(page.clone(), cx))
     }
+
+    /// The book's title, the cover's accessible name.
+    pub(crate) fn title(&self) -> &SharedString {
+        &self.title
+    }
+}
+
+/// A clickable cover's accessible name: what a click does. It isn't a tab
+/// stop (the title is the keyboard's way to the book), but a screen
+/// reader's pointer can still reach and press it.
+pub fn cover_label(title: &str) -> String {
+    format!("Open “{title}”")
 }
 
 impl RenderOnce for Cover {
@@ -330,6 +342,8 @@ impl RenderOnce for Cover {
         match self.click {
             Some((id, handler)) => cover
                 .id(id)
+                .role(Role::Link)
+                .aria_label(cover_label(&self.title))
                 .on_click(move |event, window, cx| handler(event, window, cx))
                 .into_any_element(),
             None => cover.into_any_element(),
@@ -461,6 +475,11 @@ fn cloth(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_clickable_cover_is_named_for_what_it_does() {
+        assert_eq!(cover_label("Dune"), "Open “Dune”");
+    }
 
     #[test]
     fn the_initial_skips_the_and_untitled() {

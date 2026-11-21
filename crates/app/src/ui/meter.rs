@@ -11,13 +11,14 @@
 //!   progress. Their counts sit beside them.
 //! - It fills its width; set one where the system names it
 //!   (`size::METER_IN_ROW`, at most `size::METER_MAX`).
-//! - Exposed as a progress indicator with its value and an accessible name.
+//! - Exposed as a progress indicator with its value and an accessible name,
+//!   which every meter must give: what it measures ("Reading progress",
+//!   "2026 reading goal", "5-star ratings").
 //!
 //! ```ignore
-//! Meter::new(("home-progress", id), percent)
+//! Meter::new(("home-progress", id), percent, "Reading progress")
 //!     .thin()
 //!     .w(size::METER_IN_ROW)
-//!     .accessibility_label("Reading progress")
 //! ```
 
 use gpui_kit::base::Progress;
@@ -37,21 +38,22 @@ pub struct Meter {
     thin: bool,
     muted: bool,
     pace: Option<f32>,
-    label: Option<SharedString>,
+    label: SharedString,
     style: StyleRefinement,
 }
 
 impl Meter {
-    /// A meter at `percent` (clamped to 0..=100). `id` must be unique among
-    /// its siblings.
-    pub fn new(id: impl Into<ElementId>, percent: f32) -> Self {
+    /// A meter at `percent` (clamped to 0..=100), named `label` for a
+    /// screen reader ("Reading progress"). `id` must be unique among its
+    /// siblings.
+    pub fn new(id: impl Into<ElementId>, percent: f32, label: impl Into<SharedString>) -> Self {
         Self {
             id: id.into(),
             percent,
             thin: false,
             muted: false,
             pace: None,
-            label: None,
+            label: label.into(),
             style: StyleRefinement::default(),
         }
     }
@@ -73,12 +75,6 @@ impl Meter {
     /// be today. `None` draws none.
     pub fn pace(mut self, percent: Option<f32>) -> Self {
         self.pace = percent;
-        self
-    }
-
-    /// The meter's accessible name, such as "Reading progress".
-    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
-        self.label = Some(label.into());
         self
     }
 }
@@ -117,7 +113,7 @@ impl RenderOnce for Meter {
         let overhang = size::PACE_TICK_OVERHANG;
         Progress::new(self.id)
             .value(filled * 100.)
-            .when_some(self.label, gpui_kit::base::Progress::accessibility_label)
+            .accessibility_label(self.label)
             .relative()
             .flex_none()
             .w_full()

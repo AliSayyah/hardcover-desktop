@@ -28,6 +28,7 @@ use crate::bidi::WrappingText;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, date_text, rating_text};
 use crate::freshness::Stamp;
+use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{Avatar, Block, BylineLink, RowSpacing, Sequence, Skeleton, Stars};
 
@@ -374,7 +375,7 @@ impl BookDetailView {
                         Button::new(("review-more", key))
                             .ghost()
                             .small_control()
-                            .ml_neg_2()
+                            .on_text_spine(true)
                             .label(if expanded { "Show less" } else { "Read more" })
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 let expanded = &mut this.community_reviews.expanded;

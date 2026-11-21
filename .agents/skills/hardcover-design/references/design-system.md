@@ -70,36 +70,46 @@ selected row.
 | `chip` | ink 7% | ink 8% | Chip fill |
 | `skeleton` | `#E9E4DA` | `#2B2825` | Something still loading (about 1.2:1 on paper in both themes) |
 | `border` | `#E4DED3` | `#292623` | Hairlines between regions and sections |
-| `border-strong` | `#D0C8BA` | `#3D3934` | Control outlines |
+| `border-strong` | `#918879` | `#77706A` | Control outlines: at least 3:1 on `raised`, paper, `surface` and the sidebar, since a field's outline is all that marks it |
 | `track` | `#E0D9CC` | `#35312C` | The empty part of a meter; an off switch |
 | `switch-thumb` | `#FFFFFF` (`raised`) | `#EEEAE3` (`fg`) | A switch's thumb, on `track` and on `accent`. In dark mode a `raised` thumb on `track` is 1.2:1, and gone once a disabled switch fades its track |
 | `fg` | `#1F1C17` | `#EEEAE3` | Ink: text |
 | `fg-muted` | `#5F574B` | `#ABA498` | Secondary text that carries information: authors, facts, counts, labels |
-| `fg-faint` | `#857D70` | `#807A6F` | Placeholders, disabled hints, empty-state icons. Nothing a reader must read |
+| `fg-faint` | `#7A7266` | `#8D877C` | Empty-state icons and other marks. Never text |
 | `accent` | `#3B4A9C` | `#98A5F4` | Ink blue (details below the table) |
 | `accent-fg` | `#FFFFFF` | `#12142A` | Text on accent |
 | `accent-soft` | accent 10% | accent 14% | The avatar's fill |
 | `ring` | accent 50% | accent 50% | The 2 px focus ring |
-| `gold` | `#F59E0B` (amber 500) | `#FBBF24` (amber 400) | The user's own rating, nothing else |
-| `gold-preview` | gold 55% | gold 55% | The rating control's hover preview: the stars a click would set |
-| `star-empty` | ink 14% | ink 14% | An unfilled star |
-| `danger` | `#B42318` | `#F97066` | Destructive commands and errors |
+| `gold` | `#A16207` (ochre) | `#FBBF24` (amber 400) | The user's own rating, nothing else. The hover preview draws it as an outline |
+| `star-empty` | ink 10% | ink 10% | An unfilled star |
+| `danger` | `#B42318` | `#FB8178` | Destructive commands and errors |
 | `warning` | `#B54708` | `#FDB022` | A content warning's icon; warnings |
 | `cover-edge` | `rgba(30,20,10,.16)` | `rgba(255,255,255,.12)` | The cover's 1 px edge |
 | `cover-hinge` | `rgba(30,20,10,.16)` | `rgba(0,0,0,.28)` | The hinge gradient's dark stop |
 | `cloth-ink` | `#F4ECDD` | `#F4ECDD` | Type and stamp on a cloth cover |
+| `scrim` | ink 16% | black 48% | The backdrop behind a dialog |
 
 Accent is used on progress, the primary commit, the focus ring, the selected
 sidebar icon, links that open the browser, the brand icon, and a genre
 chip's icon. Nothing else.
 
-Contrast, checked over every surface alone, hovered and selected:
-- `fg-muted` is at least 4.7:1 in both themes (WCAG AA), so it may carry
-  information;
-- `fg-faint` is about 3.7:1, so it must never carry anything a reader needs;
-- accent on paper is at least 5:1, and on a chip at least 5.3:1.
+Contrast, checked over every surface alone, hovered and selected
+(`design::contrast_audit` fails the build when a token breaks one):
+- **Text that carries information is at least 4.5:1** (WCAG 1.4.3):
+  `fg-muted` at least 4.7:1 in both themes, so it may carry information;
+  accent on paper at least 5:1 and on a chip at least 4.8:1; danger on
+  paper and in a dialog, pressed too.
+- **Marks that carry meaning without words are at least 3:1** (WCAG
+  1.4.11): `border-strong` on `raised`, paper, `surface` and the sidebar
+  (3:1 to 3.9:1); `gold` against an empty star on paper, hovered or
+  selected (3.1:1 light, 6.4:1 dark); the catalogue's `fg-muted` stars
+  against an empty one; the warning icon on a chip.
+- **`fg-faint` is 3.3:1 to 5.4:1**: enough for an icon, never enough for
+  text. Placeholders are `fg-muted`.
 
-A new colour role needs the same check. The mockup's console audit does it.
+A new colour role needs the same check: add its pairs to
+`design::contrast_audit` (the mockup's console audit shows the same
+numbers).
 
 **Cloth colours** are eight book-cloth tones, the same in both themes.
 cloth-ink on each is at least 5:1.
@@ -121,7 +131,7 @@ Every size has a fixed line height.
 
 | Role | Family, weight | Size / line | In code | Use |
 | --- | --- | --- | --- | --- |
-| `page-title` | Inter 600 | 20 / 28 | `.page_title()` | A destination's title: "Currently reading" |
+| `page-title` | Inter 600 | 20 / 28 | `.page_title()` | A destination's or page's title: "Currently reading" (always through `ui::PageHeader`; a catalogue name wraps, a destination's is cut) |
 | `section` | Inter 600 | 16 / 24 | `.section()` | A section on a page: "Continue reading" |
 | `byline` | Inter 500 | 16 / 24 | `.byline()` | A book's author and series under its title in the header |
 | `heading` | Inter 600 | 14 / 20 | `.heading()` | A block in a pane: "About this book", "Details" |
@@ -219,10 +229,14 @@ selection fill or a nested surface its own radius.
 | Sidebar | 240 wide | `w(rems(15.))` |
 | Shelf list | 384 wide by default, resizable from 272 (its filter, a small select and the inset) to 640 | `size::LIST`, `LIST_MIN`, `LIST_MAX` |
 | Rail (Home, full book page) | 272 wide | `w(rems(17.))` |
-| Next lane (a series row) | 240 wide | `size::NEXT_LANE` |
+| Next lane (a series row) | 240 wide, 24 after the row's body | `size::NEXT_LANE`, `NEXT_LANE_GAP` |
 | Strip item (a series row) | 40 wide | `size::STRIP_ITEM` |
 | Key column in a property list | 96; 72 in a rail | `w_24`, `w(rems(4.5))` |
 | Select | 168; small 128 | `size::SELECT`, `size::SELECT_SMALL` |
+| Number field (a page, a time) | 128 wide | `size::FIELD_NUMBER` |
+| Date field | 224 wide max | `size::FIELD_DATE_MAX` |
+| A book list's status chips | icon only below a 360 list | `size::LIST_COMPACT_BELOW` |
+| App icon (About) | 64 | `size::APP_ICON` |
 | Meter | 6 high beside words, 2 high inside a row; 400 wide max (160 in a row) | |
 | Prose | 640 wide max | `size::PROSE` |
 | Page content (Discover, Coming soon, Stats, Series, list, series and author pages) | fills the region inside the 32 inset; only reading text keeps the prose measure | `size::PAGE_INSET` |
@@ -267,7 +281,9 @@ Rules:
 - **Loading:** a `skeleton` fill with the edge, until the image lands.
 - **No image:** the cloth cover.
 - **Click:** opens the book. The cover is never the only keyboard path to
-  the book; its title is a button too.
+  the book; its title is a button too. A clickable cover is a link named
+  for what it does (`Open “Dune”`), so a screen reader's pointer can use
+  it; it is not a tab stop.
 
 | Size | Width × height | GPUI | Use |
 | --- | --- | --- | --- |
@@ -331,7 +347,7 @@ dust jacket.
 
 - Input and select are 32 high, `raised`, with a 1 px `border-strong` and
   `r-control`.
-  - Placeholder: `fg-faint`.
+  - Placeholder: `fg-muted` (the kit's `muted_foreground`).
   - A leading icon: 16 px, `fg-muted`.
   - A small select is 24 high.
 - A switch is 28 × 16 (the kit's `.small()`): `track` when off, `accent`
@@ -346,8 +362,8 @@ dust jacket.
   and %) has a small segmented control before it, the book's own unit
   first. What the input means goes after the field in `fg-muted`, tabular
   ("Page 200 of 476", "6h 25m of 16h 10m"). A unit that can't be offered is
-  left out rather than disabled (Kit limits), and a caption under the
-  field says why.
+  left out, and a caption under the field says why. The segments are
+  `ui::kit::small_tab`s in a `.small_control()` bar: 24 high, 12 px labels.
 
 ### Chips (`chip.rs`)
 
@@ -369,6 +385,8 @@ The two kinds:
   - Moods and other tags have no icon.
   - Those two icon colours are the only colours a chip ever carries; the
     pill and its text stay neutral.
+  - A tag too long for its row is cut with an ellipsis, and then shows its
+    whole text in a tooltip and to a screen reader.
   - The icon sits on the chip's leading (left) side, a right-to-left tag
     too: the interface isn't mirrored.
 - **Wrapped chips** (`TagRow`): chips that wrap across a width sit 6 apart
@@ -380,15 +398,20 @@ Never colour-code chips, and never use a badge for ordinary metadata.
 
 - The app's own rounded solid star. Sizes: 20 for the rating control, 16
   in rows, 12 inline; gap 2.
-- **Your rating:** `gold` fill.
+- **Your rating:** `gold` fill. It reads at 3:1 against an empty star.
 - **Hardcover's figures** (the average, the breakdown): the same star in
   `fg-muted`.
 - **An empty star:** the same shape in `star-empty`, so a half star splits
   cleanly.
 - An unrated rating control reads "Rate" beside it, in `fg-muted`.
 - **Hover preview:** over the rating control, the stars a click would set
-  show in `gold-preview` (gold 55%). It is the pointer's preview, never a
-  saved rating; the keyboard changes the rating itself.
+  show as `gold` outlines over the empty star (`star::outline`): they
+  differ from a saved rating by shape, not by lightness alone. It is the
+  pointer's preview, never a saved rating; the keyboard changes the rating
+  itself.
+- **Pointer targets:** each half star is a slice of the whole control, its
+  full height, and the 2 px gaps belong to the halves beside them: ten
+  equal slices, no dead space.
 - In code: the rating control is `book::star_rating::StarRating` (20;
   `.small()` 16 in a row); a rating only shown is `ui::Stars` (16;
   `.small()` 12 inline).
@@ -401,6 +424,9 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   wide, `fg`, 3 px proud of the meter on each side.
 - Words come with every meter ("Page 312 of 476", "66%"). The bar is never
   the only carrier.
+- Every meter has an accessible name, what it measures ("Reading
+  progress", "Progress toward the goal", "5 stars"): `Meter::new` takes
+  it.
 
 ### Panels, rails and hairlines
 
@@ -472,6 +498,9 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   that can't show every book keeps the next one in view and ends with a
   "+N" caption.
   State never relies on colour: the icon, the slot and the clock carry it.
+  Each book is named for a screen reader with what the eye reads from it:
+  "#2, Dune Messiah: Currently reading, 40%, next", "#3, Children of Dune:
+  not in your library".
 - **Property list** (Details): rows at least 24 high, 8 apart. The key
   column (96, or 72 in a rail) is `fg-muted`; the value is ink, with small
   controls inline.
@@ -500,6 +529,12 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   and a chevrons-up-down icon.
 - While Ctrl is held, each destination shows its shortcut in place of its
   count (existing behaviour).
+- **Reasons are never hover-only.** A row's tooltip (why it is disabled,
+  why a load failed) is also its accessible description, and while the row
+  has keyboard focus it shows as a caption under the label. The account
+  row does the same with why a sync failed, under the sync line. A
+  disabled row can't take focus; a missing permission is also the
+  sidebar's "Sign in again" notice, which can.
 
 ### Popovers, menus and dialogs
 
@@ -556,7 +591,7 @@ Each state has one treatment, on every control. Hover is never the only cue.
 | State | Treatment |
 | --- | --- |
 | Rest | As specified for the component |
-| Hover | The `hover` fill. A text button gains its underline. The rating control previews the stars a click would set in `gold-preview` |
+| Hover | The `hover` fill. A text button gains its underline. The rating control previews the stars a click would set as `gold` outlines |
 | Pressed, selected, open | The `selected` fill. A selected nav row also takes weight 500 and the accent icon. A menu button stays pressed while its menu is open |
 | Focus-visible | A 2 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
 | Disabled | 50% opacity, with no hover or pressed response. When the reason isn't obvious, say it beside the control or in its tooltip (`format::needs_permission`) |
@@ -612,10 +647,13 @@ every width below (the tiers' thresholds included) is in design px too.
   may be wider.
 - **Tiers come from the region.** Each layout picks its tier from the width
   its own region gets: the window less the sidebar, less any list beside it,
-  less its insets. Never from the raw window width. The choice is a pure
-  function with unit tests (`ui::columns::tier`, like `folds`), pinned at
-  800 and 1200 (today's layout), on both sides of each threshold, and at
-  1600 and 2560.
+  less its insets. Never from the raw window width. One helper gives that
+  width beside the sidebar (`ui::region_width`); a screen never subtracts
+  the sidebar itself. The choice is a pure function with unit tests
+  (`ui::columns::tier`, like `folds`), pinned at 800 and 1200 (today's
+  layout), on both sides of each threshold, and at 1600 and 2560. The tier
+  is what `Columns` is built from, so a second column can't sit beside the
+  main one except in the three-column tier.
 - **Tiers by screen:**
   - **Home:** fills its region in every tier. Two content columns of at
     least 448 beside the rail (a 1536 window) give it three columns:
@@ -853,7 +891,10 @@ interface.
   the right.
 - **Implementation:** wrapping right-to-left text goes through `WrappingText`
   (`bidi.rs`), because GPUI on Linux draws wrapped right-to-left text in the
-  wrong place. A single truncated line (rows) can use GPUI's own layout.
+  wrong place. A single truncated line keeps its place, but GPUI still lays
+  it out as if it read left to right, so a bracket or a mark at the edge of
+  a Persian run lands on the wrong side: a text button (a title in a row)
+  sets a right-to-left label through `WrappingText`, clamped to one line.
 - **Fonts:** Persian and Arabic are set in Vazirmatn (static faces)
   everywhere, under the serif roles as well as the sans ones, so the script
   reads the same across the app. Display sizes use a 1.5 line height. The
@@ -927,8 +968,10 @@ it when you wire it.
 | `primary_hover`, `primary_active` | `hover`, `selected` blended into `accent` |
 | `button_danger` | clear: `danger` text, with `hover` and `selected` on hover and press |
 | `switch` (off), `switch_thumb` | `track`, `switch-thumb` |
-| `scrollbar_thumb`, `scrollbar_thumb_hover` | `border-strong`, `fg-faint` |
-| `tab_bar_segmented` | `chip` blended into `bg` |
+| `scrollbar_thumb`, `scrollbar_thumb_hover` | `border-strong`, `fg-muted` |
+| `tab_bar_segmented`, `tab_bar` | `chip` blended into `bg` (`tab_bar` paints a disabled segment) |
+| `info`, `success` | `fg-muted`: a notification's icon and a success check stay ink |
+| `overlay` | `scrim` |
 | `chart_1` to `chart_5`, `chart_grid` | `accent`, `track` |
 | `skeleton` | `skeleton` |
 | `danger` | `danger` |
@@ -983,9 +1026,11 @@ demo build shows them all with `HARDCOVER_GALLERY=1`).
 
 `ui::kit` fixes what the theme can't reach and the kit lets the app
 refine: inputs, selects and text areas on `raised` (`RaisedField`), small
-controls at 12 px (`SmallControl`, `SmallIconButton`), dialogs on `raised`
-with the system's widths and keys (`open_dialog`, `open_alert_dialog`,
-`bind_keys`), and quiet buttons on the text spine (`OnTextSpine`).
+controls at 12 px (`SmallControl`, `SmallIconButton`, `small_tab`),
+dialogs on `raised` with the system's widths and keys (`open_dialog`,
+`open_alert_dialog`, `bind_keys`; a confirmation's own footer focuses its
+button by handle, with the ring only after keyboard input), and quiet
+buttons on the text spine (`OnTextSpine`).
 
 What follows is off the system and can't be fixed without patching the
 kit. Keep it in step with `ui::kit`'s module doc; remove an item in the
@@ -996,11 +1041,9 @@ commit that fixes it.
   the menu sets both itself.
 - Menu items hover at 10% in dark mode: the kit's `accent` serves both menu
   items and ghost buttons, and ghost buttons take half of it there.
-- The sidebar's menu hover is 8%, not 5%.
-- The segmented tab bar's sliding indicator is always paper.
-- A disabled segment of a segmented tab bar is painted paper, like the
-  selected one, so it reads as chosen. The app leaves out a segment it
-  can't offer instead.
+- The segmented tab bar's sliding indicator is always paper, and casts the
+  kit's small shadow: a shadow on a control.
+- A small segment pads its label 10, not 8.
 - A disabled switch fades its track, not its thumb.
 - A radio's circle takes no style from outside: unchecked and disabled, it
   is faint, most in dark mode. Settings shows a fixed theme as text rather
@@ -1015,3 +1058,10 @@ commit that fixes it.
   labels (Stats, the goal's months) are a fixed 10 px; a segmented tab
   bar's height and padding (Search's tabs, Discover's periods, the progress
   dialog's units); a dialog's margins.
+- The kit's buttons and switches show their ring whenever they hold focus,
+  not only after keyboard input. A press never focuses one, so this shows
+  only where focus is handed to it after a pointer action: a menu closing
+  onto its trigger, a dialog closing onto its opener, Back. Buttons whose
+  focus the app keeps (the alert footers, `ui::kit::KeyboardRing`) follow
+  the rule.
+- Empty-state icons are Lucide's, at stroke 2, not 1.5.

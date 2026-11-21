@@ -16,6 +16,11 @@
 //! - Disabled ([`NavRow::disabled`]): 50% opacity, no hover or press, out of
 //!   the Tab order, with the reason in its tooltip ([`NavRow::tooltip`],
 //!   usually `format::needs_permission`).
+//! - The tooltip's text is never only a tooltip: it is the row's accessible
+//!   description, and while the row has keyboard focus it shows as a
+//!   caption under the label (a retry row's "Couldn't load your lists…").
+//!   A disabled row can't take focus; its reason, a missing permission, is
+//!   also the sidebar's "Sign in again" notice, which can.
 //! - In a scroller that reveals focus ([`super::reveal`]), the row is shown
 //!   when it gains focus.
 //!
@@ -40,6 +45,7 @@ use gpui_kit::{
 
 use super::focus::{FocusTreatment as _, control_radius, focus_visible, keyed_focus};
 use super::reveal::probe;
+use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -130,6 +136,7 @@ impl RenderOnce for NavRow {
         let colors = colors(cx);
         let focus = keyed_focus(self.id.clone(), window, cx);
         let focused = focus_visible(&focus, window);
+
         let radius = control_radius(cx);
         let selected = self.selected;
         let disabled = self.disabled;
@@ -172,8 +179,9 @@ impl RenderOnce for NavRow {
                 this.hover(|style| style.bg(colors.hover))
                     .active(|style| style.bg(colors.selected))
             })
-            .when_some(tooltip, |this, tooltip| {
-                this.tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+            .when_some(tooltip.clone(), |this, tooltip| {
+                this.aria_description(tooltip.clone())
+                    .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
             })
             .when_some(on_click, |this, handler| {
                 this.on_click(move |event, window, cx| handler(event, window, cx))
@@ -186,7 +194,20 @@ impl RenderOnce for NavRow {
             }))
             .child(div().flex_1().min_w_0().truncate().child(self.label))
             .children(trailing.map(|t| div().flex_none().pl_2().child(t)));
-        probe(row)
+        // The reason, for the keyboard: under the label, on its spine.
+        let reason = tooltip.filter(|_| focused).map(|reason| {
+            let caption = div()
+                .pl(size::NAV_LABEL_INSET)
+                .pr_2()
+                .pb_1()
+                .caption(cx)
+                .child(WrappingText::new(reason));
+            #[cfg(test)]
+            let caption =
+                gpui_kit::InteractiveElement::debug_selector(caption, || "nav-row-reason".into());
+            caption
+        });
+        probe(div().flex().flex_col().w_full().child(row).children(reason))
     }
 }
 
@@ -244,5 +265,26 @@ mod tests {
         tab(cx);
         press(cx, "enter");
         assert_eq!(chosen.get(), Some(1));
+    }
+
+    #[gpui_kit::test]
+    fn a_rows_reason_shows_under_it_while_it_has_keyboard_focus(cx: &mut TestAppContext) {
+        let cx = host(cx, |_, _| {
+            NavRow::new(
+                "retry",
+                IconName::CircleAlert,
+                "Try loading your lists again",
+            )
+            .tooltip(Some("Couldn't load your lists. Check your connection."))
+            .into_any_element()
+        });
+        let reason =
+            |cx: &mut gpui_kit::VisualTestContext| cx.debug_bounds("nav-row-reason").is_some();
+        assert!(!reason(cx));
+        tab(cx);
+        assert!(!reason(cx), "focus without a key shows no caption");
+        press(cx, "a");
+        crate::ui::test_support::redraw(cx);
+        assert!(reason(cx), "keyboard focus shows the reason");
     }
 }

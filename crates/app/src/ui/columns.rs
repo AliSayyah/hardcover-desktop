@@ -7,28 +7,30 @@
 //!   `min_w_0`); the rail is 272 with its leading hairline, starting at the
 //!   top. The gap is 24 on the book page and 32 on Home
 //!   ([`Columns::wide_gap`]).
-//! - **Three columns** ([`Columns::second`]): the main column and the second
-//!   share the surplus equally, then the rail. They fill the width they are
-//!   given; [`content_column_width`] says how wide each gets, for content
-//!   that adds items as it widens (Home's shelf of covers).
+//! - **Three columns** ([`Tier::Three`] with [`Columns::second`]): the main
+//!   column and the second share the surplus equally, then the rail. They
+//!   fill the width they are given; [`content_column_width`] says how wide
+//!   each gets, for content that adds items as it widens (Home's shelf of
+//!   covers). In any other tier a second column follows the main one inside
+//!   it: the tier, not the caller, decides how many columns there are.
 //! - **Folded:** the second column (if any) follows the main one, then the
 //!   rail's sections, full width, under a hairline (the column gap above it,
 //!   24 below), separated by hairlines like the rail's (24 above and below).
 //!   Nothing is hidden.
-//! - The caller decides from the width the columns get (the window less the
-//!   sidebar, any list beside them and the page's insets; never the raw
-//!   window): GPUI has no container queries. [`folds`] folds when the main
-//!   column would get less than [`size::MAIN_MIN`]; [`tier`] also says when
-//!   two content columns of at least [`size::WIDE_COLUMN_MIN`] fit beside
-//!   the rail. Pass a second
-//!   column only in [`Tier::Three`].
+//! - The caller decides the tier from the width the columns get (the
+//!   window less the sidebar, any list beside them and the page's insets;
+//!   never the raw window): GPUI has no container queries. [`region_width`]
+//!   is that width for a page beside the sidebar. [`folds`] folds when the
+//!   main column would get less than [`size::MAIN_MIN`]; [`tier`] also says
+//!   when two content columns of at least [`size::WIDE_COLUMN_MIN`] fit
+//!   beside the rail.
 //!
 //! ```ignore
-//! let width = window.viewport_size().width - size::SIDEBAR.to_pixels(window.rem_size());
-//! Columns::new(main)
+//! let width = region_width(window, size::PAGE_INSET);
+//! Columns::new(tier(width, window.rem_size(), true), main)
+//!     .second(coming_soon)
 //!     .wide_gap()
 //!     .rail(sections)
-//!     .folded(folds(width - inset, window.rem_size(), true))
 //! ```
 
 use gpui_kit::{
@@ -40,6 +42,20 @@ use super::Rail;
 use super::reveal::probe;
 use crate::design::{colors, size};
 
+/// The width of the content region beside the sidebar, less `inset` on
+/// each side (`size::PAGE_INSET` for a page, `rems(0.)` for the whole
+/// region): what a screen picks its tier from. The one place that knows
+/// the sidebar's width is all there is beside it.
+pub fn region_width(window: &Window, inset: Rems) -> Pixels {
+    region_width_in(window.viewport_size().width, window.rem_size(), inset)
+}
+
+/// [`region_width`] for a window `viewport` wide.
+pub fn region_width_in(viewport: Pixels, rem_size: Pixels, inset: Rems) -> Pixels {
+    (viewport - size::SIDEBAR.to_pixels(rem_size) - inset.to_pixels(rem_size) * 2.)
+        .max(Pixels::ZERO)
+}
+
 /// Between the columns on the book page (24).
 const GAP: Rems = rems(1.5);
 /// Between the columns on Home (32).
@@ -48,21 +64,22 @@ const WIDE_GAP: Rems = rems(2.);
 /// A main column and its rail. See the module doc.
 #[derive(IntoElement)]
 pub struct Columns {
+    tier: Tier,
     main: AnyElement,
     second: Option<AnyElement>,
     rail: Vec<AnyElement>,
     wide_gap: bool,
-    folded: bool,
 }
 
 impl Columns {
-    pub fn new(main: impl IntoElement) -> Self {
+    /// `main` laid out as `tier` says ([`tier`] or [`folds`] picks it).
+    pub fn new(tier: Tier, main: impl IntoElement) -> Self {
         Self {
+            tier,
             main: main.into_any_element(),
             second: None,
             rail: Vec::new(),
             wide_gap: false,
-            folded: false,
         }
     }
 
@@ -72,9 +89,9 @@ impl Columns {
         self
     }
 
-    /// A second content column, between the main column and the rail. The
-    /// two share the width equally. For [`Tier::Three`]; folded, it follows
-    /// the main column.
+    /// A second content column, between the main column and the rail in
+    /// [`Tier::Three`], the two sharing the width equally. In any other
+    /// tier it follows the main column, inside it.
     pub fn second(mut self, column: impl IntoElement) -> Self {
         self.second = Some(column.into_any_element());
         self
@@ -85,12 +102,6 @@ impl Columns {
     pub fn rail(mut self, sections: impl IntoIterator<Item = impl IntoElement>) -> Self {
         self.rail
             .extend(sections.into_iter().map(IntoElement::into_any_element));
-        self
-    }
-
-    /// Puts the rail's sections under the main column.
-    pub fn folded(mut self, folded: bool) -> Self {
-        self.folded = folded;
         self
     }
 }
@@ -114,6 +125,14 @@ pub enum Tier {
     Rail,
     /// The main column, a second content column and the rail.
     Three,
+}
+
+impl Tier {
+    /// [`Tier::Folded`] or [`Tier::Rail`], for a page with no second column
+    /// (the book page), from [`folds`].
+    pub fn rail(folded: bool) -> Self {
+        if folded { Self::Folded } else { Self::Rail }
+    }
 }
 
 /// The tier for columns `width` wide: [`Tier::Three`] when two content
@@ -165,12 +184,24 @@ impl RenderOnce for Columns {
         let gap = if self.wide_gap { WIDE_GAP } else { GAP };
         let content =
             |child: AnyElement| probe(div().flex().flex_col().flex_1().min_w_0().child(child));
-        let main = content(self.main);
-        let second = self.second.map(content);
+        let beside = self.tier == Tier::Three && self.second.is_some();
+        // Outside three columns, the second follows the main one inside it.
+        let (main, second) = if beside {
+            (content(self.main), self.second.map(content))
+        } else {
+            let main = div()
+                .flex()
+                .flex_col()
+                .gap(gap)
+                .child(self.main)
+                .children(self.second)
+                .into_any_element();
+            (content(main), None)
+        };
         if self.rail.is_empty() && second.is_none() {
             return div().flex().w_full().child(main).into_any_element();
         }
-        if !self.folded {
+        if self.tier != Tier::Folded {
             let rail = (!self.rail.is_empty()).then(|| Rail::new().sections(self.rail));
             // Stretched, so the rail's hairline runs the columns' height;
             // growing, so in a page that fills the window (a flex column
@@ -194,7 +225,6 @@ impl RenderOnce for Columns {
             .w_full()
             .gap(gap)
             .child(main)
-            .children(second)
             .when(has_rail, |this| {
                 this.child(
                     div()
@@ -265,6 +295,42 @@ mod tests {
         assert_eq!(main_column_width(px(1296.), rem, false, false), px(1000.));
         assert_eq!(main_column_width(px(1296.), rem, true, false), px(992.));
         assert_eq!(main_column_width(px(600.), rem, false, true), px(600.));
+    }
+
+    #[test]
+    fn the_region_is_the_window_less_the_sidebar_and_insets() {
+        let rem = px(16.);
+        assert_eq!(region_width_in(px(1200.), rem, size::PAGE_INSET), px(896.));
+        assert_eq!(region_width_in(px(1200.), rem, rems(0.)), px(960.));
+        assert_eq!(region_width_in(px(200.), rem, size::PAGE_INSET), px(0.));
+    }
+
+    /// A second column sits beside the main one only in three columns.
+    #[gpui_kit::test]
+    fn a_second_column_is_beside_the_main_one_only_in_three_columns(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        use crate::ui::test_support::host;
+        use gpui_kit::{InteractiveElement as _, Styled as _};
+
+        for (tier, beside) in [
+            (Tier::Rail, false),
+            (Tier::Folded, false),
+            (Tier::Three, true),
+        ] {
+            let cx = host(cx, move |_, _| {
+                Columns::new(tier, div().h_8().debug_selector(|| "main".into()))
+                    .second(div().h_8().debug_selector(|| "second".into()))
+                    .into_any_element()
+            });
+            let main = cx.debug_bounds("main").expect("main is drawn");
+            let second = cx.debug_bounds("second").expect("second is drawn");
+            assert_eq!(
+                main.top() == second.top(),
+                beside,
+                "{tier:?}: main {main:?}, second {second:?}"
+            );
+        }
     }
 
     #[test]

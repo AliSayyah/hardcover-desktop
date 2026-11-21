@@ -47,7 +47,9 @@ use crate::format::average_rating_text;
 use crate::library::book_row::{BookRow, loading_rows};
 use crate::library::model::LibraryModel;
 use crate::ui::reveal::RevealScroll as _;
-use crate::ui::{ListRow as _, RowFocus, empty_state, on_keyboard_entry, select_first_row};
+use crate::ui::{
+    ListRow as _, RowFocus, empty_state, on_keyboard_entry, region_width, select_first_row,
+};
 
 /// The top of a page: inset 32 on three sides, 16 above the list (whose
 /// rows add their own 8), filling the page's width.
@@ -218,7 +220,7 @@ impl ListPane {
         cx: &mut App,
     ) -> AnyElement {
         let rem = window.rem_size();
-        let region = window.viewport_size().width - size::SIDEBAR.to_pixels(rem);
+        let region = region_width(window, gpui_kit::rems(0.));
         let beside = pane_beside_list(region, rem);
         if self.beside.replace(beside) != beside {
             // Outside this frame's drawing: grown past the threshold, the

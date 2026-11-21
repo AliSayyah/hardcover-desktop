@@ -32,7 +32,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::{
     ElementExt as _, Icon, IconName, IndexPath, Sizable as _, h_flex, h_resizable, resizable_panel,
     v_flex,
@@ -57,16 +57,13 @@ use crate::search::results::{Hit, Phase, SearchResults};
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::gutter_list;
+use crate::ui::kit::small_tab;
 use crate::ui::{
     ListRow as _, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
     select_first_row,
 };
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
-
-/// Below this list width (360) a row's `StatusChip` shrinks to its icon: the
-/// widest chip ("Currently reading") would leave a title too little room.
-const COMPACT_BELOW: f32 = 22.5;
 
 /// Around the query field. `main` binds Down to [`EnterResults`] in
 /// `SearchField > Input`, over the input's own Down (a no-op on one line).
@@ -784,9 +781,9 @@ impl SearchView {
                     .child(
                         TabBar::new("search-kind")
                             .segmented()
-                            .small()
+                            .small_control()
                             .selected_index(self.kind.index())
-                            .children(SearchKind::ALL.map(|k| Tab::new().label(k.label())))
+                            .children(SearchKind::ALL.map(|k| small_tab(k.label())))
                             .on_click(move |ix, window, cx| {
                                 let kind = SearchKind::ALL[*ix];
                                 let _ = view.update(cx, |this, cx| this.set_kind(kind, window, cx));
@@ -813,7 +810,8 @@ impl SearchView {
                     .flex_1()
                     .min_h_0()
                     .on_prepaint(move |bounds, window, _| {
-                        let narrow = bounds.size.width < window.rem_size() * COMPACT_BELOW;
+                        let narrow = bounds.size.width
+                            < size::LIST_COMPACT_BELOW.to_pixels(window.rem_size());
                         if compact.replace(narrow) != narrow {
                             // The rows were drawn for the other width.
                             window.refresh();

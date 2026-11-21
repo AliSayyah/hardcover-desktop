@@ -20,6 +20,7 @@ use hardcover_core::{Date, Goal, GoalId, GoalMetric, NewGoal};
 use super::model::GoalsModel;
 use super::sidebar::pace_percent;
 use crate::app_state::Services;
+use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{
     goal_amount, goal_description, goal_pace, goal_period, goal_unit, needs_permission,
@@ -72,7 +73,7 @@ pub fn open_goal(
     let view = cx.new(|cx| GoalView::new(goals, library, id, window, cx));
     open_dialog(window, cx, move |dialog, window, _| {
         dialog
-            .title(title.clone())
+            .title(WrappingText::new(title.clone()))
             .w(dialog_width(window))
             .child(view.clone())
     });
@@ -272,9 +273,12 @@ impl GoalView {
                     ),
             )
             .child(
-                Meter::new("goal-progress", crate::format::bar_percent(goal.fraction()))
-                    .pace(pace_percent(goal, today()))
-                    .accessibility_label("Progress toward the goal"),
+                Meter::new(
+                    "goal-progress",
+                    crate::format::bar_percent(goal.fraction()),
+                    "Progress toward the goal",
+                )
+                .pace(pace_percent(goal, today())),
             )
             .child(
                 h_flex()
@@ -598,7 +602,7 @@ impl Render for NewGoalView {
                     )
                     .child(
                         Field::new().label("From").child(
-                            div().w_full().max_w_56().child(
+                            div().w_full().max_w(size::FIELD_DATE_MAX).child(
                                 DatePicker::new(&self.start)
                                     .cleanable(false)
                                     .disabled(writing),
@@ -607,7 +611,7 @@ impl Render for NewGoalView {
                     )
                     .child(
                         Field::new().label("To").child(
-                            div().w_full().max_w_56().child(
+                            div().w_full().max_w(size::FIELD_DATE_MAX).child(
                                 DatePicker::new(&self.end)
                                     .cleanable(false)
                                     .disabled(writing),

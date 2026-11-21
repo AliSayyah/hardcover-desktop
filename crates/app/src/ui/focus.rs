@@ -123,6 +123,13 @@ pub fn return_focus(to: FocusReturn, window: &mut Window, cx: &mut App) {
     }
 }
 
+/// Marks a drawn ring for the UI tests (`cx.debug_bounds("focus-ring")`).
+fn marked(ring: gpui_kit::Div) -> gpui_kit::Div {
+    #[cfg(test)]
+    let ring = gpui_kit::InteractiveElement::debug_selector(ring, || "focus-ring".into());
+    ring
+}
+
 /// The 1 px accent edge, drawn inside the element's bounds.
 fn edge(cx: &App) -> BoxShadow {
     BoxShadow::new(px(0.), px(0.), colors(cx).accent)
@@ -143,7 +150,7 @@ pub trait FocusTreatment: Styled + ParentElement + Sized {
         let ring = size::FOCUS_RING;
         // A band drawn only outside the element, so a translucent fill
         // (a hovered ghost control) doesn't show a shadow through it.
-        self.shadow(vec![edge(cx)]).child(
+        self.shadow(vec![edge(cx)]).child(marked(
             div()
                 .absolute()
                 .top(-ring)
@@ -153,7 +160,7 @@ pub trait FocusTreatment: Styled + ParentElement + Sized {
                 .rounded(radius + ring)
                 .border(ring)
                 .border_color(colors(cx).ring),
-        )
+        ))
     }
 
     /// The focus of bare text (a text button, a byline link): the 1 px
@@ -174,11 +181,8 @@ pub trait FocusTreatment: Styled + ParentElement + Sized {
                 .border(width)
                 .border_color(color)
         };
-        self.child(band(edge, edge, colors(cx).accent)).child(band(
-            edge + ring,
-            ring,
-            colors(cx).ring,
-        ))
+        self.child(band(edge, edge, colors(cx).accent))
+            .child(marked(band(edge + ring, ring, colors(cx).ring)))
     }
 
     /// A row's focus: the 1 px accent edge inside the row and the 2 px ring
@@ -419,5 +423,80 @@ mod tests {
                 .into_any_element()
         });
         redraw(cx);
+    }
+
+    /// The ring shows only after keyboard input: focus that arrives
+    /// without a key (handed over after a click) shows none, a key shows
+    /// it, and moving the pointer hides it again.
+    #[gpui_kit::test]
+    fn the_ring_shows_only_after_keyboard_input(cx: &mut gpui_kit::TestAppContext) {
+        use crate::ui::NavRow;
+        use crate::ui::test_support::{host, press, redraw, tab};
+        use gpui_kit::component::IconName;
+        use gpui_kit::{IntoElement as _, Modifiers, VisualTestContext};
+
+        let ring = |cx: &mut VisualTestContext| cx.debug_bounds("focus-ring").is_some();
+        let cx = host(cx, |_, _| {
+            NavRow::new("nav-home", IconName::LayoutDashboard, "Home").into_any_element()
+        });
+        tab(cx);
+        assert!(crate::ui::test_support::has_focus(cx));
+        assert!(!ring(cx), "focus handed over without a key");
+
+        press(cx, "a");
+        redraw(cx);
+        assert!(ring(cx), "after a key");
+
+        cx.simulate_mouse_move(point(px(400.), px(400.)), None, Modifiers::none());
+        redraw(cx);
+        assert!(!ring(cx), "after the pointer moved");
+    }
+
+    /// Back gives focus to the control that opened the page, though the
+    /// page's cover dropped the control's state while it was hidden.
+    #[gpui_kit::test]
+    fn back_returns_focus_to_what_opened_the_page(cx: &mut gpui_kit::TestAppContext) {
+        use crate::ui::NavRow;
+        use crate::ui::test_support::{has_focus, host, redraw, tab};
+        use gpui_kit::component::IconName;
+        use gpui_kit::component::button::Button;
+        use gpui_kit::{IntoElement as _, ParentElement as _};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let page = Rc::new(Cell::new(false));
+        let cx = host(cx, {
+            let page = page.clone();
+            move |_, _| {
+                if page.get() {
+                    div().child(Button::new("on-the-page").label("On the page"))
+                } else {
+                    div().child(NavRow::new("opener", IconName::BookOpen, "Opener"))
+                }
+                .into_any_element()
+            }
+        });
+        let back = |cx: &mut gpui_kit::VisualTestContext, returning: bool| {
+            tab(cx);
+            let from = cx.update(|window, cx| remember_focus(window, cx));
+            assert!(
+                matches!(from, Some(FocusReturn::Keyed(_))),
+                "a keyed control"
+            );
+            page.set(true);
+            redraw(cx);
+            tab(cx);
+            page.set(false);
+            if returning {
+                let from = from.expect("focus was remembered");
+                cx.update(|window, cx| return_focus(from, window, cx));
+            }
+            redraw(cx);
+            cx.run_until_parked();
+            redraw(cx);
+            has_focus(cx)
+        };
+        assert!(!back(cx, false), "without it, focus is lost with the page");
+        assert!(back(cx, true), "with it, the opener has focus again");
     }
 }

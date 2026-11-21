@@ -33,7 +33,7 @@ use crate::format::series_position_text;
 use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
 use crate::ui::kit::SmallControl as _;
-use crate::ui::{ExternalLink, Skeleton, TextButton};
+use crate::ui::{ExternalLink, PageHeader, Skeleton, TextButton};
 
 enum Loaded {
     /// Kept for the run, fetched again when stale ([`crate::freshness`]).
@@ -260,41 +260,28 @@ impl SeriesView {
                 .map(|b| model.entry_for_book(b.book.id).map(|e| e.status)),
         );
         let muted = colors(cx).fg_muted;
+        let mut header = PageHeader::new(series.name.clone()).wraps();
+        if let Some(author) = series.author.clone() {
+            header = header.under(
+                h_flex()
+                    .gap_1()
+                    .body()
+                    .child(div().text_color(muted).child("by"))
+                    .child(
+                        TextButton::new("series-author", author.name.clone())
+                            .opens(Page::Author(author.id)),
+                    ),
+            );
+        }
+        if !facts.is_empty() {
+            header = header.facts(facts.join(" · "));
+        }
+        if let Some(summary) = summary {
+            header = header.under(div().body().tabular().child(summary));
+        }
         v_flex()
             .gap_4()
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(
-                        div()
-                            .page_title()
-                            .child(WrappingText::new(series.name.clone())),
-                    )
-                    .when_some(series.author.clone(), |this, author| {
-                        this.child(
-                            h_flex()
-                                .gap_1()
-                                .body()
-                                .child(div().text_color(muted).child("by"))
-                                .child(
-                                    TextButton::new("series-author", author.name.clone())
-                                        .opens(Page::Author(author.id)),
-                                ),
-                        )
-                    })
-                    .when(!facts.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .body()
-                                .tabular()
-                                .text_color(muted)
-                                .child(facts.join(" · ")),
-                        )
-                    })
-                    .when_some(summary, |this, summary| {
-                        this.child(div().body().tabular().child(summary))
-                    }),
-            )
+            .child(header)
             .when_some(series.description.clone(), |this, text| {
                 this.child(
                     div()

@@ -72,11 +72,11 @@ mod surfaces;
 pub(crate) mod test_support;
 mod text_button;
 
-pub(crate) use self::stars::{StarSize, render_star};
+pub(crate) use self::stars::{StarInk, StarSize, render_star};
 pub use self::{
     avatar::{Avatar, AvatarSize},
     byline_link::BylineLink,
-    columns::{Columns, Tier, content_column_width, folds, main_column_width, tier},
+    columns::{Columns, Tier, content_column_width, folds, main_column_width, region_width, tier},
     cover_shelf::{CoverShelf, books_that_fit},
     empty_state::{EmptyState, empty_state, empty_state_with_action},
     external_link::ExternalLink,

@@ -18,6 +18,9 @@ pub const OBJECT_BAR: Rems = rems(3.5);
 
 /// The sidebar (240).
 pub const SIDEBAR: Rems = rems(15.);
+/// From a nav row's leading edge to its label: the 8 padding, the 16 icon
+/// and the 8 gap (the sidebar's label spine).
+pub const NAV_LABEL_INSET: Rems = rems(2.);
 /// The shelf list, by default; it is resizable (384; `w_96`).
 pub const LIST: Rems = rems(24.);
 /// The narrowest the shelf or search list gets (272): its header's filter
@@ -42,6 +45,15 @@ pub const KEY_IN_RAIL: Rems = rems(4.5);
 pub const SELECT: Rems = rems(10.5);
 /// A small select (128; `w_32`).
 pub const SELECT_SMALL: Rems = rems(8.);
+/// A field for a number: a page, a time, a percentage (128).
+pub const FIELD_NUMBER: Rems = rems(8.);
+/// The widest a date field gets (224).
+pub const FIELD_DATE_MAX: Rems = rems(14.);
+/// The app's icon in About (64).
+pub const APP_ICON: Rems = rems(4.);
+/// Below this width (360) a book list's status chips show only their icon:
+/// the widest ("Currently reading") would leave a title too little room.
+pub const LIST_COMPACT_BELOW: Rems = rems(22.5);
 /// A list row's trailing lane, kept even when empty (48; `w_12`).
 pub const TRAILING_LANE: Rems = rems(3.);
 /// An upcoming row's action lane, kept either way (136).
@@ -49,6 +61,8 @@ pub const ACTION_LANE: Rems = rems(8.5);
 /// A series row's next-step lane, kept on every row so the lanes line up
 /// (240).
 pub const NEXT_LANE: Rems = rems(15.);
+/// Between a series row's body and its next-step lane (24).
+pub const NEXT_LANE_GAP: Rems = rems(1.5);
 /// One book in a series strip: an sm cover with its marks under it (40).
 pub const STRIP_ITEM: Rems = rems(2.5);
 

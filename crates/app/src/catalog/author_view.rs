@@ -36,6 +36,7 @@ use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
+use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{Avatar, AvatarSize, ExternalLink, SectionHeader, Skeleton};
@@ -407,7 +408,7 @@ impl AuthorView {
                                     .small_control()
                                     // The label on the bio's spine, not the
                                     // button's edge.
-                                    .ml_neg_2()
+                                    .on_text_spine(true)
                                     .label(if self.bio_expanded {
                                         "Show less"
                                     } else {

@@ -15,13 +15,19 @@
 //!   button, as Space does, instead of the kit's dialog-wide Confirm; so
 //!   does Enter on a row's own button in a list ([`row_action`]), instead of
 //!   the list's Confirm, which opens the row.
-//! - [`SmallControl`]: the system's small button and select (24 high,
+//! - [`SmallControl`]: the system's small button, select and segmented bar (24 high,
 //!   padding 8, 12 px text, 12 px icon, gap 4). The kit's `Size::Small` sets
 //!   14 px text and a 14 px icon; use `.small_control()` (or
 //!   `.small_icon_button()` for an icon alone) wherever a small control
-//!   goes, never `.small()`.
+//!   goes, never `.small()`. A small segmented bar's segments are
+//!   [`small_tab`]s.
+//! - [`Alert`], built by [`open_alert_dialog`]: the app's own footer, whose
+//!   buttons take focus by handle and show the ring only after keyboard
+//!   input ([`KeyboardRing`]).
 //! - [`OnTextSpine`]: a quiet button (ghost, or a danger label) that starts a
 //!   line puts its label, not its padding, on the content's leading edge.
+//! - [`danger_menu_item`]: a destructive menu command ("Delete read…") in
+//!   `danger`, its icon too; the kit's menu items take no colour.
 //! - [`gutter_list`] and [`gutter_scrollbar`]: a scrollbar that stays in the
 //!   8 inset beside a list's rows (the shelf and search lists, the sidebar).
 //!   The kit's thumb is 6 wide and 4 in from the edge, 8 wide on hover, so
@@ -41,6 +47,11 @@
 //!   (`accent`) for menu items and ghost buttons, and halves it for ghost
 //!   buttons in dark mode. The theme picks 10% so ghost buttons get the
 //!   system's 5%.
+//! - **The segmented tab bar's indicator** is always paper (`background`)
+//!   and casts the kit's small raised shadow, a shadow on a control: both
+//!   are hard-coded in the bar.
+//! - **A small segment** pads its label 10, not the small control's 8: the
+//!   padding sits on an inner box the tab's style doesn't reach.
 //! - **A disabled switch** fades its track only, not its thumb.
 //! - **Radios** draw their outline in `border-strong` and halve it when
 //!   disabled; a style reaches the radio's row, not its circle. An
@@ -57,22 +68,38 @@
 //! - **Px measures** don't follow the interface scale (`ui_scale`): chart
 //!   labels are a fixed 10 px, and a segmented `TabBar`'s height and padding
 //!   and a dialog's margins are px.
-//! - **A disabled segment** of a segmented `TabBar` is painted with the
-//!   theme's `tab_bar` (paper), like the selected segment's indicator, so
-//!   it reads as chosen. Leave a segment out rather than disable it (the
-//!   progress dialog's %).
+//! - **The kit's buttons and switches show their ring whenever they hold
+//!   focus**, not only after keyboard input: they check only that they are
+//!   focused. A press never focuses them, so the ring shows where focus is
+//!   handed to one after a pointer action: a menu closing onto its trigger,
+//!   a dialog closing onto the button that opened it, Back returning to the
+//!   control that opened the page. A button that takes its focus from a
+//!   handle the app keeps follows the rule ([`KeyboardRing`]: the alert
+//!   footers); a switch can't be given one.
+//! - **Empty-state icons** are Lucide's fixed SVGs, drawn at stroke 2, not
+//!   the system's 1.5.
 
+use gpui_kit::base::FocusableExt as _;
 use gpui_kit::component::button::Button;
-use gpui_kit::component::dialog::{AlertDialog, Dialog};
+use gpui_kit::component::button::{ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::dialog::{Dialog, DialogContent, DialogFooter};
 use gpui_kit::component::list::{List, ListDelegate, ListState};
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarThumbStyle};
 use gpui_kit::component::select::{Select, SelectDelegate, SelectItem};
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{Icon, IconName, Sizable as _, WindowExt as _};
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui_kit::{
-    App, Div, ElementId, Entity, InteractiveElement as _, IntoElement, KeyBinding, NoAction,
-    ParentElement as _, Pixels, Styled, Window, div, px, rems,
+    App, ClickEvent, Div, ElementId, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    KeyBinding, NoAction, ParentElement as _, Pixels, SharedString, Styled, Window, div,
+    prelude::FluentBuilder as _, px, rems,
 };
 
+use super::focus::focus_visible;
+use crate::bidi::WrappingText;
 use crate::design::{TypeRole, colors, size};
 
 /// Enter in a dialog, outside a text field, goes to the focused control
@@ -146,6 +173,33 @@ impl SmallControl for Button {
     }
 }
 
+impl SmallControl for TabBar {
+    /// The kit's small segmented bar: 24 high. Its tabs set their own text
+    /// size, so give it [`small_tab`]s, whose labels are 12 px.
+    fn small_control(self) -> Self {
+        self.small()
+    }
+}
+
+/// One segment of a small segmented `TabBar` (`.small_control()`): its label
+/// at 12/16, as the system's small controls are. The kit's small tab sets
+/// 14 px text on the tab itself, after any style the app gives it, so the
+/// label is a child that sets its own size.
+///
+/// ```ignore
+/// TabBar::new("search-kind").segmented().small_control().child(small_tab("Books"))
+/// ```
+pub fn small_tab(label: impl Into<SharedString>) -> Tab {
+    let label = label.into();
+    let (text, line) = TypeRole::Caption.scale();
+    Tab::new().aria_label(label.clone()).child(
+        div()
+            .text_size(rems(text / 16.))
+            .line_height(rems(line / 16.))
+            .child(label),
+    )
+}
+
 impl<D> SmallControl for Select<D>
 where
     D: SelectDelegate + 'static,
@@ -189,6 +243,22 @@ pub trait OnTextSpine: Styled + Sized {
 
 impl OnTextSpine for Button {}
 
+/// A destructive menu command ("Remove from library…", "Delete read…"): its
+/// label and Delete icon in `danger`, as every destructive command is. The
+/// kit's menu items take no colour, so it is an element item. Disabled, it
+/// takes the kit's muted colour instead.
+pub fn danger_menu_item(label: impl Into<SharedString>, enabled: bool, cx: &App) -> PopupMenuItem {
+    let label = label.into();
+    let danger = enabled.then(|| colors(cx).danger);
+    PopupMenuItem::element(move |_, _| {
+        div()
+            .when_some(danger, gpui_kit::Styled::text_color)
+            .child(label.clone())
+    })
+    .icon(Icon::new(IconName::Delete).when_some(danger, gpui_kit::Styled::text_color))
+    .disabled(!enabled)
+}
+
 /// The kit's label inset in a button: `px_2p5`, and `px_2` when small.
 const KIT_INSET: gpui_kit::Rems = gpui_kit::rems(0.625);
 const KIT_INSET_SMALL: gpui_kit::Rems = gpui_kit::rems(0.5);
@@ -210,54 +280,194 @@ pub fn open_dialog(
     });
 }
 
+/// A button that takes its focus from `handle`, a handle the app keeps, so
+/// the app can focus it, and that shows the kit's ring only after keyboard
+/// input, like the app's own controls (`ui::focus`). The kit's buttons
+/// otherwise show it whenever they hold focus (Kit limits).
+pub trait KeyboardRing: Sized {
+    fn keyboard_ring(self, handle: &FocusHandle, window: &Window) -> Self;
+}
+
+impl KeyboardRing for Button {
+    fn keyboard_ring(self, handle: &FocusHandle, window: &Window) -> Self {
+        self.track_focus(handle)
+            .focus_ring(focus_visible(handle, window))
+    }
+}
+
+type AlertContent = Rc<dyn Fn(DialogContent, &mut Window, &mut App) -> DialogContent>;
+type AlertOk = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) -> bool>;
+
+/// A confirmation's parts, as [`open_alert_dialog`] builds it: the kit's
+/// `AlertDialog` names, with the app's own footer, whose buttons focus by
+/// handle. The title and description go through `WrappingText`, since they
+/// often hold a book's or a list's name, which may be right to left.
+pub struct Alert {
+    title: Option<SharedString>,
+    description: Option<SharedString>,
+    content: Option<AlertContent>,
+    cancel: Option<SharedString>,
+    ok_text: SharedString,
+    ok_variant: ButtonVariant,
+    on_ok: Option<AlertOk>,
+}
+
+impl Alert {
+    fn new() -> Self {
+        Self {
+            title: None,
+            description: None,
+            content: None,
+            cancel: None,
+            ok_text: "OK".into(),
+            ok_variant: ButtonVariant::Primary,
+            on_ok: None,
+        }
+    }
+
+    /// The decision: `Delete “Book club picks”?`.
+    pub fn title(mut self, title: impl Into<SharedString>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Only new information: the scope, the consequence, the way back.
+    pub fn description(mut self, description: impl Into<SharedString>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// More under the description (release notes, a link).
+    pub fn content(
+        mut self,
+        builder: impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static,
+    ) -> Self {
+        self.content = Some(Rc::new(builder));
+        self
+    }
+
+    /// Adds Cancel before the result.
+    pub fn confirm(mut self) -> Self {
+        self.cancel.get_or_insert_with(|| "Cancel".into());
+        self
+    }
+
+    /// Cancel's label ("Later"); also adds it.
+    pub fn cancel_text(mut self, text: impl Into<SharedString>) -> Self {
+        self.cancel = Some(text.into());
+        self
+    }
+
+    /// The result's label: "Delete", "Mark as read".
+    pub fn ok_text(mut self, text: impl Into<SharedString>) -> Self {
+        self.ok_text = text.into();
+        self
+    }
+
+    /// `Danger` for a destructive result; primary otherwise.
+    pub fn ok_variant(mut self, variant: ButtonVariant) -> Self {
+        self.ok_variant = variant;
+        self
+    }
+
+    /// Runs the result; the alert closes when it returns `true`.
+    pub fn on_ok(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) -> bool + 'static,
+    ) -> Self {
+        self.on_ok = Some(Rc::new(handler));
+        self
+    }
+}
+
+/// Which of an alert's buttons holds focus when it opens.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AlertFocus {
+    /// Cancel when there is one, else the result.
+    Cancel,
+    /// The result.
+    Result,
+}
+
 /// Opens an alert dialog (a confirmation) on `raised`, 384 wide. Use instead
 /// of `window.open_alert_dialog`.
 ///
-/// It opens with focus on its first button: Cancel when it has one
-/// (`.confirm()`), so a keyboard user sees what Enter does and a
-/// destructive confirmation never runs on a stray Enter. A confirmation
-/// whose result is safe opens on that result instead:
-/// [`open_alert_dialog_on_result`].
+/// It opens with focus on Cancel when it has one (`.confirm()`), so a
+/// keyboard user sees what Enter does and a destructive confirmation never
+/// runs on a stray Enter; else on its one button. A confirmation whose
+/// result is safe opens on that result instead:
+/// [`open_alert_dialog_on_result`]. Focus goes to the button itself, by
+/// its handle, whatever the content holds before it (a link, say).
 pub fn open_alert_dialog(
     window: &mut Window,
     cx: &mut App,
-    build: impl Fn(AlertDialog, &mut Window, &mut App) -> AlertDialog + 'static,
+    build: impl Fn(Alert, &mut Window, &mut App) -> Alert + 'static,
 ) {
-    open_alert(window, cx, build, 1);
+    open_alert(window, cx, build, AlertFocus::Cancel);
 }
 
 /// [`open_alert_dialog`] for a confirmation that isn't destructive ("Install"
-/// an update): focus opens on its result, the button after Cancel. Its
-/// content must hold no control of its own before the buttons.
+/// an update): focus opens on its result.
 pub fn open_alert_dialog_on_result(
     window: &mut Window,
     cx: &mut App,
-    build: impl Fn(AlertDialog, &mut Window, &mut App) -> AlertDialog + 'static,
+    build: impl Fn(Alert, &mut Window, &mut App) -> Alert + 'static,
 ) {
-    open_alert(window, cx, build, 2);
+    open_alert(window, cx, build, AlertFocus::Result);
 }
 
-/// Opens the alert, and once it is drawn moves focus from the dialog, which
-/// holds it at first, `steps` controls on.
 fn open_alert(
     window: &mut Window,
     cx: &mut App,
-    build: impl Fn(AlertDialog, &mut Window, &mut App) -> AlertDialog + 'static,
-    steps: usize,
+    build: impl Fn(Alert, &mut Window, &mut App) -> Alert + 'static,
+    focus: AlertFocus,
 ) {
-    window.open_alert_dialog(cx, move |alert, window, cx| {
+    let cancel_focus = cx.focus_handle();
+    let ok_focus = cx.focus_handle();
+    // The kit focuses the dialog's shell as it opens; initial focus is set
+    // on the first build of this opening only, so a later rebuild never
+    // takes it from where the reader moved it.
+    let first_build = Rc::new(Cell::new(true));
+    window.open_alert_dialog(cx, move |dialog, window, cx| {
+        let alert = build(Alert::new(), window, cx);
+        let target = match (focus, alert.cancel.is_some()) {
+            (AlertFocus::Cancel, true) => &cancel_focus,
+            _ => &ok_focus,
+        };
+        if first_build.replace(false) {
+            target.focus(window, cx);
+        }
+        let cancel = alert.cancel.map(|label| {
+            Button::new("alert-cancel")
+                .label(label)
+                .keyboard_ring(&cancel_focus, window)
+                .on_click(|_, window, cx| window.close_dialog(cx))
+        });
+        let on_ok = alert.on_ok;
+        let ok = Button::new("alert-ok")
+            .label(alert.ok_text)
+            .with_variant(alert.ok_variant)
+            .keyboard_ring(&ok_focus, window)
+            .on_click(move |event, window, cx| {
+                if on_ok.as_ref().is_none_or(|on_ok| on_ok(event, window, cx)) {
+                    window.close_dialog(cx);
+                }
+            });
         let raised = colors(cx).raised;
         let width = size::DIALOG_CONFIRM.to_pixels(window.rem_size());
-        build(alert.width(width), window, cx).bg(raised)
-    });
-    let dialog = window.focused(cx);
-    window.on_next_frame(move |window, cx| {
-        // Unless focus moved meanwhile, or the alert is gone.
-        if window.has_active_dialog(cx) && window.focused(cx) == dialog {
-            for _ in 0..steps {
-                window.focus_next(cx);
-            }
-        }
+        dialog
+            .width(width)
+            .when_some(alert.title, |this, title| {
+                this.title(WrappingText::new(title))
+            })
+            .when_some(alert.description, |this, text| {
+                this.description(WrappingText::new(text))
+            })
+            .when_some(alert.content, |this, content| {
+                this.content(move |c, window, cx| content(c, window, cx))
+            })
+            .footer(DialogFooter::new().children(cancel).child(ok))
+            .bg(raised)
     });
 }
 
@@ -313,6 +523,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::ui::ExternalLink;
     use crate::ui::test_support::{press, redraw};
 
     struct Empty;
@@ -386,48 +597,135 @@ mod tests {
         assert!(dialog_open(cx));
     }
 
+    gpui_kit::actions!(kit_test, [ConfirmRow]);
+
+    /// Enter on a row's own button presses it; without `row_action` the
+    /// list around it would take Enter as confirming the row.
     #[gpui_kit::test]
-    fn enter_on_a_confirmations_buttons_presses_them(cx: &mut TestAppContext) {
-        let cx = open(cx);
-        let confirmed = Rc::new(Cell::new(0));
-        // Opens the alert with focus `steps` controls on from the dialog: 1
-        // is Cancel, where it opens (moved there on the next frame, which a
-        // test window doesn't run), 2 the action.
-        let show = |steps: usize, cx: &mut VisualTestContext| {
-            let confirmed = confirmed.clone();
-            cx.update(|window, cx| {
-                open_alert_dialog(window, cx, move |alert, _, _| {
+    fn enter_on_a_rows_own_button_presses_it(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{counter, host, tab};
+        use gpui_kit::{InteractiveElement as _, KeyBinding};
+
+        let run = |cx: &mut TestAppContext, wrapped: bool| {
+            let (pressed, on_click) = counter();
+            let confirmed = Rc::new(Cell::new(0));
+            let cx = host(cx, {
+                let confirmed = confirmed.clone();
+                move |_, _| {
                     let confirmed = confirmed.clone();
-                    alert
-                        .title("Delete?")
-                        .confirm()
-                        .ok_text("Delete")
-                        .on_ok(move |_, _, _| {
+                    let button = Button::new("remove")
+                        .label("Remove")
+                        .on_click(on_click.clone());
+                    div()
+                        .key_context("TestList")
+                        .on_action(move |_: &ConfirmRow, _, _| {
                             confirmed.set(confirmed.get() + 1);
-                            true
                         })
-                });
+                        .map(|this| {
+                            if wrapped {
+                                this.child(row_action(button))
+                            } else {
+                                this.child(button)
+                            }
+                        })
+                        .into_any_element()
+                }
             });
+            cx.update(|_, cx| {
+                cx.bind_keys([KeyBinding::new("enter", ConfirmRow, Some("TestList"))]);
+            });
+            tab(cx);
+            press(cx, "enter");
             redraw(cx);
-            for _ in 0..steps {
-                cx.update(gpui_kit::Window::focus_next);
+            (pressed.get(), confirmed.get())
+        };
+        assert_eq!(run(cx, false), (0, 1), "the list takes Enter");
+        assert_eq!(run(cx, true), (1, 0), "the row's button takes Enter");
+    }
+
+    /// Opens an alert whose result counts in `confirmed`, settles it and
+    /// presses Enter on whatever it opened on.
+    fn confirm_with_enter(
+        cx: &mut VisualTestContext,
+        on_result: bool,
+        build: impl Fn(Alert) -> Alert + 'static,
+    ) -> usize {
+        let confirmed = Rc::new(Cell::new(0));
+        cx.update(|window, cx| {
+            let confirmed = confirmed.clone();
+            let build = move |alert: Alert, _: &mut Window, _: &mut App| {
+                let confirmed = confirmed.clone();
+                build(alert).on_ok(move |_, _, _| {
+                    confirmed.set(confirmed.get() + 1);
+                    true
+                })
+            };
+            if on_result {
+                open_alert_dialog_on_result(window, cx, build);
+            } else {
+                open_alert_dialog(window, cx, build);
             }
-            redraw(cx);
-        };
-        let settle = |cx: &mut VisualTestContext| {
-            cx.run_until_parked();
-            redraw(cx);
-        };
-
-        show(1, cx);
+        });
+        redraw(cx);
+        redraw(cx);
         press(cx, "enter");
-        settle(cx);
-        assert_eq!(confirmed.get(), 0);
+        cx.run_until_parked();
+        redraw(cx);
+        confirmed.get()
+    }
+
+    #[gpui_kit::test]
+    fn a_confirmation_opens_on_cancel(cx: &mut TestAppContext) {
+        let cx = open(cx);
+        let delete = |alert: Alert| {
+            alert
+                .title("Delete “Book club picks”?")
+                .confirm()
+                .ok_text("Delete")
+                .ok_variant(ButtonVariant::Danger)
+        };
+        assert_eq!(confirm_with_enter(cx, false, delete), 0);
+        assert!(!dialog_open(cx), "Enter on Cancel closes it");
+    }
+
+    #[gpui_kit::test]
+    fn a_safe_confirmation_opens_on_its_result_past_a_link(cx: &mut TestAppContext) {
+        let cx = open(cx);
+        let install = |alert: Alert| {
+            alert
+                .title("Hardcover Desktop 9.9.9 is out")
+                .content(|content, _, _| {
+                    content.child(ExternalLink::new(
+                        "page",
+                        "Open the release page",
+                        "https://x",
+                    ))
+                })
+                .confirm()
+                .cancel_text("Later")
+                .ok_text("Install")
+        };
+        assert_eq!(confirm_with_enter(cx, true, install), 1);
+    }
+
+    /// The update alert with nothing to install has a link before its one
+    /// button: counting Tab steps from the dialog landed on the link.
+    #[gpui_kit::test]
+    fn an_alert_with_one_button_opens_on_it_past_a_link(cx: &mut TestAppContext) {
+        let cx = open(cx);
+        let nothing_to_install = |alert: Alert| {
+            alert
+                .title("Hardcover Desktop 9.9.9 is out")
+                .content(|content, _, _| {
+                    content.child(ExternalLink::new(
+                        "page",
+                        "Open the release page",
+                        "https://x",
+                    ))
+                })
+                .ok_text("Close")
+        };
+        assert_eq!(confirm_with_enter(cx, false, nothing_to_install), 1);
         assert!(!dialog_open(cx));
-
-        show(2, cx);
-        press(cx, "enter");
-        settle(cx);
-        assert_eq!(confirmed.get(), 1);
     }
 }

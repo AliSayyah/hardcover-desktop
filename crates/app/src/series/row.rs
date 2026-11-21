@@ -20,8 +20,8 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Disableable as _, IconName, h_flex};
 use gpui_kit::{
     App, Entity, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, ScrollHandle, SharedString, Styled as _, Window, div, prelude::FluentBuilder as _,
-    rems,
+    Rems, RenderOnce, ScrollHandle, SharedString, Styled as _, Window, div,
+    prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{Date, ReadingStatus, UserBookId};
@@ -33,41 +33,69 @@ use crate::app_state::Services;
 use crate::bidi::is_rtl;
 use crate::book::progress_dialog::open_progress;
 use crate::catalog::navigation::Page;
-use crate::chip::{StatusChip, status_icon};
+use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverSize};
-use crate::design::{TypeRoles as _, colors, size};
+use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{count_text, needs_permission, progress_summary};
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::library::writes;
 use crate::ui::focus::{keyed_focus, reveal_when};
+use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{SeriesStrip, StripItem, TextButton};
 use crate::upcoming::row::add_to_want_to_read;
 use crate::upcoming::schedule::{release_text, soon_text};
 
-/// Above and below a row (16).
-const ROW_PADDING: f32 = 1.;
-/// The name (24), the facts (20), 12, then the strip: an sm cover (48), the
-/// 2 px line and the caption (16), 4 apart.
-const ROW_CONTENT: f32 = 1.5 + 1.25 + 0.75 + 3. + 0.25 + 0.125 + 0.25 + 1.;
-/// A group's label over its first row: 24 above, the label (16), 4 below.
-const GROUP_LABEL: f32 = 1.5 + 1. + 0.25;
+// The tracker's virtual list must know each row's height before drawing
+// it, so the rows are laid out from these and the heights summed from the
+// same values (`a_rows_height_is_what_it_draws` checks the two agree).
 
-/// How tall a row is, its group's label included when it's the first.
+/// Above and below a row (16).
+const ROW_PADDING: Rems = rems(1.);
+/// Between the facts and the strip (12).
+const STRIP_ABOVE: Rems = rems(0.75);
+/// Above a group's label (24).
+const LABEL_ABOVE: Rems = rems(1.5);
+/// Between a group's label and its first row (4).
+const LABEL_BELOW: Rems = rems(0.25);
+
+/// How tall a row is, its group's label included when it's the first: the
+/// name, the facts and the strip, inside the row's padding.
 pub fn row_height(first_in_group: bool, rem: Pixels) -> Pixels {
-    let body = rems(ROW_CONTENT + 2. * ROW_PADDING).to_pixels(rem);
+    let body = (ROW_PADDING * 2.
+        + STRIP_ABOVE
+        + TypeRole::Title18.line_height()
+        + TypeRole::Body.line_height())
+    .to_pixels(rem)
+        + SeriesStrip::height(rem);
     if first_in_group {
-        body + rems(GROUP_LABEL).to_pixels(rem)
+        body + group_label_height(rem)
     } else {
         // The hairline above.
         body + size::HAIRLINE
     }
 }
 
+/// How tall a group's label is, with the space around it.
+fn group_label_height(rem: Pixels) -> Pixels {
+    (LABEL_ABOVE + LABEL_BELOW + TypeRole::Label.line_height()).to_pixels(rem)
+}
+
+/// A group's label and count, over its first row. Label and caption share
+/// one size, so centring keeps one baseline.
+fn group_label(group: Group, count: usize, cx: &App) -> gpui_kit::Div {
+    h_flex()
+        .gap_2()
+        .pt(LABEL_ABOVE)
+        .pb(LABEL_BELOW)
+        .child(div().label(cx).child(group.label()))
+        .child(div().caption(cx).tabular().child(count_text(count)))
+}
+
 /// How wide the strip gets in a column `column` wide: the row less the lane
 /// and the gap before it.
 pub fn strip_width(column: Pixels, rem: Pixels) -> Pixels {
-    column - size::NEXT_LANE.to_pixels(rem) - rems(1.5).to_pixels(rem)
+    column - (size::NEXT_LANE + size::NEXT_LANE_GAP).to_pixels(rem)
 }
 
 /// How many books a row's strip shows in a column `column` wide: as many as
@@ -128,21 +156,15 @@ impl RenderOnce for SeriesRow {
         );
         let first = self.label.is_some();
 
-        let label = self.label.map(|(group, count)| {
-            // Label and caption share one size, so centring keeps one baseline.
-            h_flex()
-                .gap_2()
-                .pt_6()
-                .pb_1()
-                .child(div().label(cx).child(group.label()))
-                .child(div().caption(cx).tabular().child(count_text(count)))
-        });
+        let label = self
+            .label
+            .map(|(group, count)| group_label(group, count, cx));
 
         let row = h_flex()
             .w_full()
             .items_start()
-            .gap_6()
-            .py_4()
+            .gap(size::NEXT_LANE_GAP)
+            .py(ROW_PADDING)
             .when(!first, |this| {
                 this.border_t(size::HAIRLINE).border_color(colors.border)
             })
@@ -183,7 +205,7 @@ pub fn series_body(
             .opens(Page::Series(series.id)),
         )
         .child(facts_line(series, today, cx))
-        .child(div().pt_3().child(strip(series, capacity)))
+        .child(div().pt(STRIP_ABOVE).child(strip(series, capacity)))
 }
 
 /// "Brandon Sanderson · 2 of 6 read · #6 not out yet · Reading now". A
@@ -243,9 +265,9 @@ fn strip_item(series: &SeriesSummary, book: &SeriesBook, ix: usize) -> StripItem
                     Page::Book(book.book.clone()),
                 ),
         )
-        .icon(status_icon(status)),
-        Mark::Missing => StripItem::missing(id.clone()),
-        Mark::Unreleased => StripItem::unreleased(id.clone(), crate::icons::clock()),
+        .shelf(status),
+        Mark::Missing => StripItem::missing(id.clone(), book.book.title.clone()),
+        Mark::Unreleased => StripItem::unreleased(id.clone(), book.book.title.clone()),
     };
     item.position(position)
         .progress(
@@ -386,7 +408,7 @@ fn want_to_read(
         .small_control()
         .icon(IconName::Plus)
         .label("Want to read")
-        .ml(rems(-0.5))
+        .on_text_spine(true)
         .loading(adding)
         .disabled(adding || !can_write)
         .when(!can_write, |this| {
@@ -459,6 +481,109 @@ mod tests {
         // At the edge: n books need n × 44 − 4.
         assert_eq!(strip_capacity(px(20. * 44. - 4. + 264.), REM), 20);
         assert_eq!(strip_capacity(px(20. * 44. - 5. + 264.), REM), 19);
+    }
+
+    /// A started series of three books: the first read, the second being
+    /// read (so its strip book has a meter), the third not in the library.
+    fn started_series(name: &str) -> SeriesSummary {
+        use super::super::progress::{LibraryIndex, summarize};
+        use hardcover_core::{
+            AuthorId, AuthorRef, BookId, BookSummary, LibraryEntry, ReadId, ReadSession, SeriesId,
+            SeriesRef, TrackedBook, TrackedSeries, UserId,
+        };
+        let day = |s: &str| -> Date { s.parse().unwrap() };
+        let book = |id: i64| {
+            let mut b = BookSummary::new(BookId::new(id), format!("Book {id}"));
+            b.release_year = Some(2020);
+            b
+        };
+        let mut series = TrackedSeries::new(SeriesId::new(1), name);
+        series.author = Some(AuthorRef::new(AuthorId::new(1), "Ada Quill"));
+        for id in 1..=3 {
+            let mut b = TrackedBook::new(book(id), id as f32);
+            b.release_date = Some(day("2020-01-01"));
+            series.books.push(b);
+        }
+        let entry = |id: i64, status| {
+            let mut e =
+                LibraryEntry::new(UserBookId::new(id * 10), UserId::new(1), book(id), status);
+            let mut r = SeriesRef::new(name);
+            r.id = Some(SeriesId::new(1));
+            r.position = Some(id as f32);
+            e.series.push(r);
+            e
+        };
+        let mut read = entry(1, ReadingStatus::Read);
+        let mut finished = ReadSession::new(ReadId::new(10));
+        finished.finished_at = Some(day("2026-01-01"));
+        read.reads.push(finished);
+        let mut reading = entry(2, ReadingStatus::CurrentlyReading);
+        let mut open = ReadSession::new(ReadId::new(20));
+        open.started_at = Some(day("2026-11-01"));
+        open.progress_pages = Some(100);
+        reading.reads.push(open);
+        reading.book.pages = Some(400);
+        let entries = [read, reading];
+        summarize(
+            &series,
+            &LibraryIndex::new(&entries),
+            &std::collections::HashMap::new(),
+            day("2026-11-20"),
+        )
+    }
+
+    /// The tracker's virtual list sizes each row with [`row_height`] before
+    /// drawing it; a row drawn taller or shorter would overlap or gap.
+    #[gpui_kit::test]
+    fn a_rows_height_is_what_it_draws(cx: &mut gpui_kit::TestAppContext) {
+        use crate::ui::test_support::host;
+        use gpui_kit::InteractiveElement as _;
+
+        // A Latin and a Persian name (another font's line box), at the
+        // default rem and a larger one.
+        for (name, rem) in [
+            ("The Long Road", REM),
+            ("کلیدر (جلد اول)", REM),
+            ("The Long Road", px(20.)),
+        ] {
+            let series = started_series(name);
+            assert!(
+                series.books.iter().any(|b| b.progress.is_some()),
+                "the strip draws a meter"
+            );
+            let cx = host(cx, move |window, cx| {
+                window.set_rem_size(rem);
+                let today: Date = "2026-11-20".parse().unwrap();
+                div()
+                    .w(px(1000.))
+                    .child(group_label(Group::InProgress, 3, cx).debug_selector(|| "label".into()))
+                    .child(
+                        h_flex()
+                            .py(ROW_PADDING)
+                            .items_start()
+                            .debug_selector(|| "row".into())
+                            .child(series_body(&series, today, 14, cx)),
+                    )
+                    .into_any_element()
+            });
+            let label = cx.debug_bounds("label").expect("the label is drawn");
+            let row = cx.debug_bounds("row").expect("the row is drawn");
+            assert_eq!(
+                label.size.height,
+                group_label_height(rem),
+                "{name} at {rem:?}"
+            );
+            assert_eq!(
+                row.size.height + size::HAIRLINE,
+                row_height(false, rem),
+                "{name} at {rem:?}"
+            );
+            assert_eq!(
+                label.size.height + row.size.height,
+                row_height(true, rem),
+                "{name} at {rem:?}"
+            );
+        }
     }
 
     #[test]

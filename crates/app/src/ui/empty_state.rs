@@ -16,7 +16,7 @@
 //! ```
 //!
 //! The system asks for a 1.5 stroke on the icon; the kit's Lucide icons are
-//! fixed SVGs drawn at 2, so they keep it.
+//! fixed SVGs drawn at 2, so they keep it (Kit limits).
 
 use gpui_kit::component::Icon;
 use gpui_kit::{

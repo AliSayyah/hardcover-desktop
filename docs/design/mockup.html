@@ -27,20 +27,21 @@
   --hover: rgba(31, 28, 23, .05);     /* ink overlays: they step the same way on every host surface */
   --selected: rgba(31, 28, 23, .10);  /* the current row; a pressed control */
   --border: #E4DED3;
-  --border-strong: #D0C8BA; /* control outlines */
+  --border-strong: #918879; /* control outlines: 3:1 on raised, paper, surface, the sidebar */
   --track: #E0D9CC;         /* empty part of a progress bar */
   --switch-thumb: #FFFFFF;  /* raised */
   --chip: rgba(31, 28, 23, .07);
   --skeleton: #E9E4DA;      /* something still loading */
   --fg: #1F1C17;            /* ink */
   --fg-muted: #5F574B;      /* secondary text that carries information: AA on every surface */
-  --fg-faint: #857D70;      /* placeholders and disabled hints only */
+  --fg-faint: #7A7266;      /* empty-state icons and other marks; never text */
   --accent: #3B4A9C;        /* ink blue: progress, primary commit, focus, the selected icon, external links */
   --accent-fg: #FFFFFF;
   --accent-soft: rgba(59, 74, 156, .10);
   --ring: rgba(59, 74, 156, .5);
-  --gold: #F59E0B;          /* the user's own rating, nothing else */
-  --star-empty: rgba(31, 28, 23, .14);
+  --gold: #A16207;          /* the user's own rating, nothing else: 3:1 against an empty star */
+  --star-empty: rgba(31, 28, 23, .10);
+  --scrim: rgba(31, 28, 23, .16); /* the dialog backdrop */
   --danger: #B42318;
   --warning: #B54708;
   --cover-edge: rgba(30, 20, 10, .16);
@@ -58,21 +59,22 @@
   --hover: rgba(238, 234, 227, .05);
   --selected: rgba(238, 234, 227, .10);
   --border: #292623;
-  --border-strong: #3D3934;
+  --border-strong: #77706A;
   --track: #35312C;
   --switch-thumb: #EEEAE3;  /* fg: a raised thumb on track is 1.2:1 here */
   --chip: rgba(238, 234, 227, .08);
   --skeleton: #2B2825;
   --fg: #EEEAE3;
   --fg-muted: #ABA498;
-  --fg-faint: #807A6F;
+  --fg-faint: #8D877C;
   --accent: #98A5F4;
   --accent-fg: #12142A;
   --accent-soft: rgba(152, 165, 244, .14);
   --ring: rgba(152, 165, 244, .5);
   --gold: #FBBF24;
-  --star-empty: rgba(238, 234, 227, .14);
-  --danger: #F97066;
+  --star-empty: rgba(238, 234, 227, .10);
+  --scrim: rgba(0, 0, 0, .48);
+  --danger: #FB8178;
   --warning: #FDB022;
   --cover-edge: rgba(255, 255, 255, .12);
   --cover-hinge: rgba(0, 0, 0, .28);
@@ -221,7 +223,7 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .btn.icon { width: var(--h-control); padding: 0; justify-content: center; }
 .btn.focus, .input.focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
 .dis { opacity: .5; }
-.input { height: var(--h-control); border: 1px solid var(--border-strong); background: var(--raised); border-radius: var(--r-control); display: flex; align-items: center; gap: var(--s-8); padding: 0 var(--s-8); color: var(--fg-faint); }
+.input { height: var(--h-control); border: 1px solid var(--border-strong); background: var(--raised); border-radius: var(--r-control); display: flex; align-items: center; gap: var(--s-8); padding: 0 var(--s-8); color: var(--fg-muted); }
 .input svg { color: var(--fg-muted); }
 .input .val { color: var(--fg); }
 .select { height: var(--h-control); border: 1px solid var(--border-strong); background: var(--raised); border-radius: var(--r-control); display: inline-flex; align-items: center; gap: var(--s-8); padding: 0 var(--s-8) 0 var(--s-12); flex: none; }
@@ -399,7 +401,7 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .shelfrow { display: flex; align-items: center; gap: var(--s-8); height: var(--h-control); max-width: var(--w-list); }
 .shelfrow svg { color: var(--fg-muted); }
 .shelfrow .n { width: 48px; text-align: right; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
-.wide-note { position: absolute; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-faint); font-size: var(--t-12); }
+.wide-note { position: absolute; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-muted); font-size: var(--t-12); }
 /* ---------- Full book page ---------- */
 .page { padding: var(--s-32); }
 .page .cols { gap: var(--s-24); }
@@ -537,15 +539,18 @@ const warnChip = t => `<span class="chip">${ic("warn", "xs warn")}${t}</span>`;
 // block. Genres show here only past the header's first six.
 const tagsBlock = (groups, more) => `<div class="block">${blockH("Tags", more ? `<span class="btn sm ghost">Show ${more} more</span>` : "")}<div class="tag-groups">${groups.map(([label, chips]) => `<div><div class="label">${label}</div><div class="tag-row">${chips.join("")}</div></div>`).join("")}</div></div>`;
 const STAR = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><polygon points="12 2.6 14.85 8.55 21.4 9.35 16.6 13.85 17.85 20.35 12 17.15 6.15 20.35 7.4 13.85 2.6 9.35 9.15 8.55"/></svg>';
-// own: gold; cat: the muted text colour (catalogue figures)
+// The hover preview: the same star as a ring, in gold over the empty star, so it differs from a saved rating by shape.
+const STAR_OUTLINE = STAR.replace('fill="currentColor"', 'fill="none"');
+// own: gold; cat: the muted text colour (catalogue figures); preview: gold outlines (the pointer over the rating control)
 function stars(v, kind = "own", size = "") {
-  const col = kind === "own" ? "var(--gold)" : "var(--fg-muted)";
+  const col = kind === "cat" ? "var(--fg-muted)" : "var(--gold)";
+  const glyph = kind === "preview" ? STAR_OUTLINE : STAR;
   const px = size === "lg" ? 20 : size === "xs" ? 12 : 16;
   let h = `<span class="stars ${size}">`;
   for (let i = 0; i < 5; i++) {
     const f = Math.max(0, Math.min(1, v - i));
     h += `<span class="star"><span style="color:var(--star-empty)">${STAR}</span>` +
-      (f > 0 ? `<span class="sfill" style="width:${f * 100}%;color:${col}"><span style="display:block;width:${px}px;height:100%;position:relative">${STAR}</span></span>` : "") + `</span>`;
+      (f > 0 ? `<span class="sfill" style="width:${f * 100}%;color:${col}"><span style="display:block;width:${px}px;height:100%;position:relative">${glyph}</span></span>` : "") + `</span>`;
   }
   return h + "</span>";
 }
@@ -1005,7 +1010,7 @@ function tokensTheme(theme, themeName) {
       ${sw("border", "--border", "hairlines")}${sw("border-strong", "--border-strong", "control outlines")}${sw("track", "--track", "empty progress")}${sw("star-empty", "--star-empty", "an unfilled star")}
     </div></div>
     <div><h4>Ink: contrast is the lowest over bg, sidebar, surface and raised, each alone, hovered and selected</h4><div class="sw">
-      ${ink("fg", "--fg", "text")}${ink("fg-muted", "--fg-muted", "secondary text, counts")}${ink("fg-faint", "--fg-faint", "placeholder, disabled only", plain(theme, "--bg", "--raised"))}${ink("accent", "--accent", "links, selected icon, genre icons", [...fills(theme), ...chips(theme)])}
+      ${ink("fg", "--fg", "text")}${ink("fg-muted", "--fg-muted", "secondary text, counts")}${ink("fg-faint", "--fg-faint", "empty-state icons; never text")}${ink("accent", "--accent", "links, selected icon, genre icons", [...fills(theme), ...chips(theme)])}
       ${sw("accent", "--accent", "progress, primary commit", "--accent-fg")}${sw("accent-soft", "--accent-soft", "the avatar")}${sw("ring", "--ring", "focus ring, 2 px")}${sw("gold", "--gold", "your rating only")}
       ${ink("danger", "--danger", "destructive", plain(theme, "--bg", "--raised"))}${ink("warning", "--warning", "content-warning icon", [over(theme, "--chip", "--bg")])}
     </div></div>
@@ -1022,6 +1027,7 @@ function tokensTheme(theme, themeName) {
       <span class="row-c g-8">${stars(4.5, "own", "lg")}<span class="small muted">yours</span></span>
       <span class="row-c g-8">${stars(4.51, "cat")}<span class="small muted">Hardcover average</span></span>
       <span class="row-c g-8">${stars(0, "own")}<span class="small muted">unrated</span></span>
+      <span class="row-c g-8">${stars(3.5, "preview", "lg")}<span class="small muted">hover preview: a click sets 3.5</span></span>
     </div></div>
     <div><h4>Chips: neutral; the icon's shape tells statuses apart; a genre's icon in accent, a warning's in warning; 6 apart when they wrap</h4><div class="wrap c" style="gap:var(--s-6)">
       ${statuses.map(([i, l]) => `<span class="chip">${ic(i, "xs")}${l}</span>`).join("")}
@@ -1325,9 +1331,14 @@ document.fonts.ready.then(() => {
   const ok = ["600 16px Literata", "16px Inter", "16px Vazirmatn"].map(f => `${f}: ${document.fonts.check(f)}`);
   console.log("fonts", ok.join(", "));
   for (const t of ["light", "dark"]) {
-    const line = [["--fg"], ["--fg-muted", [...fills(t), over(t, "--chip", "--bg"), over(t, "--chip", "--sidebar")]], ["--fg-faint", plain(t, "--bg", "--raised")], ["--accent", [...fills(t), ...chips(t)]], ["--danger", plain(t, "--bg", "--raised")], ["--warning", [over(t, "--chip", "--bg")]]]
+    const line = [["--fg"], ["--fg-muted", [...fills(t), over(t, "--chip", "--bg"), over(t, "--chip", "--sidebar")]], ["--fg-faint"], ["--accent", [...fills(t), ...chips(t)]], ["--danger", plain(t, "--bg", "--raised")], ["--warning", [over(t, "--chip", "--bg")]]]
       .map(([fg, on]) => `${fg.slice(2)} ${worst(t, fg, on).toFixed(2)}`).join(", ");
     console.log(`contrast ${t} (lowest over the fills each is used on): ${line}; accent-fg on accent ${contrast(tv(t, "--accent-fg"), tv(t, "--accent")).toFixed(2)}`);
+    // Marks at 3:1 (design::contrast_audit checks the same pairs): a field's outline, and gold against an empty star on paper.
+    const outline = worst(t, "--border-strong", plain(t, "--raised", "--bg", "--surface", "--sidebar"));
+    const papers = [tv(t, "--bg"), over(t, "--hover", "--bg"), over(t, "--selected", "--bg")];
+    const empty = papers.map(p => { const m = tv(t, "--star-empty").match(/[\d.]+/g).map(Number); return "#" + [0, 1, 2].map(i => hex2(m[i] * m[3] + parseInt(p.slice(1 + 2 * i, 3 + 2 * i), 16) * (1 - m[3]))).join(""); });
+    console.log(`marks ${t}: border-strong ${outline.toFixed(2)}, gold on an empty star ${worst(t, "--gold", empty).toFixed(2)}`);
     // State fills must step the same way on every host: rest < hover < selected in distance from the host.
     const steps = HOSTS.map(h => { const [r, hv, s] = [tv(t, h), over(t, "--hover", h), over(t, "--selected", h)].map(lum); return `${h.slice(2)} ${Math.sign(hv - r) === Math.sign(s - hv) ? "ok" : "FLIPS"} (${contrast(tv(t, h), over(t, "--hover", h)).toFixed(2)}, ${contrast(tv(t, h), over(t, "--selected", h)).toFixed(2)})`; });
     console.log(`state steps ${t}: ${steps.join(", ")}`);

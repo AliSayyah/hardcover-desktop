@@ -70,7 +70,7 @@ use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, CoverShelf, Greeting, Lane, Meter, MonthBars, RailSection, RowSpacing, SectionHeader,
     Sequence, Skeleton, TextButton, Tier, books_that_fit, content_column_width, date_line,
-    empty_state, greeting_at, see_all, tier,
+    empty_state, greeting_at, region_width, see_all, tier,
 };
 use crate::upcoming::model::UpcomingModel;
 use crate::{ShowPaused, ShowWantToRead};
@@ -466,13 +466,11 @@ impl HomeView {
                                             .child(percent_label(pct))
                                     })),
                             )
-                            .child(
-                                Meter::new(
-                                    SharedString::from(format!("home-progress-{id}")),
-                                    progress.percent.unwrap_or(0.0),
-                                )
-                                .accessibility_label("Reading progress"),
-                            )
+                            .child(Meter::new(
+                                SharedString::from(format!("home-progress-{id}")),
+                                progress.percent.unwrap_or(0.0),
+                                "Reading progress",
+                            ))
                             .children(
                                 pace.map(|pace| {
                                     div().body().tabular().text_color(muted).child(pace)
@@ -527,10 +525,13 @@ impl HomeView {
                             .mt_2()
                             .gap_2()
                             .child(
-                                Meter::new(SharedString::from(format!("home-progress-{id}")), pct)
-                                    .thin()
-                                    .w(size::METER_IN_ROW)
-                                    .accessibility_label("Reading progress"),
+                                Meter::new(
+                                    SharedString::from(format!("home-progress-{id}")),
+                                    pct,
+                                    "Reading progress",
+                                )
+                                .thin()
+                                .w(size::METER_IN_ROW),
                             )
                             .child(div().caption(cx).tabular().child(percent_label(pct)))
                     })),
@@ -778,9 +779,12 @@ impl HomeView {
             )
             .child(
                 div().pt_1().child(
-                    Meter::new("home-goal-bar", crate::format::bar_percent(goal.fraction()))
-                        .pace(crate::goals::sidebar::pace_percent(goal, today))
-                        .accessibility_label("Progress toward the goal"),
+                    Meter::new(
+                        "home-goal-bar",
+                        crate::format::bar_percent(goal.fraction()),
+                        "Progress toward the goal",
+                    )
+                    .pace(crate::goals::sidebar::pace_percent(goal, today)),
                 ),
             )
             .children(sentence.map(|(text, title)| {
@@ -976,9 +980,7 @@ impl Render for HomeView {
         // The sidebar is fixed, so the columns get the rest of the window
         // less the page's insets.
         let rem = window.rem_size();
-        let width = window.viewport_size().width
-            - size::SIDEBAR.to_pixels(rem)
-            - size::PAGE_INSET.to_pixels(rem) * 2.;
+        let width = region_width(window, size::PAGE_INSET);
         let has_second = rate.is_some() || coming_soon.is_some();
         let tier = home_tier(width, rem, has_second);
 
@@ -1011,10 +1013,9 @@ impl Render for HomeView {
         let columns = if tier == Tier::Three {
             // Coming soon leads the second column; Rate what you finished
             // and the newest on Want to read follow it.
-            Columns::new(reading).second(column(vec![coming_soon, rate, want_in_column]))
+            Columns::new(tier, reading).second(column(vec![coming_soon, rate, want_in_column]))
         } else {
-            Columns::new(column(vec![Some(reading), rate, coming_soon]))
-                .folded(tier == Tier::Folded)
+            Columns::new(tier, column(vec![Some(reading), rate, coming_soon]))
         };
         root.scroll_y_revealing_focus()
             .child(

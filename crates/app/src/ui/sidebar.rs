@@ -12,7 +12,9 @@
 //! - [`AccountRow`]: the account at the foot: a 32 avatar, the username in
 //!   `body-strong`, the sync line in caption, and a chevrons-up-down icon. It
 //!   is the trigger of the account menu (`.dropdown_menu(..)`), and stays
-//!   pressed while the menu is open.
+//!   pressed while the menu is open. Why a sync failed is the sync line's
+//!   tooltip, the row's accessible description, and a caption under the
+//!   sync line while the row has keyboard focus.
 //!
 //! ```ignore
 //! v_flex()
@@ -39,6 +41,7 @@ use gpui_kit::{
 use super::Meter;
 use super::focus::{FocusTreatment as _, control_radius, focus_visible, keyed_focus};
 use super::reveal::probe;
+use crate::bidi::WrappingText;
 use crate::design::type_roles::Family;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 
@@ -165,9 +168,7 @@ impl RenderOnce for GoalRow {
                         .items_center()
                         .gap_2()
                         .child(
-                            // The mockup's target isn't in the kit's icon set;
-                            // the calendar stands for the goal's period.
-                            Icon::new(IconName::Calendar)
+                            Icon::new(crate::icons::target())
                                 .size_4()
                                 .flex_none()
                                 .text_color(colors.fg_muted),
@@ -185,9 +186,11 @@ impl RenderOnce for GoalRow {
                 )
                 // From the label spine: past the 16 icon and its 8 gap.
                 .child(
-                    div()
-                        .pl_6()
-                        .child(Meter::new(meter_id, self.percent).thin().pace(self.pace)),
+                    div().pl_6().child(
+                        Meter::new(meter_id, self.percent, "Progress toward the goal")
+                            .thin()
+                            .pace(self.pace),
+                    ),
                 ),
         )
     }
@@ -237,7 +240,9 @@ impl AccountRow {
         self
     }
 
-    /// More about the sync line, such as why it failed.
+    /// More about the sync line, such as why it failed: its tooltip, the
+    /// row's accessible description, and a caption under the sync line
+    /// while the row has keyboard focus.
     pub fn status_tooltip(mut self, tooltip: Option<SharedString>) -> Self {
         self.status_tooltip = tooltip;
         self
@@ -281,9 +286,13 @@ impl RenderOnce for AccountRow {
         let radius = control_radius(cx);
         let status_id =
             ElementId::NamedChild(std::sync::Arc::new(self.id.clone()), "status".into());
+        let reason = self.status_tooltip.clone().filter(|_| focused);
         self.base
             .role(Role::Button)
             .aria_label(self.name.clone())
+            .when_some(self.status_tooltip.clone(), |this, tip| {
+                this.aria_description(tip)
+            })
             .track_focus(&focus.clone().tab_stop(true))
             .relative()
             .flex()
@@ -317,12 +326,16 @@ impl RenderOnce for AccountRow {
                             .min_w_0()
                             .caption(cx)
                             .child(self.status)
-                            .when_some(self.status_tooltip, |this, tip| {
+                            .when_some(self.status_tooltip.clone(), |this, tip| {
                                 this.tooltip(move |window, cx| {
                                     Tooltip::new(tip.clone()).build(window, cx)
                                 })
                             }),
-                    ),
+                    )
+                    // The reason, for the keyboard, under the sync line.
+                    .when_some(reason, |this, reason| {
+                        this.child(div().caption(cx).child(WrappingText::new(reason)))
+                    }),
             )
             .child(
                 Icon::new(IconName::ChevronsUpDown)

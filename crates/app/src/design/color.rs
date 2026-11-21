@@ -110,6 +110,9 @@ const CLOTH: [Rgba; 8] = [
 /// Type and stamp on a cloth cover, in both themes.
 const CLOTH_INK: Rgba = hex(0xF4_EC_DD);
 
+/// The empty star's ink overlay, in both themes.
+const STAR_EMPTY: f32 = 0.10;
+
 /// One theme's tokens as written in the skill.
 struct Tokens {
     bg: Rgba,
@@ -131,6 +134,8 @@ struct Tokens {
     /// The chip overlay's alpha (7% light, 8% dark).
     chip: f32,
     gold: Rgba,
+    /// The dialog backdrop.
+    scrim: Rgba,
     danger: Rgba,
     warning: Rgba,
     cover_edge: Rgba,
@@ -145,19 +150,23 @@ const LIGHT: Tokens = Tokens {
     raised: hex(0xFF_FF_FF),
     skeleton: hex(0xE9_E4_DA),
     border: hex(0xE4_DE_D3),
-    border_strong: hex(0xD0_C8_BA),
+    // At least 3:1 on `raised`, paper, `surface` and the sidebar: a field's
+    // outline is all that marks it.
+    border_strong: hex(0x91_88_79),
     track: hex(0xE0_D9_CC),
     // `raised`.
     switch_thumb: hex(0xFF_FF_FF),
     fg: hex(0x1F_1C_17),
     fg_muted: hex(0x5F_57_4B),
-    fg_faint: hex(0x85_7D_70),
+    fg_faint: hex(0x7A_72_66),
     accent: hex(0x3B_4A_9C),
     accent_fg: hex(0xFF_FF_FF),
     accent_soft: 0.10,
     chip: 0.07,
-    // Amber 500.
-    gold: hex(0xF5_9E_0B),
+    // Ochre: at least 3:1 against an empty star on paper, hovered or
+    // selected (amber 500 was 1.5:1, so a rating barely showed).
+    gold: hex(0xA1_62_07),
+    scrim: hexa(0x1F_1C_17, 0.16),
     danger: hex(0xB4_23_18),
     warning: hex(0xB5_47_08),
     cover_edge: hexa(0x1E_14_0A, 0.16),
@@ -175,21 +184,23 @@ const DARK: Tokens = Tokens {
     raised: hex(0x26_23_20),
     skeleton: hex(0x2B_28_25),
     border: hex(0x29_26_23),
-    border_strong: hex(0x3D_39_34),
+    border_strong: hex(0x77_70_6A),
     track: hex(0x35_31_2C),
     // `fg`: a `raised` thumb on `track` is 1.2:1 in dark mode, gone once a
     // disabled switch fades its track.
     switch_thumb: hex(0xEE_EA_E3),
     fg: hex(0xEE_EA_E3),
     fg_muted: hex(0xAB_A4_98),
-    fg_faint: hex(0x80_7A_6F),
+    fg_faint: hex(0x8D_87_7C),
     accent: hex(0x98_A5_F4),
     accent_fg: hex(0x12_14_2A),
     accent_soft: 0.14,
     chip: 0.08,
     // Amber 400.
     gold: hex(0xFB_BF_24),
-    danger: hex(0xF9_70_66),
+    scrim: hexa(0x00_00_00, 0.48),
+    // At least 4.5:1 on a pressed danger button in a dialog.
+    danger: hex(0xFB_81_78),
     warning: hex(0xFD_B0_22),
     cover_edge: hexa(0xFF_FF_FF, 0.12),
     cover_hinge: hexa(0x00_00_00, 0.28),
@@ -233,8 +244,8 @@ pub struct Palette {
     pub fg: Hsla,
     /// Secondary text that carries information.
     pub fg_muted: Hsla,
-    /// Placeholders, disabled hints, empty-state icons; nothing a reader must
-    /// read.
+    /// Empty-state icons and other marks nobody must read: at least 3:1 on
+    /// every fill, never text.
     pub fg_faint: Hsla,
     /// Ink blue, the one accent.
     pub accent: Hsla,
@@ -246,13 +257,13 @@ pub struct Palette {
     /// The kit's controls take the solid accent from the theme and apply the
     /// 50% themselves.
     pub ring: Hsla,
-    /// The user's own rating, nothing else.
+    /// The user's own rating, nothing else. The rating control's hover
+    /// preview draws it as an outline over the empty star (`crate::star`).
     pub gold: Hsla,
-    /// The rating control's hover preview: the stars a click would set, at
-    /// gold 55%.
-    pub gold_preview: Hsla,
-    /// An unfilled star (ink 14%).
+    /// An unfilled star (ink 10%).
     pub star_empty: Hsla,
+    /// The dialog backdrop: ink 16% in light mode, black 48% in dark.
+    pub scrim: Hsla,
     /// Destructive commands and errors.
     pub danger: Hsla,
     /// A content warning's icon; warnings.
@@ -293,8 +304,8 @@ impl Palette {
             accent_soft: accent.opacity(t.accent_soft),
             ring: accent.opacity(0.5),
             gold: t.gold.into(),
-            gold_preview: Hsla::from(t.gold).opacity(0.55),
-            star_empty: fg.opacity(0.14),
+            star_empty: fg.opacity(STAR_EMPTY),
+            scrim: t.scrim.into(),
             danger: t.danger.into(),
             warning: t.warning.into(),
             cover_edge: t.cover_edge.into(),
@@ -349,20 +360,36 @@ pub fn data_color([r, g, b]: [u8; 3]) -> Hsla {
     .into()
 }
 
-/// Text on a data colour ([`data_color`]): near-black ink on a light one,
-/// white on a dark one, in both themes.
-pub fn text_on_data([r, g, b]: [u8; 3]) -> Hsla {
-    if is_light([r, g, b]) {
-        LIGHT.fg.into()
+/// Text on a data colour ([`data_color`]): near-black ink or white,
+/// whichever has the higher contrast on it, in both themes.
+pub fn text_on_data(rgb: [u8; 3]) -> Hsla {
+    let fill = data_color(rgb);
+    let (ink, white): (Hsla, Hsla) = (LIGHT.fg.into(), LIGHT.raised.into());
+    if contrast(ink, fill) >= contrast(white, fill) {
+        ink
     } else {
-        LIGHT.raised.into()
+        white
     }
 }
 
-/// Whether text on `rgb` should be dark (its luma is high).
-fn is_light([r, g, b]: [u8; 3]) -> bool {
-    let luma = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
-    luma > 160.0
+/// WCAG relative luminance of an opaque colour.
+pub fn luminance(color: Hsla) -> f32 {
+    let c = Rgba::from(color);
+    let lin = |v: f32| {
+        if v <= 0.040_45 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+}
+
+/// WCAG contrast ratio between two opaque colours (1 to 21). Composite a
+/// translucent one onto its host first ([`solid`]).
+pub fn contrast(a: Hsla, b: Hsla) -> f32 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
 /// The cloth colour for a title: a stable hash of its code points, the same
@@ -399,7 +426,7 @@ mod tests {
         assert_eq!(rgb(Palette::dark().gold), [0xFB, 0xBF, 0x24]);
         assert!((Palette::light().hover.a - 0.05).abs() < 1e-6);
         assert!((Palette::dark().chip.a - 0.08).abs() < 1e-6);
-        assert!((Palette::light().star_empty.a - 0.14).abs() < 1e-6);
+        assert!((Palette::light().star_empty.a - 0.10).abs() < 1e-6);
     }
 
     /// The overlay composited by hand: 255 * 0.95 + 31 * 0.05 = 243.8, and
@@ -436,12 +463,35 @@ mod tests {
     }
 
     #[test]
-    fn light_data_colours_get_dark_text() {
-        assert!(is_light([0xf5, 0xe6, 0x80]));
-        assert!(!is_light([0x33, 0x66, 0x99]));
-        assert_eq!(rgb(text_on_data([0xf5, 0xe6, 0x80])), [0x1F, 0x1C, 0x17]);
-        assert_eq!(rgb(text_on_data([0x33, 0x66, 0x99])), [0xFF, 0xFF, 0xFF]);
+    fn data_colours_get_whichever_text_reads_better() {
+        let ink = [0x1F, 0x1C, 0x17];
+        let white = [0xFF, 0xFF, 0xFF];
+        assert_eq!(rgb(text_on_data([0xf5, 0xe6, 0x80])), ink);
+        assert_eq!(rgb(text_on_data([0x33, 0x66, 0x99])), white);
+        // Cyan: white is 2.3:1 on it, ink 7.4:1 (a luma threshold picked white).
+        assert_eq!(rgb(text_on_data([0x00, 0xBC, 0xD4])), ink);
         assert_eq!(rgb(data_color([0x33, 0x66, 0x99])), [0x33, 0x66, 0x99]);
+        for fill in [
+            [0x00, 0xBC, 0xD4],
+            [0x3f, 0x6e, 0x8c],
+            [0x77, 0x77, 0x77],
+            [0xE9, 0x1E, 0x63],
+        ] {
+            let on = data_color(fill);
+            let chosen = contrast(text_on_data(fill), on);
+            let other = contrast(LIGHT.fg.into(), on).min(contrast(LIGHT.raised.into(), on));
+            assert!(chosen >= other, "{fill:?}: {chosen} < {other}");
+        }
+    }
+
+    #[test]
+    fn contrast_is_the_wcag_ratio() {
+        let black: Hsla = hex(0x00_00_00).into();
+        let white: Hsla = hex(0xFF_FF_FF).into();
+        assert!((contrast(black, white) - 21.).abs() < 0.01);
+        assert!((contrast(white, white) - 1.).abs() < 1e-6);
+        // #767676 on white is the classic 4.54:1.
+        assert!((contrast(hex(0x76_76_76).into(), white) - 4.54).abs() < 0.01);
     }
 
     #[test]

@@ -31,20 +31,41 @@ pub(crate) enum StarSize {
     Large,
 }
 
+/// How the filled part of a star is drawn.
+#[derive(Clone, Copy)]
+pub(crate) enum StarInk {
+    /// A solid star: a saved rating or a catalogue figure.
+    Solid(gpui_kit::Hsla),
+    /// The rating control's hover preview: the empty star with an outline
+    /// in the colour over it, so it differs from a saved rating by shape.
+    Outline(gpui_kit::Hsla),
+}
+
 pub(crate) fn render_star(
     position: u8,
     value: f32,
     size: StarSize,
-    filled: gpui_kit::Hsla,
+    filled: StarInk,
     empty: gpui_kit::Hsla,
 ) -> gpui_kit::Div {
-    let star = || {
-        let icon = crate::star::icon().flex_shrink_0();
+    let sized = move |icon: gpui_kit::component::Icon| {
+        let icon = icon.flex_shrink_0();
         match size {
             StarSize::Small => icon.size_3(),
             StarSize::Medium => icon.size_4(),
             StarSize::Large => icon.size_5(),
         }
+    };
+    let star = move || sized(crate::star::icon());
+    let fill = move || match filled {
+        StarInk::Solid(color) => div().child(star().text_color(color)),
+        StarInk::Outline(color) => div().relative().child(star().text_color(empty)).child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .child(sized(crate::star::outline()).text_color(color)),
+        ),
     };
     div()
         .relative()
@@ -55,7 +76,7 @@ pub(crate) fn render_star(
             StarSize::Large => this.size_5(),
         })
         .map(|this| match star_fill(value, position) {
-            StarFill::Full => this.child(star().text_color(filled)),
+            StarFill::Full => this.child(fill()),
             StarFill::Empty => this.child(star().text_color(empty)),
             StarFill::Half => this.child(star().text_color(empty)).child(
                 div()
@@ -65,7 +86,7 @@ pub(crate) fn render_star(
                     .h_full()
                     .w(relative(0.5))
                     .overflow_hidden()
-                    .child(star().text_color(filled)),
+                    .child(fill()),
             ),
         })
 }
@@ -125,7 +146,7 @@ impl RenderOnce for Stars {
                     } else {
                         StarSize::Medium
                     },
-                    filled,
+                    StarInk::Solid(filled),
                     empty,
                 )
             }));
