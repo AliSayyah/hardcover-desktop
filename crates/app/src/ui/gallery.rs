@@ -193,7 +193,7 @@ fn meters(cx: &App) -> AnyElement {
                 .child(div().flex_1())
                 .child(div().body().tabular().text_color(c.fg_muted).child("66%")),
         )
-        .child(Meter::new("g-meter", 66.).accessibility_label("Reading progress"))
+        .child(Meter::new("g-meter", 66., "Reading progress"))
         .child(
             div()
                 .caption(cx)
@@ -205,25 +205,31 @@ fn meters(cx: &App) -> AnyElement {
             .gap_4()
             .child(progress)
             .child(
-                Meter::new("g-goal", 75.)
+                Meter::new("g-goal", 75., "Progress toward the goal")
                     .pace(Some(88.))
-                    .max_w(size::METER_MAX)
-                    .accessibility_label("Progress toward the goal"),
+                    .max_w(size::METER_MAX),
             )
-            .child(Meter::new("g-thin", 40.).thin().w(size::METER_IN_ROW))
-            .child(Meter::new("g-empty", 0.).thin().w(size::METER_IN_ROW))
             .child(
-                Meter::new("g-full", 120.)
+                Meter::new("g-thin", 40., "Reading progress")
+                    .thin()
+                    .w(size::METER_IN_ROW),
+            )
+            .child(
+                Meter::new("g-empty", 0., "Reading progress")
+                    .thin()
+                    .w(size::METER_IN_ROW),
+            )
+            .child(
+                Meter::new("g-full", 120., "Progress toward the goal")
                     .thin()
                     .pace(Some(100.))
                     .w(size::METER_IN_ROW),
             )
             // Hardcover's figures: a ratings breakdown row.
             .child(
-                Meter::new("g-muted", 62.)
+                Meter::new("g-muted", 62., "4 stars")
                     .muted()
-                    .max_w(size::METER_MAX)
-                    .accessibility_label("4 stars"),
+                    .max_w(size::METER_MAX),
             )
             .child(
                 div().w(size::RAIL).child(
@@ -311,33 +317,33 @@ fn series_strips(cx: &App) -> AnyElement {
     let legend = SeriesStrip::new()
         .item(
             StripItem::cover("g-s1", cover("Dune"))
-                .icon(IconName::CircleCheck)
+                .shelf(ReadingStatus::Read)
                 .position("1"),
         )
         .item(
             StripItem::cover("g-s2", cover("Dune Messiah"))
-                .icon(IconName::BookOpen)
+                .shelf(ReadingStatus::CurrentlyReading)
                 .position("2")
                 .progress(Some(42.))
                 .next(true),
         )
         .item(
             StripItem::cover("g-s3", cover("Children of Dune"))
-                .icon(IconName::Inbox)
+                .shelf(ReadingStatus::WantToRead)
                 .position("3"),
         )
         .item(
             StripItem::cover("g-s4", cover("God Emperor of Dune"))
-                .icon(IconName::Pause)
+                .shelf(ReadingStatus::Paused)
                 .position("4"),
         )
         .item(
             StripItem::cover("g-s5", cover("Heretics of Dune"))
-                .icon(IconName::Ban)
+                .shelf(ReadingStatus::DidNotFinish)
                 .position("5"),
         )
-        .item(StripItem::missing("g-s6").position("6"))
-        .item(StripItem::unreleased("g-s7", crate::icons::clock()).position("6.5"));
+        .item(StripItem::missing("g-s6", "Chapterhouse: Dune").position("6"))
+        .item(StripItem::unreleased("g-s7", "Untitled Dune #7").position("6.5"));
 
     // A Persian series of ten: two read, the third paused, the rest not in
     // the library, cut to six slots with "+N".
@@ -423,7 +429,7 @@ fn list_row(ix: usize, title: &'static str, selected: bool, focused: bool, cx: &
                     Lane::trailing()
                         .stacked()
                         .child(div().caption(cx).tabular().child("66%"))
-                        .child(Meter::new(("g-row-meter", ix), 66.).thin()),
+                        .child(Meter::new(("g-row-meter", ix), 66., "Reading progress").thin()),
                 ),
         )
 }

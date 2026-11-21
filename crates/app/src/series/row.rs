@@ -33,7 +33,7 @@ use crate::app_state::Services;
 use crate::bidi::is_rtl;
 use crate::book::progress_dialog::open_progress;
 use crate::catalog::navigation::Page;
-use crate::chip::{StatusChip, status_icon};
+use crate::chip::StatusChip;
 use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, needs_permission, progress_summary};
@@ -243,9 +243,9 @@ fn strip_item(series: &SeriesSummary, book: &SeriesBook, ix: usize) -> StripItem
                     Page::Book(book.book.clone()),
                 ),
         )
-        .icon(status_icon(status)),
-        Mark::Missing => StripItem::missing(id.clone()),
-        Mark::Unreleased => StripItem::unreleased(id.clone(), crate::icons::clock()),
+        .shelf(status),
+        Mark::Missing => StripItem::missing(id.clone(), book.book.title.clone()),
+        Mark::Unreleased => StripItem::unreleased(id.clone(), book.book.title.clone()),
     };
     item.position(position)
         .progress(

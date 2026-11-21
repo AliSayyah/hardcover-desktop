@@ -209,10 +209,9 @@ impl RenderOnce for BookRow {
                     .stacked()
                     .child(figure().child(text))
                     .children(percent.map(|percent| {
-                        Meter::new(("row-progress", id), percent)
+                        Meter::new(("row-progress", id), percent, "Reading progress")
                             .thin()
                             .w_full()
-                            .accessibility_label("Reading progress")
                     }))
                     .into_any_element(),
             ),

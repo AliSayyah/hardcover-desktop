@@ -94,9 +94,7 @@ impl BookDetailView {
                     }),
             )
             .when_some(progress.percent, |this, percent| {
-                this.child(
-                    Meter::new("reading-progress", percent).accessibility_label("Reading progress"),
-                )
+                this.child(Meter::new("reading-progress", percent, "Reading progress"))
             })
             .child(
                 h_flex()

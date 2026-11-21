@@ -277,7 +277,9 @@ Rules:
 - **Loading:** a `skeleton` fill with the edge, until the image lands.
 - **No image:** the cloth cover.
 - **Click:** opens the book. The cover is never the only keyboard path to
-  the book; its title is a button too.
+  the book; its title is a button too. A clickable cover is a link named
+  for what it does (`Open “Dune”`), so a screen reader's pointer can use
+  it; it is not a tab stop.
 
 | Size | Width × height | GPUI | Use |
 | --- | --- | --- | --- |
@@ -379,6 +381,8 @@ The two kinds:
   - Moods and other tags have no icon.
   - Those two icon colours are the only colours a chip ever carries; the
     pill and its text stay neutral.
+  - A tag too long for its row is cut with an ellipsis, and then shows its
+    whole text in a tooltip and to a screen reader.
   - The icon sits on the chip's leading (left) side, a right-to-left tag
     too: the interface isn't mirrored.
 - **Wrapped chips** (`TagRow`): chips that wrap across a width sit 6 apart
@@ -416,6 +420,9 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   wide, `fg`, 3 px proud of the meter on each side.
 - Words come with every meter ("Page 312 of 476", "66%"). The bar is never
   the only carrier.
+- Every meter has an accessible name, what it measures ("Reading
+  progress", "Progress toward the goal", "5 stars"): `Meter::new` takes
+  it.
 
 ### Panels, rails and hairlines
 
@@ -487,6 +494,9 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   that can't show every book keeps the next one in view and ends with a
   "+N" caption.
   State never relies on colour: the icon, the slot and the clock carry it.
+  Each book is named for a screen reader with what the eye reads from it:
+  "#2, Dune Messiah: Currently reading, 40%, next", "#3, Children of Dune:
+  not in your library".
 - **Property list** (Details): rows at least 24 high, 8 apart. The key
   column (96, or 72 in a rail) is `fg-muted`; the value is ink, with small
   controls inline.
@@ -515,6 +525,12 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   and a chevrons-up-down icon.
 - While Ctrl is held, each destination shows its shortcut in place of its
   count (existing behaviour).
+- **Reasons are never hover-only.** A row's tooltip (why it is disabled,
+  why a load failed) is also its accessible description, and while the row
+  has keyboard focus it shows as a caption under the label. The account
+  row does the same with why a sync failed, under the sync line. A
+  disabled row can't take focus; a missing permission is also the
+  sidebar's "Sign in again" notice, which can.
 
 ### Popovers, menus and dialogs
 

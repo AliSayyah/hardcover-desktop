@@ -466,13 +466,11 @@ impl HomeView {
                                             .child(percent_label(pct))
                                     })),
                             )
-                            .child(
-                                Meter::new(
-                                    SharedString::from(format!("home-progress-{id}")),
-                                    progress.percent.unwrap_or(0.0),
-                                )
-                                .accessibility_label("Reading progress"),
-                            )
+                            .child(Meter::new(
+                                SharedString::from(format!("home-progress-{id}")),
+                                progress.percent.unwrap_or(0.0),
+                                "Reading progress",
+                            ))
                             .children(
                                 pace.map(|pace| {
                                     div().body().tabular().text_color(muted).child(pace)
@@ -527,10 +525,13 @@ impl HomeView {
                             .mt_2()
                             .gap_2()
                             .child(
-                                Meter::new(SharedString::from(format!("home-progress-{id}")), pct)
-                                    .thin()
-                                    .w(size::METER_IN_ROW)
-                                    .accessibility_label("Reading progress"),
+                                Meter::new(
+                                    SharedString::from(format!("home-progress-{id}")),
+                                    pct,
+                                    "Reading progress",
+                                )
+                                .thin()
+                                .w(size::METER_IN_ROW),
                             )
                             .child(div().caption(cx).tabular().child(percent_label(pct)))
                     })),
@@ -778,9 +779,12 @@ impl HomeView {
             )
             .child(
                 div().pt_1().child(
-                    Meter::new("home-goal-bar", crate::format::bar_percent(goal.fraction()))
-                        .pace(crate::goals::sidebar::pace_percent(goal, today))
-                        .accessibility_label("Progress toward the goal"),
+                    Meter::new(
+                        "home-goal-bar",
+                        crate::format::bar_percent(goal.fraction()),
+                        "Progress toward the goal",
+                    )
+                    .pace(crate::goals::sidebar::pace_percent(goal, today)),
                 ),
             )
             .children(sentence.map(|(text, title)| {

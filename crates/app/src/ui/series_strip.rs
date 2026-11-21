@@ -13,24 +13,31 @@
 //!   icon, the slot and the clock carry it. A strip that can't show every
 //!   book ends with a "+N" caption for the rest
 //!   (`series::progress::strip_window` picks which).
+//! - Each book is named for a screen reader with everything the eye reads
+//!   from it ([`strip_label`]): "#2, Dune Messiah: Currently reading, 40%,
+//!   next"; a slot says "not in your library" or "not out yet".
 //!
 //! ```ignore
 //! SeriesStrip::new()
-//!     .item(StripItem::cover(("strip", id), cover).icon(IconName::CircleCheck).position("1"))
-//!     .item(StripItem::missing(("strip", id2)).position("2").next(true))
-//!     .item(StripItem::unreleased(("strip", id3)).position("3"))
+//!     .item(StripItem::cover(("strip", id), cover).shelf(ReadingStatus::Read).position("1"))
+//!     .item(StripItem::missing(("strip", id2), "Dune Messiah").position("2").next(true))
+//!     .item(StripItem::unreleased(("strip", id3), "Untitled Dune #3").position("3"))
 //!     .more(4)
 //! ```
 
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    AnyElement, App, ElementId, FontWeight, IntoElement, ParentElement as _, RenderOnce,
-    SharedString, Styled as _, Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, ElementId, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Window, div, prelude::FluentBuilder as _,
 };
+use hardcover_core::ReadingStatus;
 
 use super::Meter;
+use crate::chip::status_icon;
 use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRoles as _, colors, size};
+use crate::format::status_label;
 
 /// An empty place for a book. See the module doc.
 #[derive(IntoElement)]
@@ -74,49 +81,93 @@ impl RenderOnce for CoverSlot {
 enum Body {
     Cover(Cover),
     Missing,
-    Unreleased(Box<Icon>),
+    Unreleased,
+}
+
+/// What a book's place in the strip says, for [`strip_label`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StripState {
+    /// On a shelf.
+    Shelf(ReadingStatus),
+    /// Out, but not in the library.
+    Missing,
+    /// Not out yet.
+    Unreleased,
+}
+
+/// A strip book's accessible name: its position, its title and what its
+/// place shows (the shelf, the meter's percentage, a slot), then whether
+/// it is the series' next book.
+pub fn strip_label(
+    position: &str,
+    title: &str,
+    state: StripState,
+    progress: Option<f32>,
+    next: bool,
+) -> String {
+    let mut parts = vec![match state {
+        StripState::Shelf(status) => status_label(status).to_owned(),
+        StripState::Missing => "not in your library".to_owned(),
+        StripState::Unreleased => "not out yet".to_owned(),
+    }];
+    if let Some(percent) = progress {
+        parts.push(format!("{:.0}%", super::meter::fraction(percent) * 100.));
+    }
+    if next {
+        parts.push("next".to_owned());
+    }
+    let place = if position.is_empty() {
+        String::new()
+    } else {
+        format!("#{position}, ")
+    };
+    format!("{place}{title}: {}", parts.join(", "))
 }
 
 /// One book of a [`SeriesStrip`].
 pub struct StripItem {
     id: ElementId,
+    title: SharedString,
     body: Body,
-    icon: Option<Icon>,
+    shelf: Option<ReadingStatus>,
     position: SharedString,
     progress: Option<f32>,
     next: bool,
 }
 
 impl StripItem {
-    fn new(id: impl Into<ElementId>, body: Body) -> Self {
+    fn new(id: impl Into<ElementId>, title: SharedString, body: Body) -> Self {
         Self {
             id: id.into(),
+            title,
             body,
-            icon: None,
+            shelf: None,
             position: SharedString::default(),
             progress: None,
             next: false,
         }
     }
 
-    /// A book in the library: its sm cover.
+    /// A book in the library: its sm cover. Give its shelf with
+    /// [`StripItem::shelf`].
     pub fn cover(id: impl Into<ElementId>, cover: Cover) -> Self {
-        Self::new(id, Body::Cover(cover))
+        let title = cover.title().clone();
+        Self::new(id, title, Body::Cover(cover))
     }
 
     /// A book not in the library: an empty slot.
-    pub fn missing(id: impl Into<ElementId>) -> Self {
-        Self::new(id, Body::Missing)
+    pub fn missing(id: impl Into<ElementId>, title: impl Into<SharedString>) -> Self {
+        Self::new(id, title.into(), Body::Missing)
     }
 
-    /// A book not out yet: a slot with `clock`.
-    pub fn unreleased(id: impl Into<ElementId>, clock: impl Into<Icon>) -> Self {
-        Self::new(id, Body::Unreleased(Box::new(clock.into())))
+    /// A book not out yet: a slot with the clock.
+    pub fn unreleased(id: impl Into<ElementId>, title: impl Into<SharedString>) -> Self {
+        Self::new(id, title.into(), Body::Unreleased)
     }
 
-    /// The shelf's icon, before the position.
-    pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
-        self.icon = Some(icon.into());
+    /// The book's shelf: its icon before the position.
+    pub fn shelf(mut self, status: ReadingStatus) -> Self {
+        self.shelf = Some(status);
         self
     }
 
@@ -138,23 +189,43 @@ impl StripItem {
         self
     }
 
+    fn state(&self) -> StripState {
+        match (&self.body, self.shelf) {
+            (Body::Missing, _) => StripState::Missing,
+            (Body::Unreleased, _) => StripState::Unreleased,
+            (Body::Cover(_), Some(status)) => StripState::Shelf(status),
+            // A cover with no shelf given: in the library, as a cover means.
+            (Body::Cover(_), None) => StripState::Shelf(ReadingStatus::WantToRead),
+        }
+    }
+
     fn render(self, cx: &App) -> AnyElement {
         let colors = colors(cx);
+        let label = strip_label(
+            &self.position,
+            &self.title,
+            self.state(),
+            self.progress,
+            self.next,
+        );
         let body = match self.body {
             Body::Cover(cover) => cover.into_any_element(),
             Body::Missing => CoverSlot::new(CoverSize::Sm).into_any_element(),
-            Body::Unreleased(clock) => CoverSlot::new(CoverSize::Sm)
-                .icon(*clock)
+            Body::Unreleased => CoverSlot::new(CoverSize::Sm)
+                .icon(crate::icons::clock())
                 .into_any_element(),
         };
         let line = match self.progress {
-            Some(percent) => Meter::new(self.id.clone(), percent)
+            Some(percent) => Meter::new(self.id.clone(), percent, "Reading progress")
                 .thin()
                 .w(CoverSize::Sm.width())
                 .into_any_element(),
             None => div().flex_none().h(size::METER_THIN).into_any_element(),
         };
         div()
+            .id(self.id)
+            .role(Role::ListItem)
+            .aria_label(label)
             .flex()
             .flex_col()
             .flex_none()
@@ -174,7 +245,10 @@ impl StripItem {
                     .when(self.next, |this| {
                         this.text_color(colors.fg).font_weight(FontWeight::SEMIBOLD)
                     })
-                    .children(self.icon.map(|icon| icon.size_3().flex_none()))
+                    .children(
+                        self.shelf
+                            .map(|status| Icon::new(status_icon(status)).size_3().flex_none()),
+                    )
                     .child(self.position),
             )
             .into_any_element()
@@ -253,5 +327,48 @@ impl RenderOnce for SeriesStrip {
                         .child(format!("+{more}")),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_strip_book_says_what_its_place_shows() {
+        assert_eq!(
+            strip_label(
+                "1",
+                "Dune",
+                StripState::Shelf(ReadingStatus::Read),
+                None,
+                false
+            ),
+            "#1, Dune: Read"
+        );
+        assert_eq!(
+            strip_label(
+                "2",
+                "Dune Messiah",
+                StripState::Shelf(ReadingStatus::CurrentlyReading),
+                Some(40.),
+                true
+            ),
+            "#2, Dune Messiah: Currently reading, 40%, next"
+        );
+        assert_eq!(
+            strip_label("3", "Children of Dune", StripState::Missing, None, true),
+            "#3, Children of Dune: not in your library, next"
+        );
+        assert_eq!(
+            strip_label(
+                "6.5",
+                "Untitled Dune #7",
+                StripState::Unreleased,
+                None,
+                false
+            ),
+            "#6.5, Untitled Dune #7: not out yet"
+        );
     }
 }

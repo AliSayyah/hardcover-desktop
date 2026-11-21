@@ -272,9 +272,12 @@ impl GoalView {
                     ),
             )
             .child(
-                Meter::new("goal-progress", crate::format::bar_percent(goal.fraction()))
-                    .pace(pace_percent(goal, today()))
-                    .accessibility_label("Progress toward the goal"),
+                Meter::new(
+                    "goal-progress",
+                    crate::format::bar_percent(goal.fraction()),
+                    "Progress toward the goal",
+                )
+                .pace(pace_percent(goal, today())),
             )
             .child(
                 h_flex()

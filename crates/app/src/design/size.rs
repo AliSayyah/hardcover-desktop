@@ -18,6 +18,9 @@ pub const OBJECT_BAR: Rems = rems(3.5);
 
 /// The sidebar (240).
 pub const SIDEBAR: Rems = rems(15.);
+/// From a nav row's leading edge to its label: the 8 padding, the 16 icon
+/// and the 8 gap (the sidebar's label spine).
+pub const NAV_LABEL_INSET: Rems = rems(2.);
 /// The shelf list, by default; it is resizable (384; `w_96`).
 pub const LIST: Rems = rems(24.);
 /// The narrowest the shelf or search list gets (272): its header's filter
