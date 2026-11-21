@@ -123,6 +123,13 @@ pub const HOME_WIDE_MAX: Rems = rems(2. * COLUMN_MAX.0 + 2. * 2. + RAIL.0 + 2. *
 /// strip of 23 books beside the [`NEXT_LANE`]. It grows past
 /// [`SERIES_COLUMN`] only as far as the longest series needs.
 pub const SERIES_COLUMN_MAX: Rems = rems(80.);
+/// The narrowest a column of Stats' sections gets beside another (544):
+/// Stats splits into two columns only when both get this, which a 1200
+/// window (896 of content) never does.
+pub const CHART_COLUMN_MIN: Rems = rems(34.);
+/// Stats' frame at its widest in two columns (1632): two [`PAGE_MAX`]
+/// columns 32 apart, and the inset on both sides.
+pub const STATS_WIDE_FRAME_MAX: Rems = rems(2. * PAGE_MAX.0 + 2. + 2. * PAGE_INSET.0);
 
 /// The widest prose and readers' words get (640).
 pub const PROSE: Rems = rems(40.);
