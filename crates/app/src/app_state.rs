@@ -150,7 +150,6 @@ pub enum Startup {
     /// ([`restore_session`]) rather than a new sign-in.
     KeyringUnavailable {
         cache: Option<Arc<LibraryCache>>,
-        error: Error,
     },
 }
 
@@ -236,7 +235,7 @@ fn real_startup() -> Startup {
         Ok(None) => Startup::SignedOut { cache },
         Err(error) => {
             eprintln!("hardcover: could not restore the saved session: {error}");
-            Startup::KeyringUnavailable { cache, error }
+            Startup::KeyringUnavailable { cache }
         }
     }
 }

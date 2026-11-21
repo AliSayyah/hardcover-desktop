@@ -21,8 +21,9 @@ use gpui_kit::component::{
     Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
-    AppContext as _, ClipboardItem, Context, Entity, EventEmitter, IntoElement, ParentElement as _,
-    Render, SharedString, Styled as _, Task, Window, div, prelude::FluentBuilder as _,
+    AppContext as _, ClipboardItem, Context, Entity, EventEmitter, FocusHandle,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
+    Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::{
     self, CancelHandle, GrantedScopes, KeyringTokenStore, OAuthConfig, PendingSignIn, Session,
@@ -30,7 +31,7 @@ use hardcover_core::auth::{
 };
 use hardcover_core::{Client, Error};
 
-use super::{keyring_message, saved_sign_in_message};
+use super::{KEYRING_UNAVAILABLE, SAVED_SIGN_IN_UNREADABLE};
 use crate::app_state::{Restored, restore_session};
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::error_message;
@@ -59,7 +60,6 @@ enum State {
     },
     /// The keyring couldn't be read at startup.
     KeyringUnavailable {
-        error: SharedString,
         retrying: bool,
     },
 }
@@ -68,6 +68,8 @@ pub struct SignInView {
     state: State,
     url: Entity<InputState>,
     task: Option<Task<()>>,
+    /// The screen's root: focused when it is shown, so Tab reaches its buttons.
+    focus_handle: FocusHandle,
 }
 
 impl EventEmitter<SignedIn> for SignInView {}
@@ -78,17 +80,20 @@ impl SignInView {
             state: State::Idle { error: None },
             url: cx.new(|cx| InputState::new(window, cx)),
             task: None,
+            focus_handle: cx.focus_handle(),
         }
+    }
+
+    /// Takes the keyboard focus, as the screen is shown.
+    pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus_handle, cx);
     }
 
     /// The screen for a keyring that couldn't be read at startup, with
     /// `Try again`.
-    pub fn keyring_unavailable(error: &Error, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn keyring_unavailable(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
-            state: State::KeyringUnavailable {
-                error: saved_sign_in_message(error).into(),
-                retrying: false,
-            },
+            state: State::KeyringUnavailable { retrying: false },
             ..Self::new(window, cx)
         }
     }
@@ -122,10 +127,8 @@ impl SignInView {
                     }
                     Ok(None) => this.state = State::Idle { error: None },
                     Err(e) => {
-                        this.state = State::KeyringUnavailable {
-                            error: saved_sign_in_message(&e).into(),
-                            retrying: false,
-                        };
+                        eprintln!("hardcover: could not restore the saved session: {e}");
+                        this.state = State::KeyringUnavailable { retrying: false };
                     }
                 }
                 cx.notify();
@@ -215,7 +218,10 @@ impl SignInView {
         let message = match error {
             Error::Timeout => "Sign-in timed out. Try again.".to_owned(),
             // The sign-in only ever stores to the keyring.
-            Error::Storage(_) => keyring_message(error),
+            Error::Storage(detail) => {
+                eprintln!("hardcover: sign-in: {detail}");
+                KEYRING_UNAVAILABLE.to_owned()
+            }
             e => error_message(e),
         };
         self.state = State::Idle {
@@ -292,14 +298,14 @@ impl Render for SignInView {
                     this.child(div().text_center().text_color(colors.danger).child(error))
                 }),
             State::Starting => v_flex().items_center().child(sign_in(true)),
-            State::KeyringUnavailable { error, retrying } => v_flex()
+            State::KeyringUnavailable { retrying } => v_flex()
                 .gap_3()
                 .items_center()
                 .child(
                     div()
                         .text_center()
                         .text_color(colors.danger)
-                        .child(error.clone()),
+                        .child(SAVED_SIGN_IN_UNREADABLE),
                 )
                 .child(
                     Button::new("retry-keyring")
@@ -351,6 +357,7 @@ impl Render for SignInView {
         };
 
         div()
+            .track_focus(&self.focus_handle)
             .size_full()
             .flex()
             .items_center()
@@ -378,9 +385,15 @@ impl Render for SignInView {
                                     )
                                     .child("Hardcover"),
                             )
-                            .child(div().text_center().text_color(colors.fg_muted).child(
-                                "Sign in with your Hardcover account in the browser to keep your reading library up to date.",
-                            )),
+                            // Not above "Try again": it isn't asking for a sign-in.
+                            .when(
+                                !matches!(self.state, State::KeyringUnavailable { .. }),
+                                |this| {
+                                    this.child(div().text_center().text_color(colors.fg_muted).child(
+                                        "Sign in with your Hardcover account in the browser to keep your reading library up to date.",
+                                    ))
+                                },
+                            ),
                     )
                     .child(body),
             )

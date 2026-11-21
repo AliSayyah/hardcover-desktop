@@ -22,7 +22,7 @@ use gpui_kit::{
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::store::LibraryCache;
-use hardcover_core::{Error, ListId, ReadingStatus};
+use hardcover_core::{ListId, ReadingStatus};
 
 use crate::about::open_about;
 use crate::app_state::{CoverService, Services, Startup, startup};
@@ -112,11 +112,11 @@ impl Shell {
                     }
                     Startup::SignedOut { cache } => {
                         this.cache = cache;
-                        this.show_sign_in(None, window, cx);
+                        this.show_sign_in(false, window, cx);
                     }
-                    Startup::KeyringUnavailable { cache, error } => {
+                    Startup::KeyringUnavailable { cache } => {
                         this.cache = cache;
-                        this.show_sign_in(Some(&error), window, cx);
+                        this.show_sign_in(true, window, cx);
                     }
                 }
             });
@@ -135,18 +135,18 @@ impl Shell {
         self.subscription = Some(cx.subscribe_in(
             &workspace,
             window,
-            |this, _, _: &SignedOut, window, cx| this.show_sign_in(None, window, cx),
+            |this, _, _: &SignedOut, window, cx| this.show_sign_in(false, window, cx),
         ));
         workspace.update(cx, |w, cx| w.focus_initial(window, cx));
         self.screen = Screen::Workspace(workspace);
         cx.notify();
     }
 
-    /// The sign-in screen; with `keyring_error`, the keyring couldn't be read
-    /// at startup and the screen offers to try again.
+    /// The sign-in screen; with `keyring_unavailable`, the keyring couldn't
+    /// be read at startup and the screen offers to try again.
     fn show_sign_in(
         &mut self,
-        keyring_error: Option<&Error>,
+        keyring_unavailable: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -154,9 +154,12 @@ impl Shell {
             cx.remove_global::<Services>();
         }
         ListsModel::release(cx);
-        let sign_in = cx.new(|cx| match keyring_error {
-            Some(error) => SignInView::keyring_unavailable(error, window, cx),
-            None => SignInView::new(window, cx),
+        let sign_in = cx.new(|cx| {
+            if keyring_unavailable {
+                SignInView::keyring_unavailable(window, cx)
+            } else {
+                SignInView::new(window, cx)
+            }
         });
         self.subscription =
             Some(
@@ -170,6 +173,7 @@ impl Shell {
                     this.enter_workspace(services, window, cx);
                 }),
             );
+        sign_in.update(cx, |view, cx| view.focus(window, cx));
         self.screen = Screen::SignIn(sign_in);
         cx.notify();
     }

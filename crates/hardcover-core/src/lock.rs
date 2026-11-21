@@ -78,19 +78,25 @@ mod tests {
 
     #[test]
     fn acquire_waits_for_the_holder() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("refresh.lock");
         let held = FileLock::acquire(&path).unwrap();
+        let released = Arc::new(AtomicBool::new(false));
         let waiter = {
             let path = path.clone();
+            let released = released.clone();
             std::thread::spawn(move || {
-                let started = std::time::Instant::now();
                 let _lock = FileLock::acquire(&path).unwrap();
-                started.elapsed()
+                released.load(Ordering::SeqCst)
             })
         };
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        released.store(true, Ordering::SeqCst);
         drop(held);
-        assert!(waiter.join().unwrap() >= std::time::Duration::from_millis(150));
+        // The waiter got the lock only after it was released.
+        assert!(waiter.join().unwrap());
     }
 }

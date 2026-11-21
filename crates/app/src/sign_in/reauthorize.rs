@@ -21,7 +21,7 @@ use hardcover_core::auth::{
 };
 use hardcover_core::{Client, Error, UserId};
 
-use super::keyring_message;
+use super::KEYRING_UNAVAILABLE;
 use super::sign_in_view::SIGN_IN_TIMEOUT;
 use crate::app_state::Services;
 use crate::design::{TypeRoles as _, colors};
@@ -168,7 +168,10 @@ impl Reauthorize {
         let message = match failure {
             Failure::Core(Error::Timeout) => "Sign-in timed out. Try again.".to_owned(),
             // The session's tokens live in the keyring.
-            Failure::Core(e @ Error::Storage(_)) => keyring_message(&e),
+            Failure::Core(Error::Storage(detail)) => {
+                eprintln!("hardcover: signing in again: {detail}");
+                KEYRING_UNAVAILABLE.to_owned()
+            }
             Failure::Core(e) => Services::error_message(&e, None, cx),
             Failure::OtherAccount(username) => format!(
                 "You approved as @{username}, not the account shown here. To switch accounts, sign out first."

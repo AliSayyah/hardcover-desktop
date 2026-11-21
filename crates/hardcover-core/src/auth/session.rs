@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use super::oauth;
 use super::{GrantedScopes, OAuthConfig, TokenStore, Tokens};
@@ -28,14 +29,20 @@ const REFRESH_MARGIN_MINUTES: i64 = 10;
 ///   `unauthorized_client`) signs the session out, and the store is cleared
 ///   only if it still holds the token that was rejected;
 /// - the rotated pair is used at once; if saving it fails, the save is tried
-///   again on every later call until it succeeds, and a refresh in between
-///   never adopts the spent token still in the store.
+///   again on a later call (at most every [`SAVE_RETRY_INTERVAL`]) until it
+///   succeeds, and a refresh in between never adopts the spent token still
+///   in the store.
 pub struct Session {
     cfg: OAuthConfig,
     store: Arc<dyn TokenStore>,
     http: Arc<dyn HttpTransport>,
     state: Mutex<State>,
+    save_retry_interval: Duration,
 }
+
+/// How often a failed save is tried again. Each try reads and writes the
+/// keyring, which may ask to unlock it, so not on every request.
+const SAVE_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 /// How many spent refresh tokens a session remembers: more than enough, as
 /// only the last one can still be in the store.
@@ -49,6 +56,8 @@ struct State {
     spent: Vec<String>,
     /// The tokens in memory are newer than the store's: saving them failed.
     unsaved: bool,
+    /// When saving last failed.
+    save_failed_at: Option<Instant>,
 }
 
 impl State {
@@ -160,7 +169,14 @@ impl Session {
                 tokens: Some(tokens),
                 ..State::default()
             }),
+            save_retry_interval: SAVE_RETRY_INTERVAL,
         }
+    }
+
+    #[cfg(test)]
+    fn with_save_retry_interval(mut self, interval: Duration) -> Self {
+        self.save_retry_interval = interval;
+        self
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -274,10 +290,14 @@ impl Session {
             return;
         };
         match self.store.save(tokens) {
-            Ok(()) => state.unsaved = false,
+            Ok(()) => {
+                state.unsaved = false;
+                state.save_failed_at = None;
+            }
             Err(e) => {
                 eprintln!("hardcover: could not save the refreshed sign-in, will retry: {e}");
                 state.unsaved = true;
+                state.save_failed_at = Some(Instant::now());
             }
         }
     }
@@ -372,7 +392,11 @@ fn store_lock(store: &dyn TokenStore) -> Option<FileLock> {
 impl TokenSource for Session {
     fn access_token(&self) -> Result<String> {
         let mut state = self.lock();
-        if state.unsaved {
+        if state.unsaved
+            && state
+                .save_failed_at
+                .is_none_or(|at| at.elapsed() >= self.save_retry_interval)
+        {
             self.retry_save(&mut state);
         }
         let tokens = state.tokens.as_ref().ok_or(Error::Unauthorized)?;
@@ -845,7 +869,8 @@ mod tests {
             Tokens::new("at1", Some("rt1".into()), Some(soon(2))),
             http.clone(),
         )
-        .unwrap();
+        .unwrap()
+        .with_save_retry_interval(Duration::ZERO);
         store.fail(true);
         http.push(200, ROTATED);
         // The tokens are fine in memory: the call succeeds.
@@ -865,7 +890,7 @@ mod tests {
             store.inner.load().unwrap().unwrap().refresh_token(),
             Some("rt1")
         );
-        // Once the keyring is back, the next call saves.
+        // Once the keyring is back, the next try saves.
         store.fail(false);
         assert_eq!(s.access_token().unwrap(), "at3");
         let stored = store.inner.load().unwrap().unwrap();
@@ -874,6 +899,29 @@ mod tests {
             ("at3", Some("rt3"))
         );
         assert_eq!(http.requests().len(), 2);
+    }
+
+    #[test]
+    fn failed_saves_are_retried_at_most_every_interval() {
+        let store = Arc::new(FlakyStore::default());
+        let http = Arc::new(FakeTransport::new());
+        let s = Session::start_with(
+            OAuthConfig::new("cid"),
+            store.clone(),
+            Tokens::new("at1", Some("rt1".into()), Some(soon(2))),
+            http.clone(),
+        )
+        .unwrap();
+        store.fail(true);
+        http.push(200, ROTATED);
+        assert_eq!(s.access_token().unwrap(), "at2");
+        // The keyring is back, but the last try was just now.
+        store.fail(false);
+        assert_eq!(s.access_token().unwrap(), "at2");
+        assert_eq!(
+            store.inner.load().unwrap().unwrap().refresh_token(),
+            Some("rt1")
+        );
     }
 
     #[test]
@@ -911,7 +959,12 @@ mod tests {
         http.push(200, ROTATED);
         assert_eq!(s.access_token().unwrap(), "at2");
         store.fail(false);
-        // The retry saves rt2 first; then rt2 is rejected and cleared.
+        // The store still holds rt1, spent; rt2 is rejected, and the spent
+        // token is cleared with it.
+        assert_eq!(
+            store.inner.load().unwrap().unwrap().refresh_token(),
+            Some("rt1")
+        );
         http.push(400, r#"{"error":"invalid_grant"}"#);
         assert!(!s.on_unauthorized("at2").unwrap());
         assert!(!s.is_signed_in());
