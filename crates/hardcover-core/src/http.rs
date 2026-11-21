@@ -167,6 +167,12 @@ impl HttpTransport for UreqTransport {
 
 fn map_ureq_error(e: ureq::Error) -> Error {
     match e {
+        // Nothing was sent: a definite failure, even for a write.
+        ureq::Error::Timeout(phase @ (ureq::Timeout::Resolve | ureq::Timeout::Connect)) => {
+            Error::Network(format!("could not connect ({phase})"))
+        }
+        // Possibly after the request went out (ureq reports the global
+        // timeout without its phase): a write's outcome is unknown.
         ureq::Error::Timeout(_) => Error::Timeout,
         ureq::Error::BodyExceedsLimit(n) => {
             Error::Network(format!("response larger than {n} bytes"))

@@ -6,8 +6,8 @@ mod queries;
 pub(crate) mod sdl;
 mod wire;
 
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -21,6 +21,7 @@ pub use model::*;
 pub const DOCUMENTS: &[(&str, &str)] = queries::ALL;
 
 use crate::http::{HttpRequest, HttpResponse, HttpTransport, Method, UreqTransport};
+pub use crate::ratelimit::Priority;
 use crate::ratelimit::TokenBucket;
 use crate::{Error, Result};
 pub(crate) use wire::as_i64 as wire_i64;
@@ -82,8 +83,13 @@ const TRACKED_SERIES_ROWS: u32 = 200;
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
-/// A 429 asking us to wait at most this long is retried once (after waiting).
-const MAX_AUTO_RETRY_AFTER: Duration = Duration::from_secs(15);
+/// A 429 is retried once if the retry can go out within this long: the
+/// whole wait, the server's block and the queue for the rate limit both.
+const MAX_AUTO_RETRY_WAIT: Duration = Duration::from_secs(15);
+
+/// Reads that are a step of a write (the context it needs, a read-back of
+/// what it wrote, the row it edits): the user waits on them as on the write.
+const WRITE_STEP_READS: &[&str] = &["ProgressContext", "UserBookById", "GoalById", "ListById"];
 
 /// Supplies bearer tokens to the [`Client`].
 pub trait TokenSource: Send + Sync {
@@ -112,9 +118,16 @@ pub trait TokenSource: Send + Sync {
 ///
 /// Every method blocks (including while waiting for the client-side rate limiter)
 /// and must run off the UI thread.
+///
+/// Requests that wait for the rate limit go in two lanes (see [`Priority`]).
+/// Every write, every search and every read that is a step of a write is
+/// [`Priority::Interactive`] whatever the client's priority, so no call
+/// site can forget it; the rest goes at the client's own priority,
+/// [`Priority::Background`] unless [`Client::with_priority`] says otherwise.
 #[derive(Clone)]
 pub struct Client {
     inner: Arc<Inner>,
+    priority: Priority,
 }
 
 struct Inner {
@@ -123,6 +136,9 @@ struct Inner {
     bucket: TokenBucket,
     endpoint: String,
     me_id: OnceLock<UserId>,
+    /// Held while `me` is fetched for [`Client::my_id`], so concurrent
+    /// callers wait for one request instead of each sending their own.
+    me_fetch: Mutex<()>,
 }
 
 impl std::fmt::Debug for Client {
@@ -154,8 +170,27 @@ impl Client {
                 bucket,
                 endpoint: GRAPHQL_ENDPOINT.to_owned(),
                 me_id: OnceLock::new(),
+                me_fetch: Mutex::new(()),
             }),
+            priority: Priority::Background,
         }
+    }
+
+    /// A clone whose reads wait for the rate limit at `priority`. Writes,
+    /// searches and the reads that are steps of a write are always
+    /// [`Priority::Interactive`].
+    #[must_use]
+    pub fn with_priority(&self, priority: Priority) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            priority,
+        }
+    }
+
+    /// The priority this client's reads wait at.
+    #[must_use]
+    pub fn priority(&self) -> Priority {
+        self.priority
     }
 
     // ----- reads -----
@@ -182,7 +217,17 @@ impl Client {
         Ok(user)
     }
 
+    /// The signed-in user's id, fetched once. Concurrent first callers share
+    /// one request; a failure isn't remembered, so the next call tries again.
     fn my_id(&self) -> Result<UserId> {
+        if let Some(id) = self.inner.me_id.get() {
+            return Ok(*id);
+        }
+        let _one_at_a_time = self
+            .inner
+            .me_fetch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         match self.inner.me_id.get() {
             Some(id) => Ok(*id),
             None => Ok(self.me()?.id),
@@ -1726,6 +1771,19 @@ impl Client {
 
     // ----- transport -----
 
+    /// The lane a request waits in for the rate limit.
+    fn priority_of(&self, op: &str, doc: &str) -> Priority {
+        if self.priority == Priority::Interactive
+            || is_mutation(doc)
+            || op.starts_with("Search")
+            || WRITE_STEP_READS.contains(&op)
+        {
+            Priority::Interactive
+        } else {
+            Priority::Background
+        }
+    }
+
     fn query<T: DeserializeOwned>(
         &self,
         op: &str,
@@ -1735,38 +1793,56 @@ impl Client {
     ) -> Result<T> {
         let mut body = json!({ "operationName": op, "query": doc });
         body["variables"] = variables;
+        let priority = self.priority_of(op, doc);
+        let mutation = is_mutation(doc);
         let mut auth_retried = false;
-        let mut rate_retried = false;
+        // Set once a 429 is retried: the retry must get out by then.
+        let mut retry_deadline: Option<Instant> = None;
         loop {
             let token = self.inner.tokens.access_token()?;
-            self.inner.bucket.acquire(1);
+            self.inner.bucket.acquire(priority, retry_deadline)?;
             let req = HttpRequest::new(Method::Post, &self.inner.endpoint)
                 .header("authorization", format!("Bearer {token}"))
                 .header("accept", "application/json")
                 .json(&body)
                 .timeout(timeout);
-            let resp = self.inner.http.send(req)?;
+            let resp = match self.inner.http.send(req) {
+                Ok(resp) => resp,
+                // The request went out but no answer came back: a write may
+                // have been applied. Never retried.
+                Err(Error::Timeout) if mutation => return Err(Error::OutcomeUnknown),
+                Err(e) => return Err(e),
+            };
             if resp.status == 401 && !auth_retried && self.inner.tokens.on_unauthorized(&token)? {
                 auth_retried = true;
                 continue;
             }
+            if resp.status == 504 && mutation {
+                // The gateway gave up waiting; the write may still have run.
+                return Err(Error::OutcomeUnknown);
+            }
             if resp.status == 429 {
                 // Throttled requests are rejected before they run, so retrying is
-                // safe even for mutations. Retry once if the wait is short (the
-                // per-minute bucket); the daily limit's wait is hours.
-                // A long wait (daily limit) is not fed to the bucket: callers
-                // should fail fast with `RateLimited`, not block for hours.
+                // safe even for mutations. Every waiting caller now respects the
+                // block; a long one (the daily limit) is remembered and fails
+                // the calls that follow at once. One retry, if it can go out
+                // soon enough.
                 let wait = retry_after(&resp);
-                let short = wait.filter(|w| *w <= MAX_AUTO_RETRY_AFTER);
-                self.inner.bucket.penalize(short);
-                if !rate_retried && short.is_some() {
-                    rate_retried = true;
+                self.inner.bucket.penalize(wait);
+                let short = wait.is_none_or(|w| w <= MAX_AUTO_RETRY_WAIT);
+                if retry_deadline.is_none() && short {
+                    retry_deadline = Some(Instant::now() + MAX_AUTO_RETRY_WAIT);
                     continue;
                 }
             }
             return decode_graphql(&resp);
         }
     }
+}
+
+/// Whether a document is a mutation (each holds one operation).
+fn is_mutation(doc: &str) -> bool {
+    doc.trim_start().starts_with("mutation")
 }
 
 fn read_payload(payload: Option<ReadIdPayload>, field: &str) -> Result<ReadRef> {

@@ -81,7 +81,9 @@ The workspace has two crates, in `crates/*`.
   - All fixtures must be synthetic: no real user data.
   - `HttpRequest` deliberately does not implement `Debug`, because it carries tokens.
 - `ratelimit.rs`: a client-side token bucket with burst 8 and a refill of 1 per second. Hardcover's own limits are 60 requests per minute, burst 10, and at most 10 top-level fields per request.
-  - On a 429 the client waits and retries once.
+  - Two priorities, each a FIFO lane: `Priority::Interactive` callers are admitted before any waiting `Background` one. The client classifies requests itself (`Client::priority_of`): every mutation, every search and the reads that are steps of a write (`WRITE_STEP_READS`: the progress context, read-backs, the row an edit reads first) are interactive whatever the client's priority, so no call site can forget; other reads go at the client's priority (`Client::with_priority`, `Background` by default).
+  - A 429 is a block, not a debt: no request goes out before `max(blocked until, now + Retry-After)`, and callers already waiting wake and respect a later block. A block over `LONG_BLOCK` (60 s: the daily limit) is remembered, and every call fails at once with `Error::RateLimited { retry_after }` until it ends. The throttled request is retried once, only if the retry can go out within 15 s (`MAX_AUTO_RETRY_WAIT`), queue included.
+  - A mutation that timed out after it may have been sent, or got a 504, fails with `Error::OutcomeUnknown` ("may have been saved") and is never retried. A resolve or connect timeout is a definite `Error::Network`.
   - On a 401 it calls `TokenSource::on_unauthorized` once, which refreshes the token, then retries.
 - `auth`: OAuth for a native public client.
   - Authorization code with PKCE S256, redirected to a loopback `http://127.0.0.1:<port>/callback`. `state` and `iss` are checked. A request without this sign-in's `state` gets a 400 and the wait goes on (any local program or web page can send one); each connection has 3 s in all for its request head, and Cancel is checked while it reads. A Cancel that lands during the code exchange revokes the new tokens.

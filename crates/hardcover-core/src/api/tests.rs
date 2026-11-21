@@ -681,16 +681,6 @@ fn http_errors_map_to_typed_errors() {
         Error::Api("ilike and related operations are not permitted on this server.".into())
     );
     assert_eq!(
-        run(
-            429,
-            &[("Retry-After", "86400")],
-            r#"{"error":"Too Many Requests","message":"slow down"}"#
-        ),
-        Error::RateLimited {
-            retry_after: Some(Duration::from_hours(24))
-        }
-    );
-    assert_eq!(
         run(408, &[], r#"{"error":"Request timeout"}"#),
         Error::Timeout
     );
@@ -720,6 +710,17 @@ fn http_errors_map_to_typed_errors() {
     ));
     http.push_err(Error::Timeout);
     assert_eq!(c.me(), Err(Error::Timeout));
+    // Last: the daily limit's block is remembered, so it refuses what follows.
+    assert_eq!(
+        run(
+            429,
+            &[("Retry-After", "86400")],
+            r#"{"error":"Too Many Requests","message":"slow down"}"#
+        ),
+        Error::RateLimited {
+            retry_after: Some(Duration::from_hours(24))
+        }
+    );
 }
 
 #[test]
@@ -740,7 +741,8 @@ fn rate_limited_response_waits_and_retries_once() {
     http.push_with_headers(429, &[("retry-after", "0")], "{}");
     assert!(matches!(c.me(), Err(Error::RateLimited { .. })));
 
-    // Daily limit (long wait) or no Retry-After: no retry.
+    // The daily limit (a long wait): no retry, and the block is remembered,
+    // so the calls that follow fail at once without a request.
     http.push_with_headers(429, &[("retry-after", "3600")], "{}");
     assert_eq!(
         c.me(),
@@ -748,7 +750,128 @@ fn rate_limited_response_waits_and_retries_once() {
             retry_after: Some(Duration::from_secs(3600))
         })
     );
+    let sent = http.requests().len();
+    assert!(matches!(
+        c.me(),
+        Err(Error::RateLimited { retry_after: Some(left) }) if left > Duration::from_secs(3500)
+    ));
+    assert_eq!(http.requests().len(), sent);
     assert_eq!(http.remaining(), 0);
+}
+
+#[test]
+fn a_retry_that_cant_go_out_soon_enough_fails() {
+    let tokens = TestTokens::new(false);
+    let http = Arc::new(FakeTransport::new());
+    let c = Client::with_transport(tokens, http.clone(), TokenBucket::new(5, 50.0));
+    // 30 s is waited out by the queue, but past the retry's 15 s cap.
+    http.push_with_headers(429, &[("retry-after", "30")], "{}");
+    let start = std::time::Instant::now();
+    assert_eq!(
+        c.me(),
+        Err(Error::RateLimited {
+            retry_after: Some(Duration::from_secs(30))
+        })
+    );
+    assert!(start.elapsed() < Duration::from_secs(1));
+    assert_eq!(http.requests().len(), 1);
+}
+
+#[test]
+fn writes_searches_and_their_reads_are_interactive() {
+    let (c, _) = client(TestTokens::new(false));
+    for (name, doc) in queries::ALL {
+        let op = doc
+            .split_whitespace()
+            .nth(1)
+            .and_then(|w| w.split(['(', '{']).next())
+            .unwrap();
+        let interactive = is_mutation(doc)
+            || op.starts_with("Search")
+            || WRITE_STEP_READS.contains(&op);
+        let expected = if interactive {
+            Priority::Interactive
+        } else {
+            Priority::Background
+        };
+        assert_eq!(c.priority_of(op, doc), expected, "{name}");
+    }
+    assert_eq!(
+        c.priority_of("LibraryPage", queries::LIBRARY_PAGE),
+        Priority::Background
+    );
+    assert_eq!(
+        c.priority_of("UpdateUserBook", queries::UPDATE_USER_BOOK),
+        Priority::Interactive
+    );
+    assert_eq!(
+        c.priority_of("SearchBooks", queries::SEARCH_BOOKS),
+        Priority::Interactive
+    );
+    // A client can raise its own reads.
+    let interactive = c.with_priority(Priority::Interactive);
+    assert_eq!(
+        interactive.priority_of("LibraryPage", queries::LIBRARY_PAGE),
+        Priority::Interactive
+    );
+    for (op, _) in WRITE_STEP_READS.iter().map(|op| (op, ())) {
+        assert!(
+            queries::ALL
+                .iter()
+                .any(|(_, doc)| doc.contains(&format!("query {op}("))),
+            "{op} names no query"
+        );
+    }
+}
+
+#[test]
+fn a_write_without_an_answer_is_unconfirmed_and_not_retried() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push_err(Error::Timeout);
+    assert_eq!(
+        c.set_privacy(UserBookId::new(3), Privacy::Private),
+        Err(Error::OutcomeUnknown)
+    );
+    http.push(504, r#"{"error":"Gateway Timeout"}"#);
+    assert_eq!(
+        c.set_privacy(UserBookId::new(3), Privacy::Private),
+        Err(Error::OutcomeUnknown)
+    );
+    // A failure to connect never reached Hardcover: a definite failure.
+    http.push_err(Error::Network("could not connect (connect)".into()));
+    assert!(matches!(
+        c.set_privacy(UserBookId::new(3), Privacy::Private),
+        Err(Error::Network(_))
+    ));
+    // A read that times out is just a timeout.
+    http.push_err(Error::Timeout);
+    assert_eq!(c.me(), Err(Error::Timeout));
+    assert_eq!(http.requests().len(), 4);
+}
+
+#[test]
+fn concurrent_first_callers_share_one_me_request() {
+    let (c, http) = client(TestTokens::new(false));
+    // One `me`, then each caller's own goals request.
+    http.push(200, &data(json!({"me": [{"id": 7, "username": "u"}]})));
+    for _ in 0..4 {
+        http.push(200, &data(json!({"goals": []})));
+    }
+    let threads: Vec<_> = (0..4)
+        .map(|_| {
+            let c = c.clone();
+            std::thread::spawn(move || c.goals().unwrap())
+        })
+        .collect();
+    for t in threads {
+        t.join().unwrap();
+    }
+    let me_requests = http
+        .requests()
+        .iter()
+        .filter(|r| r.json.as_ref().unwrap()["operationName"] == "Me")
+        .count();
+    assert_eq!(me_requests, 1);
 }
 
 #[test]
