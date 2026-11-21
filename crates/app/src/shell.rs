@@ -34,6 +34,7 @@ use crate::catalog::series_view::SeriesView;
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{SIDEBAR_SHELVES, count_text, relative_time, status_label};
+use crate::freshness;
 use crate::goals::model::GoalsModel;
 use crate::goals::sidebar::GoalsSection;
 use crate::home::home_view::HomeView;
@@ -339,6 +340,7 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     this.model.update(cx, LibraryModel::sync_if_stale);
+                    this.revalidate_visible(false, window, cx);
                 }
             }),
             cx.observe(&updates, |_, _, cx| cx.notify()),
@@ -441,7 +443,51 @@ impl Workspace {
                 });
             }
         }
+        self.revalidate_visible(true, window, cx);
         cx.notify();
+    }
+
+    /// Asks the views on screen to fetch again what they show that is stale
+    /// ([`crate::freshness`]): the top page (and its book pane), else the
+    /// destination's catalogue content. Views can't tell whether they are
+    /// shown, so only these are asked, on Refresh, when the window becomes
+    /// active, and when a page or destination is shown again
+    /// (`shown_again`).
+    fn revalidate_visible(
+        &mut self,
+        shown_again: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.pages.current() {
+            Some(Page::Series(_)) => self
+                .series_page
+                .update(cx, |p, cx| p.revalidate(shown_again, window, cx)),
+            Some(Page::Author(_)) => self
+                .author_page
+                .update(cx, |p, cx| p.revalidate(shown_again, window, cx)),
+            Some(Page::Book(_)) => self
+                .book_page
+                .update(cx, |p, cx| p.revalidate(shown_again, cx)),
+            // Follows the library and the upcoming books.
+            Some(Page::Upcoming) => {}
+            None => match self.destination {
+                Destination::Search => self
+                    .search
+                    .update(cx, |s, cx| s.revalidate(shown_again, cx)),
+                Destination::Discover => self
+                    .discover
+                    .update(cx, |d, cx| d.revalidate(shown_again, window, cx)),
+                Destination::Shelf(_) => self
+                    .library
+                    .update(cx, |l, cx| l.revalidate(shown_again, cx)),
+                Destination::List(_) => self
+                    .list_page
+                    .update(cx, |l, cx| l.revalidate(shown_again, cx)),
+                // Worked out from the library and models that follow it.
+                Destination::Home | Destination::Series | Destination::Stats => {}
+            },
+        }
     }
 
     // ----- catalogue pages -----
@@ -463,6 +509,7 @@ impl Workspace {
         if self.pages.current().is_some() {
             self.show_page(window, cx);
         } else {
+            self.revalidate_visible(true, window, cx);
             self.focus_destination(window, cx);
             cx.notify();
         }
@@ -481,6 +528,7 @@ impl Workspace {
             Some(Page::Upcoming) => {}
             None => return,
         }
+        self.revalidate_visible(true, window, cx);
         self.focus_page(window, cx);
         cx.notify();
     }
@@ -583,7 +631,9 @@ impl Workspace {
         cx.notify();
     }
 
-    fn refresh(&mut self, cx: &mut Context<Self>) {
+    fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        freshness::refresh_all(cx);
+        self.revalidate_visible(true, window, cx);
         self.model.update(cx, LibraryModel::sync);
         self.goals.update(cx, GoalsModel::load);
         self.lists.update(cx, ListsModel::reload);
@@ -1146,7 +1196,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.show(Destination::Search, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh(cx)))
+            .on_action(cx.listener(|this, _: &Refresh, window, cx| this.refresh(window, cx)))
             .on_action(cx.listener(|this, _: &GoBack, window, cx| this.go_back(window, cx)))
             .on_action(
                 cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),

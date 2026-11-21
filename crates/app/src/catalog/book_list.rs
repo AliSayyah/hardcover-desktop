@@ -193,6 +193,16 @@ impl ListPane {
         });
     }
 
+    /// Fetches the pane's book again if it is stale ([`crate::freshness`]),
+    /// when the pane is beside the list. `shown_again` allows changes that
+    /// move what the reader is looking at (see [`BookDetailView::revalidate`]).
+    pub fn revalidate(&self, shown_again: bool, cx: &mut App) {
+        if self.beside.get() {
+            self.detail
+                .update(cx, |detail, cx| detail.revalidate(shown_again, cx));
+        }
+    }
+
     /// The page: `column` (its header and list, as without the pane) alone,
     /// or at its frame's width beside the pane when the region is wide.
     pub fn layout<D: ListDelegate>(
@@ -286,6 +296,27 @@ pub fn select_on_click<D: ListDelegate>(
             cx.notify();
         });
     })
+}
+
+/// Replaces the list's rows after its page was fetched again, keeping the
+/// selected book selected at its new row, so the pane beside the list keeps
+/// showing it; nothing stays selected if the book is gone.
+pub fn replace_rows(
+    list: &Entity<ListState<CatalogBooks>>,
+    rows: Vec<CatalogRow>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    list.update(cx, |list, cx| {
+        let selected = list
+            .selected_index()
+            .and_then(|ix| list.delegate().rows.get(ix.row))
+            .map(|row| row.book.id);
+        let row = selected.and_then(|id| rows.iter().position(|r| r.book.id == id));
+        list.delegate_mut().set_rows(rows);
+        list.set_selected_index(row.map(IndexPath::new), window, cx);
+        cx.notify();
+    });
 }
 
 /// One book and its secondary line.

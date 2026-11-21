@@ -57,6 +57,7 @@ use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
 use crate::app_state::{Services, release_cover_medium};
 use crate::design::size;
 use crate::format::read_dates_text;
+use crate::freshness::Fetched;
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::library::writes;
 use crate::lists::book_lists;
@@ -130,8 +131,18 @@ fn notes_differ(text: &str, saved: Option<&str>) -> bool {
 }
 
 enum Details {
-    Loaded(Arc<BookDetails>),
+    /// Kept for the run, fetched again when stale ([`crate::freshness`]).
+    Loaded(Fetched<Arc<BookDetails>>),
     Failed(SharedString),
+}
+
+impl Details {
+    fn loaded(&self) -> Option<&Arc<BookDetails>> {
+        match self {
+            Details::Loaded(fetched) => Some(fetched.value()),
+            Details::Failed(_) => None,
+        }
+    }
 }
 
 /// Whether a book pane `width` wide takes the page's rail: inside its inset,
@@ -287,6 +298,15 @@ impl BookDetailView {
         if self.subject == subject {
             return;
         }
+        if let (Some(Subject::Book(shown)), Some(Subject::Book(book))) = (&self.subject, &subject)
+            && shown.id == book.id
+        {
+            // The same book with newer facts (its list's page was fetched
+            // again): everything the pane shows of it stays as it is.
+            self.subject = subject;
+            cx.notify();
+            return;
+        }
         self.subject = subject;
         self.shown = None;
         self.sync_controls(window, cx);
@@ -301,6 +321,30 @@ impl BookDetailView {
         self.load_similar(cx);
         self.community_reviews_subject_changed(cx);
         cx.notify();
+    }
+
+    /// Fetches again whatever the view shows that is stale
+    /// ([`crate::freshness`]): the details (after [`DETAILS_DELAY`]), similar
+    /// books and other readers' reviews, keeping them on screen meanwhile.
+    /// The shell calls it for the visible views. `shown_again` (Refresh, or
+    /// the page shown again) lets reviews the reader paged through be
+    /// replaced by a fresh first page; without it (the window became active)
+    /// only a single page is.
+    ///
+    /// A failed fetch is tried again only with `shown_again`: offline, every
+    /// return to the window would otherwise send a request and flash the
+    /// placeholder.
+    pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
+        let Some(book) = self.book(cx).map(|b| b.id) else {
+            return;
+        };
+        if shown_again || !matches!(self.details.get(&book), Some(Details::Failed(_))) {
+            self.load_details(cx);
+        }
+        if shown_again || !matches!(self.similar.get(&book), Some(Similar::Failed(_))) {
+            self.load_similar(cx);
+        }
+        self.revalidate_reviews(shown_again, cx);
     }
 
     /// Makes this view the full book page: its tools go to the object bar the
@@ -410,13 +454,18 @@ impl BookDetailView {
         let Some(book) = self.book(cx) else {
             return;
         };
-        if matches!(self.details.get(&book.id), Some(Details::Loaded(_))) {
-            return;
-        }
+        let revalidating = match self.details.get(&book.id) {
+            Some(Details::Loaded(fetched)) if !fetched.is_stale(cx) => return,
+            Some(Details::Loaded(_)) => true,
+            Some(Details::Failed(_)) | None => false,
+        };
         if self.details_loading == Some(book.id) {
             return;
         }
-        self.details.remove(&book.id);
+        // Stale details stay on screen while they are fetched again.
+        if !revalidating {
+            self.details.remove(&book.id);
+        }
         self.details_loading = Some(book.id);
         self.details_fetching = None;
         let client = Services::global(cx).client().clone();
@@ -441,13 +490,25 @@ impl BookDetailView {
                 if this.details_fetching == Some(id) {
                     this.details_fetching = None;
                 }
-                let details = match result {
-                    Ok(d) => Details::Loaded(Arc::new(d)),
-                    Err(e) => {
-                        Details::Failed(Services::error_message(&e, Some(READ_CATALOG), cx).into())
+                let result = result.map(Arc::new);
+                match (this.details.get_mut(&id), result) {
+                    // A refetch: a failure keeps the details shown, and only
+                    // records a refused scope.
+                    (Some(Details::Loaded(fetched)), result) => {
+                        if let Err(e) = &result {
+                            Services::error_message(e, Some(READ_CATALOG), cx);
+                        }
+                        fetched.refetched(result, cx);
                     }
-                };
-                this.details.insert(id, details);
+                    (_, Ok(details)) => {
+                        this.details
+                            .insert(id, Details::Loaded(Fetched::new(details, cx)));
+                    }
+                    (_, Err(e)) => {
+                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        this.details.insert(id, Details::Failed(message.into()));
+                    }
+                }
                 this.load_similar(cx);
                 this.load_community_reviews(cx);
                 cx.notify();
@@ -1138,10 +1199,11 @@ impl Render for BookDetailView {
             return EmptyState::new(IconName::BookOpen, "Select a book to see its details")
                 .into_any_element();
         };
-        let details = match self.details.get(&book.id) {
-            Some(Details::Loaded(d)) => Some(d.clone()),
-            _ => None,
-        };
+        let details = self
+            .details
+            .get(&book.id)
+            .and_then(Details::loaded)
+            .cloned();
         if self.tools_in_bar {
             self.render_page(&book, entry.as_ref(), details.as_deref(), window, cx)
         } else {
@@ -1153,7 +1215,84 @@ impl Render for BookDetailView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui_kit::px;
+    use gpui_kit::{TestAppContext, VisualTestContext, px};
+    use hardcover_core::auth::GrantedScopes;
+    use hardcover_core::store::LibraryCache;
+
+    /// Project Hail Mary in the demo catalogue: more than a page of reviews.
+    pub(super) const BOOK: BookId = BookId::new(427_578);
+
+    /// A book pane on the demo client, showing [`BOOK`] once its details,
+    /// similar books and first page of reviews are in.
+    pub(super) fn demo_pane(
+        cx: &mut TestAppContext,
+    ) -> (Entity<BookDetailView>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+            let client = hardcover_core::demo::client();
+            cx.set_global(Services::new(client, None, cache, GrantedScopes::all()));
+        });
+        let model = cx.new(|_| LibraryModel::new());
+        let (view, cx) = cx.add_window_view(|window, cx| BookDetailView::new(model, window, cx));
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let book = BookSummary::new(BOOK, "Project Hail Mary");
+                view.set_subject(Some(Subject::Book(book)), window, cx);
+            });
+        });
+        settle(cx);
+        (view, cx)
+    }
+
+    /// Past every delay, with every fetch landed.
+    pub(super) fn settle(cx: &mut VisualTestContext) {
+        for _ in 0..3 {
+            cx.executor().advance_clock(Duration::from_secs(1));
+            cx.run_until_parked();
+        }
+    }
+
+    fn details_stale(view: &Entity<BookDetailView>, cx: &mut VisualTestContext) -> Option<bool> {
+        view.read_with(cx, |view, cx| match view.details.get(&BOOK)? {
+            Details::Loaded(fetched) => Some(fetched.is_stale(cx)),
+            Details::Failed(_) => None,
+        })
+    }
+
+    #[gpui_kit::test]
+    fn a_failure_is_tried_again_on_refresh_not_on_activation(cx: &mut TestAppContext) {
+        let (view, cx) = demo_pane(cx);
+        let loading = |view: &Entity<BookDetailView>, cx: &mut VisualTestContext| {
+            view.read_with(cx, |view, _| view.details_loading == Some(BOOK))
+        };
+        view.update(cx, |view, _| {
+            view.details.insert(BOOK, Details::Failed("offline".into()));
+        });
+        view.update(cx, |view, cx| view.revalidate(false, cx));
+        assert!(!loading(&view, cx), "the window became active: left alone");
+        view.update(cx, |view, cx| view.revalidate(true, cx));
+        assert!(loading(&view, cx), "Refresh, or shown again: tried again");
+        settle(cx);
+        assert_eq!(details_stale(&view, cx), Some(false));
+    }
+
+    #[gpui_kit::test]
+    fn stale_details_stay_on_screen_while_fetched_again(cx: &mut TestAppContext) {
+        let (view, cx) = demo_pane(cx);
+        assert_eq!(details_stale(&view, cx), Some(false));
+
+        cx.update(|_, cx| crate::freshness::refresh_all(cx));
+        assert_eq!(details_stale(&view, cx), Some(true));
+        view.update(cx, |view, cx| view.revalidate(false, cx));
+        assert_eq!(
+            details_stale(&view, cx),
+            Some(true),
+            "still shown while the fetch waits"
+        );
+        settle(cx);
+        assert_eq!(details_stale(&view, cx), Some(false), "fetched again");
+    }
 
     #[test]
     fn the_pane_takes_the_rail_only_when_a_main_column_fits_beside_it() {

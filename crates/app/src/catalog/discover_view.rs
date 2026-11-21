@@ -21,10 +21,11 @@ use hardcover_core::{BookSummary, TrendingPeriod};
 
 use super::book_list::{
     CatalogBooks, CatalogRow, ListPane, follow_list, load_failed, new_list, page_body, page_header,
-    page_list, page_loading, row_details,
+    page_list, page_loading, replace_rows, row_details,
 };
 use crate::app_state::Services;
 use crate::format::authors_text;
+use crate::freshness::Fetched;
 use crate::library::model::LibraryModel;
 use crate::ui::PageHeader;
 use crate::ui::kit::SmallControl as _;
@@ -68,7 +69,8 @@ fn period_description(period: TrendingPeriod) -> &'static str {
 }
 
 enum Loaded {
-    Ready(Arc<Vec<BookSummary>>),
+    /// Kept for the run, fetched again when stale ([`crate::freshness`]).
+    Ready(Fetched<Arc<Vec<BookSummary>>>),
     Failed(SharedString),
 }
 
@@ -77,6 +79,9 @@ pub struct DiscoverView {
     /// Periods fetched this session.
     periods: HashMap<TrendingPeriod, Loaded>,
     loading: Option<TrendingPeriod>,
+    /// The fetch running was asked for with the Refresh button, which shows
+    /// it; a stale period fetched again on its own does so quietly.
+    refreshing: bool,
     task: Option<Task<()>>,
     list: Entity<ListState<CatalogBooks>>,
     /// The selected book, beside the list when the window is wide.
@@ -109,6 +114,7 @@ impl DiscoverView {
             period: TrendingPeriod::Month,
             periods: HashMap::new(),
             loading: None,
+            refreshing: false,
             task: None,
             list,
             pane,
@@ -118,7 +124,8 @@ impl DiscoverView {
         }
     }
 
-    /// Loads the shown period if this session has not yet.
+    /// Loads the shown period if this session has not yet, or again if it
+    /// is stale.
     pub fn show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.load(false, window, cx);
         self.fill_list(window, cx);
@@ -155,16 +162,23 @@ impl DiscoverView {
         cx.notify();
     }
 
+    /// Fetches the shown period's books if there are none, or they are
+    /// stale, or `again` (the Refresh button). Books already shown stay
+    /// while they are fetched again.
     fn load(&mut self, again: bool, window: &mut Window, cx: &mut Context<Self>) {
         let period = self.period;
-        let ready = matches!(self.periods.get(&period), Some(Loaded::Ready(_)));
-        if (ready && !again) || self.loading == Some(period) {
+        let (ready, stale) = match self.periods.get(&period) {
+            Some(Loaded::Ready(fetched)) => (true, fetched.is_stale(cx)),
+            Some(Loaded::Failed(_)) | None => (false, false),
+        };
+        if (ready && !again && !stale) || self.loading == Some(period) {
             return;
         }
         if !ready {
             self.periods.remove(&period);
         }
         self.loading = Some(period);
+        self.refreshing = again;
         let client = Services::global(cx).client().clone();
         // Replacing the task drops the fetch for a period no longer shown.
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -175,21 +189,36 @@ impl DiscoverView {
                 if this.loading == Some(period) {
                     this.loading = None;
                 }
-                match result {
-                    Ok(books) => {
-                        this.periods.insert(period, Loaded::Ready(Arc::new(books)));
-                        // Refill even if this period was listed: these are newer.
-                        if this.listed == Some(period) {
-                            this.listed = None;
+                let asked = std::mem::take(&mut this.refreshing);
+                let result = result.map(Arc::new);
+                match (this.periods.get_mut(&period), result) {
+                    // A failed refresh keeps the books already shown; only
+                    // the Refresh button says so.
+                    (Some(Loaded::Ready(fetched)), Err(e)) => {
+                        fetched.refetched(Err(()), cx);
+                        // Records a refused scope even when nothing is said.
+                        let message = Services::error_message(&e, Some(READ_CATALOG), cx);
+                        if asked {
+                            window.push_notification(
+                                Notification::error(message).title("Couldn't refresh Discover"),
+                                cx,
+                            );
                         }
                     }
-                    // A failed refresh keeps the books already shown.
-                    Err(e) if this.periods.contains_key(&period) => window.push_notification(
-                        Notification::error(Services::error_message(&e, Some(READ_CATALOG), cx))
-                            .title("Couldn't refresh Discover"),
-                        cx,
-                    ),
-                    Err(e) => {
+                    // Newer books replace the rows, keeping the selected one.
+                    (Some(Loaded::Ready(fetched)), Ok(books)) => {
+                        if fetched.refetched(Ok::<_, ()>(books), cx)
+                            && this.listed == Some(period)
+                            && let Some(rows) = this.rows(period)
+                        {
+                            replace_rows(&this.list, rows, window, cx);
+                        }
+                    }
+                    (_, Ok(books)) => {
+                        this.periods
+                            .insert(period, Loaded::Ready(Fetched::new(books, cx)));
+                    }
+                    (_, Err(e)) => {
                         this.periods.insert(
                             period,
                             Loaded::Failed(
@@ -213,16 +242,9 @@ impl DiscoverView {
         if self.listed == Some(period) {
             return;
         }
-        let Some(Loaded::Ready(books)) = self.periods.get(&period) else {
+        let Some(rows) = self.rows(period) else {
             return;
         };
-        let rows: Vec<CatalogRow> = books
-            .iter()
-            .map(|book| CatalogRow {
-                details: row_details(&[authors_text(&book.authors)], book),
-                book: book.clone(),
-            })
-            .collect();
         self.listed = Some(period);
         self.list.update(cx, |list, cx| {
             list.delegate_mut().set_rows(rows);
@@ -231,9 +253,36 @@ impl DiscoverView {
         });
     }
 
+    /// The list's rows for a loaded period.
+    fn rows(&self, period: TrendingPeriod) -> Option<Vec<CatalogRow>> {
+        let Some(Loaded::Ready(books)) = self.periods.get(&period) else {
+            return None;
+        };
+        let rows = books
+            .value()
+            .iter()
+            .map(|book| CatalogRow {
+                details: row_details(&[authors_text(&book.authors)], book),
+                book: book.clone(),
+            })
+            .collect();
+        Some(rows)
+    }
+
+    /// Fetches the shown period again if it is stale ([`crate::freshness`]),
+    /// and the book in the pane beside the list.
+    /// A failed period is tried again only with `shown_again`.
+    pub fn revalidate(&mut self, shown_again: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let failed = matches!(self.periods.get(&self.period), Some(Loaded::Failed(_)));
+        if shown_again || !failed {
+            self.load(false, window, cx);
+        }
+        self.pane.revalidate(shown_again, cx);
+    }
+
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity().downgrade();
-        let refreshing = self.loading == Some(self.period) && self.is_ready();
+        let refreshing = self.refreshing && self.loading == Some(self.period) && self.is_ready();
         let selected = PERIODS.iter().position(|p| *p == self.period).unwrap_or(0);
         v_flex()
             .gap_4()
