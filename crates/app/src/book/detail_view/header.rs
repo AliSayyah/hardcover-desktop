@@ -41,7 +41,7 @@ use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::session;
 use crate::ui::TextButton;
-use crate::ui::kit::{SmallIconButton as _, danger_menu_item};
+use crate::ui::kit::{KeyboardRing as _, SmallIconButton as _, danger_menu_item};
 
 /// Genres shown in the header. With more, every genre is in the Tags block.
 pub(super) const HEADER_GENRES: usize = 6;
@@ -164,7 +164,7 @@ impl BookDetailView {
             // In a row, so a lone button keeps its own width rather than
             // stretching across the column.
             .child(h_flex().child(match entry {
-                Some(entry) => self.render_actions(entry, cx),
+                Some(entry) => self.render_actions(entry, window, cx),
                 None => self.render_add(book, cx),
             }));
 
@@ -250,7 +250,12 @@ impl BookDetailView {
 
     /// The status menu button, then the rating control (or a book not in the
     /// library: "Add to library").
-    fn render_actions(&self, entry: &LibraryEntry, cx: &mut Context<Self>) -> AnyElement {
+    fn render_actions(
+        &self,
+        entry: &LibraryEntry,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let busy = pending.is_some();
         let can_write = Self::can_write(cx);
@@ -262,7 +267,9 @@ impl BookDetailView {
             .shown(entry.user_book_id)
             .unwrap_or(entry.rating);
         let view = cx.entity().downgrade();
+        let trigger = self.status_focus.clone();
         let status_button = Button::new("book-status")
+            .keyboard_ring(&self.status_focus, window)
             .icon(status_icon(status))
             .label(status_label(status))
             .dropdown_caret(true)
@@ -276,11 +283,15 @@ impl BookDetailView {
                 let mut menu = menu.check_side(Side::Right);
                 for option in ReadingStatus::ALL {
                     let view = view.clone();
+                    let trigger = trigger.clone();
                     menu = menu.item(
                         PopupMenuItem::new(status_label(option))
                             .icon(status_icon(option))
                             .checked(option == status)
                             .on_click(move |_, window, cx| {
+                                // From the trigger, so a confirmation gives
+                                // focus back to it, not to the closed menu.
+                                window.focus(&trigger, cx);
                                 let _ = view
                                     .update(cx, |this, cx| this.change_status(option, window, cx));
                             }),

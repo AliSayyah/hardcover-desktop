@@ -451,16 +451,15 @@ mod tests {
         assert_eq!(stepped_value(None, false), None);
     }
 
+    /// The value a test owns, and the changes passed on to it.
+    type Owned = (Rc<std::cell::Cell<Option<Rating>>>, Rc<std::cell::Cell<usize>>);
+
     /// A host for one control over a value the test owns, counting every
     /// change passed on.
     fn host_stars(
         cx: &mut gpui_kit::TestAppContext,
         start: Option<Rating>,
-    ) -> (
-        Rc<std::cell::Cell<Option<Rating>>>,
-        Rc<std::cell::Cell<usize>>,
-        &mut gpui_kit::VisualTestContext,
-    ) {
+    ) -> (Owned, &mut gpui_kit::VisualTestContext) {
         use crate::ui::test_support::{host, tab};
         use gpui_kit::IntoElement as _;
         use std::cell::Cell;
@@ -486,7 +485,7 @@ mod tests {
             window.activate_window();
         });
         tab(cx);
-        (value, changes, cx)
+        ((value, changes), cx)
     }
 
     /// D18: the arrows move the stars shown, and the value they reach is
@@ -495,7 +494,7 @@ mod tests {
     fn keys_pass_on_one_change_after_they_rest(cx: &mut gpui_kit::TestAppContext) {
         use crate::ui::test_support::{press, redraw};
 
-        let (value, changes, cx) = host_stars(cx, r(3.0));
+        let ((value, changes), cx) = host_stars(cx, r(3.0));
         for key in ["right", "right", "right", "left"] {
             press(cx, key);
             redraw(cx);
@@ -526,7 +525,7 @@ mod tests {
     fn enter_blur_and_delete_pass_on_at_once(cx: &mut gpui_kit::TestAppContext) {
         use crate::ui::test_support::{press, redraw};
 
-        let (value, changes, cx) = host_stars(cx, None);
+        let ((value, changes), cx) = host_stars(cx, None);
         press(cx, "right");
         press(cx, "right");
         press(cx, "enter");

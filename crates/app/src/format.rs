@@ -126,6 +126,15 @@ pub fn bar_percent(fraction: f64) -> f32 {
     percent
 }
 
+/// "page 418" or "2h 5m": where the open read is, for a line of text.
+pub fn short_position(progress: &ProgressSummary) -> Option<String> {
+    match (progress.page, progress.seconds) {
+        (Some(page), _) => Some(format!("page {}", count_text(page))),
+        (None, Some(seconds)) => Some(duration_text(seconds)),
+        (None, None) => None,
+    }
+}
+
 /// Progress of the entry's unfinished read, if it has one, in the unit of
 /// [`LibraryEntry::measure`]: pages, or time for an audiobook.
 pub fn progress_summary(entry: &LibraryEntry) -> ProgressSummary {

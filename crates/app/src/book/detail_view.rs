@@ -52,7 +52,8 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{ElementExt as _, IconName, WindowExt as _, v_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _,
+    IntoElement,
     ParentElement as _, Pixels, Render, RenderImage, SharedString, Styled as _, Subscription, Task,
     Window, div,
 };
@@ -259,6 +260,9 @@ pub struct BookDetailView {
     community_reviews: CommunityReviews,
     /// Ratings asked for and not yet saved.
     ratings: Entity<Ratings>,
+    /// The status menu's trigger, which its commands and their
+    /// confirmations give focus back to.
+    status_focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -347,6 +351,7 @@ impl BookDetailView {
             review,
             community_reviews: CommunityReviews::default(),
             ratings,
+            status_focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
     }
@@ -666,30 +671,18 @@ impl BookDetailView {
         self.entry(self.model.read(cx)).cloned()
     }
 
+    /// Moves the entry to `status`, asking first when that starts or
+    /// finishes a read (`writes::change_status`).
     fn change_status(
         &mut self,
         status: ReadingStatus,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(entry) = self.current_entry(cx) else {
+        let Some(id) = self.entry(self.model.read(cx)).map(|e| e.user_book_id) else {
             return;
         };
-        if entry.status == status {
-            return;
-        }
-        let id = entry.user_book_id;
-        self.run_write(
-            LibraryWrite::entry(
-                id,
-                WriteKind::Status,
-                "Couldn't change the status",
-                move |client| client.set_status(id, status),
-            ),
-            |_| None,
-            window,
-            cx,
-        );
+        writes::change_status(&self.model, id, status, window, cx);
     }
 
     /// Saves a rating, now or once the write running on the entry ends
@@ -1308,6 +1301,108 @@ mod tests {
         catalog
             .details
             .read_with(cx, |s, _| s.resource().is_loading(&BOOK))
+    }
+
+    /// A book view inside the kit's root (dialogs need it), on the demo
+    /// library, synced.
+    pub(super) fn rooted_view(
+        cx: &mut TestAppContext,
+    ) -> (Entity<BookDetailView>, Entity<LibraryModel>, &mut VisualTestContext) {
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::ui::kit::bind_keys(cx);
+            session.install(cx);
+            Catalog::init(&session, cx);
+        });
+        let model = cx.new(|_| LibraryModel::new(session));
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let view = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let (_, cx) = cx.add_window_view({
+            let (model, view) = (model.clone(), view.clone());
+            move |window, cx| {
+                let detail = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
+                *view.borrow_mut() = Some(detail.clone());
+                gpui_kit::base::Root::new(detail, window, cx)
+            }
+        });
+        cx.update(|window, _| window.activate_window());
+        let view = view.borrow_mut().take().unwrap();
+        (view, model, cx)
+    }
+
+    /// Shows the first entry with `status` that `matches`.
+    pub(super) fn show_entry(
+        view: &Entity<BookDetailView>,
+        model: &Entity<LibraryModel>,
+        cx: &mut VisualTestContext,
+        matches: impl Fn(&LibraryEntry) -> bool,
+    ) -> UserBookId {
+        let id = model.read_with(cx, |m, _| {
+            m.entries()
+                .iter()
+                .find(|e| matches(e))
+                .map(|e| e.user_book_id)
+                .expect("the demo has such an entry")
+        });
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.set_subject(Some(Subject::Entry(id)), window, cx);
+            });
+        });
+        settle(cx);
+        crate::ui::test_support::redraw(cx);
+        id
+    }
+
+    fn dialog_open(cx: &mut VisualTestContext) -> bool {
+        cx.update(gpui_kit::component::WindowExt::has_active_dialog)
+    }
+
+    /// D3: moving a paused book back to Currently reading asks first; Cancel
+    /// changes nothing and gives focus back to the status menu's trigger.
+    #[gpui_kit::test]
+    fn a_status_change_that_starts_a_read_asks_first(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (view, model, cx) = rooted_view(cx);
+        let id = show_entry(&view, &model, cx, |e| {
+            e.status == ReadingStatus::Paused && e.open_read().is_some()
+        });
+        let trigger = view.read_with(cx, |v, _| v.status_focus.clone());
+        cx.update(|window, cx| {
+            window.focus(&trigger, cx);
+            view.update(cx, |v, cx| {
+                v.change_status(ReadingStatus::CurrentlyReading, window, cx);
+            });
+        });
+        redraw(cx);
+        redraw(cx);
+        assert!(dialog_open(cx), "asked first");
+        press(cx, "enter");
+        cx.run_until_parked();
+        redraw(cx);
+        assert!(!dialog_open(cx), "Cancel, where focus opened");
+        let status = model.read_with(cx, |m, _| m.entry(id).map(|e| e.status));
+        assert_eq!(status, Some(ReadingStatus::Paused), "nothing changed");
+        assert!(
+            cx.update(|window, _| trigger.is_focused(window)),
+            "focus is back on the status menu's trigger"
+        );
+
+        // A change that starts nothing goes at once.
+        cx.update(|window, cx| {
+            view.update(cx, |v, cx| {
+                v.change_status(ReadingStatus::DidNotFinish, window, cx);
+            });
+        });
+        redraw(cx);
+        assert!(!dialog_open(cx));
+        cx.run_until_parked();
+        let status = model.read_with(cx, |m, _| m.entry(id).map(|e| e.status));
+        assert_eq!(status, Some(ReadingStatus::DidNotFinish));
     }
 
     #[gpui_kit::test]

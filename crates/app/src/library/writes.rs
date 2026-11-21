@@ -5,10 +5,12 @@ use std::collections::HashMap;
 use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::{App, Context, Entity, Subscription, Window};
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
-use hardcover_core::{BookId, EditionId, Rating, ReadingStatus, UserBookId};
+use hardcover_core::{BookId, EditionId, LibraryEntry, Rating, ReadingStatus, UserBookId};
 
 use super::model::{LibraryModel, LibraryWrite, WriteKind, WriteOutcome};
+use crate::format::{progress_summary, short_position};
 use crate::session;
+use crate::ui::kit::open_alert_dialog;
 
 /// Adds a book with `status`.
 pub(crate) fn add_to_library(
@@ -39,6 +41,114 @@ pub(crate) fn set_status(
         move |client| client.set_status(id, status),
     );
     drop(library.update(cx, |model, cx| model.write(write, window, cx)));
+}
+
+/// What moving an entry to another status does to its reads, and so
+/// whether to ask first (the rules Home follows: "Start reading" goes at
+/// once, "Mark as read…" asks).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StatusChange {
+    /// Starts or finishes nothing: made at once.
+    Now,
+    /// Starts a new read (to Currently reading from anything but Want to
+    /// read) or finishes one (to Read): asked first, saying what happens.
+    Confirm {
+        title: String,
+        description: String,
+        ok: &'static str,
+    },
+}
+
+/// The change from `entry`'s status to `to`, or `None` if it has it.
+///
+/// - **To Currently reading** starts a new read on Hardcover, whatever the
+///   entry had. From Want to read that is the point ("Start reading"), so it
+///   goes at once; from anything else the reader may expect the read they
+///   had to carry on, so it asks, naming where an unfinished read stays.
+/// - **To Read** finishes the open read today, or marks the book read today
+///   when none is open: it asks.
+/// - **Anything else** (Want to read, Paused, Did not finish, Ignored)
+///   leaves the reads as they are: at once.
+pub(crate) fn status_change(entry: &LibraryEntry, to: ReadingStatus) -> Option<StatusChange> {
+    if entry.status == to {
+        return None;
+    }
+    let title = &entry.book.title;
+    Some(match to {
+        ReadingStatus::CurrentlyReading if entry.status == ReadingStatus::WantToRead => {
+            StatusChange::Now
+        }
+        ReadingStatus::CurrentlyReading => {
+            let kept = match entry.open_read() {
+                Some(_) => {
+                    let which = if entry.status == ReadingStatus::Paused {
+                        "paused"
+                    } else {
+                        "unfinished"
+                    };
+                    match short_position(&progress_summary(entry)) {
+                        Some(at) => format!(" Your {which} read stays at {at}."),
+                        None => format!(" Your {which} read stays as it is."),
+                    }
+                }
+                None if !entry.reads.is_empty() => " Your earlier reads stay.".to_owned(),
+                None => String::new(),
+            };
+            StatusChange::Confirm {
+                title: format!("Start a new read of “{title}”?"),
+                description: format!("This starts a new read, from today.{kept}"),
+                ok: "Start reading",
+            }
+        }
+        ReadingStatus::Read => StatusChange::Confirm {
+            title: format!("Mark “{title}” as read?"),
+            description: if entry.open_read().is_some() {
+                "It moves to your Read shelf, and this read ends today.".to_owned()
+            } else {
+                "It moves to your Read shelf, finished today.".to_owned()
+            },
+            ok: "Mark as read",
+        },
+        _ => StatusChange::Now,
+    })
+}
+
+/// Moves an entry to `to`: at once, or after asking when that starts or
+/// finishes a read ([`status_change`]). Focus goes back to whatever had it
+/// when this was called, so a command from a menu should first focus the
+/// menu's trigger.
+pub(crate) fn change_status(
+    library: &Entity<LibraryModel>,
+    id: UserBookId,
+    to: ReadingStatus,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(change) = library.read(cx).entry(id).and_then(|e| status_change(e, to)) else {
+        return;
+    };
+    match change {
+        StatusChange::Now => set_status(library, id, to, window, cx),
+        StatusChange::Confirm {
+            title,
+            description,
+            ok,
+        } => {
+            let library = library.clone();
+            open_alert_dialog(window, cx, move |alert, _, _| {
+                let library = library.clone();
+                alert
+                    .title(title.clone())
+                    .description(description.clone())
+                    .confirm()
+                    .ok_text(ok)
+                    .on_ok(move |_, window, cx| {
+                        set_status(&library, id, to, window, cx);
+                        true
+                    })
+            });
+        }
+    }
 }
 
 /// Moves an entry to `edition`, its open read with it
@@ -189,6 +299,88 @@ mod tests {
 
     use super::*;
     use crate::session::SessionScope;
+    use hardcover_core::{BookSummary, ReadId, ReadSession, UserId};
+
+    fn entry(status: ReadingStatus) -> LibraryEntry {
+        let mut book = BookSummary::new(BookId::new(1), "Dune");
+        book.pages = Some(400);
+        LibraryEntry::new(UserBookId::new(1), UserId::new(1), book, status)
+    }
+
+    fn read(id: i64, page: Option<u32>, finished: bool) -> ReadSession {
+        let mut read = ReadSession::new(ReadId::new(id));
+        read.progress_pages = page;
+        if finished {
+            read.finished_at = hardcover_core::Date::from_ymd_opt(2026, 1, 2);
+        }
+        read
+    }
+
+    fn description(change: Option<StatusChange>) -> String {
+        match change {
+            Some(StatusChange::Confirm { description, .. }) => description,
+            other => panic!("expected a confirmation, got {other:?}"),
+        }
+    }
+
+    /// D3: a change that starts or finishes a read asks first and says what
+    /// happens; Home's rules decide which.
+    #[test]
+    fn changes_that_start_or_finish_a_read_ask_first() {
+        use ReadingStatus::*;
+        // Starting a book on Want to read is the point: at once.
+        assert_eq!(
+            status_change(&entry(WantToRead), CurrentlyReading),
+            Some(StatusChange::Now)
+        );
+        // The same status: nothing to do.
+        assert_eq!(status_change(&entry(Paused), Paused), None);
+        // Neither starts nor finishes a read.
+        for (from, to) in [
+            (CurrentlyReading, Paused),
+            (CurrentlyReading, DidNotFinish),
+            (Read, WantToRead),
+            (Paused, Ignored),
+        ] {
+            assert_eq!(status_change(&entry(from), to), Some(StatusChange::Now));
+        }
+
+        // Back to reading from Paused: a new read, the paused one stays.
+        let mut paused = entry(Paused);
+        paused.reads.push(read(1, Some(200), false));
+        assert_eq!(
+            description(status_change(&paused, CurrentlyReading)),
+            "This starts a new read, from today. Your paused read stays at page 200."
+        );
+        let mut reread = entry(Read);
+        reread.reads.push(read(1, None, true));
+        assert_eq!(
+            description(status_change(&reread, CurrentlyReading)),
+            "This starts a new read, from today. Your earlier reads stay."
+        );
+
+        // Finishing: the open read ends today.
+        let mut reading = entry(CurrentlyReading);
+        reading.reads.push(read(1, Some(120), false));
+        let Some(StatusChange::Confirm {
+            title,
+            description: finishing,
+            ok,
+        }) = status_change(&reading, Read)
+        else {
+            panic!("finishing asks first");
+        };
+        assert_eq!(title, "Mark “Dune” as read?");
+        assert_eq!(
+            finishing,
+            "It moves to your Read shelf, and this read ends today."
+        );
+        assert_eq!(ok, "Mark as read");
+        assert_eq!(
+            description(status_change(&entry(WantToRead), Read)),
+            "It moves to your Read shelf, finished today."
+        );
+    }
 
     /// D18: ratings asked for while another write on the entry runs are
     /// held, not dropped, and only the last is sent, once that write ends.

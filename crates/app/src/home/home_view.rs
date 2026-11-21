@@ -65,7 +65,6 @@ use crate::library::model::{LibraryModel, WriteKind};
 use crate::library::writes::{self, Ratings};
 use crate::session;
 use crate::ui::kit::SmallControl as _;
-use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, CoverShelf, Greeting, Lane, Meter, MonthBars, RailSection, RowSpacing, SectionHeader,
     Sequence, Skeleton, TextButton, Tier, books_that_fit, content_column_width, date_line,
@@ -295,6 +294,8 @@ impl HomeView {
         art
     }
 
+    /// Moves an entry to `status`, asking first when that starts or
+    /// finishes a read (`writes::change_status`).
     fn set_status(
         &mut self,
         id: UserBookId,
@@ -302,7 +303,7 @@ impl HomeView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        writes::set_status(&self.model, id, status, window, cx);
+        writes::change_status(&self.model, id, status, window, cx);
     }
 
     fn rate(
@@ -322,24 +323,7 @@ impl HomeView {
     /// Asks before finishing a book: the read ends today, and moving the
     /// book back to Currently Reading would start another read.
     fn confirm_finished(&mut self, id: UserBookId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(title) = self.model.read(cx).entry(id).map(|e| e.book.title.clone()) else {
-            return;
-        };
-        let view = cx.entity().downgrade();
-        open_alert_dialog(window, cx, move |alert, _, _| {
-            let view = view.clone();
-            alert
-                .title(format!("Mark “{title}” as read?"))
-                .description("It moves to your Read shelf, and this read ends today.")
-                .confirm()
-                .ok_text("Mark as read")
-                .on_ok(move |_, window, cx| {
-                    let _ = view.update(cx, |this, cx| {
-                        this.set_status(id, ReadingStatus::Read, window, cx);
-                    });
-                    true
-                })
-        });
+        self.set_status(id, ReadingStatus::Read, window, cx);
     }
 
     // ----- Continue reading -----
@@ -1285,7 +1269,7 @@ mod tests {
     use super::*;
     use crate::home::digest::Pace;
     use crate::session::SessionScope;
-    use gpui_kit::{AppContext as _, TestAppContext};
+    use gpui_kit::TestAppContext;
     use hardcover_core::store::LibraryCache;
 
     fn day(s: &str) -> Date {

@@ -28,8 +28,7 @@ use crate::bidi::WrappingText;
 use crate::book::progress_dialog::open_progress;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{
-    ProgressSummary, count_text, date_text, duration_text, edition_text, needs_permission,
-    progress_summary, read_dates_text,
+    date_text, edition_text, needs_permission, progress_summary, read_dates_text, short_position,
 };
 use crate::library::model::WriteKind;
 use crate::lists::book_lists;
@@ -490,15 +489,6 @@ impl BookDetailView {
     }
 }
 
-/// "page 418" or "2h 5m" for the current read's row.
-fn short_position(progress: &ProgressSummary) -> Option<String> {
-    match (progress.page, progress.seconds) {
-        (Some(page), _) => Some(format!("page {}", count_text(page))),
-        (None, Some(seconds)) => Some(duration_text(seconds)),
-        (None, None) => None,
-    }
-}
-
 /// The muted line under the meter: "Started Nov 1 · 16 pages a day · done
 /// around Dec 1", as much of it as is known. A paused book has no pace and
 /// no finish date: only when it started.
@@ -558,6 +548,7 @@ pub(super) fn saved_note(cx: &gpui_kit::App) -> impl IntoElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::format::ProgressSummary;
 
     fn progress(page: Option<u32>, total: Option<u32>, seconds: Option<u32>) -> ProgressSummary {
         ProgressSummary {
