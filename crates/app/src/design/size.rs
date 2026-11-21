@@ -51,10 +51,6 @@ pub const ACTION_LANE: Rems = rems(8.5);
 pub const NEXT_LANE: Rems = rems(15.);
 /// One book in a series strip: an sm cover with its marks under it (40).
 pub const STRIP_ITEM: Rems = rems(2.5);
-/// The Series destination's column (896): its width up to the default
-/// window, and the least it keeps when the region is wider (see
-/// [`SERIES_COLUMN_MAX`]).
-pub const SERIES_COLUMN: Rems = rems(56.);
 
 /// A meter with words beside it (6).
 pub const METER: Rems = rems(0.375);
@@ -68,14 +64,12 @@ pub const METER_IN_ROW: Rems = rems(10.);
 pub const PACE_TICK_WIDTH: Pixels = px(2.);
 pub const PACE_TICK_OVERHANG: Pixels = px(3.);
 
-/// The widest a page's content gets (768): Coming soon, Discover, Stats (in
-/// one column), list, series and author pages, and the book pane's content.
-/// The page inset is outside it.
+/// The widest the book pane's content gets (768). The page inset is outside
+/// it. Pages fill their region: only reading text keeps a measure
+/// ([`PROSE`]).
 pub const PAGE_MAX: Rems = rems(48.);
 /// A page's inset (32; `p_8`).
 pub const PAGE_INSET: Rems = rems(2.);
-/// A page's frame at its widest: [`PAGE_MAX`] and the inset on both sides.
-pub const PAGE_FRAME_MAX: Rems = rems(PAGE_MAX.0 + 2. * PAGE_INSET.0);
 /// The widest Home's content gets in two columns (1024), its inset
 /// included: beyond it the rows' actions drift away from their books. A
 /// wider region gives Home a third column instead ([`HOME_WIDE_MAX`]).
@@ -100,6 +94,10 @@ pub const COLUMNS_MAX: Rems = rems(PAGE_MAX.0 + 1.5 + RAIL.0);
 /// pane's inset on both sides. Its object bar keeps to it, as to
 /// [`PANE_FRAME_MAX`] when it has no rail.
 pub const PANE_COLUMNS_FRAME_MAX: Rems = rems(COLUMNS_MAX.0 + 2. * PANE_INSET.0);
+/// A catalogue page's list beside the book pane (704): the [`PROSE`]
+/// measure and the page's inset on both sides, so a series' or an author's
+/// description keeps its measure while the pane takes the rest.
+pub const PAGE_BESIDE_PANE: Rems = rems(PROSE.0 + 2. * PAGE_INSET.0);
 /// The narrowest book pane beside a catalogue page's list (392): its header
 /// keeps the xl cover beside the info column at [`HEADER_INFO_MIN`], 24
 /// apart, inside the pane's inset (24 + 128 + 24 + 192 + 24). Narrower, the
@@ -114,6 +112,12 @@ pub const PAGE_LIST_MIN: Rems = rems(14.);
 pub const CHART: Rems = rems(12.);
 /// A short chart on a page, such as a rating spread (160).
 pub const CHART_SHORT: Rems = rems(10.);
+/// The widest a chart's bar gets (48): a chart fills its column, and past
+/// this its bars stay bars, with more paper between them.
+pub const CHART_BAR_MAX: Rems = rems(3.);
+/// The least room a year gets in Stats' Finished per year (64): a wider
+/// chart shows more years, when the library has them.
+pub const CHART_YEAR_MIN: Rems = rems(4.);
 /// A headline figure's column at its narrowest (160): Stats' figures, four
 /// to a row at the page's width and two in a narrow window.
 pub const FIGURE: Rems = rems(10.);
@@ -132,17 +136,10 @@ pub const COLUMN_MAX: Rems = rems(45.);
 /// included: two [`COLUMN_MAX`] columns and the [`RAIL`], 32 apart. Beyond
 /// it, paper.
 pub const HOME_WIDE_MAX: Rems = rems(2. * COLUMN_MAX.0 + 2. * 2. + RAIL.0 + 2. * PAGE_INSET.0);
-/// The widest the Series destination's column gets (1280): room for a
-/// strip of 23 books beside the [`NEXT_LANE`]. It grows past
-/// [`SERIES_COLUMN`] only as far as the longest series needs.
-pub const SERIES_COLUMN_MAX: Rems = rems(80.);
 /// The narrowest a column of Stats' sections gets beside another (544):
 /// Stats splits into two columns only when both get this, which a 1200
-/// window (896 of content) never does.
+/// window (896 of content) never does. Each column fills its half.
 pub const CHART_COLUMN_MIN: Rems = rems(34.);
-/// Stats' frame at its widest in two columns (1632): two [`PAGE_MAX`]
-/// columns 32 apart, and the inset on both sides.
-pub const STATS_WIDE_FRAME_MAX: Rems = rems(2. * PAGE_MAX.0 + 2. + 2. * PAGE_INSET.0);
 
 /// The widest prose and readers' words get (640).
 pub const PROSE: Rems = rems(40.);

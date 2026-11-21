@@ -17,8 +17,10 @@ use hardcover_core::{Date, EditionSummary, Length, LibraryEntry, ReadSession, Re
 
 use crate::format::SIDEBAR_SHELVES;
 
-/// The per-year chart shows at most this many years, ending with the latest.
-pub const MAX_YEARS: i32 = 12;
+/// The most years the stats keep for the per-year chart, ending with the
+/// latest. The chart shows the latest of them that fit its width
+/// ([`ReadingStats::recent_years`]).
+pub const MAX_YEARS: i32 = 40;
 
 /// Books and pages finished in one year.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -26,6 +28,17 @@ pub struct YearTotals {
     pub year: i32,
     pub books: u32,
     pub pages: u32,
+}
+
+impl ReadingStats {
+    /// The latest `count` of [`Self::years`] (all of them when there are
+    /// fewer), and the books finished before the first of those.
+    pub fn recent_years(&self, count: usize) -> (&[YearTotals], u32) {
+        let cut = self.years.len().saturating_sub(count);
+        let (dropped, shown) = self.years.split_at(cut);
+        let earlier = self.earlier_books + dropped.iter().map(|y| y.books).sum::<u32>();
+        (shown, earlier)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -372,12 +385,36 @@ mod tests {
             read(4, None, Some("2026-10-12")),
         ];
         let stats = compute(&[e], date(TODAY));
+        // Every year from the first finish is kept, 2001 to 2026.
+        assert_eq!(stats.years.len(), 26);
+        assert_eq!(stats.earlier_books, 0);
+        // A chart with room for 12 shows 2015 to 2026, and counts the rest.
+        let (years, earlier) = stats.recent_years(12);
+        assert_eq!(years.len(), 12);
+        assert_eq!(years.first().unwrap().year, 2015);
+        assert_eq!(years.last().unwrap().year, 2026);
+        assert_eq!(earlier, 2);
+        let charted: u32 = years.iter().map(|y| y.books).sum();
+        assert_eq!(charted + earlier, stats.finished_reads);
+        // A wider one reaches back to 2010; one wider than the data, all.
+        let (years, earlier) = stats.recent_years(17);
+        assert_eq!((years.first().unwrap().year, earlier), (2010, 1));
+        let (years, earlier) = stats.recent_years(40);
+        assert_eq!((years.len(), earlier), (26, 0));
+    }
+
+    #[test]
+    fn the_years_kept_stop_at_the_maximum() {
+        let mut e = entry(1, ReadingStatus::Read, None);
+        e.reads = vec![
+            read(1, None, Some("1970-06-01")),
+            read(2, None, Some("2026-10-12")),
+        ];
+        let stats = compute(&[e], date(TODAY));
         assert_eq!(stats.years.len(), usize::try_from(MAX_YEARS).unwrap());
-        assert_eq!(stats.years.first().unwrap().year, 2015);
-        assert_eq!(stats.years.last().unwrap().year, 2026);
-        assert_eq!(stats.earlier_books, 2);
-        let charted: u32 = stats.years.iter().map(|y| y.books).sum();
-        assert_eq!(charted + stats.earlier_books, stats.finished_reads);
+        assert_eq!(stats.years.first().unwrap().year, 1987);
+        assert_eq!(stats.earlier_books, 1);
+        assert_eq!(stats.recent_years(100).1, 1);
     }
 
     #[test]
