@@ -22,6 +22,13 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # out by the bidirectional algorithm (`bidi.rs`), with mirrored brackets.
 unicode-bidi = "0.3"
 unicode-bidi-mirroring = "0.4"
+# SPIKE (`ui_scale`): a second Wayland connection for the outputs' sizes in mm,
+# and the v5 uuid GPUI names a display by. All three are already in the tree.
+uuid = { version = "1", features = ["v5"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
 
 [dev-dependencies]
 # GPUI's test support, for the shared components' tests (`ui/`). Turned on in

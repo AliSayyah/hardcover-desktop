@@ -3179,6 +3179,9 @@ dependencies = [
  "tempfile",
  "unicode-bidi",
  "unicode-bidi-mirroring",
+ "uuid",
+ "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]

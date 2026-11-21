@@ -26,6 +26,7 @@ mod sign_in;
 mod star;
 mod stats;
 mod ui;
+mod ui_scale;
 mod upcoming;
 mod update;
 
@@ -191,6 +192,7 @@ fn main() {
             }
             gpui_kit::open_window(options, cx, |window, cx| {
                 preferences::follow_theme(window, cx);
+                ui_scale::follow(window, cx);
                 cx.new(|cx| shell::Shell::new(window, cx))
             })
             .expect("failed to open window");

@@ -51,7 +51,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
-use gpui_kit::{App, Hsla, Rgba, SharedString};
+use gpui_kit::{App, Hsla, Rgba, SharedString, Window};
 
 use super::color::{Palette, channel_byte, solid};
 use crate::fonts;
@@ -76,6 +76,22 @@ pub fn init(bundled_fonts: bool, cx: &mut App) {
     // `Theme::update` doesn't reload a swapped config; `change` does, even
     // for the mode already showing.
     Theme::change(mode, None, cx);
+}
+
+/// SPIKE (`ui_scale`): rebuilds both configs with the rem at `16 * k` and
+/// reapplies the current mode, so the scale survives every later
+/// `Theme::change`.
+pub fn set_ui_scale(k: f32, window: &mut Window, cx: &mut App) {
+    let mode = Theme::update(cx, |theme| {
+        let mut light = (*theme.light_theme).clone();
+        let mut dark = (*theme.dark_theme).clone();
+        light.font_size = Some(16. * k);
+        dark.font_size = Some(16. * k);
+        theme.light_theme = Rc::new(light);
+        theme.dark_theme = Rc::new(dark);
+        theme.mode
+    });
+    Theme::change(mode, Some(window), cx);
 }
 
 /// A colour as the theme config reads it: `#RRGGBBAA`.
