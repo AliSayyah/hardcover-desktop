@@ -9,7 +9,6 @@ use gpui_kit::component::button::{Button, ButtonVariant};
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{
@@ -53,7 +52,9 @@ use crate::sign_in::sign_in_view::{SignInView, SignedIn};
 use crate::stats::stats_view::StatsView;
 use crate::ui::focus::{remember_focus, return_focus};
 use crate::ui::kit::SmallControl as _;
-use crate::ui::kit::{open_alert_dialog, open_alert_dialog_on_result, open_dialog};
+use crate::ui::kit::{
+    gutter_scrollbar, open_alert_dialog, open_alert_dialog_on_result, open_dialog,
+};
 use crate::ui::reveal::RevealScroll as _;
 use crate::ui::{
     AccountRow, Avatar, BackTo, ExternalLink, NavRow, ObjectBar, back_label, brand_row,
@@ -871,8 +872,8 @@ impl Workspace {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.sidebar_scroll)
-                    .vertical_scrollbar(&self.sidebar_scroll)
                     .child(destinations)
+                    .child(gutter_scrollbar("sidebar-scrollbar", &self.sidebar_scroll))
                     .reveals_focus(&self.sidebar_scroll),
             )
             // When the destinations don't all fit (a short window), a

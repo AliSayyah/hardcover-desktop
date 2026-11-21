@@ -72,7 +72,7 @@ selected row.
 | `accent` | `#3B4A9C` | `#98A5F4` | Ink blue (details below the table) |
 | `accent-fg` | `#FFFFFF` | `#12142A` | Text on accent |
 | `accent-soft` | accent 10% | accent 14% | The avatar's fill |
-| `ring` | accent 50% | accent 50% | The 3 px focus ring |
+| `ring` | accent 50% | accent 50% | The 2 px focus ring |
 | `gold` | `#F59E0B` (amber 500) | `#FBBF24` (amber 400) | The user's own rating, nothing else |
 | `gold-preview` | gold 55% | gold 55% | The rating control's hover preview: the stars a click would set |
 | `star-empty` | ink 14% | ink 14% | An unfilled star |
@@ -83,13 +83,14 @@ selected row.
 | `cloth-ink` | `#F4ECDD` | `#F4ECDD` | Type and stamp on a cloth cover |
 
 Accent is used on progress, the primary commit, the focus ring, the selected
-sidebar icon, links that open the browser, and the brand icon. Nothing else.
+sidebar icon, links that open the browser, the brand icon, and a genre
+chip's icon. Nothing else.
 
 Contrast, checked over every surface alone, hovered and selected:
 - `fg-muted` is at least 4.7:1 in both themes (WCAG AA), so it may carry
   information;
 - `fg-faint` is about 3.7:1, so it must never carry anything a reader needs;
-- accent on paper is at least 5:1.
+- accent on paper is at least 5:1, and on a chip at least 5.3:1.
 
 A new colour role needs the same check. The mockup's console audit does it.
 
@@ -170,6 +171,7 @@ One scale, named by the relationship it expresses.
 | --- | --- | --- | --- |
 | `s-2` | 2 | `gap_0p5` | Optical; gap between list rows; stars |
 | `s-4` | 4 | `gap_1` | Parts of one control; title to author |
+| `s-6` | 6 | `gap_1p5` | Chips in a wrapped group, both ways; a tag group's label to its chips |
 | `s-8` | 8 | `gap_2` | Closely related controls; icon to label; sidebar inset |
 | `s-12` | 12 | `gap_3` | One group: cover to text in a row; list header |
 | `s-16` | 16 | `gap_4` | Groups in a section; panel and list inset |
@@ -299,7 +301,7 @@ dust jacket.
 | Danger | Danger text, no fill | Destructive commands; the confirm button of a destructive dialog |
 | Icon | 32 square, ghost | Familiar symbols only ("more"), with an accessible name and a tooltip |
 | Text button | Ink text, underline on hover only | In-app navigation inside content: an author, a series, a book title |
-| Link | Accent, underlined, a 12 px external-link icon | Only for things that open the browser: "Open on Hardcover" |
+| Link | Accent, underlined, a 12 px external-link icon | Only for things that open the browser: "Open on Hardcover" on a series, author or list page (a book's is in its "more" menu) |
 | Byline link | Ink, 14/500, underline on hover, pointing hand | A reviewer's name, which opens their Hardcover profile in the browser. It repeats on every review, so it stays quiet; a right-to-left name goes without the underline, which GPUI on Linux draws beside it |
 
 - **Sizes:** default 32 (padding 12, icon 16, gap 8); small 24 (padding 8,
@@ -345,8 +347,20 @@ The two kinds:
 - **StatusChip:** a book's library status at the end of a catalogue row, with
   its shelf's sidebar icon. The icons are book-open, inbox, circle-check,
   pause, ban and eye-off.
-- **TagChip:** a catalogue tag. A content warning adds the warning icon in
-  `warning`, which is the only colour a chip ever carries.
+- **TagChip:** a catalogue tag.
+  - A genre adds an icon chosen from its name, in `accent`: rocket for
+    science fiction, wand-sparkles for fantasy, heart for romance, and so on
+    (`chip::genre`, about 40 genres, matched on normalised words with the
+    common variants: "Sci-Fi", "SF", "YA", "Children's", "Non-Fiction"). A
+    genre that matches none has no icon; an icon is never guessed.
+  - A content warning adds the warning icon in `warning`.
+  - Moods and other tags have no icon.
+  - Those two icon colours are the only colours a chip ever carries; the
+    pill and its text stay neutral.
+  - The icon sits on the chip's leading (left) side, a right-to-left tag
+    too: the interface isn't mirrored.
+- **Wrapped chips** (`TagRow`): chips that wrap across a width sit 6 apart
+  both ways (`s-6`), in the header and in the Tags block alike.
 
 Never colour-code chips, and never use a badge for ordinary metadata.
 
@@ -530,7 +544,7 @@ Each state has one treatment, on every control. Hover is never the only cue.
 | Rest | As specified for the component |
 | Hover | The `hover` fill. A text button gains its underline. The rating control previews the stars a click would set in `gold-preview` |
 | Pressed, selected, open | The `selected` fill. A selected nav row also takes weight 500 and the accent icon. A menu button stays pressed while its menu is open |
-| Focus-visible | A 3 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
+| Focus-visible | A 2 px `ring` outside, plus a 1 px accent edge: the border for controls, an inset edge for rows, and just outside the text for bare text (a text button, a byline link), which has no border. Never clipped by a scrolling parent |
 | Disabled | 50% opacity, with no hover or pressed response. When the reason isn't obvious, say it beside the control or in its tooltip (`format::needs_permission`) |
 | Loading | `skeleton` shapes where the content will be, pulsing between 100% and 50% opacity. Covers show a skeleton until the image lands. A button running its action keeps its label, shows its loading state and refuses repeat clicks. No spinner in a list |
 | Error | Say what happened and how to recover, next to the thing that failed (`Services::error_message`) |
@@ -608,7 +622,8 @@ out there exactly as it did before this rule.
 - **Book pane:**
   - **Object bar:** 56 high, no hairline. "Lists" (a ghost menu button with
     the gallery-vertical-end icon, the sidebar's list icon) and "more" (an
-    icon button) sit on the trailing edge, over the content: in a wide
+    icon button: "Open on Hardcover" for any book with a page there, then,
+    for a book in the library, its library commands) sit on the trailing edge, over the content: in a wide
     window the bar keeps to the content's width and inset.
     The book's tools live here, never over the title.
   - **Content:** inset 24, with 0 above.
@@ -620,7 +635,7 @@ out there exactly as it did before this rule.
   - the facts: muted and tabular ("2021 · 476 pages");
   - Hardcover's average: a 12 px muted star and "4.51 average · 9,223
     ratings";
-  - the tags: TagChips, 4 apart;
+  - the genres: genre TagChips (with their icons), wrapped 6 apart;
   - at the foot of the cover, the action row: the status menu button, then
     the rating control (20 px stars and "Rate"), 16 apart.
 - **Then one panel, 24 below:**
@@ -635,6 +650,11 @@ out there exactly as it did before this rule.
   (a property list: Edition, Owned, Privacy, Added). The other existing
   blocks (your review, reads, lists, series, other readers' reviews,
   similar books) follow the same pattern.
+- **Tags:** the genres past the header's first six, then moods, content
+  warnings and other tags, each a group, 16 apart: the group's name
+  ("Content warnings") in `label`, and 6 below it its chips, wrapped 6 apart
+  across the block's width. Each group shows six until the block's small
+  ghost "Show N more" (then "Show fewer").
 
 ### Full book page (over Discover, search, a series or an author)
 
@@ -652,7 +672,8 @@ out there exactly as it did before this rule.
     at most two lines.
 - **Rail:**
   - On Hardcover: the average as a `display-30` figure with muted 16 px
-    stars; "4,280 ratings · 10,144 readers"; the "Open on Hardcover" link;
+    stars; "4,280 ratings · 10,144 readers"; the ratings breakdown
+    ("Open on Hardcover" is in the "more" menu);
   - Details (key column 72);
   - Reads: a label, plus a small ghost "Add a past read…" on the trailing
     edge;
@@ -867,8 +888,8 @@ it when you wire it.
 | `font_size` | 16 |
 
 The app builds this as two theme configs (`design::theme`), so every mode
-change applies it. `ring` is the solid accent: the kit draws the 3 px ring
-at 50% of it, plus a 1 px accent edge. What the kit doesn't let the theme
+change applies it. `ring` is the solid accent: the kit draws its ring at 50%
+of it, plus a 1 px accent edge. What the kit doesn't let the theme
 reach is listed under "Kit limits".
 
 **Notes:**
@@ -929,3 +950,6 @@ commit that fixes it.
   than disabled radios; a form's radios are disabled only while it saves.
 - The `DatePicker`'s field stays paper.
 - A dialog keeps the kit's shadow.
+- The kit's controls (buttons, inputs, selects, switches) draw a 3 px focus
+  ring, not 2: the width is a private constant of the kit. The app's own
+  rows, text buttons and components draw 2.

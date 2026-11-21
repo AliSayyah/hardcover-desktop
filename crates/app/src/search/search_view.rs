@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
+use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{
@@ -56,6 +56,7 @@ use crate::search::library_matches::{counts_as_shelved, library_matches};
 use crate::search::results::{Hit, Phase, SearchResults};
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
+use crate::ui::kit::gutter_list;
 use crate::ui::{
     ListRow as _, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
     select_first_row,
@@ -927,7 +928,7 @@ fn results_status<T: SearchHit>(
         status,
         busy,
         failed,
-        List::new(list).size_full().p_2().into_any_element(),
+        gutter_list("search-scrollbar", list, cx).into_any_element(),
     )
 }
 

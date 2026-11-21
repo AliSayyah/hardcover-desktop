@@ -1,5 +1,6 @@
 //! The book's catalogue parts: About this book, the tags, other titles, On
-//! Hardcover (the average, the ratings breakdown and "Open on Hardcover"),
+//! Hardcover (the average and the ratings breakdown; "Open on Hardcover" is
+//! in the book's "more" menu, `header.rs`),
 //! and similar books (`hardcover-design`, Shelf → Book pane, and Full book
 //! page).
 
@@ -11,7 +12,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, SharedString,
-    Styled as _, div, prelude::FluentBuilder as _,
+    Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{BookDetails, BookId, BookSummary, RatingBucket};
@@ -19,18 +20,17 @@ use hardcover_core::{BookDetails, BookId, BookSummary, RatingBucket};
 use super::header::HEADER_GENRES;
 use super::your_book::paragraphs;
 use super::{BookDetailView, Details};
-use crate::app_state::Services;
+use crate::app_state::{Services, release_cover_medium};
 use crate::bidi::WrappingText;
 use crate::catalog::navigation::Page;
-use crate::chip::TagChip;
+use crate::chip::{TagChip, TagGroup, tag_groups};
 use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{average_rating_text, count_text};
 use crate::freshness::Fetched;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{
-    Block, CoverShelf, ExternalLink, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars,
-    TextButton,
+    Block, CoverShelf, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars, TextButton,
 };
 
 /// Similar books fetched for one book.
@@ -113,6 +113,32 @@ impl BookDetailView {
         }));
     }
 
+    /// Releases the md/lg covers of similar books no longer shown, now that
+    /// `book` (if any) is: those of the book shown before, once it changes.
+    pub(super) fn keep_similar_covers(
+        &mut self,
+        book: Option<BookId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let shown: Vec<String> = match book.and_then(|id| self.similar.get(&id)) {
+            Some(Similar::Ready(books)) => books
+                .value()
+                .iter()
+                .filter_map(|b| b.cover.as_ref().map(|c| c.url.clone()))
+                .collect(),
+            _ => Vec::new(),
+        };
+        if shown == self.similar_covers {
+            return;
+        }
+        for url in std::mem::replace(&mut self.similar_covers, shown) {
+            if !self.similar_covers.contains(&url) {
+                release_cover_medium(&url, Some(window), cx);
+            }
+        }
+    }
+
     fn retry_similar(&mut self, cx: &mut Context<Self>) {
         if let Some(book) = self.book(cx) {
             self.similar.remove(&book.id);
@@ -172,20 +198,27 @@ impl BookDetailView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let details = details?;
-        // The label, the tags, and whether they are content warnings.
-        let groups: Vec<(&'static str, &[String], bool)> = [
-            ("Genres", details.genres.as_slice(), false),
-            ("Moods", details.moods.as_slice(), false),
+        /// Which chips a group's tags get.
+        #[derive(Clone, Copy, PartialEq)]
+        enum Group {
+            Genres,
+            Warnings,
+            Plain,
+        }
+        // The label, the tags, and which chips they get.
+        let groups: Vec<(&'static str, &[String], Group)> = [
+            ("Genres", details.genres.as_slice(), Group::Genres),
+            ("Moods", details.moods.as_slice(), Group::Plain),
             (
                 "Content warnings",
                 details.content_warnings.as_slice(),
-                true,
+                Group::Warnings,
             ),
-            ("Other tags", details.tags.as_slice(), false),
+            ("Other tags", details.tags.as_slice(), Group::Plain),
         ]
         .into_iter()
-        .filter(|(label, tags, _)| {
-            !tags.is_empty() && (*label != "Genres" || tags.len() > HEADER_GENRES)
+        .filter(|(_, tags, group)| {
+            !tags.is_empty() && (*group != Group::Genres || tags.len() > HEADER_GENRES)
         })
         .collect();
         if groups.is_empty() {
@@ -196,7 +229,6 @@ impl BookDetailView {
             .map(|(_, tags, _)| tags.len().saturating_sub(TAGS_SHOWN))
             .sum();
         let expanded = self.tags_expanded;
-        let muted = colors(cx).fg_muted;
         Some(
             Block::new("Tags")
                 .when(hidden > 0, |this| {
@@ -215,37 +247,21 @@ impl BookDetailView {
                             })),
                     )
                 })
-                .child(v_flex().gap_2().children(groups.into_iter().map(
-                    |(label, tags, warning)| {
-                        let shown = if expanded {
-                            tags.len()
-                        } else {
-                            tags.len().min(TAGS_SHOWN)
-                        };
-                        // The key column of a property list, and the
-                        // label on a chip's line, so it sits on the first
-                        // row of chips.
-                        h_flex()
-                            .items_start()
-                            .child(
-                                div()
-                                    .flex_shrink_0()
-                                    .w(size::KEY)
-                                    .pr_2()
-                                    .body()
-                                    .line_height(size::CHIP)
-                                    .text_color(muted)
-                                    .child(label),
-                            )
-                            .child(
-                                h_flex().flex_1().min_w_0().flex_wrap().gap_1().children(
-                                    tags[..shown]
-                                        .iter()
-                                        .map(|t| TagChip::new(t.clone()).warning(warning)),
-                                ),
-                            )
-                    },
-                )))
+                .child(tag_groups(groups.into_iter().map(|(label, tags, kind)| {
+                    let shown = if expanded {
+                        tags.len()
+                    } else {
+                        tags.len().min(TAGS_SHOWN)
+                    };
+                    TagGroup::new(
+                        label,
+                        tags[..shown].iter().map(|t| match kind {
+                            Group::Genres => TagChip::genre(t.clone()),
+                            Group::Warnings => TagChip::new(t.clone()).warning(true),
+                            Group::Plain => TagChip::new(t.clone()),
+                        }),
+                    )
+                })))
                 .into_any_element(),
         )
     }
@@ -281,7 +297,7 @@ impl BookDetailView {
         )
     }
 
-    /// On Hardcover: the ratings breakdown and "Open on Hardcover". The
+    /// On Hardcover: the counts and the ratings breakdown. The
     /// page's rail leads with the average as a figure; the pane has the
     /// average in its header.
     pub(super) fn render_on_hardcover(
@@ -312,10 +328,6 @@ impl BookDetailView {
         let breakdown = details
             .filter(|d| !d.ratings_distribution.is_empty())
             .map(|d| render_breakdown(d, cx));
-        let link = book
-            .web_url()
-            .map(|url| ExternalLink::new("open-on-hardcover", "Open on Hardcover", url));
-
         if in_rail {
             let figure = average.map(|average| {
                 let text = average_rating_text(average);
@@ -334,7 +346,7 @@ impl BookDetailView {
                             ),
                     )
             });
-            if figure.is_none() && breakdown.is_none() && link.is_none() {
+            if figure.is_none() && breakdown.is_none() && counts.is_empty() {
                 return None;
             }
             return Some(
@@ -350,20 +362,18 @@ impl BookDetailView {
                         )
                     })
                     .children(breakdown.map(|b| div().pt_2().child(b)))
-                    .children(link.map(|link| div().pt_2().child(link)))
                     .into_any_element(),
             );
         }
-        if breakdown.is_none() && link.is_none() {
-            return None;
-        }
+        // Without a spread there is nothing the header's average doesn't
+        // say. "Open on Hardcover" is in the book's "more" menu.
+        breakdown.as_ref()?;
         Some(
             Block::new("On Hardcover")
                 .when(!counts.is_empty(), |this| {
                     this.action(div().caption(cx).tabular().child(counts.join(" · ")))
                 })
                 .children(breakdown)
-                .children(link)
                 .into_any_element(),
         )
     }

@@ -54,7 +54,7 @@ use self::community_reviews::CommunityReviews;
 use self::review_section::ReviewEditor;
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
-use crate::app_state::Services;
+use crate::app_state::{Services, release_cover_medium};
 use crate::design::size;
 use crate::format::read_dates_text;
 use crate::freshness::Fetched;
@@ -191,6 +191,10 @@ pub struct BookDetailView {
     similar: HashMap<BookId, Similar>,
     similar_loading: Option<BookId>,
     similar_task: Option<Task<()>>,
+    /// The cover URLs of the similar books shown, released when the view
+    /// moves to another book or goes away: browsing books would otherwise
+    /// keep every lg cover it passed for the run.
+    similar_covers: Vec<String>,
     /// "Show all tags" was pressed for the book shown.
     tags_expanded: bool,
     /// The full book page, under the object bar the shell draws: the book's
@@ -245,6 +249,11 @@ impl BookDetailView {
             ];
         subscriptions.extend(review_subscriptions);
         subscriptions.push(Self::observe_review_scope(cx));
+        subscriptions.push(cx.on_release_in(window, |this: &mut Self, window, cx| {
+            for url in this.similar_covers.drain(..) {
+                release_cover_medium(&url, Some(window), cx);
+            }
+        }));
         // The list menu and the Owned switch follow the user's lists.
         if let Some(lists) = ListsModel::global(cx) {
             subscriptions.push(cx.observe(&lists, |_, _, cx| cx.notify()));
@@ -270,6 +279,7 @@ impl BookDetailView {
             similar: HashMap::new(),
             similar_loading: None,
             similar_task: None,
+            similar_covers: Vec::new(),
             tags_expanded: false,
             tools_in_bar: false,
             wide: Rc::new(Cell::new(false)),
@@ -1182,7 +1192,9 @@ impl ObjectTools for BookDetailView {
 
 impl Render for BookDetailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some((book, entry)) = self.shown_book(cx) else {
+        let shown = self.shown_book(cx);
+        self.keep_similar_covers(shown.as_ref().map(|(book, _)| book.id), window, cx);
+        let Some((book, entry)) = shown else {
             self.load_cover(None, window, cx);
             return EmptyState::new(IconName::BookOpen, "Select a book to see its details")
                 .into_any_element();
