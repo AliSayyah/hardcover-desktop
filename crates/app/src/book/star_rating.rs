@@ -25,8 +25,8 @@ use gpui_kit::{
 use hardcover_core::Rating;
 
 use crate::design::colors;
-use crate::star;
 use crate::ui::focus::{FocusTreatment as _, control_radius, focus_visible};
+use crate::ui::{StarSize, render_star};
 
 /// Key context of the control; its bindings live in `main`.
 pub const KEY_CONTEXT: &str = "StarRating";
@@ -37,14 +37,14 @@ const STARS: u8 = 5;
 
 /// How much of one star is filled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StarFill {
+pub(crate) enum StarFill {
     Empty,
     Half,
     Full,
 }
 
 /// The fill of star `star` (1-based) for `value` stars.
-pub fn star_fill(value: f32, star: u8) -> StarFill {
+pub(crate) fn star_fill(value: f32, star: u8) -> StarFill {
     let star = f32::from(star);
     if value >= star {
         StarFill::Full
@@ -56,16 +56,13 @@ pub fn star_fill(value: f32, star: u8) -> StarFill {
 }
 
 /// The value a click on `target` requests: clicking the current value clears.
-pub fn clicked_value(current: Option<Rating>, target: f32) -> Option<Rating> {
-    match current {
-        Some(r) if r.value() == target => None,
-        _ => Rating::new(target),
-    }
+pub(crate) fn clicked_value(current: Option<Rating>, target: f32) -> Option<Rating> {
+    Rating::new(target).filter(|r| Some(*r) != current)
 }
 
 /// The value after one keyboard step of half a star (`up` or down). Stepping
 /// down from half a star clears; stepping up from none gives half a star.
-pub fn stepped_value(current: Option<Rating>, up: bool) -> Option<Rating> {
+pub(crate) fn stepped_value(current: Option<Rating>, up: bool) -> Option<Rating> {
     let v = current.map_or(0.0, Rating::value);
     let next = if up {
         (v + 0.5).min(Rating::MAX)
@@ -153,7 +150,11 @@ impl RenderOnce for StarRating {
 
         let value = self.value;
         let disabled = self.disabled;
-        let small = self.small;
+        let size = if self.small {
+            StarSize::Medium
+        } else {
+            StarSize::Large
+        };
         let on_change = self.on_change.clone();
         let request = move |next: Option<Rating>, window: &mut Window, cx: &mut App| {
             if let Some(handler) = &on_change
@@ -189,13 +190,13 @@ impl RenderOnce for StarRating {
                     .on_action({
                         let request = request.clone();
                         move |_: &IncreaseRating, window, cx| {
-                            request(stepped_value(value, true), window, cx)
+                            request(stepped_value(value, true), window, cx);
                         }
                     })
                     .on_action({
                         let request = request.clone();
                         move |_: &DecreaseRating, window, cx| {
-                            request(stepped_value(value, false), window, cx)
+                            request(stepped_value(value, false), window, cx);
                         }
                     })
                     .on_action({
@@ -214,50 +215,24 @@ impl RenderOnce for StarRating {
                         }
                     })
                     .children((1..=STARS).map(|n| {
-                        let half = |trailing: bool| {
-                            let target = f32::from(n) - if trailing { 0.0 } else { 0.5 };
-                            let hover = hover.clone();
-                            let request = request.clone();
-                            div()
-                                .id(ElementId::from(SharedString::from(format!(
-                                    "{n}-{}",
-                                    if trailing { "end" } else { "start" }
-                                ))))
-                                .absolute()
-                                .top_0()
-                                .h_full()
-                                .w(relative(0.5))
-                                .map(|this| {
-                                    if trailing {
-                                        this.right_0()
-                                    } else {
-                                        this.left_0()
-                                    }
-                                })
-                                .on_mouse_move(move |_, _, cx| {
-                                    hover.update(cx, |h, cx| {
-                                        if *h != Some(target) {
-                                            *h = Some(target);
-                                            cx.notify();
-                                        }
-                                    });
-                                })
-                                .on_click({
-                                    let focus = focus.clone();
-                                    move |_, window, cx| {
-                                        focus.focus(window, cx);
-                                        request(clicked_value(value, target), window, cx);
-                                    }
-                                })
+                        let half = |trailing| {
+                            half_star_target(
+                                n,
+                                trailing,
+                                value,
+                                hover.clone(),
+                                focus.clone(),
+                                request.clone(),
+                            )
                         };
-                        render_star(n, shown, small, filled_color, empty_color)
+                        render_star(n, shown, size, filled_color, empty_color)
                             .child(half(false))
                             .child(half(true))
                     }))
             })
             .when(disabled, |this| {
                 this.opacity(0.5).children(
-                    (1..=STARS).map(|n| render_star(n, shown, small, filled_color, empty_color)),
+                    (1..=STARS).map(|n| render_star(n, shown, size, filled_color, empty_color)),
                 )
             })
             .when_some(self.tooltip, |this, tip| {
@@ -267,37 +242,43 @@ impl RenderOnce for StarRating {
     }
 }
 
-fn render_star(
-    position: u8,
-    value: f32,
-    small: bool,
-    filled: gpui_kit::Hsla,
-    empty: gpui_kit::Hsla,
-) -> gpui_kit::Div {
-    let size = |this: gpui_kit::Div| if small { this.size_4() } else { this.size_5() };
-    let star = || {
-        let icon = star::icon().flex_shrink_0();
-        if small { icon.size_4() } else { icon.size_5() }
-    };
+fn half_star_target(
+    n: u8,
+    trailing: bool,
+    value: Option<Rating>,
+    hover: gpui_kit::Entity<Option<f32>>,
+    focus: FocusHandle,
+    request: Rc<impl Fn(Option<Rating>, &mut Window, &mut App) + 'static>,
+) -> impl IntoElement {
+    let target = f32::from(n) - if trailing { 0.0 } else { 0.5 };
+
     div()
-        .relative()
-        .flex_shrink_0()
-        .map(size)
-        .map(|this| match star_fill(value, position) {
-            StarFill::Full => this.child(star().text_color(filled)),
-            StarFill::Empty => this.child(star().text_color(empty)),
-            // An empty star with its leading half filled. Both are the same
-            // solid shape, so the split is clean.
-            StarFill::Half => this.child(star().text_color(empty)).child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .h_full()
-                    .w(relative(0.5))
-                    .overflow_hidden()
-                    .child(star().text_color(filled)),
-            ),
+        .id(ElementId::from(SharedString::from(format!(
+            "{n}-{}",
+            if trailing { "end" } else { "start" }
+        ))))
+        .absolute()
+        .top_0()
+        .h_full()
+        .w(relative(0.5))
+        .map(|this| {
+            if trailing {
+                this.right_0()
+            } else {
+                this.left_0()
+            }
+        })
+        .on_mouse_move(move |_, _, cx| {
+            hover.update(cx, |h, cx| {
+                if *h != Some(target) {
+                    *h = Some(target);
+                    cx.notify();
+                }
+            });
+        })
+        .on_click(move |_, window, cx| {
+            focus.focus(window, cx);
+            request(clicked_value(value, target), window, cx);
         })
 }
 

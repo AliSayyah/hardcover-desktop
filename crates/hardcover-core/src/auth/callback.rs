@@ -20,6 +20,11 @@ const MAX_REQUEST_HEAD: usize = 16 * 1024;
 
 /// Starts a sign-in: binds `127.0.0.1:<random port>`, makes a PKCE verifier and a
 /// random `state`, and builds the authorize URL. Nothing is sent yet.
+///
+/// # Errors
+///
+/// Returns an error if the configuration, loopback listener or PKCE challenge cannot
+/// be initialized.
 pub fn begin_sign_in(cfg: &OAuthConfig) -> Result<PendingSignIn> {
     begin_sign_in_with(cfg, Arc::new(UreqTransport::new()))
 }
@@ -98,6 +103,7 @@ impl CancelHandle {
         self.0.store(true, Ordering::SeqCst);
     }
 
+    #[must_use]
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
     }
@@ -106,14 +112,17 @@ impl CancelHandle {
 impl PendingSignIn {
     /// Open this in the browser, and also show it so the user can copy it if
     /// opening fails. Contains `state` and the PKCE challenge, never the verifier.
+    #[must_use]
     pub fn authorize_url(&self) -> &str {
         &self.authorize_url
     }
 
+    #[must_use]
     pub fn redirect_uri(&self) -> &str {
         &self.redirect_uri
     }
 
+    #[must_use]
     pub fn cancel_handle(&self) -> CancelHandle {
         CancelHandle(self.cancel.clone())
     }
@@ -125,7 +134,9 @@ impl PendingSignIn {
 
     /// Blocks until the browser hits the redirect URI, then exchanges the code.
     ///
-    /// Errors: [`Error::Cancelled`] (cancel handle), [`Error::Timeout`],
+    /// # Errors
+    ///
+    /// [`Error::Cancelled`] (cancel handle), [`Error::Timeout`],
     /// [`Error::Auth`] (state or issuer mismatch, the user declined, or the code
     /// exchange failed). Requests to other paths (e.g. `/favicon.ico`) are
     /// answered with 404 and ignored.
@@ -251,9 +262,7 @@ pub(crate) fn evaluate_callback(
         return Err(match err {
             "access_denied" => Error::Auth("access was denied".into()),
             other => {
-                let desc = get("error_description")
-                    .map(|d| format!(": {d}"))
-                    .unwrap_or_default();
+                let desc = get("error_description").map_or_default(|d| format!(": {d}"));
                 Error::Auth(format!("{other}{desc}"))
             }
         });

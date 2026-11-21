@@ -31,6 +31,7 @@
 mod sdl;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -252,10 +253,11 @@ fn render_field(f: &Value) -> Result<String, Error> {
         let reason = f["deprecationReason"]
             .as_str()
             .unwrap_or("No longer supported");
-        line.push_str(&format!(
+        write!(
+            line,
             " @deprecated(reason: {})",
             serde_json::to_string(reason)?
-        ));
+        )?;
     }
     Ok(line)
 }
@@ -377,8 +379,7 @@ fn report_schema_diff(old: &str, new: &str) {
 fn signature(line: &str) -> &str {
     let name = member_name(line);
     line.strip_prefix(name)
-        .map(|s| s.trim_start_matches(':').trim())
-        .unwrap_or(line)
+        .map_or(line, |s| s.trim_start_matches(':').trim())
 }
 
 fn report_scope_diff(old: &str, new: &Value) {

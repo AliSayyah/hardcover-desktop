@@ -65,8 +65,12 @@ impl PageStack {
         true
     }
 
-    /// Leaves the current page: `None` if there was none, else where focus
-    /// was when it opened.
+    /// Leaves the current page: `None` if there was none, else where focus was
+    /// when it opened.
+    #[expect(
+        clippy::option_option,
+        reason = "None means no page, while Some(None) means a page without an opener"
+    )]
     pub fn pop(&mut self) -> Option<Option<FocusReturn>> {
         self.pages.pop().map(|(_, from)| from)
     }
@@ -151,7 +155,7 @@ mod tests {
     #[test]
     fn history_is_bounded_and_clears() {
         let mut stack = PageStack::default();
-        for id in 0..(PageStack::MAX as i64 + 10) {
+        for id in 0..(i64::try_from(PageStack::MAX).unwrap() + 10) {
             stack.push(Page::Author(AuthorId::new(id)), None);
         }
         let mut depth = 0;

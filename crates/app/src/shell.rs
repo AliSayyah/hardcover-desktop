@@ -86,7 +86,7 @@ enum Screen {
 pub struct Shell {
     screen: Screen,
     cache: Option<Arc<LibraryCache>>,
-    _subscription: Option<Subscription>,
+    subscription: Option<Subscription>,
 }
 
 impl Shell {
@@ -104,7 +104,7 @@ impl Shell {
                         cache,
                         scopes,
                     } => {
-                        this.cache = cache.clone();
+                        this.cache.clone_from(&cache);
                         let services = Services::new(client, session, cache, scopes);
                         this.enter_workspace(services, window, cx);
                     }
@@ -119,14 +119,14 @@ impl Shell {
         Self {
             screen: Screen::Starting,
             cache: None,
-            _subscription: None,
+            subscription: None,
         }
     }
 
     fn enter_workspace(&mut self, services: Services, window: &mut Window, cx: &mut Context<Self>) {
         cx.set_global(services);
         let workspace = cx.new(|cx| Workspace::new(window, cx));
-        self._subscription = Some(cx.subscribe_in(
+        self.subscription = Some(cx.subscribe_in(
             &workspace,
             window,
             |this, _, _: &SignedOut, window, cx| this.show_sign_in(window, cx),
@@ -142,7 +142,7 @@ impl Shell {
         }
         ListsModel::release(cx);
         let sign_in = cx.new(|cx| SignInView::new(window, cx));
-        self._subscription =
+        self.subscription =
             Some(
                 cx.subscribe_in(&sign_in, window, |this, _, event: &SignedIn, window, cx| {
                     let services = Services::new(
@@ -231,12 +231,12 @@ pub struct Workspace {
     /// held, so the rest of the time the rows stay clean.
     key_hints: bool,
     /// Shows the hints once Ctrl has been held for [`KEY_HINT_DELAY`].
-    _key_hint_delay: Option<Task<()>>,
+    key_hint_delay: Option<Task<()>>,
     /// The open Settings dialog's sign-out request.
-    _settings: Option<Subscription>,
+    settings_subscription: Option<Subscription>,
     /// Re-renders periodically so "Updated 5 min ago" stays true.
     _clock: Task<()>,
-    _subscriptions: Vec<Subscription>,
+    subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<SignedOut> for Workspace {}
@@ -254,8 +254,8 @@ impl Workspace {
         let lists = ListsModel::init(cx);
         let list_page = cx.new(|cx| ListView::new(lists.clone(), model.clone(), window, cx));
         let library = cx.new(|cx| LibraryView::new(model.clone(), window, cx));
-        let search = cx.new(|cx| SearchView::new(model.clone(), window, cx));
-        let discover = cx.new(|cx| DiscoverView::new(model.clone(), window, cx));
+        let search = cx.new(|cx| SearchView::new(&model, window, cx));
+        let discover = cx.new(|cx| DiscoverView::new(&model, window, cx));
         let stats = cx.new(|cx| StatsView::new(model.clone(), cx));
         let series_page = cx.new(|cx| SeriesView::new(model.clone(), window, cx));
         let author_page = cx.new(|cx| AuthorView::new(model.clone(), window, cx));
@@ -266,19 +266,18 @@ impl Workspace {
         });
         let navigator = Navigator::init(cx);
         let reauthorize = cx.new(|_| Reauthorize::new(model.clone()));
-        let goals = cx.new(|cx| GoalsModel::new(model.clone(), cx));
+        let goals = cx.new(|cx| GoalsModel::new(&model, cx));
         let sidebar_scroll = ScrollHandle::new();
         let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
         let upcoming = cx.new(|cx| UpcomingModel::new(model.clone(), cx));
         let upcoming_page = cx.new(|cx| UpcomingView::new(upcoming.clone(), model.clone(), cx));
         let home = cx.new(|cx| HomeView::new(model.clone(), goals.clone(), upcoming.clone(), cx));
         let series = cx.new(|cx| SeriesModel::new(model.clone(), upcoming.clone(), cx));
-        let series_view = cx.new(|cx| {
-            SeriesTrackerView::new(series.clone(), model.clone(), upcoming.clone(), window, cx)
-        });
-        model.update(cx, |m, cx| m.start(cx));
-        goals.update(cx, |g, cx| g.load(cx));
-        lists.update(cx, |l, cx| l.load(cx));
+        let series_view = cx
+            .new(|cx| SeriesTrackerView::new(series.clone(), model.clone(), &upcoming, window, cx));
+        model.update(cx, LibraryModel::start);
+        goals.update(cx, GoalsModel::load);
+        lists.update(cx, ListsModel::load);
         let clock = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -289,52 +288,7 @@ impl Workspace {
                 }
             }
         });
-        let updates = Updates::global(cx).clone();
-        let subscriptions = vec![
-            cx.observe(&model, |_, _, cx| cx.notify()),
-            cx.observe(&updates, |_, _, cx| cx.notify()),
-            cx.observe(&reauthorize, |_, _, cx| cx.notify()),
-            cx.observe(&goals, |_, _, cx| cx.notify()),
-            // The sidebar counts the series not finished.
-            cx.observe(&series, |_, _, cx| cx.notify()),
-            // A list shown that is gone after a reload, or no longer
-            // readable, hands over to a shelf.
-            cx.observe_in(&lists, window, |this, lists, window, cx| {
-                if let Destination::List(id) = this.destination
-                    && lists.read(cx).is_gone(id)
-                {
-                    this.show_shelf(ReadingStatus::CurrentlyReading, window, cx);
-                }
-                cx.notify();
-            }),
-            cx.subscribe_in(&lists, window, |this, _, event: &ListsEvent, window, cx| {
-                if let ListsEvent::Deleted(id) = event
-                    && this.destination == Destination::List(*id)
-                {
-                    this.show_shelf(ReadingStatus::CurrentlyReading, window, cx);
-                }
-            }),
-            cx.subscribe(&reauthorize, |this, _, event: &Reauthorized, cx| {
-                this.on_reauthorized(event, cx)
-            }),
-            cx.subscribe_in(&updates, window, |this, _, event, window, cx| {
-                this.on_update_event(event, window, cx)
-            }),
-            // A dialog or menu closing can drop focus (its trigger may be gone,
-            // e.g. after removing a book). Keyboard shortcuts need a focused
-            // element, so return to the current destination.
-            cx.on_focus_lost(window, |this, window, cx| {
-                this.focus_destination(window, cx)
-            }),
-            cx.subscribe_in(
-                &navigator,
-                window,
-                |this, _, event: &NavigationEvent, window, cx| match event {
-                    NavigationEvent::Open(page) => this.open_page(page.clone(), window, cx),
-                },
-            ),
-        ];
-        Self {
+        let mut workspace = Self {
             focus_handle: cx.focus_handle(),
             model,
             destination: Destination::Home,
@@ -361,11 +315,70 @@ impl Workspace {
             series_view,
             signing_out: false,
             key_hints: false,
-            _key_hint_delay: None,
-            _settings: None,
+            key_hint_delay: None,
+            settings_subscription: None,
             _clock: clock,
-            _subscriptions: subscriptions,
-        }
+            subscriptions: Vec::new(),
+        };
+        workspace.subscribe(&navigator, window, cx);
+        workspace
+    }
+
+    fn subscribe(
+        &mut self,
+        navigator: &Entity<Navigator>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let updates = Updates::global(cx).clone();
+        self.subscriptions = vec![
+            cx.observe(&self.model, |_, _, cx| cx.notify()),
+            cx.observe(&updates, |_, _, cx| cx.notify()),
+            cx.observe(&self.reauthorize, |_, _, cx| cx.notify()),
+            cx.observe(&self.goals, |_, _, cx| cx.notify()),
+            // The sidebar counts the series not finished.
+            cx.observe(&self.series, |_, _, cx| cx.notify()),
+            // A list shown that is gone after a reload, or no longer
+            // readable, hands over to a shelf.
+            cx.observe_in(&self.lists, window, |this, lists, window, cx| {
+                if let Destination::List(id) = this.destination
+                    && lists.read(cx).is_gone(id)
+                {
+                    this.show_shelf(ReadingStatus::CurrentlyReading, window, cx);
+                }
+                cx.notify();
+            }),
+            cx.subscribe_in(
+                &self.lists,
+                window,
+                |this, _, event: &ListsEvent, window, cx| {
+                    if let ListsEvent::Deleted(id) = event
+                        && this.destination == Destination::List(*id)
+                    {
+                        this.show_shelf(ReadingStatus::CurrentlyReading, window, cx);
+                    }
+                },
+            ),
+            cx.subscribe(&self.reauthorize, |this, _, event: &Reauthorized, cx| {
+                this.on_reauthorized(event, cx);
+            }),
+            cx.subscribe_in(&updates, window, |_, _, event, window, cx| {
+                Self::on_update_event(event, window, cx);
+            }),
+            // A dialog or menu closing can drop focus (its trigger may be gone,
+            // e.g. after removing a book). Keyboard shortcuts need a focused
+            // element, so return to the current destination.
+            cx.on_focus_lost(window, |this, window, cx| {
+                this.focus_destination(window, cx);
+            }),
+            cx.subscribe_in(
+                navigator,
+                window,
+                |this, _, event: &NavigationEvent, window, cx| match event {
+                    NavigationEvent::Open(page) => this.open_page(page.clone(), window, cx),
+                },
+            ),
+        ];
     }
 
     /// At launch focus sits on the workspace itself, ahead of the sidebar, so
@@ -455,7 +468,7 @@ impl Workspace {
             Some(Page::Series(id)) => self.series_page.update(cx, |p, cx| p.show(id, window, cx)),
             Some(Page::Author(id)) => self.author_page.update(cx, |p, cx| p.show(id, window, cx)),
             Some(Page::Book(book)) => self.book_page.update(cx, |p, cx| {
-                p.set_subject(Some(Subject::Book(book)), window, cx)
+                p.set_subject(Some(Subject::Book(book)), window, cx);
             }),
             Some(Page::Upcoming) => {}
             None => return,
@@ -470,14 +483,14 @@ impl Workspace {
             Some(Page::Series(_)) => {
                 let fallback = self.page_focus.clone();
                 self.series_page
-                    .update(cx, |p, cx| p.focus(&fallback, window, cx))
+                    .update(cx, |p, cx| p.focus(&fallback, window, cx));
             }
             Some(Page::Author(_)) => {
                 let fallback = self.page_focus.clone();
                 self.author_page
-                    .update(cx, |p, cx| p.focus(&fallback, window, cx))
+                    .update(cx, |p, cx| p.focus(&fallback, window, cx));
             }
-            Some(Page::Book(_)) | Some(Page::Upcoming) => window.focus(&self.page_focus, cx),
+            Some(Page::Book(_) | Page::Upcoming) => window.focus(&self.page_focus, cx),
             None => {}
         }
     }
@@ -526,12 +539,10 @@ impl Workspace {
             Destination::Series => SharedString::new_static("Series"),
             Destination::Stats => SharedString::new_static("Stats"),
             Destination::Shelf(status) => SharedString::new_static(status_label(status)),
-            Destination::List(id) => self
-                .lists
-                .read(cx)
-                .list(id)
-                .map(|list| SharedString::from(list.name.clone()))
-                .unwrap_or_else(|| SharedString::new_static("Back")),
+            Destination::List(id) => self.lists.read(cx).list(id).map_or_else(
+                || SharedString::new_static("Back"),
+                |list| SharedString::from(list.name.clone()),
+            ),
         };
         let previous = self.pages.previous().map(|page| match page {
             Page::Book(book) => BackTo::Named(&book.title),
@@ -557,33 +568,32 @@ impl Workspace {
     /// The session now holds a new grant: features it adds come alive.
     fn on_reauthorized(&mut self, event: &Reauthorized, cx: &mut Context<Self>) {
         Services::set_scopes(event.scopes.clone(), cx);
-        self.goals.update(cx, |g, cx| g.load(cx));
-        self.lists.update(cx, |l, cx| l.reload(cx));
-        self.upcoming.update(cx, |u, cx| u.load(cx));
-        self.series.update(cx, |s, cx| s.load(cx));
+        self.goals.update(cx, GoalsModel::load);
+        self.lists.update(cx, ListsModel::reload);
+        self.upcoming.update(cx, UpcomingModel::load);
+        self.series.update(cx, SeriesModel::load);
         cx.notify();
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.model.update(cx, |m, cx| m.sync(cx));
-        self.goals.update(cx, |g, cx| g.load(cx));
-        self.lists.update(cx, |l, cx| l.reload(cx));
-        self.upcoming.update(cx, |u, cx| u.load(cx));
-        self.series.update(cx, |s, cx| s.load(cx));
+        self.model.update(cx, LibraryModel::sync);
+        self.goals.update(cx, GoalsModel::load);
+        self.lists.update(cx, ListsModel::reload);
+        self.upcoming.update(cx, UpcomingModel::load);
+        self.series.update(cx, SeriesModel::load);
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let model = self.model.clone();
         let view = cx.new(|cx| SettingsView::new(model, cx));
-        self._settings = Some(cx.subscribe_in(
-            &view,
-            window,
-            |this, _, _: &SignOutRequested, window, cx| {
-                // One overlay at a time: the confirmation replaces Settings.
-                window.close_all_dialogs(cx);
-                this.confirm_sign_out(window, cx);
-            },
-        ));
+        self.settings_subscription =
+            Some(
+                cx.subscribe_in(&view, window, |_, _, _: &SignOutRequested, window, cx| {
+                    // One overlay at a time: the confirmation replaces Settings.
+                    window.close_all_dialogs(cx);
+                    Self::confirm_sign_out(window, cx);
+                }),
+            );
         open_dialog(window, cx, move |dialog, window, _| {
             dialog
                 .title("Settings")
@@ -592,7 +602,7 @@ impl Workspace {
         });
     }
 
-    fn confirm_sign_out(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn confirm_sign_out(window: &mut Window, cx: &mut Context<Self>) {
         let view = cx.entity().downgrade();
         open_alert_dialog(window, cx, move |alert, _, _| {
             let view = view.clone();
@@ -603,7 +613,7 @@ impl Workspace {
                 .ok_text("Sign out")
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, _, cx| {
-                    let _ = view.update(cx, |this, cx| this.sign_out(cx));
+                    let _ = view.update(cx, Workspace::sign_out);
                     true
                 })
         });
@@ -616,7 +626,7 @@ impl Workspace {
         self.signing_out = true;
         // A "Sign in again…" still waiting on the browser must not sign the
         // user back in once the session is gone.
-        self.reauthorize.update(cx, |r, cx| r.cancel(cx));
+        self.reauthorize.update(cx, Reauthorize::cancel);
         cx.notify();
         let services = Services::global(cx).clone();
         cx.spawn(async move |this, cx| {
@@ -643,27 +653,45 @@ impl Workspace {
     /// may join it) for a moment, and hides them as soon as it's released.
     fn modifiers_changed(&mut self, modifiers: Modifiers, cx: &mut Context<Self>) {
         if !ctrl_held(modifiers) {
-            self._key_hint_delay = None;
+            self.key_hint_delay = None;
             if self.key_hints {
                 self.key_hints = false;
                 cx.notify();
             }
             return;
         }
-        if self.key_hints || self._key_hint_delay.is_some() {
+        if self.key_hints || self.key_hint_delay.is_some() {
             return;
         }
-        self._key_hint_delay = Some(cx.spawn(async move |this, cx| {
+        self.key_hint_delay = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(KEY_HINT_DELAY).await;
             let _ = this.update(cx, |this, cx| {
-                this._key_hint_delay = None;
+                this.key_hint_delay = None;
                 this.key_hints = true;
                 cx.notify();
             });
         }));
     }
 
-    fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn sidebar_lists(&self, cx: &Context<Self>) -> Option<gpui_kit::Div> {
+        lists_section(
+            &self.lists,
+            match self.destination {
+                Destination::List(id) => Some(id),
+                _ => None,
+            },
+            Rc::new({
+                let view = cx.entity().downgrade();
+                move |id, window, cx| {
+                    let _ =
+                        view.update(cx, |this, cx| this.show(Destination::List(id), window, cx));
+                }
+            }),
+            cx,
+        )
+    }
+
+    fn destination_rows(&self, window: &Window, cx: &mut Context<Self>) -> gpui_kit::Div {
         let model = self.model.read(cx);
         let view = cx.entity().downgrade();
         // The modifiers are read again here: a release while a dialog had
@@ -698,28 +726,14 @@ impl Workspace {
                 Destination::Shelf(status),
                 action.as_ref(),
             )
-            .count(count_text(model.count(status) as u32))
+            .count(count_text(model.count(status)))
         });
         let goals = self
             .goals_section
             .read(cx)
             .is_visible(cx)
             .then(|| self.goals_section.clone());
-        let lists = lists_section(
-            &self.lists,
-            match self.destination {
-                Destination::List(id) => Some(id),
-                _ => None,
-            },
-            Rc::new({
-                let view = view.clone();
-                move |id, window, cx| {
-                    let _ =
-                        view.update(cx, |this, cx| this.show(Destination::List(id), window, cx));
-                }
-            }),
-            cx,
-        );
+        let lists = self.sidebar_lists(cx);
         // Hidden without the catalogue, which the page reads.
         let series_row = Services::global(cx).has_scope(READ_CATALOG).then(|| {
             let today = chrono::Local::now().date_naive();
@@ -739,10 +753,47 @@ impl Workspace {
                 &ShowSeries,
             )
             // Nothing to count shows no count, as the empty page has nothing.
-            .when_some(count.filter(|n| *n > 0), |row, n| {
-                row.count(count_text(n as u32))
-            })
+            .when_some(count.filter(|n| *n > 0), |row, n| row.count(count_text(n)))
         });
+        v_flex()
+            .p_2()
+            .child(nav_row(
+                "nav-home",
+                "Home",
+                IconName::LayoutDashboard.into(),
+                Destination::Home,
+                &ShowHome,
+            ))
+            .child(nav_row(
+                "nav-search",
+                "Search",
+                IconName::Search.into(),
+                Destination::Search,
+                &FocusSearch,
+            ))
+            .child(nav_row(
+                "nav-discover",
+                "Discover",
+                IconName::Globe.into(),
+                Destination::Discover,
+                &ShowDiscover,
+            ))
+            .children(series_row)
+            .child(nav_row(
+                "nav-stats",
+                "Stats",
+                IconName::ChartPie.into(),
+                Destination::Stats,
+                &ShowStats,
+            ))
+            .child(sidebar_label("Library", cx))
+            .children(shelves)
+            .children(goals)
+            .children(lists)
+    }
+
+    fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let destinations = self.destination_rows(window, cx);
         let colors = colors(cx);
 
         // The brand and the foot stay put; the destinations between them
@@ -764,43 +815,7 @@ impl Workspace {
                     .overflow_y_scroll()
                     .track_scroll(&self.sidebar_scroll)
                     .vertical_scrollbar(&self.sidebar_scroll)
-                    .child(
-                        v_flex()
-                            .p_2()
-                            .child(nav_row(
-                                "nav-home",
-                                "Home",
-                                IconName::LayoutDashboard.into(),
-                                Destination::Home,
-                                &ShowHome,
-                            ))
-                            .child(nav_row(
-                                "nav-search",
-                                "Search",
-                                IconName::Search.into(),
-                                Destination::Search,
-                                &FocusSearch,
-                            ))
-                            .child(nav_row(
-                                "nav-discover",
-                                "Discover",
-                                IconName::Globe.into(),
-                                Destination::Discover,
-                                &ShowDiscover,
-                            ))
-                            .children(series_row)
-                            .child(nav_row(
-                                "nav-stats",
-                                "Stats",
-                                IconName::ChartPie.into(),
-                                Destination::Stats,
-                                &ShowStats,
-                            ))
-                            .child(sidebar_label("Library", cx))
-                            .children(shelves)
-                            .children(goals)
-                            .children(lists),
-                    )
+                    .child(destinations)
                     .reveals_focus(&self.sidebar_scroll),
             )
             // When the destinations don't all fit (a short window), a
@@ -820,7 +835,7 @@ impl Workspace {
                         self.reauthorize.read(cx).is_needed(Services::global(cx)),
                         |this| this.child(self.reauthorize.clone()),
                     )
-                    .children(self.render_update(cx))
+                    .children(Self::render_update(cx))
                     .child(self.render_account(cx)),
             )
     }
@@ -828,7 +843,7 @@ impl Workspace {
     // ----- updates -----
 
     /// The sidebar's update row, while there is something to act on.
-    fn render_update(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_update(cx: &mut Context<Self>) -> Option<AnyElement> {
         let updates = Updates::global(cx).read(cx);
         let view = cx.entity().downgrade();
         let button = match updates.state() {
@@ -837,7 +852,7 @@ impl Workspace {
                 .icon(IconName::ArrowUp)
                 .label(format!("Update to {}…", release.version))
                 .on_click(move |_, window, cx| {
-                    let _ = view.update(cx, |this, cx| this.open_update_dialog(window, cx));
+                    let _ = view.update(cx, |_, cx| Self::open_update_dialog(window, cx));
                 }),
             UpdateState::Installing(release) => Button::new("update")
                 .loading(true)
@@ -852,18 +867,13 @@ impl Workspace {
         Some(button.small_control().w_full().into_any_element())
     }
 
-    fn check_for_updates(&mut self, cx: &mut Context<Self>) {
+    fn check_for_updates(cx: &mut Context<Self>) {
         Updates::global(cx)
             .clone()
             .update(cx, |u, cx| u.check(true, cx));
     }
 
-    fn on_update_event(
-        &mut self,
-        event: &UpdateEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn on_update_event(event: &UpdateEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             UpdateEvent::UpToDate(version) => window.push_notification(
                 Notification::success(format!(
@@ -874,7 +884,7 @@ impl Workspace {
             UpdateEvent::Found => {
                 // Found by "Check now" in Settings: show the release instead.
                 window.close_all_dialogs(cx);
-                self.open_update_dialog(window, cx)
+                Self::open_update_dialog(window, cx);
             }
             UpdateEvent::CheckFailed(message) => window.push_notification(
                 Notification::error(message.clone()).title("Couldn't check for updates"),
@@ -887,7 +897,7 @@ impl Workspace {
         }
     }
 
-    fn open_update_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_update_dialog(window: &mut Window, cx: &mut Context<Self>) {
         let updates = Updates::global(cx).clone();
         let model = updates.read(cx);
         let UpdateState::Available(release) = model.state() else {
@@ -965,52 +975,13 @@ impl Workspace {
     fn render_account(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let model = self.model.read(cx);
         let user = model.user().cloned();
-        let (status_icon, status_text): (Option<IconName>, SharedString) = match model.sync_status()
-        {
-            SyncStatus::Syncing => (
-                None,
-                match model.sync_fetched() {
-                    0 => "Syncing…".into(),
-                    n => format!("Syncing… {} books", count_text(n as u32)).into(),
-                },
-            ),
-            SyncStatus::Failed { offline: true, .. } => {
-                (Some(IconName::CircleAlert), "Offline".into())
-            }
-            SyncStatus::Failed { .. } => (Some(IconName::CircleAlert), "Couldn't sync".into()),
-            SyncStatus::Synced | SyncStatus::Idle => match model.last_synced_at() {
-                Some(at) => (
-                    None,
-                    format!("Updated {}", relative_time(&chrono::Utc::now(), &at)).into(),
-                ),
-                None => (None, "Not synced yet".into()),
-            },
-        };
-        let sync_tooltip = match model.sync_status() {
-            SyncStatus::Failed {
-                message,
-                offline: true,
-            } => Some(format!("Showing your saved library. {message}").into()),
-            SyncStatus::Failed { message, .. } => Some(message.clone()),
-            _ => None,
-        };
+        let (status, sync_tooltip) = sync_status_line(model, cx);
         let username: SharedString = user
             .as_ref()
-            .map(|u| u.username.clone().into())
-            .unwrap_or_else(|| "Account".into());
+            .map_or_else(|| "Account".into(), |u| u.username.clone().into());
         // Initials from the name when there is one ("Jane Quill"), else the
         // username.
-        let avatar = Avatar::new(
-            user.as_ref()
-                .and_then(|u| u.name.clone())
-                .filter(|name| !name.trim().is_empty())
-                .map_or_else(|| username.clone(), SharedString::from),
-        )
-        .image(
-            user.as_ref()
-                .and_then(|u| u.avatar.as_ref())
-                .map(|a| a.url.clone()),
-        );
+        let avatar = Avatar::for_user(user.as_ref(), username.clone());
         let profile_url = user
             .as_ref()
             .map(|u| format!("https://hardcover.app/@{}", u.username));
@@ -1025,18 +996,6 @@ impl Workspace {
                 services.session().is_some() && !services.missing_scopes().is_empty()
             }
         };
-        // While syncing, a 12 px spinner where the other states have their
-        // icon, so the line shows the work moving, not only its count.
-        let syncing = matches!(model.sync_status(), SyncStatus::Syncing);
-        let status = h_flex()
-            .min_w_0()
-            .gap_1()
-            .when(syncing, |this| {
-                this.child(Spinner::new().xsmall().color(colors(cx).fg_muted))
-            })
-            .children(status_icon.map(|icon| Icon::new(icon).size_3().flex_none()))
-            .child(div().min_w_0().truncate().tabular().child(status_text));
-
         AccountRow::new("account", avatar, username, status)
             .focus(&self.account_focus)
             .status_tooltip(sync_tooltip)
@@ -1063,7 +1022,7 @@ impl Workspace {
                     let reauthorize = reauthorize.clone();
                     menu.item(PopupMenuItem::new("Sign in again…").on_click(
                         move |_, window, cx| {
-                            reauthorize.update(cx, |r, cx| r.sign_in_again(window, cx))
+                            reauthorize.update(cx, |r, cx| r.sign_in_again(window, cx));
                         },
                     ))
                 } else {
@@ -1074,7 +1033,8 @@ impl Workspace {
                     .menu_with_icon("Settings…", IconName::Settings, Box::new(OpenSettings))
                     .item(
                         PopupMenuItem::new("Check for updates").on_click(move |_, _, cx| {
-                            let _ = updates_view.update(cx, |this, cx| this.check_for_updates(cx));
+                            let _ =
+                                updates_view.update(cx, |_, cx| Workspace::check_for_updates(cx));
                         }),
                     )
                     .menu_with_icon(
@@ -1086,11 +1046,53 @@ impl Workspace {
                     .item(
                         PopupMenuItem::new("Sign out…").on_click(move |_, window, cx| {
                             window.focus(&focus, cx);
-                            let _ = view.update(cx, |this, cx| this.confirm_sign_out(window, cx));
+                            let _ = view.update(cx, |_, cx| Self::confirm_sign_out(window, cx));
                         }),
                     )
             })
     }
+}
+
+fn sync_status_line(model: &LibraryModel, cx: &App) -> (gpui_kit::Div, Option<SharedString>) {
+    let (status_icon, status_text): (Option<IconName>, SharedString) = match model.sync_status() {
+        SyncStatus::Syncing => (
+            None,
+            match model.sync_fetched() {
+                0 => "Syncing…".into(),
+                n => format!("Syncing… {} books", count_text(n)).into(),
+            },
+        ),
+        SyncStatus::Failed { offline: true, .. } => (Some(IconName::CircleAlert), "Offline".into()),
+        SyncStatus::Failed { .. } => (Some(IconName::CircleAlert), "Couldn't sync".into()),
+        SyncStatus::Synced | SyncStatus::Idle => match model.last_synced_at() {
+            Some(at) => (
+                None,
+                format!("Updated {}", relative_time(&chrono::Utc::now(), &at)).into(),
+            ),
+            None => (None, "Not synced yet".into()),
+        },
+    };
+    let sync_tooltip = match model.sync_status() {
+        SyncStatus::Failed {
+            message,
+            offline: true,
+        } => Some(format!("Showing your saved library. {message}").into()),
+        SyncStatus::Failed { message, .. } => Some(message.clone()),
+        _ => None,
+    };
+    // While syncing, a 12 px spinner where the other states have their
+    // icon, so the line shows the work moving, not only its count.
+    let syncing = matches!(model.sync_status(), SyncStatus::Syncing);
+    let status = h_flex()
+        .min_w_0()
+        .gap_1()
+        .when(syncing, |this| {
+            this.child(Spinner::new().xsmall().color(colors(cx).fg_muted))
+        })
+        .children(status_icon.map(|icon| Icon::new(icon).size_3().flex_none()))
+        .child(div().min_w_0().truncate().tabular().child(status_text));
+
+    (status, sync_tooltip)
 }
 
 /// Ctrl alone, or with Shift (Discover and Stats): what the sidebar hints are for.
@@ -1129,12 +1131,12 @@ impl Render for Workspace {
             .key_context("Workspace")
             .track_focus(&self.focus_handle)
             .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _, cx| {
-                this.modifiers_changed(event.modifiers, cx)
+                this.modifiers_changed(event.modifiers, cx);
             }))
             .size_full()
             .items_stretch()
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
-                this.show(Destination::Search, window, cx)
+                this.show(Destination::Search, window, cx);
             }))
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh(cx)))
             .on_action(cx.listener(|this, _: &GoBack, window, cx| this.go_back(window, cx)))
@@ -1143,36 +1145,36 @@ impl Render for Workspace {
             )
             .on_action(cx.listener(|_, _: &ShowAbout, window, cx| open_about(window, cx)))
             .on_action(cx.listener(|this, _: &ShowCurrentlyReading, window, cx| {
-                this.show_shelf(ReadingStatus::CurrentlyReading, window, cx)
+                this.show_shelf(ReadingStatus::CurrentlyReading, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowWantToRead, window, cx| {
-                this.show_shelf(ReadingStatus::WantToRead, window, cx)
+                this.show_shelf(ReadingStatus::WantToRead, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowRead, window, cx| {
-                this.show_shelf(ReadingStatus::Read, window, cx)
+                this.show_shelf(ReadingStatus::Read, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowPaused, window, cx| {
-                this.show_shelf(ReadingStatus::Paused, window, cx)
+                this.show_shelf(ReadingStatus::Paused, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowDidNotFinish, window, cx| {
-                this.show_shelf(ReadingStatus::DidNotFinish, window, cx)
+                this.show_shelf(ReadingStatus::DidNotFinish, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowIgnored, window, cx| {
-                this.show_shelf(ReadingStatus::Ignored, window, cx)
+                this.show_shelf(ReadingStatus::Ignored, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowDiscover, window, cx| {
-                this.show(Destination::Discover, window, cx)
+                this.show(Destination::Discover, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowSeries, window, cx| {
                 if Services::global(cx).has_scope(READ_CATALOG) {
-                    this.show(Destination::Series, window, cx)
+                    this.show(Destination::Series, window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &ShowStats, window, cx| {
-                this.show(Destination::Stats, window, cx)
+                this.show(Destination::Stats, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowHome, window, cx| {
-                this.show(Destination::Home, window, cx)
+                this.show(Destination::Home, window, cx);
             }))
             .child(self.render_sidebar(window, cx))
             .child(div().flex_1().min_w_0().h_full().map(|this| {

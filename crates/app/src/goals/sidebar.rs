@@ -54,7 +54,7 @@ pub fn pace_percent(goal: &Goal, today: Date) -> Option<f32> {
     let reached = goal.progress >= f64::from(goal.target);
     (!reached && goal.is_current(today)).then(|| {
         let expected = goal.expected_by(today) / f64::from(goal.target.max(1));
-        (expected.clamp(0.0, 1.0) * 100.0) as f32
+        crate::format::bar_percent(expected)
     })
 }
 
@@ -88,7 +88,7 @@ impl Render for GoalsSection {
                     Some(pace) => format!("{period} reading goal, {count}, {pace}").into(),
                     None => format!("{period} reading goal, {count}").into(),
                 };
-                let percent = (goal.fraction() * 100.0).clamp(0.0, 100.0) as f32;
+                let percent = crate::format::bar_percent(goal.fraction());
                 let (goals, library, id) = (goals.clone(), library.clone(), goal.id);
                 GoalRow::new(
                     SharedString::from(format!("goal-row-{id}")),
@@ -99,7 +99,7 @@ impl Render for GoalsSection {
                 .pace(pace_percent(goal, today))
                 .accessibility_label(accessible)
                 .on_click(move |_, window, cx| {
-                    open_goal(goals.clone(), library.clone(), id, window, cx)
+                    open_goal(goals.clone(), library.clone(), id, window, cx);
                 })
                 .into_any_element()
             })
@@ -115,7 +115,7 @@ impl Render for GoalsSection {
                         "Try loading your goal again",
                     )
                     .tooltip(Some(format!("Couldn't load your reading goal. {message}")))
-                    .on_click(move |_, _, cx| goals.update(cx, |m, cx| m.load(cx)))
+                    .on_click(move |_, _, cx| goals.update(cx, GoalsModel::load))
                     .into_any_element()
                 }
                 _ => {

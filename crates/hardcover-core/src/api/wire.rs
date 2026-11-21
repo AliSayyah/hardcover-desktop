@@ -9,12 +9,24 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::model::*;
+use super::model::{
+    AuthorBook, AuthorDetails, AuthorHit, AuthorId, AuthorRef, BookDetails, BookId, BookSummary,
+    CommunityReview, Contributor, Cover, Date, EditionId, EditionSummary, Goal, GoalConditions,
+    GoalId, GoalMetric, Length, LibraryEntry, ListBook, ListBookId, ListId, ListMembership,
+    Privacy, Rating, RatingBucket, ReadId, ReadSession, ReadingStatus, Review, Reviewer,
+    SearchHits, SearchPage, SeriesBook, SeriesDetails, SeriesHit, SeriesId, SeriesRef, Timestamp,
+    TrackedBook, TrackedSeries, UpcomingBook, User, UserBookId, UserId, UserList,
+    length_from_parts, read_order,
+};
 
 // ---------- scalar helpers ----------
 
 pub(crate) fn as_i64(v: &Value) -> Option<i64> {
     match v {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the lenient wire decoder also accepts decimal numbers and discards their fractional part"
+        )]
         Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
         Value::String(s) => s.trim().parse().ok(),
         _ => None,
@@ -28,6 +40,14 @@ pub(crate) fn as_f64(v: &Value) -> Option<f64> {
         _ => None,
     }
     .filter(|f| f.is_finite())
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "GraphQL Float is f64 and the display model uses f32"
+)]
+fn model_float(value: f64) -> f32 {
+    value as f32
 }
 
 fn as_u32(v: &Value) -> Option<u32> {
@@ -166,8 +186,13 @@ pub(crate) fn ratings_distribution(v: &Value) -> Vec<RatingBucket> {
         if !(0.5..=5.0).contains(&rating) || count == 0 {
             continue;
         }
-        let rating = ((rating * 2.0).round() / 2.0) as f32;
-        match buckets.iter_mut().find(|b| b.rating == rating) {
+        let Some(rating) = Rating::from_api(rating).map(Rating::value) else {
+            continue;
+        };
+        match buckets
+            .iter_mut()
+            .find(|b| b.rating.total_cmp(&rating).is_eq())
+        {
             Some(b) => b.count = b.count.saturating_add(count),
             None => buckets.push(RatingBucket::new(rating, count)),
         }
@@ -225,8 +250,7 @@ fn dedup(items: Vec<String>) -> Vec<String> {
 
 fn string_list(v: Option<&Value>) -> Vec<String> {
     v.and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(as_string).collect())
-        .unwrap_or_default()
+        .map_or_default(|a| a.iter().filter_map(as_string).collect())
 }
 
 /// `cached_tags` is `{"Genre": [{"tag": "...", "count": n, ...}], "Mood": [...], ...}`.
@@ -271,7 +295,7 @@ impl RawBook {
         b.pages = opt_u32(self.pages).filter(|p| *p > 0);
         b.release_year = self.release_year.and_then(|y| i32::try_from(y).ok());
         b.slug = non_empty(self.slug);
-        b.average_rating = self.rating.as_ref().and_then(as_f64).map(|r| r as f32);
+        b.average_rating = self.rating.as_ref().and_then(as_f64).map(model_float);
         b.users_count = opt_u32(self.users_count);
         b
     }
@@ -349,7 +373,7 @@ fn series_refs(rows: Vec<RawBookSeries>) -> Vec<SeriesRef> {
         let mut s = SeriesRef::new(name);
         s.id = series.id.map(SeriesId::new);
         s.slug = non_empty(series.slug);
-        s.position = bs.position.filter(|p| p.is_finite()).map(|p| p as f32);
+        s.position = bs.position.filter(|p| p.is_finite()).map(model_float);
         s.featured = bs.featured;
         refs.push(s);
     }
@@ -415,7 +439,7 @@ impl RawSeriesPage {
             b.position = e
                 .position
                 .filter(|p| p.is_finite() && *p >= 0.0)
-                .map(|p| p as f32);
+                .map(model_float);
             Some(b)
         });
         d.books = series_reading_order(entries.collect());
@@ -506,18 +530,14 @@ impl RawAuthorPage {
             }
             let role = non_empty(c.contribution).filter(|r| !r.eq_ignore_ascii_case("author"));
             let summary = book.book.into_summary();
-            match d.books.iter_mut().find(|b| b.book.id == summary.id) {
-                // Credited twice (e.g. author and illustrator): authorship wins.
-                Some(existing) => {
-                    if role.is_none() {
-                        existing.role = None;
-                    }
+            if let Some(existing) = d.books.iter_mut().find(|b| b.book.id == summary.id) {
+                if role.is_none() {
+                    existing.role = None;
                 }
-                None => {
-                    let mut b = AuthorBook::new(summary);
-                    b.role = role;
-                    d.books.push(b);
-                }
+            } else {
+                let mut b = AuthorBook::new(summary);
+                b.role = role;
+                d.books.push(b);
             }
         }
         d
@@ -597,7 +617,7 @@ impl RawRead {
         r.progress_percent = self
             .progress
             .filter(|p| p.is_finite())
-            .map(|p| p.clamp(0.0, 100.0) as f32);
+            .map(|p| model_float(p.clamp(0.0, 100.0)));
         r.edition_id = self.edition_id.map(EditionId::new);
         r.edition = self.edition.map(RawEdition::into_summary);
         r
@@ -694,20 +714,25 @@ pub(crate) struct RawSearch {
     pub results: Value,
 }
 
+impl RawSearch {
+    fn total(&self) -> Option<u32> {
+        self.results.get("found").and_then(as_u32)
+    }
+}
+
 /// `results` is the Typesense response: `{found, page, hits: [{document: {...}}]}`.
 /// Hits without a usable id are skipped.
-pub(crate) fn search_page(raw: RawSearch, page: u32, per_page: u32) -> SearchPage {
+pub(crate) fn search_page(raw: &RawSearch, page: u32, per_page: u32) -> SearchPage {
     let results = &raw.results;
     let books = results
         .get("hits")
         .and_then(Value::as_array)
-        .map(|hits| {
+        .map_or_default(|hits| {
             hits.iter()
                 .filter_map(|h| h.get("document"))
                 .filter_map(book_from_search_document)
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     let mut p = SearchPage::new(
         books,
         raw.page.and_then(|n| u32::try_from(n).ok()).unwrap_or(page),
@@ -715,7 +740,7 @@ pub(crate) fn search_page(raw: RawSearch, page: u32, per_page: u32) -> SearchPag
             .and_then(|n| u32::try_from(n).ok())
             .unwrap_or(per_page),
     );
-    p.total = results.get("found").and_then(as_u32);
+    p.total = raw.total();
     p
 }
 
@@ -728,8 +753,7 @@ fn book_from_search_document(doc: &Value) -> Option<BookSummary> {
     if b.authors.is_empty() {
         b.authors = doc
             .get("contributions")
-            .map(authors_from_contributors)
-            .unwrap_or_default();
+            .map_or_default(authors_from_contributors);
     }
     b.cover = doc.get("image").and_then(cover_from_value);
     b.pages = doc.get("pages").and_then(as_u32).filter(|p| *p > 0);
@@ -738,7 +762,7 @@ fn book_from_search_document(doc: &Value) -> Option<BookSummary> {
         .and_then(as_i64)
         .and_then(|y| i32::try_from(y).ok());
     b.slug = doc.get("slug").and_then(as_string);
-    b.average_rating = doc.get("rating").and_then(as_f64).map(|r| r as f32);
+    b.average_rating = doc.get("rating").and_then(as_f64).map(model_float);
     b.users_count = doc.get("users_count").and_then(as_u32);
     Some(b)
 }
@@ -798,7 +822,7 @@ pub(crate) struct GoalPayload {
 impl GoalPayload {
     /// The payload's errors, joined, if there are any.
     pub fn error(&self) -> Option<String> {
-        joined_errors(&self.errors)
+        joined_errors(self.errors.as_deref())
     }
 }
 
@@ -806,7 +830,7 @@ impl GoalPayload {
 /// document's own `id` is preferred; `ids[i]` stands in only when `ids` lines up
 /// with the hits. Hits without a usable id or name are skipped.
 pub(crate) fn search_hits<T>(
-    raw: RawSearch,
+    raw: &RawSearch,
     page: u32,
     per_page: u32,
     parse: impl Fn(&Value, Option<i64>) -> Option<T>,
@@ -815,13 +839,11 @@ pub(crate) fn search_hits<T>(
     let hits: Vec<&Value> = results
         .get("hits")
         .and_then(Value::as_array)
-        .map(|hits| hits.iter().filter_map(|h| h.get("document")).collect())
-        .unwrap_or_default();
+        .map_or_default(|hits| hits.iter().filter_map(|h| h.get("document")).collect());
     let ids: Vec<Option<i64>> = raw
         .ids
         .as_array()
-        .map(|ids| ids.iter().map(as_i64).collect())
-        .unwrap_or_default();
+        .map_or_default(|ids| ids.iter().map(as_i64).collect());
     let fallback = |i: usize| {
         if ids.len() == hits.len() {
             ids[i]
@@ -841,19 +863,17 @@ pub(crate) fn search_hits<T>(
             .and_then(|n| u32::try_from(n).ok())
             .unwrap_or(per_page),
     );
-    p.total = results.get("found").and_then(as_u32);
+    p.total = raw.total();
     p
 }
 
 /// Titles from a list of strings or of objects with a `title`.
 fn titles(v: Option<&Value>) -> Vec<String> {
-    v.and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|t| as_string(t).or_else(|| t.get("title").and_then(as_string)))
-                .collect()
-        })
-        .unwrap_or_default()
+    v.and_then(Value::as_array).map_or_default(|a| {
+        a.iter()
+            .filter_map(|t| as_string(t).or_else(|| t.get("title").and_then(as_string)))
+            .collect()
+    })
 }
 
 /// An author search document: `name`, `slug`, `image`, `books_count` and
@@ -989,7 +1009,7 @@ pub(crate) struct ListPayload {
 
 impl ListPayload {
     pub fn error(&self) -> Option<String> {
-        joined_errors(&self.errors)
+        joined_errors(self.errors.as_deref())
     }
 }
 
@@ -1011,10 +1031,9 @@ pub(crate) struct ListBookDeletePayload {
 }
 
 /// An `errors: [String]` field, joined, if it holds any.
-fn joined_errors(errors: &Option<Vec<Option<String>>>) -> Option<String> {
-    let errors: Vec<&str> = errors
+fn joined_errors(errors: Option<&[Option<String>]>) -> Option<String> {
+    let errors: Vec<&str> = errors?
         .iter()
-        .flatten()
         .flatten()
         .map(|e| e.trim())
         .filter(|e| !e.is_empty())
@@ -1142,11 +1161,7 @@ pub(crate) struct ProgressContext {
 
 impl Lengths {
     fn length(&self) -> Option<Length> {
-        match (opt_u32(self.pages), opt_u32(self.audio_seconds)) {
-            (Some(p), _) if p > 0 => Some(Length::Pages(p)),
-            (_, Some(s)) if s > 0 => Some(Length::Seconds(s)),
-            _ => None,
-        }
+        length_from_parts(opt_u32(self.pages), opt_u32(self.audio_seconds))
     }
 }
 
@@ -1305,12 +1320,11 @@ pub(crate) fn upcoming_books(rows: Vec<RawUpcomingRow>) -> Vec<UpcomingBook> {
             continue;
         };
         let id = BookId::new(raw.book.id);
-        let ix = match books.iter().position(|b| b.book.id == id) {
-            Some(ix) => ix,
-            None => {
-                books.push(UpcomingBook::new(raw.book.into_summary(), release_date));
-                books.len() - 1
-            }
+        let ix = if let Some(ix) = books.iter().position(|b| b.book.id == id) {
+            ix
+        } else {
+            books.push(UpcomingBook::new(raw.book.into_summary(), release_date));
+            books.len() - 1
         };
         let series = series_refs(vec![RawBookSeries {
             position: row.position,
@@ -1392,7 +1406,7 @@ impl RawTrackedSeries {
             if s.books.iter().any(|b| b.book.id == book.id) {
                 continue;
             }
-            let mut b = TrackedBook::new(book, position as f32);
+            let mut b = TrackedBook::new(book, model_float(position));
             b.release_date = release_date;
             b.partial = partial;
             s.books.push(b);
@@ -1456,7 +1470,7 @@ mod tests {
             Some("Editor")
         );
         assert_eq!(authors_from_contributors(&only_editor), vec!["Ed Itor"]);
-        assert!(authors_from_contributors(&json!({})).is_empty());
+        assert_eq!(authors_from_contributors(&json!({})), [] as [String; 0]);
     }
 
     #[test]
@@ -1476,7 +1490,7 @@ mod tests {
         assert_eq!(c[1].role.as_deref(), Some("Translator"));
         assert_eq!(c[2].author_id, None);
         assert!(!c[2].is_author());
-        assert!(contributors_from_cached(&json!({})).is_empty());
+        assert_eq!(contributors_from_cached(&json!({})), []);
     }
 
     #[test]
@@ -1501,8 +1515,8 @@ mod tests {
             b.iter().map(|b| (b.rating, b.count)).collect::<Vec<_>>(),
             vec![(5.0, 8), (2.5, 4), (1.0, 2)]
         );
-        assert!(ratings_distribution(&Value::Null).is_empty());
-        assert!(ratings_distribution(&json!({})).is_empty());
+        assert_eq!(ratings_distribution(&Value::Null), []);
+        assert_eq!(ratings_distribution(&json!({})), []);
     }
 
     #[test]
@@ -1512,13 +1526,13 @@ mod tests {
             alternative_titles(&titles, "The Book"),
             vec!["Le Livre", "Das Buch"]
         );
-        assert!(alternative_titles(&json!({}), "x").is_empty());
+        assert_eq!(alternative_titles(&json!({}), "x"), [] as [String; 0]);
         let ids = json!([3, "4", {"id": 5}, 3, -1, null]);
         assert_eq!(
             book_ids(&ids),
             vec![BookId::new(3), BookId::new(4), BookId::new(5)]
         );
-        assert!(book_ids(&json!({})).is_empty());
+        assert_eq!(book_ids(&json!({})), []);
     }
 
     fn series_book(id: i64, title: &str, position: Option<f32>, users: u32) -> SeriesBook {

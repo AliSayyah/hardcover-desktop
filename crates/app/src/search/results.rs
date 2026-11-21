@@ -198,7 +198,7 @@ mod tests {
         let old = r.start("dun".into()).unwrap();
         let new = r.start("dune".into()).unwrap();
         assert!(!r.receive(old, Ok::<_, String>(page(&[1, 2], 1, 10))));
-        assert!(r.hits().is_empty());
+        assert_eq!(r.hits(), []);
         assert_eq!(r.phase(), &Phase::Searching);
         assert!(r.receive(new, Ok::<_, String>(page(&[3, 4], 1, 10))));
         assert_eq!(r.hits().len(), 2);

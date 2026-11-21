@@ -139,12 +139,8 @@ pub enum CoverArt {
 }
 
 impl CoverArt {
-    fn from_asset(asset: Option<Option<Arc<RenderImage>>>) -> Self {
-        match asset {
-            None => Self::Loading,
-            Some(Some(image)) => Self::Image(image),
-            Some(None) => Self::None,
-        }
+    fn loaded(image: Option<Arc<RenderImage>>) -> Self {
+        image.map_or(Self::None, Self::Image)
     }
 
     /// The image, once it has loaded.
@@ -160,12 +156,16 @@ impl CoverArt {
 /// the other covers, scaled to `app_state::COVER_HEIGHT`. The caller releases
 /// it with `app_state::release_cover_image`.
 pub fn detail_art(url: &str, window: &mut Window, cx: &mut App) -> CoverArt {
-    CoverArt::from_asset(window.use_asset::<CoverImage>(&url.to_owned(), cx))
+    window
+        .use_asset::<CoverImage>(&url.to_owned(), cx)
+        .map_or(CoverArt::Loading, CoverArt::loaded)
 }
 
 /// The list thumbnail for `url`.
 fn thumbnail_art(url: &str, window: &mut Window, cx: &mut App) -> CoverArt {
-    CoverArt::from_asset(window.use_asset::<CoverThumbnail>(&url.to_owned(), cx))
+    window
+        .use_asset::<CoverThumbnail>(&url.to_owned(), cx)
+        .map_or(CoverArt::Loading, CoverArt::loaded)
 }
 
 enum Source {

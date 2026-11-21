@@ -65,7 +65,7 @@ impl RenderOnce for BylineLink {
                     .cursor_pointer()
                     .text_color(colors(cx).fg)
                     .body_strong()
-                    .when(underline, |this| this.hover(|style| style.underline()))
+                    .when(underline, |this| this.hover(gpui_kit::Styled::underline))
                     .on_click(move |_, _, cx| cx.open_url(&url))
                     .when(focused, |this| this.focus_ring_around(radius, cx))
                     .child(div().min_w_0().truncate().child(self.name)),

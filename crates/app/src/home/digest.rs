@@ -7,16 +7,15 @@
 
 use std::collections::HashSet;
 
-use chrono::Duration;
 use hardcover_core::{
     BookId, Date, Goal, GoalMetric, Length, LibraryEntry, ReadingStatus, SeriesId, UserBookId,
 };
 
 /// A read younger than this, in days, has no pace yet: one evening's reading
 /// would predict nonsense.
-const MIN_PACE_DAYS: i64 = 3;
+const MIN_PACE_DAYS: u32 = 3;
 /// A finish further away than this is not guessed at.
-const MAX_ESTIMATE_DAYS: i64 = 365;
+const MAX_ESTIMATE_DAYS: u64 = 365;
 /// A book being read but not updated for this many days says so.
 pub const IDLE_DAYS: i64 = 7;
 /// Want to Read books listed under Up next, besides the series pick.
@@ -154,15 +153,15 @@ pub fn pace(entry: &LibraryEntry, today: Date) -> Option<Pace> {
     let page = read.progress_pages.filter(|p| *p > 0)?;
     let started = read.started_at.filter(|s| *s <= today)?;
     // The start day counts: a book started yesterday has been read two days.
-    let days = (today - started).num_days() + 1;
+    let days = u32::try_from((today - started).num_days() + 1).ok()?;
     if days < MIN_PACE_DAYS {
         return None;
     }
-    let pages_per_day = f64::from(page) / days as f64;
+    let pages_per_day = f64::from(page) / f64::from(days);
     let finish = (page < total)
-        .then(|| (f64::from(total - page) / pages_per_day).ceil() as i64)
+        .then(|| (u64::from(total - page) * u64::from(days)).div_ceil(u64::from(page)))
         .filter(|d| *d <= MAX_ESTIMATE_DAYS)
-        .map(|d| today + Duration::days(d));
+        .and_then(|d| today.checked_add_days(chrono::Days::new(d)));
     Some(Pace {
         pages_per_day,
         finish,
@@ -382,6 +381,14 @@ mod tests {
         let p = pace(&reading(1, 476, Some("2026-11-01"), Some(312)), today).unwrap();
         assert!((p.pages_per_day - 15.6).abs() < 1e-9);
         assert_eq!(p.finish, Some(day("2026-12-01")));
+    }
+
+    #[test]
+    fn an_exact_finish_estimate_does_not_round_up_an_extra_day() {
+        // 13 pages in three days: the remaining 65 take exactly 15 days.
+        let entry = reading(1, 78, Some("2026-11-01"), Some(13));
+        let estimate = pace(&entry, day("2026-11-03")).unwrap();
+        assert_eq!(estimate.finish, Some(day("2026-11-18")));
     }
 
     #[test]
@@ -645,7 +652,7 @@ mod tests {
         let mut b = entry(2, ReadingStatus::Paused, None);
         b.updated_at = Some(at("2026-09-01"));
         let d = compute(&[a, b], day("2026-11-20"), &HashSet::new());
-        assert_eq!(d.paused.map(|i| i.get()), Some(1));
+        assert_eq!(d.paused.map(hardcover_core::UserBookId::get), Some(1));
         assert_eq!(d.paused_count, 2);
         assert!(!d.is_empty());
         assert!(compute(&[], day("2026-11-20"), &HashSet::new()).is_empty());
@@ -729,10 +736,10 @@ mod tests {
         let year = goal(GoalMetric::Books, "2026-01-01", "2026-12-31");
         assert_eq!(finishing_by(&year, &d, today), [UserBookId::new(1)]);
         let november = goal(GoalMetric::Books, "2026-01-01", "2026-11-30");
-        assert!(finishing_by(&november, &d, today).is_empty());
+        assert_eq!(finishing_by(&november, &d, today), []);
         let pages = goal(GoalMetric::Pages, "2026-01-01", "2026-12-31");
-        assert!(finishing_by(&pages, &d, today).is_empty());
-        assert!(finishing_by(&year, &d, day("2027-01-02")).is_empty());
+        assert_eq!(finishing_by(&pages, &d, today), []);
+        assert_eq!(finishing_by(&year, &d, day("2027-01-02")), []);
         let next_year = goal(GoalMetric::Books, "2026-01-01", "2027-12-31");
         assert_eq!(
             finishing_by(&next_year, &d, today),
@@ -745,7 +752,7 @@ mod tests {
         idle.updated_at = Some(at("2026-11-10"));
         let d = compute(&[idle], today, &HashSet::new());
         assert!(d.reading[0].pace.and_then(|p| p.finish).is_some());
-        assert!(finishing_by(&year, &d, today).is_empty());
+        assert_eq!(finishing_by(&year, &d, today), []);
     }
 
     #[test]

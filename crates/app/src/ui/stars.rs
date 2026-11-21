@@ -24,6 +24,52 @@ use gpui_kit::{
 use crate::book::star_rating::{StarFill, star_fill};
 use crate::design::colors;
 
+#[derive(Clone, Copy)]
+pub(crate) enum StarSize {
+    Small,
+    Medium,
+    Large,
+}
+
+pub(crate) fn render_star(
+    position: u8,
+    value: f32,
+    size: StarSize,
+    filled: gpui_kit::Hsla,
+    empty: gpui_kit::Hsla,
+) -> gpui_kit::Div {
+    let star = || {
+        let icon = crate::star::icon().flex_shrink_0();
+        match size {
+            StarSize::Small => icon.size_3(),
+            StarSize::Medium => icon.size_4(),
+            StarSize::Large => icon.size_5(),
+        }
+    };
+    div()
+        .relative()
+        .flex_shrink_0()
+        .map(|this| match size {
+            StarSize::Small => this.size_3(),
+            StarSize::Medium => this.size_4(),
+            StarSize::Large => this.size_5(),
+        })
+        .map(|this| match star_fill(value, position) {
+            StarFill::Full => this.child(star().text_color(filled)),
+            StarFill::Empty => this.child(star().text_color(empty)),
+            StarFill::Half => this.child(star().text_color(empty)).child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .h_full()
+                    .w(relative(0.5))
+                    .overflow_hidden()
+                    .child(star().text_color(filled)),
+            ),
+        })
+}
+
 /// Five read-only stars. See the module doc.
 #[derive(IntoElement)]
 pub struct Stars {
@@ -67,33 +113,21 @@ impl RenderOnce for Stars {
         let empty = colors(cx).star_empty;
         let value = self.value;
         let small = self.small;
-        let star = move || {
-            let icon = crate::star::icon().flex_shrink_0();
-            if small { icon.size_3() } else { icon.size_4() }
-        };
         let stars = h_flex()
             .flex_none()
             .gap_0p5()
             .children((1..=5u8).map(move |position| {
-                div()
-                    .relative()
-                    .flex_shrink_0()
-                    .map(|this| if small { this.size_3() } else { this.size_4() })
-                    .map(|this| match star_fill(value, position) {
-                        StarFill::Full => this.child(star().text_color(filled)),
-                        StarFill::Empty => this.child(star().text_color(empty)),
-                        // The empty star with its leading half filled.
-                        StarFill::Half => this.child(star().text_color(empty)).child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .h_full()
-                                .w(relative(0.5))
-                                .overflow_hidden()
-                                .child(star().text_color(filled)),
-                        ),
-                    })
+                render_star(
+                    position,
+                    value,
+                    if small {
+                        StarSize::Small
+                    } else {
+                        StarSize::Medium
+                    },
+                    filled,
+                    empty,
+                )
             }));
         match self.label {
             Some((id, label)) => stars.id(id).aria_label(label).into_any_element(),

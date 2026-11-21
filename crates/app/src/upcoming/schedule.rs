@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(ids, [2, 6, 1]);
         let out: Vec<i64> = {
             let mut v: Vec<i64> = unreleased(&books, today).iter().map(|b| b.get()).collect();
-            v.sort();
+            v.sort_unstable();
             v
         };
         assert_eq!(out, [1, 2, 3, 4, 6, 7, 8]);
@@ -292,7 +292,7 @@ mod tests {
         ]
         .iter()
         .enumerate()
-        .map(|(i, d)| upcoming(i as i64 + 1, d))
+        .map(|(i, d)| upcoming(i64::try_from(i).unwrap() + 1, d))
         .collect();
         let refs: Vec<&UpcomingBook> = books.iter().collect();
         let ids: Vec<i64> = next_releases(&refs, today)
@@ -301,7 +301,7 @@ mod tests {
             .collect();
         assert_eq!(ids, [1, 2, 3, 4, 5]);
         let far = [&books[5]];
-        assert!(next_releases(&far, today).is_empty());
+        assert_eq!(next_releases(&far, today), [] as [&UpcomingBook; 0]);
     }
 
     #[test]
@@ -320,7 +320,7 @@ mod tests {
         ]
         .iter()
         .enumerate()
-        .map(|(i, d)| upcoming(i as i64 + 1, d))
+        .map(|(i, d)| upcoming(i64::try_from(i).unwrap() + 1, d))
         .collect();
         let refs: Vec<&UpcomingBook> = books.iter().collect();
         let groups: Vec<(String, usize)> = grouped(&refs, today)

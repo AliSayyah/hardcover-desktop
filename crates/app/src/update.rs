@@ -1,5 +1,5 @@
 //! App updates: periodic checks against GitHub releases, and a one-click
-//! install when the app runs from an unpacked release tarball or an AppImage
+//! install when the app runs from an unpacked release tarball or an `AppImage`
 //! it can replace ([`InstallKind`]).
 //!
 //! [`UpdateModel`] lives for the whole run (an app-level global, like the cover
@@ -21,7 +21,7 @@ use crate::preferences::AppPreferences;
 /// First automatic check, after startup work has settled.
 const FIRST_CHECK: Duration = Duration::from_secs(15);
 /// Later automatic checks while the app stays open.
-const CHECK_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
+const CHECK_INTERVAL: Duration = Duration::from_hours(12);
 /// Set to any value to turn off automatic checks, whatever Settings says.
 const NO_CHECK_ENV: &str = "HARDCOVER_NO_UPDATE_CHECK";
 
@@ -53,10 +53,10 @@ pub struct UpdateModel {
     current: Version,
     install: InstallKind,
     state: UpdateState,
-    _check: Option<Task<()>>,
-    _install: Option<Task<()>>,
+    check_task: Option<Task<()>>,
+    install_task: Option<Task<()>>,
     /// The automatic checks; dropping it stops them.
-    _schedule: Option<Task<()>>,
+    schedule_task: Option<Task<()>>,
     _preferences: Subscription,
 }
 
@@ -84,9 +84,9 @@ pub fn init(install: InstallKind, cx: &mut App) {
             current: Version::current(env!("CARGO_PKG_VERSION")),
             install,
             state: UpdateState::Idle,
-            _check: None,
-            _install: None,
-            _schedule: None,
+            check_task: None,
+            install_task: None,
+            schedule_task: None,
             _preferences: cx.observe(&preferences, |this: &mut UpdateModel, preferences, cx| {
                 let wanted = preferences.read(cx).automatic_update_checks();
                 this.set_automatic_checks(wanted, cx);
@@ -128,7 +128,7 @@ impl UpdateModel {
     }
 
     /// Whether this copy can install updates itself (an unpacked release
-    /// tarball in a writable prefix, or an AppImage in a writable
+    /// tarball in a writable prefix, or an `AppImage` in a writable
     /// directory), rather than only announce them.
     pub fn can_install(&self) -> bool {
         self.install.can_self_update()
@@ -144,14 +144,14 @@ impl UpdateModel {
     fn set_automatic_checks(&mut self, wanted: bool, cx: &mut Context<Self>) {
         let enabled = wanted && automatic_checks_unavailable().is_none();
         if !enabled {
-            self._schedule = None;
-        } else if self._schedule.is_none() {
+            self.schedule_task = None;
+        } else if self.schedule_task.is_none() {
             self.schedule(cx);
         }
     }
 
     fn schedule(&mut self, cx: &mut Context<Self>) {
-        self._schedule = Some(cx.spawn(async move |this, cx| {
+        self.schedule_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(FIRST_CHECK).await;
             loop {
                 if this.update(cx, |this, cx| this.check(false, cx)).is_err() {
@@ -176,7 +176,7 @@ impl UpdateModel {
         cx.notify();
         let updater = self.updater.clone();
         let current = self.current.clone();
-        self._check = Some(cx.spawn(async move |this, cx| {
+        self.check_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move { updater.check(&current) })
                 .await;
@@ -226,7 +226,7 @@ impl UpdateModel {
         cx.notify();
         let updater = self.updater.clone();
         let current = self.current.clone();
-        self._install = Some(cx.spawn(async move |this, cx| {
+        self.install_task = Some(cx.spawn(async move |this, cx| {
             let target = release.clone();
             let result = cx
                 .background_spawn(async move { updater.install(&target, &current, &install) })

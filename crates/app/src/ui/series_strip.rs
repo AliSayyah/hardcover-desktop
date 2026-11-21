@@ -66,7 +66,7 @@ impl RenderOnce for CoverSlot {
             .border_dashed()
             .border_color(colors.border_strong)
             .text_color(colors.fg_muted)
-            .children(self.icon.map(|icon| icon.size_3()))
+            .children(self.icon.map(gpui_kit::Styled::size_3))
     }
 }
 
@@ -218,7 +218,13 @@ impl SeriesStrip {
         let gap = gpui_kit::rems(0.25).to_pixels(rem);
         let fits = ((width + gap) / (item + gap)).floor();
         if fits.is_finite() && fits > 0. {
-            fits as usize
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "fits is a finite positive floor; the saturating cast bounds the slot count"
+            )]
+            let slots = fits as usize;
+            slots
         } else {
             1
         }

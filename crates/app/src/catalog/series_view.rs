@@ -21,8 +21,8 @@ use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::{SeriesDetails, SeriesId};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, follow_list, load_failed, new_list, page_body, page_header_scrolling,
-    page_list, read_summary, reset_scroll, row_details,
+    CatalogBooks, CatalogRow, focus_list_if_fallback_is_focused, follow_list, load_failed,
+    new_list, page_body, page_header_scrolling, page_list, read_summary, reset_scroll, row_details,
 };
 use super::navigation::Page;
 use crate::app_state::Services;
@@ -44,7 +44,7 @@ pub struct SeriesView {
     /// Pages fetched this session, so Back costs no request.
     pages: HashMap<SeriesId, Loaded>,
     loading: Option<SeriesId>,
-    _task: Option<Task<()>>,
+    task: Option<Task<()>>,
     /// Holds focus while the page loads; see [`Self::focus`].
     focus_when_ready: Option<FocusHandle>,
     list: Entity<ListState<CatalogBooks>>,
@@ -69,7 +69,7 @@ impl SeriesView {
             current: None,
             pages: HashMap::new(),
             loading: None,
-            _task: None,
+            task: None,
             focus_when_ready: None,
             list,
             listed: None,
@@ -115,7 +115,7 @@ impl SeriesView {
         self.loading = Some(id);
         let client = Services::global(cx).client().clone();
         // Replacing the task drops the fetch for a page no longer shown.
-        self._task = Some(cx.spawn_in(window, async move |this, cx| {
+        self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = cx.background_spawn(async move { client.series(id) }).await;
             let _ = this.update_in(cx, |this, window, cx| {
                 if this.loading == Some(id) {
@@ -129,11 +129,13 @@ impl SeriesView {
                 };
                 this.pages.insert(id, page);
                 this.fill_list(window, cx);
-                if this.is_ready()
-                    && let Some(fallback) = this.focus_when_ready.take()
-                    && fallback.is_focused(window)
-                {
-                    crate::ui::enter_list(&this.list, window, cx);
+                if this.is_ready() {
+                    focus_list_if_fallback_is_focused(
+                        &this.list,
+                        this.focus_when_ready.take(),
+                        window,
+                        cx,
+                    );
                 }
                 cx.notify();
             });
@@ -159,10 +161,7 @@ impl SeriesView {
             .books
             .iter()
             .map(|b| CatalogRow {
-                details: row_details(
-                    &[b.position.map(series_position_text).unwrap_or_default()],
-                    &b.book,
-                ),
+                details: row_details(&[b.position.map_or_default(series_position_text)], &b.book),
                 book: b.book.clone(),
             })
             .collect();

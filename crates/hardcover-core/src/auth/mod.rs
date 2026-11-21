@@ -64,6 +64,7 @@ pub const DEFAULT_SCOPES: [&str; 14] = [
 ];
 
 /// `HARDCOVER_CLIENT_ID` if set and non-empty, otherwise `default`.
+#[must_use]
 pub fn client_id_from_env_or(default: &str) -> String {
     std::env::var(CLIENT_ID_ENV)
         .ok()
@@ -98,6 +99,10 @@ impl Default for OAuthEndpoints {
 impl OAuthEndpoints {
     /// Fetches the discovery document and checks that its issuer is Hardcover's.
     /// Optional: the defaults are correct today.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the issuer metadata cannot be retrieved or validated.
     pub fn discover() -> crate::Result<Self> {
         oauth::discover(&crate::http::UreqTransport::new(), &Self::default().issuer)
     }
@@ -123,6 +128,7 @@ impl OAuthConfig {
         }
     }
 
+    #[must_use]
     pub fn with_scopes<I, S>(mut self, scopes: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -133,28 +139,34 @@ impl OAuthConfig {
     }
 
     /// Must start with `/`, and match the path registered for the app.
+    #[must_use]
     pub fn with_redirect_path(mut self, path: impl Into<String>) -> Self {
         self.redirect_path = path.into();
         self
     }
 
+    #[must_use]
     pub fn with_endpoints(mut self, endpoints: OAuthEndpoints) -> Self {
         self.endpoints = endpoints;
         self
     }
 
+    #[must_use]
     pub fn client_id(&self) -> &str {
         &self.client_id
     }
 
+    #[must_use]
     pub fn scopes(&self) -> &[String] {
         &self.scopes
     }
 
+    #[must_use]
     pub fn redirect_path(&self) -> &str {
         &self.redirect_path
     }
 
+    #[must_use]
     pub fn endpoints(&self) -> &OAuthEndpoints {
         &self.endpoints
     }
@@ -191,14 +203,17 @@ impl Tokens {
         }
     }
 
+    #[must_use]
     pub fn access_token(&self) -> &str {
         &self.access_token
     }
 
+    #[must_use]
     pub fn refresh_token(&self) -> Option<&str> {
         self.refresh_token.as_deref()
     }
 
+    #[must_use]
     pub fn expires_at(&self) -> Option<Timestamp> {
         self.expires_at
     }
@@ -206,6 +221,7 @@ impl Tokens {
     /// Space-separated scopes granted. Since this version a sign-in always
     /// records one (the requested scopes when the server's response left it
     /// out); `None` means an older version saved these tokens.
+    #[must_use]
     pub fn scope(&self) -> Option<&str> {
         self.scope.as_deref()
     }
@@ -216,6 +232,7 @@ impl Tokens {
     }
 
     /// True if the access token expires within `margin` of `now`.
+    #[must_use]
     pub fn expires_within(&self, now: Timestamp, margin: chrono::Duration) -> bool {
         self.expires_at.is_some_and(|exp| exp - now <= margin)
     }

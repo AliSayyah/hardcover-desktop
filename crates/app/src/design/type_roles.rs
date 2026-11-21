@@ -62,12 +62,6 @@ impl Family {
         }
     }
 
-    /// The family Persian and Arabic fall back to under this one: Vazirmatn
-    /// under every family.
-    pub fn script_fallback(self) -> &'static str {
-        fonts::VAZIRMATN
-    }
-
     /// Half of (ascent − descent), per px of font size: where the baseline
     /// sits below the middle of a line box. GPUI centres a line's ascent and
     /// descent in its line height (`(line − ascent − descent) / 2` above the
@@ -78,18 +72,6 @@ impl Family {
         match self {
             Self::Sans => (1984. - 494.) / 2048. / 2.,
             Self::SerifText | Self::SerifDisplay => (1177. - 308.) / 1000. / 2.,
-        }
-    }
-
-    /// The family a run named `family` belongs to: the serif for either
-    /// Literata cut, else the sans.
-    pub fn of(family: &str) -> Self {
-        if family == fonts::LITERATA_DISPLAY {
-            Self::SerifDisplay
-        } else if family == fonts::LITERATA_TEXT {
-            Self::SerifText
-        } else {
-            Self::Sans
         }
     }
 }
@@ -169,7 +151,7 @@ pub trait TypeRoles: Styled + Sized {
         let style = self.text_style();
         style.font_family = Some(family.name().into());
         style.font_fallbacks = Some(gpui_kit::FontFallbacks::from_fonts(vec![
-            family.script_fallback().to_owned(),
+            fonts::VAZIRMATN.to_owned(),
         ]));
         self
     }
@@ -300,13 +282,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_run_belongs_to_its_family() {
-        assert_eq!(Family::of(fonts::LITERATA_DISPLAY), Family::SerifDisplay);
-        assert_eq!(Family::of(fonts::LITERATA_TEXT), Family::SerifText);
-        assert_eq!(Family::of(fonts::INTER), Family::Sans);
-        assert_eq!(Family::of(".SystemUIFont"), Family::Sans);
-        assert_eq!(Family::SerifDisplay.script_fallback(), fonts::VAZIRMATN);
-        assert_eq!(Family::Sans.script_fallback(), fonts::VAZIRMATN);
+    fn every_type_family_keeps_its_primary_font_and_persian_fallback() {
+        for (family, primary) in [
+            (Family::Sans, fonts::INTER),
+            (Family::SerifText, fonts::LITERATA_TEXT),
+            (Family::SerifDisplay, fonts::LITERATA_DISPLAY),
+        ] {
+            let mut element = gpui_kit::div().type_family(family);
+            let style = element.text_style();
+            assert_eq!(style.font_family.as_deref(), Some(primary));
+            assert_eq!(
+                style.font_fallbacks.as_ref().unwrap().0.as_slice(),
+                &[fonts::VAZIRMATN]
+            );
+        }
     }
 
     /// `(ascent, descent, units per em)` from a font's `head` and `hhea`

@@ -10,7 +10,7 @@
 //! - the trailing lane: on a shelf, 48 wide and kept when empty, with
 //!   tabular caption figures (progress over a 2 px meter, the reader's own
 //!   rating with its gold star, a release year); in a catalogue, the
-//!   StatusChip (its icon alone in a narrow list, [`BookRow::compact`]).
+//!   `StatusChip` (its icon alone in a narrow list, [`BookRow::compact`]).
 //!   The figures turn from `fg-muted` to `fg` on the selected row.
 
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
@@ -19,6 +19,7 @@ use gpui_kit::{
     Window, div,
 };
 use hardcover_core::{BookSummary, LibraryEntry, ReadingStatus};
+use std::fmt::Write as _;
 
 use crate::chip::{StatusChip, StatusIconChip};
 use crate::cover::{Cover, CoverSize};
@@ -78,7 +79,7 @@ impl BookRow {
                 progress
                     .short_text()
                     .map_or(Trailing::Empty, |text| Trailing::Progress {
-                        id: entry.user_book_id.get() as u64,
+                        id: entry.user_book_id.get().cast_unsigned(),
                         text: text.into(),
                         percent: progress.percent,
                     })
@@ -107,7 +108,7 @@ impl BookRow {
     pub fn for_search_result(book: &BookSummary, status: Option<ReadingStatus>) -> Self {
         let mut secondary = authors_text(&book.authors);
         if let Some(year) = book.release_year {
-            secondary.push_str(&format!(" · {year}"));
+            write!(secondary, " · {year}").expect("writing to a String");
         }
         Self::for_catalog(book, secondary, status)
     }
@@ -166,7 +167,7 @@ impl BookRow {
         self
     }
 
-    /// In a narrow list the StatusChip shrinks to its icon, so the title
+    /// In a narrow list the `StatusChip` shrinks to its icon, so the title
     /// keeps its room ("As the window narrows": collapse secondary labels).
     pub fn compact(mut self, compact: bool) -> Self {
         self.compact = compact;

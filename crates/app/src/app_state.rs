@@ -262,10 +262,14 @@ impl CoverService {
         let Some(service) = cx.try_global::<Self>() else {
             return;
         };
-        let failed: Vec<String> =
-            std::mem::take(&mut *service.failed.lock().unwrap_or_else(|p| p.into_inner()))
-                .into_iter()
-                .collect();
+        let failed: Vec<String> = std::mem::take(
+            &mut *service
+                .failed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+        .into_iter()
+        .collect();
         for url in failed {
             cx.remove_asset::<CoverFile>(&url);
             cx.remove_asset::<CoverThumbnail>(&url);
@@ -355,15 +359,14 @@ impl CoverLoader {
             return Some(path.into());
         }
         let _permit = self.downloads.acquire().await;
-        match self.cache.fetch(&cover) {
-            Ok(path) => Some(path.into()),
-            Err(_) => {
-                self.failed
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .insert(url.to_owned());
-                None
-            }
+        if let Ok(path) = self.cache.fetch(&cover) {
+            Some(path.into())
+        } else {
+            self.failed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(url.to_owned());
+            None
         }
     }
 }
@@ -419,7 +422,7 @@ async fn load_scaled(
         loader
             .failed
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(url);
     }
     image
@@ -455,20 +458,19 @@ pub(crate) fn decode_scaled(path: &Path, max_height: u32) -> Option<Arc<RenderIm
         dst.into_vec()
     };
     // GPUI's sprite atlas expects BGRA.
-    let bgra = match pixel_type {
-        PixelType::U8x3 => pixels
+    let bgra = if pixel_type == PixelType::U8x3 {
+        pixels
             .as_chunks::<3>()
             .0
             .iter()
             .flat_map(|p| [p[2], p[1], p[0], u8::MAX])
-            .collect(),
-        _ => {
-            let mut pixels = pixels;
-            for pixel in pixels.as_chunks_mut::<4>().0 {
-                pixel.swap(0, 2);
-            }
-            pixels
+            .collect()
+    } else {
+        let mut pixels = pixels;
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
         }
+        pixels
     };
     let frame = image::RgbaImage::from_raw(width, height, bgra)?;
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(frame)])))
@@ -483,11 +485,18 @@ pub(crate) fn decode_scaled(path: &Path, max_height: u32) -> Option<Arc<RenderIm
 fn scaled_size(src_width: u32, src_height: u32, max_height: u32) -> (u32, u32) {
     let src_height = src_height.max(1);
     let height = max_height.min(src_height);
-    let width = (u64::from(src_width) * u64::from(height) / u64::from(src_height)).max(1) as u32;
+    let width = u32::try_from(u64::from(src_width) * u64::from(height) / u64::from(src_height))
+        .expect("downscaled width fits in the source width")
+        .max(1);
     let ratio = f64::min(
         f64::from(width) / f64::from(src_width.max(1)),
         f64::from(height) / f64::from(src_height),
     );
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the positive downscale ratio never exceeds one; rounded dimensions fit in u32"
+    )]
     let fit = |side: u32| ((f64::from(side) * ratio).round() as u32).max(1);
     (fit(src_width), fit(src_height))
 }
@@ -500,7 +509,7 @@ const SCALED_DIR: &str = "scaled";
 /// older build are then ignored, and deleted at the next start.
 const SCALED_VERSION: &str = "v1";
 /// A temporary file older than this was left by a write that never finished.
-const STALE_TEMP_AGE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+const STALE_TEMP_AGE: std::time::Duration = std::time::Duration::from_hours(1);
 /// JPEG quality of saved detail-size copies.
 const SCALED_JPEG_QUALITY: u8 = 92;
 
@@ -570,7 +579,9 @@ fn write_scaled(cover: &Path, max_height: u32, image: &RenderImage) -> std::io::
     use image::ImageEncoder as _;
 
     let size = image.size(0);
-    let (width, height) = (size.width.0 as u32, size.height.0 as u32);
+    let dimension =
+        |n| u32::try_from(n).map_err(|_| std::io::Error::other("negative image dimension"));
+    let (width, height) = (dimension(size.width.0)?, dimension(size.height.0)?);
     let bgra = image
         .as_bytes(0)
         .ok_or_else(|| std::io::Error::other("the image has no frame"))?;
@@ -682,7 +693,12 @@ mod tests {
             } else {
                 255
             };
-            image::Rgba([(x * 255 / width) as u8, (y * 255 / height) as u8, 90, alpha])
+            image::Rgba([
+                u8::try_from(x * 255 / width).unwrap(),
+                u8::try_from(y * 255 / height).unwrap(),
+                90,
+                alpha,
+            ])
         });
         image.save(path).unwrap();
     }
@@ -690,8 +706,8 @@ mod tests {
     fn pixels(image: &RenderImage) -> (u32, u32, Vec<u8>) {
         let size = image.size(0);
         (
-            size.width.0 as u32,
-            size.height.0 as u32,
+            u32::try_from(size.width.0).unwrap(),
+            u32::try_from(size.height.0).unwrap(),
             image.as_bytes(0).unwrap().to_vec(),
         )
     }

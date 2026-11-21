@@ -18,9 +18,9 @@
 use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::{IconName, IndexPath};
 use gpui_kit::{
-    App, AppContext as _, Context, Div, ElementId, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Window, div,
+    App, AppContext as _, Context, Div, ElementId, Entity, FocusHandle, InteractiveElement as _,
+    IntoElement, ParentElement as _, ScrollHandle, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, div,
 };
 use hardcover_core::{BookSummary, ReadingStatus};
 
@@ -84,6 +84,21 @@ pub fn page_list<D: ListDelegate>(list: &Entity<ListState<D>>) -> List<D> {
     List::new(list).size_full().px_6().pb_6()
 }
 
+/// Gives the list focus after a catalogue page loads, if the page's fallback
+/// control still owns focus.
+pub(super) fn focus_list_if_fallback_is_focused(
+    list: &Entity<ListState<CatalogBooks>>,
+    fallback: Option<FocusHandle>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(fallback) = fallback
+        && fallback.is_focused(window)
+    {
+        crate::ui::enter_list(list, window, cx);
+    }
+}
+
 /// A page that failed to load: what happened, in one muted sentence, and
 /// `retry` ("Try again") beside it.
 pub fn load_failed(message: SharedString, retry: impl IntoElement, cx: &App) -> Div {
@@ -143,7 +158,7 @@ impl ListDelegate for CatalogBooks {
             .entry_for_book(row.book.id)
             .map(|e| e.status);
         Some(
-            ListItem::new(("catalog-book", row.book.id.get() as u64))
+            ListItem::new(("catalog-book", row.book.id.get().cast_unsigned()))
                 .list_row(focused, cx)
                 .accessibility_label(row.book.title.clone())
                 .child(BookRow::for_catalog(&row.book, row.details.clone(), status)),
@@ -180,7 +195,7 @@ pub fn new_list(
         ListState::new(
             CatalogBooks {
                 rows: Vec::new(),
-                model: model.clone(),
+                model,
                 empty,
                 focus: RowFocus::default(),
             },
@@ -203,7 +218,7 @@ pub fn follow_list<V: 'static>(
     let entered = list.clone();
     vec![
         on_keyboard_entry(list, window, cx, move |_, window, cx| {
-            select_first_row(&entered, window, cx)
+            select_first_row(&entered, window, cx);
         }),
         cx.subscribe(list, |_, list, event: &ListEvent, cx| match event {
             ListEvent::Confirm(ix) => {

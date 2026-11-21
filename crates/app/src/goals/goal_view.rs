@@ -224,7 +224,7 @@ impl GoalView {
         });
     }
 
-    fn render_summary(&self, goal: &Goal, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_summary(goal: &Goal, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = colors(cx);
         let percent = (goal.fraction() * 100.0).clamp(0.0, 999.0);
         let dates = format!(
@@ -266,7 +266,7 @@ impl GoalView {
                     ),
             )
             .child(
-                Meter::new("goal-progress", percent.min(100.0) as f32)
+                Meter::new("goal-progress", crate::format::bar_percent(goal.fraction()))
                     .pace(pace_percent(goal, today()))
                     .accessibility_label("Progress toward the goal"),
             )
@@ -403,7 +403,7 @@ impl Render for GoalView {
         v_flex()
             .gap_6()
             .body()
-            .child(self.render_summary(&goal, cx))
+            .child(Self::render_summary(&goal, cx))
             // The error right under the field it is about, where a short
             // dialog still shows it (a field's own row doesn't wrap).
             .child(

@@ -24,7 +24,15 @@ use crate::http::{HttpRequest, HttpResponse, HttpTransport, Method, UreqTranspor
 use crate::ratelimit::TokenBucket;
 use crate::{Error, Result};
 pub(crate) use wire::as_i64 as wire_i64;
-use wire::*;
+use wire::{
+    DeletePayload, DeleteReadPayload, GoalPayload, ListBookDeletePayload, ListBookPayload,
+    ListDeletePayload, ListPayload, ProgressContext, RawAuthorPage, RawBook, RawBookDetails,
+    RawCommunityReview, RawEdition, RawGoal, RawList, RawListBook, RawListMembership, RawReview,
+    RawSearch, RawSeriesPage, RawTrackedSeries, RawTrending, RawUpcomingRow, RawUser, RawUserBook,
+    ReadIdPayload, ReadRef, ReviewedUserBookPayload, UserBookIdPayload,
+    author_from_search_document, search_hits, search_page, series_from_search_document,
+    upcoming_books,
+};
 
 /// GraphQL endpoint.
 pub const GRAPHQL_ENDPOINT: &str = "https://api.hardcover.app/v1/graphql";
@@ -77,6 +85,10 @@ const MAX_AUTO_RETRY_AFTER: Duration = Duration::from_secs(15);
 /// Supplies bearer tokens to the [`Client`].
 pub trait TokenSource: Send + Sync {
     /// A token to send now. May refresh first if the current one is about to expire.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the access token cannot be obtained or refreshed.
     fn access_token(&self) -> Result<String>;
 
     /// The API rejected `rejected` with HTTP 401. Return `Ok(true)` if a different
@@ -85,6 +97,10 @@ pub trait TokenSource: Send + Sync {
     ///
     /// `rejected` lets an implementation see that another thread already refreshed,
     /// so concurrent 401s do not spend a rotating refresh token twice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the token source cannot recover from the rejection.
     fn on_unauthorized(&self, rejected: &str) -> Result<bool>;
 }
 
@@ -142,6 +158,11 @@ impl Client {
     // ----- reads -----
 
     /// The signed-in user. Also remembers their id for [`Client::library_entry`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the account request fails or the response contains no
+    /// user.
     pub fn me(&self) -> Result<User> {
         #[derive(Deserialize)]
         struct Data {
@@ -167,12 +188,20 @@ impl Client {
 
     /// The user's whole library, Ignored entries included, ordered by
     /// `user_book_id`. Pages of 100, one request each, with every read nested.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any library page cannot be fetched or decoded.
     pub fn library(&self, user: UserId) -> Result<Vec<LibraryEntry>> {
         self.library_with_progress(user, |_| {})
     }
 
     /// Like [`Client::library`], calling `on_page` with each page as it arrives
     /// so the UI can show partial results.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any library page cannot be fetched or decoded.
     pub fn library_with_progress(
         &self,
         user: UserId,
@@ -209,6 +238,10 @@ impl Client {
 
     /// One of the signed-in user's entries. `None` if it does not exist or belongs
     /// to someone else (ids are global, and other users' public entries are readable).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the account or entry lookup fails.
     pub fn library_entry(&self, id: UserBookId) -> Result<Option<LibraryEntry>> {
         let me = self.my_id()?;
         self.fetch_entry(
@@ -219,6 +252,10 @@ impl Client {
     }
 
     /// The user's entry for `book`, whatever its status (including Ignored).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the account or entry lookup fails.
     pub fn library_entry_for_book(
         &self,
         user: UserId,
@@ -260,6 +297,11 @@ impl Client {
 
     /// Book search (Hardcover's Typesense index, same ranking as the website).
     /// `page` is 1-based; a blank query returns an empty page without a request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the search request fails or the search service reports an
+    /// error.
     pub fn search_books(&self, query: &str, page: u32) -> Result<SearchPage> {
         let query = query.trim();
         let page = page.max(1);
@@ -267,11 +309,16 @@ impl Client {
             return Ok(SearchPage::new(Vec::new(), page, SEARCH_PER_PAGE));
         }
         let raw = self.raw_search("SearchBooks", queries::SEARCH_BOOKS, query, page)?;
-        Ok(search_page(raw, page, SEARCH_PER_PAGE))
+        Ok(search_page(&raw, page, SEARCH_PER_PAGE))
     }
 
     /// Author search, ranked as on the website. Like [`Client::search_books`]
     /// otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the search request fails or the search service reports an
+    /// error.
     pub fn search_authors(&self, query: &str, page: u32) -> Result<SearchHits<AuthorHit>> {
         self.search_hits(
             "SearchAuthors",
@@ -284,6 +331,11 @@ impl Client {
 
     /// Series search, ranked as on the website. Like [`Client::search_books`]
     /// otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the search request fails or the search service reports an
+    /// error.
     pub fn search_series(&self, query: &str, page: u32) -> Result<SearchHits<SeriesHit>> {
         self.search_hits(
             "SearchSeries",
@@ -308,7 +360,7 @@ impl Client {
             return Ok(SearchHits::new(Vec::new(), page, SEARCH_PER_PAGE));
         }
         let raw = self.raw_search(op, doc, query, page)?;
-        Ok(search_hits(raw, page, SEARCH_PER_PAGE, parse))
+        Ok(search_hits(&raw, page, SEARCH_PER_PAGE, parse))
     }
 
     fn raw_search(&self, op: &str, doc: &str, query: &str, page: u32) -> Result<RawSearch> {
@@ -333,6 +385,10 @@ impl Client {
 
     /// The books the most readers finished in `period`, in Hardcover's order,
     /// at most [`TRENDING_LIMIT`]. Two requests: the ranked ids, then the books.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ranking or its book details cannot be retrieved.
     pub fn trending_books(&self, period: TrendingPeriod) -> Result<Vec<BookSummary>> {
         #[derive(Deserialize)]
         struct Data {
@@ -354,6 +410,11 @@ impl Client {
     }
 
     /// Full details for the book page. `Error::Api` if the book does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the requested record does not exist or the catalogue
+    /// request fails.
     pub fn book_details(&self, id: BookId) -> Result<BookDetails> {
         #[derive(Deserialize)]
         struct Data {
@@ -372,6 +433,11 @@ impl Client {
 
     /// One page of `book`'s editions, most read first. `offset` counts editions
     /// already fetched; a page shorter than [`EDITIONS_PER_PAGE`] is the last.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the catalogue request fails or its response cannot be
+    /// decoded.
     pub fn book_editions(&self, book: BookId, offset: u32) -> Result<Vec<EditionSummary>> {
         #[derive(Deserialize)]
         struct Data {
@@ -391,6 +457,11 @@ impl Client {
     }
 
     /// A series page in one request. `Error::Api` if the series does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the requested record does not exist or the catalogue
+    /// request fails.
     pub fn series(&self, id: SeriesId) -> Result<SeriesDetails> {
         #[derive(Deserialize)]
         struct Data {
@@ -408,6 +479,11 @@ impl Client {
     }
 
     /// An author page in one request. `Error::Api` if the author does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the requested record does not exist or the catalogue
+    /// request fails.
     pub fn author(&self, id: AuthorId) -> Result<AuthorDetails> {
         #[derive(Deserialize)]
         struct Data {
@@ -427,7 +503,16 @@ impl Client {
     /// The books with these ids, in the order given, in one request. Only the
     /// first [`BOOKS_BY_IDS_LIMIT`] ids are used; ids Hardcover does not know
     /// are left out. No ids, no request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the catalogue request fails or its response cannot be
+    /// decoded.
     pub fn books_by_ids(&self, ids: &[BookId]) -> Result<Vec<BookSummary>> {
+        #[derive(Deserialize)]
+        struct Data {
+            books: Vec<RawBook>,
+        }
         let ids: Vec<i64> = ids
             .iter()
             .take(BOOKS_BY_IDS_LIMIT)
@@ -435,10 +520,6 @@ impl Client {
             .collect();
         if ids.is_empty() {
             return Ok(Vec::new());
-        }
-        #[derive(Deserialize)]
-        struct Data {
-            books: Vec<RawBook>,
         }
         let data: Data = self.query(
             "BooksByIds",
@@ -456,20 +537,25 @@ impl Client {
     /// one request. A book listed under several of the series comes once,
     /// naming each. Merged duplicates, compilations and partial books are
     /// left out. No series, no request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the catalogue request fails or its response cannot be
+    /// decoded.
     pub fn upcoming_in_series(
         &self,
         series: &[SeriesId],
         after: Date,
     ) -> Result<Vec<UpcomingBook>> {
+        #[derive(Deserialize)]
+        struct Data {
+            book_series: Vec<RawUpcomingRow>,
+        }
         let mut ids: Vec<i64> = series.iter().map(|s| s.get()).collect();
         ids.sort_unstable();
         ids.dedup();
         if ids.is_empty() {
             return Ok(Vec::new());
-        }
-        #[derive(Deserialize)]
-        struct Data {
-            book_series: Vec<RawUpcomingRow>,
         }
         let data: Data = self.query(
             "UpcomingInSeries",
@@ -487,14 +573,19 @@ impl Client {
     /// The series with these ids and every book of each, [`TRACKED_SERIES_BATCH`]
     /// series per request, in the order Hardcover returns them. Ids Hardcover
     /// doesn't know are left out. No ids, no request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the catalogue request fails or its response cannot be
+    /// decoded.
     pub fn tracked_series(&self, ids: &[SeriesId]) -> Result<Vec<TrackedSeries>> {
-        let mut ids: Vec<i64> = ids.iter().map(|s| s.get()).collect();
-        ids.sort_unstable();
-        ids.dedup();
         #[derive(Deserialize)]
         struct Data {
             series: Vec<RawTrackedSeries>,
         }
+        let mut ids: Vec<i64> = ids.iter().map(|s| s.get()).collect();
+        ids.sort_unstable();
+        ids.dedup();
         let mut out = Vec::with_capacity(ids.len());
         for batch in ids.chunks(TRACKED_SERIES_BATCH) {
             let data: Data = self.query(
@@ -512,25 +603,35 @@ impl Client {
 
     /// Adds `book` with `status`, using the account's default privacy. The server
     /// dates the status change today.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the library write fails or the updated entry cannot be
+    /// retrieved.
     pub fn add_to_library(&self, book: BookId, status: ReadingStatus) -> Result<LibraryEntry> {
-        self.insert_user_book(json!({ "book_id": book.get(), "status_id": status.id() }))
+        self.insert_user_book(&json!({ "book_id": book.get(), "status_id": status.id() }))
     }
 
     /// Like [`Client::add_to_library`] with an explicit privacy for the entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the library write fails or the updated entry cannot be
+    /// retrieved.
     pub fn add_to_library_with_privacy(
         &self,
         book: BookId,
         status: ReadingStatus,
         privacy: Privacy,
     ) -> Result<LibraryEntry> {
-        self.insert_user_book(json!({
+        self.insert_user_book(&json!({
             "book_id": book.get(),
             "status_id": status.id(),
             "privacy_setting_id": privacy.id(),
         }))
     }
 
-    fn insert_user_book(&self, object: Value) -> Result<LibraryEntry> {
+    fn insert_user_book(&self, object: &Value) -> Result<LibraryEntry> {
         #[derive(Deserialize)]
         struct Data {
             insert_user_book: Option<UserBookIdPayload>,
@@ -546,8 +647,13 @@ impl Client {
 
     /// Changes the status. Hardcover starts a read on Currently Reading and
     /// finishes the open read on Read.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the library write fails or the updated entry cannot be
+    /// retrieved.
     pub fn set_status(&self, id: UserBookId, status: ReadingStatus) -> Result<LibraryEntry> {
-        self.update_user_book(id, json!({ "status_id": status.id() }))
+        self.update_user_book(id, &json!({ "status_id": status.id() }))
     }
 
     /// Sets or (with `None`) clears the rating, keeping the entry at `keep_status`.
@@ -556,6 +662,11 @@ impl Client {
     /// and finishes the open read at 100% (verified live). Sending the status the
     /// entry should keep avoids that; pass `ReadingStatus::Read` to get the
     /// server's behaviour on purpose. Pass the status the UI currently shows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the library write fails or the updated entry cannot be
+    /// retrieved.
     pub fn set_rating(
         &self,
         id: UserBookId,
@@ -565,7 +676,7 @@ impl Client {
         let rating = rating.map(|r| f64::from(r.value()));
         self.update_user_book(
             id,
-            json!({ "rating": rating, "status_id": keep_status.id() }),
+            &json!({ "rating": rating, "status_id": keep_status.id() }),
         )
     }
 
@@ -579,8 +690,13 @@ impl Client {
     /// the read on its old edition, which is consistent on its own, and
     /// [`EditionChange::read_left_behind`] carries the error so the caller can
     /// say so.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the edition change fails or the updated entry cannot be
+    /// retrieved.
     pub fn set_edition(&self, id: UserBookId, edition: EditionId) -> Result<EditionChange> {
-        let entry = self.update_user_book(id, json!({ "edition_id": edition.get() }))?;
+        let entry = self.update_user_book(id, &json!({ "edition_id": edition.get() }))?;
         let Some(read) = entry
             .open_read()
             .filter(|r| r.edition_id != Some(edition))
@@ -592,7 +708,7 @@ impl Client {
             });
         };
         let fields = moved_read_fields(&read, edition, entry.edition.as_ref());
-        Ok(match self.update_read(read.id, Value::Object(fields)) {
+        Ok(match self.update_read(read.id, &Value::Object(fields)) {
             Ok(written) => EditionChange {
                 entry: self
                     .entry_after_read_write(written, "edition change")
@@ -607,19 +723,34 @@ impl Client {
     }
 
     /// Sets the entry's private notes; blank text clears them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the library write fails or the updated entry cannot be
+    /// retrieved.
     pub fn set_private_notes(&self, id: UserBookId, notes: &str) -> Result<LibraryEntry> {
         let notes = notes.trim();
         let notes = (!notes.is_empty()).then_some(notes);
-        self.update_user_book(id, json!({ "private_notes": notes }))
+        self.update_user_book(id, &json!({ "private_notes": notes }))
     }
 
     /// Changes who can see the entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the library write fails or the updated entry cannot be
+    /// retrieved.
     pub fn set_privacy(&self, id: UserBookId, privacy: Privacy) -> Result<LibraryEntry> {
-        self.update_user_book(id, json!({ "privacy_setting_id": privacy.id() }))
+        self.update_user_book(id, &json!({ "privacy_setting_id": privacy.id() }))
     }
 
     /// The review of one of the user's entries; [`Review::default`] if it has
     /// none or the entry is gone.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the review request fails or its response cannot be
+    /// decoded.
     pub fn review(&self, id: UserBookId) -> Result<Review> {
         #[derive(Deserialize)]
         struct Data {
@@ -631,10 +762,7 @@ impl Client {
             json!({ "id": id.get() }),
             QUERY_TIMEOUT,
         )?;
-        Ok(data
-            .user_books_by_pk
-            .map(RawReview::into_review)
-            .unwrap_or_default())
+        Ok(data.user_books_by_pk.map_or_default(RawReview::into_review))
     }
 
     /// Writes the review, in Markdown, dated `reviewed_at`. Blank text is an
@@ -643,6 +771,10 @@ impl Client {
     /// Sends `keep_status` too, as [`Client::set_rating`] does: Hardcover
     /// treats a bare rating as "I read this", and a review may be treated the
     /// same way. Pass the status the UI currently shows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the text is blank or Hardcover rejects the review update.
     pub fn set_review(
         &self,
         id: UserBookId,
@@ -672,6 +804,10 @@ impl Client {
     /// Deletes the review: its text in every form the app can write
     /// (`review_markdown` and the website's `review_slate`), its spoiler flag
     /// and its date. The entry stays.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request to clear the review fails.
     pub fn delete_review(
         &self,
         id: UserBookId,
@@ -739,7 +875,7 @@ impl Client {
         })
     }
 
-    fn update_user_book(&self, id: UserBookId, object: Value) -> Result<LibraryEntry> {
+    fn update_user_book(&self, id: UserBookId, object: &Value) -> Result<LibraryEntry> {
         #[derive(Deserialize)]
         struct Data {
             update_user_book: Option<UserBookIdPayload>,
@@ -774,6 +910,11 @@ impl Client {
     }
 
     /// Removes the book (and its reads) from the library.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or Hardcover does not confirm the
+    /// removal.
     pub fn remove_from_library(&self, id: UserBookId) -> Result<()> {
         #[derive(Deserialize)]
         struct Data {
@@ -804,6 +945,11 @@ impl Client {
     /// Percentages are converted with the edition's page count (or audio length).
     /// Progress that reaches the end makes Hardcover finish the read and mark the
     /// book Read; the returned entry reflects that.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid percentage, a missing length needed to convert
+    /// it, or a failed read or write.
     pub fn update_progress(
         &self,
         id: UserBookId,
@@ -837,14 +983,13 @@ impl Client {
             }
             (t, _) => t,
         };
-        let written = match target {
-            Some(read) => self.update_read(read, Value::Object(fields))?,
-            None => {
-                let mut object = fields;
-                let today = chrono::Local::now().date_naive();
-                object.insert("started_at".into(), json!(today.to_string()));
-                self.insert_read(id, Value::Object(object))?
-            }
+        let written = if let Some(read) = target {
+            self.update_read(read, &Value::Object(fields))?
+        } else {
+            let mut object = fields;
+            let today = chrono::Local::now().date_naive();
+            object.insert("started_at".into(), json!(today.to_string()));
+            self.insert_read(id, &Value::Object(object))?
         };
         self.entry_after_read_write(written, "progress update")
     }
@@ -882,6 +1027,11 @@ impl Client {
     }
 
     /// Sets both dates of a read exactly: `None` clears that date.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the finish date precedes the start date or the read cannot
+    /// be saved.
     pub fn set_read_dates(
         &self,
         read: ReadId,
@@ -899,13 +1049,18 @@ impl Client {
             "started_at": started.map(|d| d.to_string()),
             "finished_at": finished.map(|d| d.to_string()),
         });
-        let written = self.update_read(read, object)?;
+        let written = self.update_read(read, &object)?;
         self.entry_after_read_write(written, "date update")
     }
 
     /// Adds a finished read, such as a re-read or one from before the account.
     /// A finish date is required so this never opens a second unfinished read.
     /// `edition` is normally the entry's.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the finish date precedes the start date or the read cannot
+    /// be saved.
     pub fn add_read(
         &self,
         id: UserBookId,
@@ -924,7 +1079,7 @@ impl Client {
         if let Some(edition) = edition {
             object.insert("edition_id".into(), json!(edition.get()));
         }
-        let written = self.insert_read(id, Value::Object(object))?;
+        let written = self.insert_read(id, &Value::Object(object))?;
         self.entry_after_read_write(written, "adding a read")
     }
 
@@ -933,6 +1088,10 @@ impl Client {
     /// The mutation returns only the id (a deleted row's relations may not
     /// resolve), so the entry is read back. A read-back that is a moment stale
     /// can still list the read, so it is taken out by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if deletion fails or the library entry cannot be read back.
     pub fn delete_read(&self, id: UserBookId, read: ReadId) -> Result<LibraryEntry> {
         #[derive(Deserialize)]
         struct Data {
@@ -960,7 +1119,7 @@ impl Client {
         Ok(entry)
     }
 
-    fn update_read(&self, read: ReadId, object: Value) -> Result<ReadRef> {
+    fn update_read(&self, read: ReadId, object: &Value) -> Result<ReadRef> {
         #[derive(Deserialize)]
         struct Data {
             update_user_book_read: Option<ReadIdPayload>,
@@ -974,7 +1133,7 @@ impl Client {
         read_payload(data.update_user_book_read, "update_user_book_read")
     }
 
-    fn insert_read(&self, id: UserBookId, object: Value) -> Result<ReadRef> {
+    fn insert_read(&self, id: UserBookId, object: &Value) -> Result<ReadRef> {
         #[derive(Deserialize)]
         struct Data {
             insert_user_book_read: Option<ReadIdPayload>,
@@ -992,6 +1151,10 @@ impl Client {
 
     /// The signed-in user's goals that are not archived, the latest end date
     /// first. Needs the `read:goals` scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
     pub fn goals(&self) -> Result<Vec<Goal>> {
         #[derive(Deserialize)]
         struct Data {
@@ -1013,25 +1176,26 @@ impl Client {
 
     /// Creates a goal for every book (no conditions), with the account's
     /// default privacy. Hardcover calculates its progress right away.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target, dates or description are invalid, or the goal
+    /// cannot be saved.
     pub fn create_goal(&self, goal: &NewGoal) -> Result<Goal> {
-        if goal.target == 0 || goal.end < goal.start {
-            return Err(Error::InvalidInput(
-                "a goal needs a target above zero and an end after its start".into(),
-            ));
-        }
-        let description = goal_description(Some(&goal.description))?;
         #[derive(Deserialize)]
         struct Data {
             insert_goal: Option<GoalPayload>,
         }
-        let object = json!({
-            "metric": goal.metric.api_name(),
-            "goal": goal.target,
-            "description": description,
-            "start_date": goal.start.to_string(),
-            "end_date": goal.end.to_string(),
-            "conditions": {},
-        });
+        validate_goal_dates(goal.target, goal.start, goal.end)?;
+        let description = goal_description(Some(&goal.description))?;
+        let object = goal_object(
+            &goal.metric,
+            goal.target,
+            goal.start,
+            goal.end,
+            description,
+            &json!({}),
+        );
         let data: Data = self.query(
             "InsertGoal",
             queries::INSERT_GOAL,
@@ -1045,34 +1209,32 @@ impl Client {
     /// and conditions. `update_goal` replaces the whole goal, so pass a goal
     /// read from Hardcover with only the fields to change edited.
     ///
+    /// # Errors
+    ///
     /// `Error::InvalidInput` if the goal's conditions hold a field this
     /// version can't send back, which the update would drop, or if it has no
     /// description, which Hardcover requires.
     pub fn update_goal(&self, goal: &Goal) -> Result<Goal> {
+        #[derive(Deserialize)]
+        struct Data {
+            update_goal: Option<GoalPayload>,
+        }
         let conditions = goal.conditions.to_input().ok_or_else(|| {
             Error::InvalidInput(
                 "this goal has conditions the app can't keep; change it on hardcover.app".into(),
             )
         })?;
-        if goal.target == 0 || goal.end < goal.start {
-            return Err(Error::InvalidInput(
-                "a goal needs a target above zero and an end after its start".into(),
-            ));
-        }
+        validate_goal_dates(goal.target, goal.start, goal.end)?;
         let description = goal_description(goal.description.as_deref())?;
-        #[derive(Deserialize)]
-        struct Data {
-            update_goal: Option<GoalPayload>,
-        }
-        let mut object = json!({
-            "metric": goal.metric.api_name(),
-            "goal": goal.target,
-            "description": description,
-            "start_date": goal.start.to_string(),
-            "end_date": goal.end.to_string(),
-            "conditions": conditions,
-            "archived": goal.archived,
-        });
+        let mut object = goal_object(
+            &goal.metric,
+            goal.target,
+            goal.start,
+            goal.end,
+            description,
+            &conditions,
+        );
+        object["archived"] = json!(goal.archived);
         // Sent back as read, even an id this version doesn't know: left out,
         // the goal would get the account's default privacy.
         if let Some(privacy) = goal.privacy_id {
@@ -1087,6 +1249,12 @@ impl Client {
         self.goal_payload(data.update_goal, "update_goal")
     }
 
+    /// Deletes a reading goal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the deletion payload reports an
+    /// error.
     pub fn delete_goal(&self, id: GoalId) -> Result<()> {
         #[derive(Deserialize)]
         struct Data {
@@ -1111,6 +1279,10 @@ impl Client {
 
     /// Uses the goal returned by the mutation, or re-reads it if the payload had none.
     fn goal_payload(&self, payload: Option<GoalPayload>, field: &str) -> Result<Goal> {
+        #[derive(Deserialize)]
+        struct Data {
+            goals_by_pk: Option<RawGoal>,
+        }
         let p = payload.ok_or_else(|| Error::Api(format!("`{field}` returned null")))?;
         if let Some(e) = p.error() {
             return Err(Error::Api(e));
@@ -1121,10 +1293,6 @@ impl Client {
         let id = p
             .id
             .ok_or_else(|| Error::Decode(format!("`{field}` returned neither a goal nor an id")))?;
-        #[derive(Deserialize)]
-        struct Data {
-            goals_by_pk: Option<RawGoal>,
-        }
         let data: Data = self.query(
             "GoalById",
             queries::GOAL_BY_ID,
@@ -1140,6 +1308,10 @@ impl Client {
 
     /// The signed-in user's lists, the Owned list included once it exists,
     /// in the order they were created. Needs `read:lists`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
     pub fn lists(&self) -> Result<Vec<UserList>> {
         #[derive(Deserialize)]
         struct Data {
@@ -1170,6 +1342,10 @@ impl Client {
     /// Which of the user's books are on which of their lists, as one index:
     /// one request per 1,000 rows, at most five. Past that the result is
     /// marked incomplete; [`Client::book_list_memberships`] covers one book.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
     pub fn list_memberships(&self) -> Result<ListMemberships> {
         let me = self.my_id()?;
         let mut rows = Vec::new();
@@ -1197,6 +1373,10 @@ impl Client {
     }
 
     /// The user's lists that `book` is on, one row per list and edition.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
     pub fn book_list_memberships(&self, book: BookId) -> Result<Vec<ListMembership>> {
         let me = self.my_id()?;
         self.memberships(
@@ -1222,6 +1402,10 @@ impl Client {
     /// One page of a list's books in the list's order. `offset` counts the
     /// rows already fetched; a page shorter than [`LIST_BOOKS_PER_PAGE`] is
     /// the last. Rows whose book did not resolve are left out.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
     pub fn list_books(&self, list: ListId, offset: u32) -> Result<Vec<ListBook>> {
         #[derive(Deserialize)]
         struct Data {
@@ -1241,19 +1425,19 @@ impl Client {
     }
 
     /// Creates a list. Needs `write:lists`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the draft is invalid or the list cannot be saved.
     pub fn create_list(&self, draft: &ListDraft) -> Result<UserList> {
-        let name = list_name(&draft.name)?;
-        let mut object = json!({
-            "name": name,
-            "description": draft.description.trim(),
-            "ranked": draft.ranked,
-        });
-        if let Some(privacy) = draft.privacy {
-            object["privacy_setting_id"] = json!(privacy.id());
-        }
         #[derive(Deserialize)]
         struct Data {
             insert_list: Option<ListPayload>,
+        }
+        let name = list_name(&draft.name)?;
+        let mut object = list_draft_object(name, draft);
+        if let Some(privacy) = draft.privacy {
+            object["privacy_setting_id"] = json!(privacy.id());
         }
         let data: Data = self.query(
             "InsertList",
@@ -1270,18 +1454,22 @@ impl Client {
     /// sent back as read: whether `update_list` keeps fields left out is
     /// unverified, and `update_goal` does not. Refuses the Owned list, which
     /// Hardcover finds by its slug.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the draft is invalid or the list cannot be saved.
     pub fn update_list(&self, list: &UserList, draft: &ListDraft) -> Result<UserList> {
+        #[derive(Deserialize)]
+        struct Data {
+            update_list: Option<ListPayload>,
+        }
         if list.is_owned() {
             return Err(Error::InvalidInput(
                 "the Owned list can't be changed".into(),
             ));
         }
         let name = list_name(&draft.name)?;
-        let mut object = json!({
-            "name": name,
-            "description": draft.description.trim(),
-            "ranked": draft.ranked,
-        });
+        let mut object = list_draft_object(name, draft);
         // Sent back as read when unchanged, even an id this version doesn't know.
         if let Some(privacy) = draft.privacy.map(Privacy::id).or(list.privacy_id) {
             object["privacy_setting_id"] = json!(privacy);
@@ -1295,10 +1483,6 @@ impl Client {
         if let Some(url) = &list.url {
             object["url"] = json!(url);
         }
-        #[derive(Deserialize)]
-        struct Data {
-            update_list: Option<ListPayload>,
-        }
         let data: Data = self.query(
             "UpdateList",
             queries::UPDATE_LIST,
@@ -1309,6 +1493,11 @@ impl Client {
     }
 
     /// Deletes a list and takes its books off it; the books stay in the library.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or Hardcover does not confirm the
+    /// deletion.
     pub fn delete_list(&self, id: ListId) -> Result<()> {
         #[derive(Deserialize)]
         struct Data {
@@ -1329,19 +1518,23 @@ impl Client {
     }
 
     /// Puts `book` on `list`, as `edition` if given. Needs `write:lists`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the addition cannot be confirmed.
     pub fn add_to_list(
         &self,
         list: ListId,
         book: BookId,
         edition: Option<EditionId>,
     ) -> Result<ListMembership> {
-        let mut object = json!({ "list_id": list.get(), "book_id": book.get() });
-        if let Some(edition) = edition {
-            object["edition_id"] = json!(edition.get());
-        }
         #[derive(Deserialize)]
         struct Data {
             insert_list_book: Option<ListBookPayload>,
+        }
+        let mut object = json!({ "list_id": list.get(), "book_id": book.get() });
+        if let Some(edition) = edition {
+            object["edition_id"] = json!(edition.get());
         }
         let data: Data = self.query(
             "InsertListBook",
@@ -1369,6 +1562,11 @@ impl Client {
 
     /// Takes one row off its list: a book, or one edition of it on the Owned
     /// list. Needs `write:lists`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or Hardcover does not confirm the
+    /// deletion.
     pub fn remove_from_list(&self, row: ListBookId) -> Result<()> {
         #[derive(Deserialize)]
         struct Data {
@@ -1394,6 +1592,10 @@ impl Client {
     /// again is [`Client::remove_from_list`] (`write:lists`), and
     /// `user_books.owned` does not follow the list. Hardcover posts the
     /// addition to the user's activity feed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the addition cannot be confirmed.
     pub fn mark_owned(&self, edition: EditionId) -> Result<Option<ListMembership>> {
         #[derive(Deserialize)]
         struct Data {
@@ -1419,6 +1621,10 @@ impl Client {
 
     /// Uses the list returned by the mutation, or re-reads it if the payload had none.
     fn list_payload(&self, payload: Option<ListPayload>, field: &str) -> Result<UserList> {
+        #[derive(Deserialize)]
+        struct Data {
+            lists_by_pk: Option<RawList>,
+        }
         let p = payload.ok_or_else(|| Error::Api(format!("`{field}` returned null")))?;
         if let Some(e) = p.error() {
             return Err(Error::Api(e));
@@ -1429,10 +1635,6 @@ impl Client {
         let id = p
             .id
             .ok_or_else(|| Error::Decode(format!("`{field}` returned neither a list nor an id")))?;
-        #[derive(Deserialize)]
-        struct Data {
-            lists_by_pk: Option<RawList>,
-        }
         let data: Data = self.query(
             "ListById",
             queries::LIST_BY_ID,
@@ -1451,6 +1653,10 @@ impl Client {
     /// previous page's [`ReviewsPage::next_offset`], 0 for the first. Asks
     /// for one row more than a page, so `has_more` is never a guess. Needs
     /// `read:social`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
     pub fn book_reviews(&self, book: BookId, me: UserId, offset: u32) -> Result<ReviewsPage> {
         #[derive(Deserialize)]
         struct Data {
@@ -1485,6 +1691,10 @@ impl Client {
     }
 
     /// How many reviews [`Client::book_reviews`] pages through.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
     pub fn book_reviews_count(&self, book: BookId, me: UserId) -> Result<u32> {
         #[derive(Deserialize)]
         struct Data {
@@ -1520,7 +1730,8 @@ impl Client {
         variables: Value,
         timeout: Duration,
     ) -> Result<T> {
-        let body = json!({ "operationName": op, "query": doc, "variables": variables });
+        let mut body = json!({ "operationName": op, "query": doc });
+        body["variables"] = variables;
         let mut auth_retried = false;
         let mut rate_retried = false;
         loop {
@@ -1641,6 +1852,33 @@ fn goal_description(description: Option<&str>) -> Result<&str> {
         .ok_or_else(|| Error::InvalidInput("a goal needs a description".into()))
 }
 
+fn validate_goal_dates(target: u32, start: Date, end: Date) -> Result<()> {
+    if target == 0 || end < start {
+        return Err(Error::InvalidInput(
+            "a goal needs a target above zero and an end after its start".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn goal_object(
+    metric: &GoalMetric,
+    target: u32,
+    start: Date,
+    end: Date,
+    description: &str,
+    conditions: &Value,
+) -> Value {
+    json!({
+        "metric": metric.api_name(),
+        "goal": target,
+        "description": description,
+        "start_date": start.to_string(),
+        "end_date": end.to_string(),
+        "conditions": conditions,
+    })
+}
+
 /// The name to send: Hardcover needs one to make a list's slug.
 fn list_name(name: &str) -> Result<&str> {
     Some(name.trim())
@@ -1648,10 +1886,23 @@ fn list_name(name: &str) -> Result<&str> {
         .ok_or_else(|| Error::InvalidInput("a list needs a name".into()))
 }
 
+fn list_draft_object(name: &str, draft: &ListDraft) -> Value {
+    json!({
+        "name": name,
+        "description": draft.description.trim(),
+        "ranked": draft.ranked,
+    })
+}
+
 /// `fraction` of `total`, to the nearest unit. An unfinished read never lands
 /// on the last unit: progress at the end may finish the read on Hardcover and
 /// move the book to Read, which changing the edition must not do.
 fn scale(fraction: f64, total: u32) -> u32 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a progress fraction in 0..=1 rounds to an unsigned unit count no larger than total"
+    )]
     let units = (fraction * f64::from(total)).round() as u32;
     if fraction < 1.0 {
         units.min(total.saturating_sub(1))

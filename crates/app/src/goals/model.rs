@@ -40,14 +40,14 @@ pub struct GoalsModel {
     writing: bool,
     /// The library revision the goals were last loaded after.
     seen_revision: u64,
-    _load: Option<Task<()>>,
-    _reload: Option<Task<()>>,
+    load_task: Option<Task<()>>,
+    reload_task: Option<Task<()>>,
     _subscription: Subscription,
 }
 
 impl GoalsModel {
-    pub fn new(library: Entity<LibraryModel>, cx: &mut Context<Self>) -> Self {
-        let subscription = cx.observe(&library, |this, library, cx| {
+    pub fn new(library: &Entity<LibraryModel>, cx: &mut Context<Self>) -> Self {
+        let subscription = cx.observe(library, |this, library, cx| {
             let library = library.read(cx);
             let revision = library.revision();
             // Pages of a running sync are not news; its result is.
@@ -62,8 +62,8 @@ impl GoalsModel {
             status: GoalsStatus::Idle,
             loaded_once: false,
             writing: false,
-            _load: None,
-            _reload: None,
+            load_task: None,
+            reload_task: None,
             _subscription: subscription,
         }
     }
@@ -129,7 +129,7 @@ impl GoalsModel {
         self.status = GoalsStatus::Loading;
         cx.notify();
         let client = Services::global(cx).client().clone();
-        self._load = Some(cx.spawn(async move |this, cx| {
+        self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = cx.background_spawn(async move { client.goals() }).await;
             let _ = this.update(cx, |this, cx| match result {
                 Ok(goals) => {
@@ -162,9 +162,9 @@ impl GoalsModel {
         if !Services::global(cx).has_scope(READ_GOALS) {
             return;
         }
-        self._reload = Some(cx.spawn(async move |this, cx| {
+        self.reload_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(RELOAD_DELAY).await;
-            let _ = this.update(cx, |this, cx| this.load(cx));
+            let _ = this.update(cx, GoalsModel::load);
         }));
     }
 
@@ -202,7 +202,7 @@ impl GoalsModel {
                         // haven't seen, so load again afterwards. A reload
                         // still waiting on its timer runs as planned.
                         if this.status == GoalsStatus::Loading {
-                            this._load = None;
+                            this.load_task = None;
                             this.schedule_reload(cx);
                         }
                         this.status = GoalsStatus::Loaded;

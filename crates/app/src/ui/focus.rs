@@ -113,7 +113,7 @@ pub fn return_focus(to: FocusReturn, window: &mut Window, cx: &mut App) {
             cx.default_global::<FocusMemory>().returning = Some(global);
             // Only for the frame that draws the screen again.
             window.on_next_frame(|window, _| {
-                window.on_next_frame(|_, cx| cx.default_global::<FocusMemory>().returning = None)
+                window.on_next_frame(|_, cx| cx.default_global::<FocusMemory>().returning = None);
             });
         }
         // A handle no longer drawn loses focus on the next frame, and the
@@ -251,7 +251,7 @@ pub fn reveal_when(
             scroll.set_offset(point(offset.x, offset.y + shift));
             window.refresh();
         },
-        |_, _, _, _| {},
+        |_, (), _, _| {},
     )
     .absolute()
     .top_0()
@@ -314,7 +314,7 @@ impl Element for RowRing {
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _: &mut (),
+        (): &mut (),
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -344,8 +344,8 @@ impl Element for RowRing {
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
-        _: &mut (),
-        _: &mut (),
+        (): &mut (),
+        (): &mut (),
         _: &mut Window,
         _: &mut App,
     ) {

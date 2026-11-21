@@ -74,7 +74,7 @@ impl SelectItem for FilterOption {
                     .caption(cx)
                     .baseline_on(TypeRole::Caption, TypeRole::Body)
                     .tabular()
-                    .child(crate::format::count_text(self.count as u32)),
+                    .child(crate::format::count_text(self.count)),
             )
     }
 
@@ -149,7 +149,7 @@ impl SeriesTrackerView {
     pub fn new(
         model: Entity<SeriesModel>,
         library: Entity<LibraryModel>,
-        upcoming: Entity<UpcomingModel>,
+        upcoming: &Entity<UpcomingModel>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -164,13 +164,13 @@ impl SeriesTrackerView {
         });
         let subscriptions = vec![
             cx.observe_in(&model, window, |this, _, window, cx| {
-                this.changed(window, cx)
+                this.changed(window, cx);
             }),
             cx.observe_in(&library, window, |this, _, window, cx| {
-                this.changed(window, cx)
+                this.changed(window, cx);
             }),
-            cx.observe_in(&upcoming, window, |this, _, window, cx| {
-                this.changed(window, cx)
+            cx.observe_in(upcoming, window, |this, _, window, cx| {
+                this.changed(window, cx);
             }),
             cx.subscribe_in(
                 &filter_input,
@@ -247,7 +247,7 @@ impl SeriesTrackerView {
     }
 
     fn retry(&mut self, cx: &mut Context<Self>) {
-        self.model.update(cx, |m, cx| m.load(cx));
+        self.model.update(cx, SeriesModel::load);
     }
 
     /// The list's items and their heights, rebuilt when what they show
@@ -342,7 +342,7 @@ impl SeriesTrackerView {
             cx,
         );
         let title = match shown {
-            Some(n) => PageHeader::new("Series").count(n as u32),
+            Some(n) => PageHeader::new("Series").count(n),
             None => PageHeader::new("Series"),
         };
         column()
@@ -384,7 +384,7 @@ impl SeriesTrackerView {
     }
 
     /// "Couldn't load your series…" and "Try again", in one muted line.
-    fn failed(&self, message: SharedString, cx: &mut Context<Self>) -> impl IntoElement {
+    fn failed(message: SharedString, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .flex_wrap()
             .gap_2()
@@ -397,7 +397,7 @@ impl SeriesTrackerView {
             )
     }
 
-    fn foot(&self, hidden: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn foot(hidden: usize, cx: &mut Context<Self>) -> AnyElement {
         if hidden == 0 {
             return div().into_any_element();
         }
@@ -486,7 +486,7 @@ impl Render for SeriesTrackerView {
             let body: AnyElement = match status {
                 SeriesStatus::Failed(message) if !loaded => column()
                     .pt_4()
-                    .child(self.failed(message, cx))
+                    .child(Self::failed(message, cx))
                     .into_any_element(),
                 _ if !loaded => column()
                     .pt_6()
@@ -531,7 +531,7 @@ impl Render for SeriesTrackerView {
                         Item::Header => this.header(Some(shown), window, cx).into_any_element(),
                         Item::Failed(message) => column()
                             .pt_4()
-                            .child(this.failed(message.clone(), cx))
+                            .child(Self::failed(message.clone(), cx))
                             .into_any_element(),
                         Item::Nothing => column()
                             .child(this.nothing_shown(&query, cx))
@@ -546,7 +546,7 @@ impl Render for SeriesTrackerView {
                                 scroll.clone(),
                             ))
                             .into_any_element(),
-                        Item::Foot { hidden } => this.foot(*hidden, cx),
+                        Item::Foot { hidden } => Self::foot(*hidden, cx),
                     })
                     .collect::<Vec<_>>()
             },

@@ -17,12 +17,11 @@
 //! be virtual: the name and every line are single, truncated lines.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, h_flex};
 use gpui_kit::{
-    App, AppContext as _, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, RenderOnce, ScrollHandle, SharedString, Styled as _, Window, div,
-    prelude::FluentBuilder as _, rems,
+    App, Entity, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
+    RenderOnce, ScrollHandle, SharedString, Styled as _, Window, div, prelude::FluentBuilder as _,
+    rems,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{Date, ReadingStatus, UserBookId};
@@ -40,6 +39,7 @@ use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{count_text, needs_permission, progress_summary};
 use crate::home::home_view::paused_text;
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::library::writes;
 use crate::ui::focus::{keyed_focus, reveal_when};
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{SeriesStrip, StripItem, TextButton};
@@ -129,7 +129,7 @@ impl RenderOnce for SeriesRow {
                 .pt_6()
                 .pb_1()
                 .child(div().label(cx).child(group.label()))
-                .child(div().caption(cx).tabular().child(count_text(count as u32)))
+                .child(div().caption(cx).tabular().child(count_text(count)))
         });
 
         let row = h_flex()
@@ -273,7 +273,7 @@ fn next_lane(
     let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
     let reason = (!can_write).then(|| needs_permission(WRITE_LIBRARY));
 
-    let line = match kind {
+    let book_details = match kind {
         NextKind::Reading => entry
             .as_ref()
             .and_then(|e| reading_line(&progress_summary(e)))
@@ -309,7 +309,7 @@ fn next_lane(
                 .label("Update progress…")
                 .loading(pending == Some(WriteKind::Progress))
                 .disabled(pending.is_some() || !can_write)
-                .when_some(reason.clone(), |b, r| b.tooltip(r))
+                .when_some(reason.clone(), Button::tooltip)
                 .on_click(move |_, window, cx| open_progress(library.clone(), &entry, window, cx))
                 .into_any_element()
         }),
@@ -320,7 +320,7 @@ fn next_lane(
                 .label("Start reading")
                 .loading(pending == Some(WriteKind::Status))
                 .disabled(pending.is_some() || !can_write)
-                .when_some(reason.clone(), |b, r| b.tooltip(r))
+                .when_some(reason.clone(), Button::tooltip)
                 .on_click(move |_, window, cx| start_reading(library.clone(), entry, window, cx))
                 .into_any_element()
         }),
@@ -355,7 +355,7 @@ fn next_lane(
                 TextButton::book(SharedString::from(format!("series-next-{id}")), &book.book)
                     .text_color(colors.fg),
             )
-            .children(line)
+            .children(book_details)
             .children(action.map(|action| h_flex().pt_2().child(action))),
     )
 }
@@ -370,7 +370,7 @@ fn want_to_read(
 ) -> gpui_kit::AnyElement {
     let adding = library.read(cx).is_adding(book.book.id);
     let library = library.clone();
-    let summary = book.book.clone();
+    let book_id = book.book.id;
     Button::new(SharedString::from(format!("series-add-{}", series.id)))
         .ghost()
         .small_control()
@@ -383,7 +383,7 @@ fn want_to_read(
             this.tooltip(needs_permission(WRITE_LIBRARY))
         })
         .on_click(move |_, window, cx| {
-            add_to_want_to_read(library.clone(), summary.clone(), window, cx)
+            add_to_want_to_read(library.clone(), book_id, window, cx);
         })
         .into_any_element()
 }
@@ -392,34 +392,7 @@ fn want_to_read(
 /// reading" does; the library applies the entry the write returns. A
 /// failure is shown as a notification.
 fn start_reading(library: Entity<LibraryModel>, id: UserBookId, window: &mut Window, cx: &mut App) {
-    if !library.update(cx, |m, cx| m.begin_write(id, WriteKind::Status, cx)) {
-        return;
-    }
-    let client = Services::global(cx).client().clone();
-    window
-        .spawn(cx, async move |cx| {
-            let result = cx
-                .background_spawn(
-                    async move { client.set_status(id, ReadingStatus::CurrentlyReading) },
-                )
-                .await;
-            library.update(cx, |m, cx| {
-                m.end_write(id, cx);
-                if let Ok(entry) = &result {
-                    m.apply_written(entry.clone(), cx);
-                }
-            });
-            if let Err(error) = result {
-                let _ = cx.update(|window, cx| {
-                    let message = Services::error_message(&error, Some(WRITE_LIBRARY), cx);
-                    window.push_notification(
-                        Notification::error(message).title("Couldn't change the status"),
-                        cx,
-                    );
-                });
-            }
-        })
-        .detach();
+    writes::set_status(library, id, ReadingStatus::CurrentlyReading, window, cx);
 }
 
 /// A row while the series load: a skeleton name line and a strip of

@@ -41,7 +41,7 @@ use gpui_kit::{
 };
 use unicode_bidi::{BidiClass, BidiInfo, Direction, Level, bidi_class, get_base_direction};
 
-use crate::design::type_roles::Family;
+use crate::fonts;
 
 /// What ends a line cut short by a clamp.
 const ELLIPSIS: &str = "…";
@@ -106,7 +106,7 @@ impl RenderOnce for WrappingText {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
         // The parent's text style is in effect here.
         let mut style = window.text_style();
-        let fallback = Family::of(&style.font_family).script_fallback();
+        let fallback = fonts::VAZIRMATN;
         let fallbacks = FontFallbacks::from_fonts(vec![fallback.to_owned()]);
         style.font_fallbacks = Some(fallbacks.clone());
         let mut root = div();
@@ -156,7 +156,7 @@ impl RenderOnce for WrappingText {
                     } else {
                         div()
                             .flex()
-                            .when(centered, |this| this.justify_center())
+                            .when(centered, gpui_kit::Styled::justify_center)
                             .whitespace_nowrap()
                             .child(line)
                             .into_any_element()
@@ -167,18 +167,23 @@ impl RenderOnce for WrappingText {
 
         if !rtl {
             return root
-                .when_some(self.line_clamp, |this, lines| this.line_clamp(lines))
+                .when_some(self.line_clamp, gpui_kit::Styled::line_clamp)
                 .child(self.text)
                 .into_any_element();
         }
         // The height of one line of this text.
         let line_height = style.line_height_in_pixels(window.rem_size());
-        root.child(
-            rtl_row(pieces(&self.text), self.centered, true)
-                .when_some(self.line_clamp, |this, lines| {
-                    this.max_h(line_height * lines as f32).overflow_hidden()
-                }),
-        )
+        root.child(rtl_row(pieces(&self.text), self.centered, true).when_some(
+            self.line_clamp,
+            |this, lines| {
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "GPUI represents layout heights in floating-point pixels"
+                )]
+                let height = line_height * lines as f32;
+                this.max_h(height).overflow_hidden()
+            },
+        ))
         .into_any_element()
     }
 }
@@ -190,8 +195,8 @@ fn rtl_row(pieces: Vec<Piece>, centered: bool, wrap: bool) -> gpui_kit::Div {
     div()
         .flex()
         .flex_row_reverse()
-        .when(wrap, |this| this.flex_wrap())
-        .when(centered, |this| this.justify_center())
+        .when(wrap, gpui_kit::Styled::flex_wrap)
+        .when(centered, gpui_kit::Styled::justify_center)
         .children(pieces.into_iter().enumerate().map(move |(i, piece)| {
             // The space goes on the piece's left, where the next piece
             // follows.
@@ -599,14 +604,14 @@ mod tests {
 
     #[test]
     fn empty_text_has_no_pieces() {
-        assert!(pieces("").is_empty());
-        assert!(pieces("   ").is_empty());
-        assert!(ltr_units("  ").is_empty());
+        assert_eq!(pieces(""), []);
+        assert_eq!(pieces("   "), []);
+        assert_eq!(ltr_units("  "), [] as [String; 0]);
     }
 
     /// One unit of width per character.
     fn chars(text: &str) -> f32 {
-        text.chars().count() as f32
+        text.chars().fold(0., |width, _| width + 1.)
     }
 
     fn lines(text: &str, width: f32, max: Option<usize>) -> Vec<String> {

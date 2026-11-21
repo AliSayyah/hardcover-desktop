@@ -173,7 +173,10 @@ impl RenderOnce for SkeletonText {
             .gap_2()
             .children((0..self.lines).map(move |ix| {
                 Skeleton::line()
-                    .when(ix + 1 == self.lines && self.lines > 1, |this| this.w_2_3())
+                    .when(
+                        ix + 1 == self.lines && self.lines > 1,
+                        gpui_kit::Styled::w_2_3,
+                    )
                     .when(still, Skeleton::still)
             }))
     }

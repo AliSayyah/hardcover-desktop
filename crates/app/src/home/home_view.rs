@@ -14,6 +14,7 @@
 //!   rail folds under the main column in a narrow window (`ui::Columns`).
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -52,6 +53,7 @@ use crate::format::{
 use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::library::writes;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
@@ -210,14 +212,7 @@ impl HomeView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.write(
-            id,
-            WriteKind::Status,
-            "Couldn't change the status",
-            move |client| client.set_status(id, status),
-            window,
-            cx,
-        );
+        writes::set_status(self.model.clone(), id, status, window, cx);
     }
 
     fn rate(
@@ -265,7 +260,7 @@ impl HomeView {
                 .ok_text("Mark as read")
                 .on_ok(move |_, window, cx| {
                     let _ = view.update(cx, |this, cx| {
-                        this.set_status(id, ReadingStatus::Read, window, cx)
+                        this.set_status(id, ReadingStatus::Read, window, cx);
                     });
                     true
                 })
@@ -290,7 +285,7 @@ impl HomeView {
         let paused = digest
             .paused
             .and_then(|id| model.entry(id).cloned())
-            .map(|entry| self.paused_row(&entry, digest.paused_count, today, cx));
+            .map(|entry| Self::paused_row(&entry, digest.paused_count, today, cx));
 
         let lead_url = books
             .first()
@@ -335,7 +330,7 @@ impl HomeView {
         entry: &LibraryEntry,
         small: bool,
         cx: &mut Context<Self>,
-    ) -> [Button; 2] {
+    ) -> [AnyElement; 2] {
         let id = entry.user_book_id;
         let pending = self.model.read(cx).pending_write(id);
         let can_write = Services::global(cx).has_scope(WRITE_LIBRARY);
@@ -354,19 +349,21 @@ impl HomeView {
                 .label("Update progress…")
                 .loading(pending == Some(WriteKind::Progress))
                 .disabled(pending.is_some() || !can_write)
-                .when_some(disabled_reason.clone(), |b, r| b.tooltip(r))
+                .when_some(disabled_reason.clone(), Button::tooltip)
                 .on_click(move |_, window, cx| {
-                    open_progress(model.clone(), &entry_for_dialog, window, cx)
-                }),
+                    open_progress(model.clone(), &entry_for_dialog, window, cx);
+                })
+                .into_any_element(),
             size(Button::new(SharedString::from(format!("home-finish-{id}"))))
                 .ghost()
                 .label("Mark as read…")
                 .loading(pending == Some(WriteKind::Status))
                 .disabled(pending.is_some() || !can_write)
-                .when_some(disabled_reason, |b, r| b.tooltip(r))
+                .when_some(disabled_reason, Button::tooltip)
                 .on_click(
                     cx.listener(move |this, _, window, cx| this.confirm_finished(id, window, cx)),
-                ),
+                )
+                .into_any_element(),
         ]
     }
 
@@ -558,7 +555,7 @@ impl HomeView {
     /// The most recently paused book, so it isn't forgotten: an sm row with
     /// the Paused chip. Opening it is the way back: moving it to Currently
     /// Reading would start a new read.
-    fn paused_row(&self, entry: &LibraryEntry, count: usize, today: Date, cx: &App) -> AnyElement {
+    fn paused_row(entry: &LibraryEntry, count: usize, today: Date, cx: &App) -> AnyElement {
         let progress = progress_summary(entry);
         let since = entry
             .updated_at
@@ -594,9 +591,9 @@ impl HomeView {
                             Button::new("home-all-paused")
                                 .ghost()
                                 .small_control()
-                                .label(format!("All {} paused", count_text(count as u32)))
+                                .label(format!("All {} paused", count_text(count)))
                                 .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(ShowPaused), cx)
+                                    window.dispatch_action(Box::new(ShowPaused), cx);
                                 }),
                         )
                     }),
@@ -630,7 +627,7 @@ impl HomeView {
                 div()
                     .caption(cx)
                     .tabular()
-                    .child(books_count_text(unrated as u32)),
+                    .child(books_count_text(u32::try_from(unrated).unwrap_or(u32::MAX))),
             );
         }
         div()
@@ -686,7 +683,7 @@ impl HomeView {
                     .value(rating)
                     .on_change(
                         cx.listener(move |this, rating: &Option<Rating>, window, cx| {
-                            this.rate(id, *rating, window, cx)
+                            this.rate(id, *rating, window, cx);
                         }),
                     ),
             )
@@ -721,7 +718,6 @@ impl HomeView {
             "Reading goal".to_owned()
         };
         let reached = goal.progress >= f64::from(goal.target);
-        let expected = (goal.expected_by(today) / f64::from(goal.target.max(1))) * 100.0;
         let library = self.model.read(cx);
         let months = (goal.metric == GoalMetric::Books)
             .then(|| finished_per_month(goal, library.entries()))
@@ -752,7 +748,7 @@ impl HomeView {
                     .small_control()
                     .label("Details…")
                     .on_click(move |_, window, cx| {
-                        open_goal(goals.clone(), model.clone(), goal_id, window, cx)
+                        open_goal(goals.clone(), model.clone(), goal_id, window, cx);
                     }),
             )
             .child(
@@ -774,11 +770,8 @@ impl HomeView {
             )
             .child(
                 div().pt_1().child(
-                    Meter::new("home-goal-bar", (goal.fraction() * 100.0) as f32)
-                        .pace(
-                            (!reached && goal.is_current(today))
-                                .then_some(expected.clamp(0.0, 100.0) as f32),
-                        )
+                    Meter::new("home-goal-bar", crate::format::bar_percent(goal.fraction()))
+                        .pace(crate::goals::sidebar::pace_percent(goal, today))
                         .accessibility_label("Progress toward the goal"),
                 ),
             )
@@ -867,7 +860,7 @@ impl HomeView {
                                                 ReadingStatus::CurrentlyReading,
                                                 window,
                                                 cx,
-                                            )
+                                            );
                                         })),
                                 ),
                             ),
@@ -912,7 +905,7 @@ impl Render for HomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let now = chrono::Local::now();
         let today = now.date_naive();
-        let header = Greeting::new(date_line(today), greeting_at(now));
+        let header = Greeting::new(date_line(today), greeting_at(&now));
         let loaded = self.model.read(cx).is_loaded();
         let root = div().id("home").track_focus(&self.focus_handle).size_full();
         if !loaded {
@@ -1049,7 +1042,7 @@ pub fn position_text(progress: &ProgressSummary) -> String {
 
 /// "66%".
 fn percent_text(percent: f32) -> String {
-    format!("{}%", percent.round() as u32)
+    format!("{}%", percent.round().max(0.0))
 }
 
 /// The pace line of a book being read: "16 pages a day · done around Dec 1",
@@ -1064,7 +1057,10 @@ pub fn pace_line(reading: &Reading, today: Date) -> Option<String> {
 fn pace_facts(reading: &Reading, today: Date) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(pace) = reading.pace {
-        parts.push(pages_a_day(pace.pages_per_day));
+        parts.push(crate::format::pages_per_day_text(
+            pace.pages_per_day,
+            "Under a page a day",
+        ));
         if reading.idle_days.is_none()
             && let Some(finish) = pace.finish
         {
@@ -1096,15 +1092,6 @@ fn caption_facts(facts: Vec<String>, cx: &App) -> gpui_kit::Div {
         }))
 }
 
-/// "16 pages a day"; "Under a page a day" below one.
-fn pages_a_day(pages: f64) -> String {
-    match pages.round() as u32 {
-        0 => "Under a page a day".to_owned(),
-        1 => "1 page a day".to_owned(),
-        n => format!("{} pages a day", count_text(n)),
-    }
-}
-
 /// The paused row's caption: "Paused at page 230 of 1,104 · since Oct 1".
 pub fn paused_text(progress: &ProgressSummary, since: Option<Date>, today: Date) -> String {
     let mut text = match (progress.page, progress.total_pages, progress.percent) {
@@ -1120,7 +1107,7 @@ pub fn paused_text(progress: &ProgressSummary, since: Option<Date>, today: Date)
         (None, _, None) => "Paused".to_owned(),
     };
     if let Some(since) = since {
-        text.push_str(&format!(" · since {}", short_date(since, today)));
+        write!(text, " · since {}", short_date(since, today)).expect("writing to a String");
     }
     text
 }
@@ -1171,7 +1158,7 @@ pub fn goal_sentence(
     let to_go = match (goal.end - today).num_days() {
         0 => format!("{left} to go today"),
         1 => format!("{left} to go in 1 day"),
-        n => format!("{left} to go in {} days", count_text(n as u32)),
+        n => format!("{left} to go in {} days", count_text(n)),
     };
     let mut text = format!("{standing}, {to_go}.");
     let mut title = None;
@@ -1180,13 +1167,15 @@ pub fn goal_sentence(
         match finishing {
             [one] if !is_rtl(one) => {
                 title = Some(text.len()..text.len() + one.len());
-                text.push_str(&format!("{one} should finish in time."));
+                write!(text, "{one} should finish in time.").expect("writing to a String");
             }
             [_] => text.push_str("1 book you're reading should finish in time."),
-            many => text.push_str(&format!(
+            many => write!(
+                text,
                 "{} books you're reading should finish in time.",
                 many.len()
-            )),
+            )
+            .expect("writing to a String"),
         }
     }
     Some((text, title))

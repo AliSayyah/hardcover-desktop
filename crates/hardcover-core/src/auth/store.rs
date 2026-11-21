@@ -7,13 +7,27 @@ use crate::{Error, Result};
 
 /// Persistent storage for [`Tokens`].
 pub trait TokenStore: Send + Sync {
+    /// Loads the saved tokens, if present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stored credentials cannot be read or decoded.
     fn load(&self) -> Result<Option<Tokens>>;
+    /// Persists the tokens for the next session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the credentials cannot be persisted.
     fn save(&self, tokens: &Tokens) -> Result<()>;
     /// Succeeds if there was nothing to clear.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the credentials cannot be removed.
     fn clear(&self) -> Result<()>;
 }
 
-/// The desktop's secret service (GNOME Keyring, KWallet, ...) via `keyring`,
+/// The desktop's secret service (GNOME Keyring, `KWallet`, ...) via `keyring`,
 /// service `"hardcover-desktop"`. Tokens are stored as one JSON secret.
 pub struct KeyringTokenStore {
     entry: keyring::Entry,
@@ -23,10 +37,20 @@ impl KeyringTokenStore {
     pub const SERVICE: &'static str = "hardcover-desktop";
     pub const DEFAULT_ACCOUNT: &'static str = "oauth-tokens";
 
+    /// Opens the default keyring entry for OAuth tokens.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the default keyring entry cannot be initialized.
     pub fn new() -> Result<Self> {
         Self::with_account(Self::DEFAULT_ACCOUNT)
     }
 
+    /// Opens the keyring entry for the specified account.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the keyring cannot initialize an entry for this account.
     pub fn with_account(account: &str) -> Result<Self> {
         Ok(Self {
             entry: keyring::Entry::new(Self::SERVICE, account).map_err(keyring_err)?,
@@ -40,6 +64,10 @@ impl std::fmt::Debug for KeyringTokenStore {
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "map_err passes the owned error to this conversion"
+)]
 fn keyring_err(e: keyring::Error) -> Error {
     // keyring errors describe the platform failure, never the secret.
     Error::Storage(format!("keyring: {e}"))
@@ -76,6 +104,7 @@ pub struct MemoryTokenStore {
 }
 
 impl MemoryTokenStore {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -92,17 +121,23 @@ impl TokenStore for MemoryTokenStore {
         Ok(self
             .tokens
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone())
     }
 
     fn save(&self, tokens: &Tokens) -> Result<()> {
-        *self.tokens.lock().unwrap_or_else(|p| p.into_inner()) = Some(tokens.clone());
+        *self
+            .tokens
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(tokens.clone());
         Ok(())
     }
 
     fn clear(&self) -> Result<()> {
-        *self.tokens.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *self
+            .tokens
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         Ok(())
     }
 }

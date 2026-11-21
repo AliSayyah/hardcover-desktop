@@ -36,8 +36,8 @@ use gpui_kit::{
 };
 use hardcover_core::auth::scopes::{READ_CATALOG, WRITE_LIBRARY};
 use hardcover_core::{
-    BookDetails, BookId, BookSummary, Client, EditionChange, EditionSummary, Error, LibraryEntry,
-    Privacy, Rating, ReadId, ReadSession, ReadingStatus, Review, ReviewedEntry, UserBookId,
+    BookDetails, BookId, BookSummary, Client, EditionChange, Error, LibraryEntry, Privacy, Rating,
+    ReadId, ReadSession, ReadingStatus, Review, ReviewedEntry, UserBookId,
 };
 
 use self::catalog_sections::Similar;
@@ -49,6 +49,7 @@ use crate::app_state::Services;
 use crate::design::size;
 use crate::format::{error_message, read_dates_text};
 use crate::library::model::{LibraryModel, WriteKind};
+use crate::library::writes;
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::ui::kit::open_alert_dialog;
@@ -137,7 +138,7 @@ pub struct BookDetailView {
     /// Only then does the placeholder animate: a pulse while arrowing past
     /// books would redraw the window every frame for nothing.
     details_fetching: Option<BookId>,
-    _details_task: Option<Task<()>>,
+    details_task: Option<Task<()>>,
     privacy: Entity<SelectState<Vec<PrivacyOption>>>,
     notes: Entity<TextareaState>,
     /// The entry and saved notes the notes field was last filled from.
@@ -158,7 +159,7 @@ pub struct BookDetailView {
     cover: Option<(String, Option<Arc<RenderImage>>)>,
     similar: HashMap<BookId, Similar>,
     similar_loading: Option<BookId>,
-    _similar_task: Option<Task<()>>,
+    similar_task: Option<Task<()>>,
     /// "Show all tags" was pressed for the book shown.
     tags_expanded: bool,
     /// The full book page, under the object bar the shell draws: the book's
@@ -221,7 +222,7 @@ impl BookDetailView {
             details: HashMap::new(),
             details_loading: None,
             details_fetching: None,
-            _details_task: None,
+            details_task: None,
             privacy,
             notes,
             notes_base: None,
@@ -234,7 +235,7 @@ impl BookDetailView {
             cover: None,
             similar: HashMap::new(),
             similar_loading: None,
-            _similar_task: None,
+            similar_task: None,
             tags_expanded: false,
             tools_in_bar: false,
             review,
@@ -261,7 +262,7 @@ impl BookDetailView {
         }
         self.tags_expanded = false;
         // Drops a pending similar-books fetch for the book left behind.
-        self._similar_task = None;
+        self.similar_task = None;
         self.similar_loading = None;
         self.load_similar(cx);
         self.community_reviews_subject_changed(cx);
@@ -387,7 +388,7 @@ impl BookDetailView {
         let client = Services::global(cx).client().clone();
         let id = book.id;
         // Replacing the task cancels a fetch for a book no longer shown.
-        self._details_task = Some(cx.spawn(async move |this, cx| {
+        self.details_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(DETAILS_DELAY).await;
             let fetching = this.update(cx, |this, cx| {
                 this.details_fetching = Some(id);
@@ -662,22 +663,21 @@ impl BookDetailView {
             return;
         };
         let book = entry.book.id;
-        let picker = match self.edition_pickers.get(&book) {
-            Some((picker, _)) => picker.clone(),
-            None => {
-                let title: SharedString = entry.book.title.clone().into();
-                let picker = cx.new(|cx| EditionPicker::new(book, title, cx));
-                let subscription = cx.subscribe_in(
-                    &picker,
-                    window,
-                    |this, _, EditionChosen(edition), window, cx| {
-                        this.change_edition(edition.clone(), window, cx)
-                    },
-                );
-                self.edition_pickers
-                    .insert(book, (picker.clone(), subscription));
-                picker
-            }
+        let picker = if let Some((picker, _)) = self.edition_pickers.get(&book) {
+            picker.clone()
+        } else {
+            let title: SharedString = entry.book.title.clone().into();
+            let picker = cx.new(|cx| EditionPicker::new(book, title, cx));
+            let subscription = cx.subscribe_in(
+                &picker,
+                window,
+                |this, _, EditionChosen(edition), window, cx| {
+                    this.change_edition(edition.id, window, cx);
+                },
+            );
+            self.edition_pickers
+                .insert(book, (picker.clone(), subscription));
+            picker
         };
         let current = entry.edition.as_ref().map(|e| e.id);
         picker.update(cx, |p, cx| p.set_current(current, cx));
@@ -686,14 +686,14 @@ impl BookDetailView {
 
     fn change_edition(
         &mut self,
-        edition: EditionSummary,
+        edition: hardcover_core::EditionId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(entry) = self.current_entry(cx) else {
             return;
         };
-        if entry.edition.as_ref().map(|e| e.id) == Some(edition.id) {
+        if entry.edition.as_ref().map(|e| e.id) == Some(edition) {
             return;
         }
         let id = entry.user_book_id;
@@ -701,7 +701,7 @@ impl BookDetailView {
             id,
             WriteKind::Edition,
             "Couldn't change the edition",
-            move |client| client.set_edition(id, edition.id),
+            move |client| client.set_edition(id, edition),
             window,
             cx,
         );
@@ -710,7 +710,7 @@ impl BookDetailView {
     /// Opens the read dialog to add a read (`None`) or change `read`'s dates.
     fn open_read_dialog(
         &mut self,
-        read: Option<ReadSession>,
+        read: Option<&ReadSession>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -721,7 +721,7 @@ impl BookDetailView {
             },
             None => ReadDialogKind::Add,
         };
-        let dialog = cx.new(|cx| ReadDialog::new(kind, read.as_ref(), window, cx));
+        let dialog = cx.new(|cx| ReadDialog::new(kind, read, window, cx));
         let subscription = cx.subscribe_in(
             &dialog,
             window,
@@ -803,7 +803,7 @@ impl BookDetailView {
                             move |client| client.delete_read(id, read).map(Some),
                             window,
                             cx,
-                        )
+                        );
                     });
                     true
                 })
@@ -855,37 +855,7 @@ impl BookDetailView {
         let Some(Subject::Book(book)) = self.subject.clone() else {
             return;
         };
-        let model = self.model.clone();
-        if !model.update(cx, |m, cx| m.begin_add(book.id, cx)) {
-            return;
-        }
-        let client = Services::global(cx).client().clone();
-        let book_id = book.id;
-        cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { client.add_to_library(book_id, status) })
-                .await;
-            model.update(cx, |m, cx| {
-                m.end_add(book_id, cx);
-                if let Ok(entry) = &result {
-                    m.apply_written(entry.clone(), cx);
-                }
-            });
-            if let Err(error) = result {
-                let _ = this.update_in(cx, |_, window, cx| {
-                    window.push_notification(
-                        Notification::error(Services::error_message(
-                            &error,
-                            Some(WRITE_LIBRARY),
-                            cx,
-                        ))
-                        .title("Couldn't add the book"),
-                        cx,
-                    );
-                });
-            }
-        })
-        .detach();
+        writes::add_to_library(self.model.clone(), book.id, status, window, cx);
     }
 }
 
@@ -962,17 +932,17 @@ impl BookDetailView {
         let header = self.render_header(book, entry, details, false, window, cx);
         let mut column: Vec<AnyElement> = Vec::new();
         if let Some(entry) = entry {
-            column.extend(self.render_notes(entry, false, cx));
+            column.push(self.render_notes(entry, false, cx));
         }
         column.push(self.render_about(book, cx));
         column.extend(self.render_tags(details, cx));
-        column.extend(self.render_other_titles(details, cx));
+        column.extend(Self::render_other_titles(details, cx));
         if let Some(entry) = entry {
             column.push(self.render_details(entry, false, cx));
             column.push(self.render_review(entry, cx).into_any_element());
             column.push(self.render_reads(entry, false, cx));
         }
-        column.extend(self.render_on_hardcover(book, details, false, cx));
+        column.extend(Self::render_on_hardcover(book, details, false, cx));
         column.extend(self.render_community_reviews(book.id, window, cx));
         column.extend(self.render_similar(book, details, cx));
 
@@ -997,7 +967,7 @@ impl BookDetailView {
                 div()
                     // Keyed by book, so another book (a similar one) opens at
                     // the top.
-                    .id(("book-detail", book.id.get() as u64))
+                    .id(("book-detail", book.id.get().cast_unsigned()))
                     .flex_1()
                     .min_h_0()
                     .scroll_y_revealing_focus()
@@ -1022,7 +992,7 @@ impl BookDetailView {
         let mut main: Vec<AnyElement> = Vec::new();
         main.push(self.render_about(book, cx));
         main.extend(self.render_tags(details, cx));
-        main.extend(self.render_other_titles(details, cx));
+        main.extend(Self::render_other_titles(details, cx));
         if let Some(entry) = entry {
             main.push(self.render_review(entry, cx).into_any_element());
         }
@@ -1030,11 +1000,11 @@ impl BookDetailView {
         main.extend(self.render_similar(book, details, cx));
 
         let mut rail: Vec<AnyElement> = Vec::new();
-        rail.extend(self.render_on_hardcover(book, details, true, cx));
+        rail.extend(Self::render_on_hardcover(book, details, true, cx));
         if let Some(entry) = entry {
             rail.push(self.render_details(entry, true, cx));
             rail.push(self.render_reads(entry, true, cx));
-            rail.extend(self.render_notes(entry, true, cx));
+            rail.push(self.render_notes(entry, true, cx));
         }
 
         // The page is the window less the sidebar and its own insets: GPUI
@@ -1054,7 +1024,7 @@ impl BookDetailView {
             .children(entry.and_then(|entry| self.render_panel(entry, cx)))
             .child(blocks().tab_group().tab_index(1).children(main));
         div()
-            .id(("book-detail", book.id.get() as u64))
+            .id(("book-detail", book.id.get().cast_unsigned()))
             .size_full()
             .scroll_y_revealing_focus()
             .child(

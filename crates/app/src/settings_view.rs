@@ -154,19 +154,8 @@ impl SettingsView {
         let user = self.library.read(cx).user().cloned();
         let username: SharedString = user
             .as_ref()
-            .map(|u| u.username.clone().into())
-            .unwrap_or_else(|| "Signed in".into());
-        let avatar = Avatar::new(
-            user.as_ref()
-                .and_then(|u| u.name.clone())
-                .filter(|name| !name.trim().is_empty())
-                .map_or_else(|| username.clone(), SharedString::from),
-        )
-        .image(
-            user.as_ref()
-                .and_then(|u| u.avatar.as_ref())
-                .map(|a| a.url.clone()),
-        );
+            .map_or_else(|| "Signed in".into(), |u| u.username.clone().into());
+        let avatar = Avatar::for_user(user.as_ref(), username.clone());
         let view = cx.entity().downgrade();
         let sign_out = Button::new("sign-out")
             .small_control()

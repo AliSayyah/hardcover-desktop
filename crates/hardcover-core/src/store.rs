@@ -3,7 +3,7 @@
 //!
 //! Entries are stored as JSON blobs of [`LibraryEntry`] keyed by `user_book_id`.
 //! The database carries a schema version (`PRAGMA user_version`). An older
-//! file is upgraded in place by [`MIGRATIONS`], so the library still shows
+//! file is upgraded in place by `MIGRATIONS`, so the library still shows
 //! instantly after an update; any other version is wiped and rebuilt, since
 //! everything in it can be re-downloaded.
 
@@ -17,7 +17,7 @@ use crate::api::{LibraryEntry, Timestamp, User, UserBookId, UserId};
 use crate::{Error, Result};
 
 /// Bump when the table layout or the JSON shape of the stored models changes,
-/// and add a step to [`MIGRATIONS`] for the version being left.
+/// and add a step to `MIGRATIONS` for the version being left.
 pub const SCHEMA_VERSION: i64 = 2;
 
 type Migration = fn(&Transaction<'_>) -> rusqlite::Result<()>;
@@ -37,22 +37,36 @@ impl std::fmt::Debug for LibraryCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LibraryCache")
             .field("path", &self.path)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 impl LibraryCache {
     /// `$XDG_DATA_HOME/hardcover-desktop/library.sqlite3`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the user data directory cannot be located.
     pub fn default_path() -> Result<PathBuf> {
         Ok(crate::project_dirs()?.data_dir().join(FILE_NAME))
     }
 
     /// Opens (creating if needed) the cache at [`LibraryCache::default_path`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the default path cannot be located or the library cache
+    /// cannot be opened.
     pub fn open_default() -> Result<Self> {
         Self::open(Self::default_path()?)
     }
 
     /// Opens (creating if needed) the cache at `path`, creating parent directories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database cannot be opened or its schema cannot be
+    /// initialized.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
@@ -63,6 +77,11 @@ impl LibraryCache {
         Self::init(conn, Some(path.to_owned()))
     }
 
+    /// Opens a temporary library cache in memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SQLite cannot initialize the in-memory cache.
     pub fn open_in_memory() -> Result<Self> {
         Self::init(Connection::open_in_memory()?, None)
     }
@@ -102,14 +121,20 @@ impl LibraryCache {
     }
 
     fn conn(&self) -> MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|p| p.into_inner())
+        self.conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
-    /// The last signed-in user.
+    /// The last signed-in user, or `None` if the row is absent or unreadable as user JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SQLite cannot read the cached user row.
     pub fn load_user(&self) -> Result<Option<User>> {
         let json: Option<String> = self
             .conn()
@@ -120,6 +145,11 @@ impl LibraryCache {
         Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
     }
 
+    /// Saves the current account in the library cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the user cannot be serialized or stored.
     pub fn save_user(&self, user: &User) -> Result<()> {
         self.conn().execute(
             "INSERT INTO current_user (slot, user_id, json) VALUES (0, ?1, ?2)
@@ -131,6 +161,10 @@ impl LibraryCache {
 
     /// `user`'s cached entries, ordered by `user_book_id`. Rows that no longer
     /// decode are skipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SQLite cannot read the library rows.
     pub fn load_library(&self, user: UserId) -> Result<Vec<LibraryEntry>> {
         let conn = self.conn();
         let mut stmt = conn
@@ -147,6 +181,10 @@ impl LibraryCache {
 
     /// Replaces everything cached for `user` with `entries` (a full sync) and
     /// records the sync time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization or the database transaction fails.
     pub fn replace_library(&self, user: UserId, entries: &[LibraryEntry]) -> Result<()> {
         self.replace_library_at(user, entries, chrono::Utc::now())
     }
@@ -181,6 +219,10 @@ impl LibraryCache {
     }
 
     /// Inserts or replaces one entry (e.g. after a mutation), filed under its `user_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the entry cannot be serialized or stored.
     pub fn upsert(&self, entry: &LibraryEntry) -> Result<()> {
         self.conn().execute(
             "INSERT OR REPLACE INTO library_entries (user_book_id, user_id, json) VALUES (?1, ?2, ?3)",
@@ -189,6 +231,11 @@ impl LibraryCache {
         Ok(())
     }
 
+    /// Deletes a library entry from the cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database cannot remove the entry.
     pub fn remove(&self, id: UserBookId) -> Result<()> {
         self.conn().execute(
             "DELETE FROM library_entries WHERE user_book_id = ?1",
@@ -198,6 +245,10 @@ impl LibraryCache {
     }
 
     /// When [`LibraryCache::replace_library`] last ran for `user`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the sync timestamp cannot be read.
     pub fn last_synced_at(&self, user: UserId) -> Result<Option<Timestamp>> {
         let s: Option<String> = self
             .conn()
@@ -214,6 +265,10 @@ impl LibraryCache {
     }
 
     /// Forgets everything (use on sign-out).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SQLite cannot clear the cache tables.
     pub fn clear(&self) -> Result<()> {
         self.conn().execute_batch(
             "DELETE FROM library_entries; DELETE FROM sync_state; DELETE FROM current_user;",
@@ -304,7 +359,7 @@ mod tests {
     fn round_trip() {
         let c = LibraryCache::open_in_memory().unwrap();
         let me = UserId::new(1);
-        assert!(c.load_library(me).unwrap().is_empty());
+        assert_eq!(c.load_library(me).unwrap(), []);
         assert!(c.last_synced_at(me).unwrap().is_none());
 
         let entries = vec![
@@ -348,7 +403,7 @@ mod tests {
             .unwrap();
         c.clear().unwrap();
         assert!(c.load_user().unwrap().is_none());
-        assert!(c.load_library(UserId::new(1)).unwrap().is_empty());
+        assert_eq!(c.load_library(UserId::new(1)).unwrap(), []);
         assert!(c.last_synced_at(UserId::new(1)).unwrap().is_none());
     }
 
@@ -367,7 +422,7 @@ mod tests {
             c.conn().pragma_update(None, "user_version", 999).unwrap();
         }
         let c = LibraryCache::open(&path).unwrap();
-        assert!(c.load_library(UserId::new(1)).unwrap().is_empty());
+        assert_eq!(c.load_library(UserId::new(1)).unwrap(), []);
     }
 
     /// A cache as 0.1.x wrote it: version 1, one `current_read` per entry.
@@ -433,7 +488,7 @@ mod tests {
         );
         assert_eq!(reading.privacy, None);
         assert_eq!(reading.private_notes, None);
-        assert!(loaded[1].reads.is_empty());
+        assert_eq!(loaded[1].reads, []);
 
         // Reopening finds the current version and changes nothing.
         drop(c);

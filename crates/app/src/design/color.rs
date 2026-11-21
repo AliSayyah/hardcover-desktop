@@ -20,6 +20,17 @@ use std::sync::LazyLock;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{App, BoxShadow, Hsla, Rgba, point, px};
 
+/// Nearest byte for a normalized sRGB or alpha channel.
+pub(super) fn channel_byte(channel: f32) -> u8 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamping and rounding produce a byte in 0..=255"
+    )]
+    let byte = (channel.clamp(0., 1.) * 255.).round() as u8;
+    byte
+}
+
 /// An opaque colour from `0xRRGGBB`.
 const fn hex(rgb: u32) -> Rgba {
     hexa(rgb, 1.)
@@ -27,10 +38,11 @@ const fn hex(rgb: u32) -> Rgba {
 
 /// A colour from `0xRRGGBB` at `alpha`.
 const fn hexa(rgb: u32, alpha: f32) -> Rgba {
+    let [_, r, g, b] = rgb.to_be_bytes();
     Rgba {
-        r: ((rgb >> 16) & 0xff) as f32 / 255.,
-        g: ((rgb >> 8) & 0xff) as f32 / 255.,
-        b: (rgb & 0xff) as f32 / 255.,
+        r: r as f32 / 255.,
+        g: g as f32 / 255.,
+        b: b as f32 / 255.,
         a: alpha,
     }
 }
@@ -85,18 +97,18 @@ impl ShadowLayer {
 /// The eight book-cloth colours of the cloth cover, the same in both themes.
 /// cloth-ink on each is at least 5:1.
 const CLOTH: [Rgba; 8] = [
-    hex(0x6A4A39),
-    hex(0x3A574B),
-    hex(0x414C6B),
-    hex(0x743838),
-    hex(0x7A5D30),
-    hex(0x39596A),
-    hex(0x594567),
-    hex(0x4E5356),
+    hex(0x6A_4A_39),
+    hex(0x3A_57_4B),
+    hex(0x41_4C_6B),
+    hex(0x74_38_38),
+    hex(0x7A_5D_30),
+    hex(0x39_59_6A),
+    hex(0x59_45_67),
+    hex(0x4E_53_56),
 ];
 
 /// Type and stamp on a cloth cover, in both themes.
-const CLOTH_INK: Rgba = hex(0xF4ECDD);
+const CLOTH_INK: Rgba = hex(0xF4_EC_DD);
 
 /// One theme's tokens as written in the skill.
 struct Tokens {
@@ -127,63 +139,63 @@ struct Tokens {
 }
 
 const LIGHT: Tokens = Tokens {
-    bg: hex(0xFAF8F4),
-    sidebar: hex(0xF1EEE7),
-    surface: hex(0xF3F0E9),
-    raised: hex(0xFFFFFF),
-    skeleton: hex(0xE9E4DA),
-    border: hex(0xE4DED3),
-    border_strong: hex(0xD0C8BA),
-    track: hex(0xE0D9CC),
+    bg: hex(0xFA_F8_F4),
+    sidebar: hex(0xF1_EE_E7),
+    surface: hex(0xF3_F0_E9),
+    raised: hex(0xFF_FF_FF),
+    skeleton: hex(0xE9_E4_DA),
+    border: hex(0xE4_DE_D3),
+    border_strong: hex(0xD0_C8_BA),
+    track: hex(0xE0_D9_CC),
     // `raised`.
-    switch_thumb: hex(0xFFFFFF),
-    fg: hex(0x1F1C17),
-    fg_muted: hex(0x5F574B),
-    fg_faint: hex(0x857D70),
-    accent: hex(0x3B4A9C),
-    accent_fg: hex(0xFFFFFF),
+    switch_thumb: hex(0xFF_FF_FF),
+    fg: hex(0x1F_1C_17),
+    fg_muted: hex(0x5F_57_4B),
+    fg_faint: hex(0x85_7D_70),
+    accent: hex(0x3B_4A_9C),
+    accent_fg: hex(0xFF_FF_FF),
     accent_soft: 0.10,
     chip: 0.07,
     // Amber 500.
-    gold: hex(0xF59E0B),
-    danger: hex(0xB42318),
-    warning: hex(0xB54708),
-    cover_edge: hexa(0x1E140A, 0.16),
-    cover_hinge: hexa(0x1E140A, 0.16),
+    gold: hex(0xF5_9E_0B),
+    danger: hex(0xB4_23_18),
+    warning: hex(0xB5_47_08),
+    cover_edge: hexa(0x1E_14_0A, 0.16),
+    cover_hinge: hexa(0x1E_14_0A, 0.16),
     shadow_cover: [
-        ShadowLayer::new(1., 2., 0., hexa(0x281C10, 0.18)),
-        ShadowLayer::new(8., 20., 0., hexa(0x281C10, 0.14)),
+        ShadowLayer::new(1., 2., 0., hexa(0x28_1C_10, 0.18)),
+        ShadowLayer::new(8., 20., 0., hexa(0x28_1C_10, 0.14)),
     ],
 };
 
 const DARK: Tokens = Tokens {
-    bg: hex(0x171614),
-    sidebar: hex(0x100F0E),
-    surface: hex(0x1E1C1A),
-    raised: hex(0x262320),
-    skeleton: hex(0x2B2825),
-    border: hex(0x292623),
-    border_strong: hex(0x3D3934),
-    track: hex(0x35312C),
+    bg: hex(0x17_16_14),
+    sidebar: hex(0x10_0F_0E),
+    surface: hex(0x1E_1C_1A),
+    raised: hex(0x26_23_20),
+    skeleton: hex(0x2B_28_25),
+    border: hex(0x29_26_23),
+    border_strong: hex(0x3D_39_34),
+    track: hex(0x35_31_2C),
     // `fg`: a `raised` thumb on `track` is 1.2:1 in dark mode, gone once a
     // disabled switch fades its track.
-    switch_thumb: hex(0xEEEAE3),
-    fg: hex(0xEEEAE3),
-    fg_muted: hex(0xABA498),
-    fg_faint: hex(0x807A6F),
-    accent: hex(0x98A5F4),
-    accent_fg: hex(0x12142A),
+    switch_thumb: hex(0xEE_EA_E3),
+    fg: hex(0xEE_EA_E3),
+    fg_muted: hex(0xAB_A4_98),
+    fg_faint: hex(0x80_7A_6F),
+    accent: hex(0x98_A5_F4),
+    accent_fg: hex(0x12_14_2A),
     accent_soft: 0.14,
     chip: 0.08,
     // Amber 400.
-    gold: hex(0xFBBF24),
-    danger: hex(0xF97066),
-    warning: hex(0xFDB022),
-    cover_edge: hexa(0xFFFFFF, 0.12),
-    cover_hinge: hexa(0x000000, 0.28),
+    gold: hex(0xFB_BF_24),
+    danger: hex(0xF9_70_66),
+    warning: hex(0xFD_B0_22),
+    cover_edge: hexa(0xFF_FF_FF, 0.12),
+    cover_hinge: hexa(0x00_00_00, 0.28),
     shadow_cover: [
-        ShadowLayer::new(1., 2., 0., hexa(0x000000, 0.55)),
-        ShadowLayer::new(10., 24., 0., hexa(0x000000, 0.45)),
+        ShadowLayer::new(1., 2., 0., hexa(0x00_00_00, 0.55)),
+        ShadowLayer::new(10., 24., 0., hexa(0x00_00_00, 0.45)),
     ],
 };
 
@@ -360,7 +372,7 @@ pub fn cloth_index(title: &str) -> usize {
     let hash = title
         .chars()
         .fold(7u32, |h, c| h.wrapping_mul(31).wrapping_add(c as u32));
-    (hash % CLOTH.len() as u32) as usize
+    hash as usize % CLOTH.len()
 }
 
 #[cfg(test)]
@@ -369,16 +381,13 @@ mod tests {
 
     fn rgb(color: Hsla) -> [u8; 3] {
         let c = Rgba::from(color);
-        [c.r, c.g, c.b].map(|v| (v * 255.).round() as u8)
+        [c.r, c.g, c.b].map(channel_byte)
     }
 
     #[test]
     fn hex_reads_channels_in_order() {
-        let c = hex(0x3B4A9C);
-        assert_eq!(
-            [c.r, c.g, c.b].map(|v| (v * 255.).round() as u8),
-            [0x3B, 0x4A, 0x9C]
-        );
+        let c = hex(0x3B_4A_9C);
+        assert_eq!([c.r, c.g, c.b].map(channel_byte), [0x3B, 0x4A, 0x9C]);
         assert_eq!(c.a, 1.);
     }
 

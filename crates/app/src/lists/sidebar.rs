@@ -35,7 +35,7 @@ pub fn lists_section(
         return None;
     }
     let can_write = services.has_scope(WRITE_LISTS);
-    let rows = model.lists().iter().map(|list| {
+    let rows = model.lists().iter().map(move |list| {
         let (id, count) = (list.id, list.books_count);
         let select = select.clone();
         NavRow::new(
@@ -66,7 +66,7 @@ pub fn lists_section(
             "Try loading your lists again",
         )
         .tooltip(Some(format!("Couldn't load your lists. {message}")))
-        .on_click(move |_, _, cx| lists.update(cx, |m, cx| m.load(cx)))
+        .on_click(move |_, _, cx| lists.update(cx, ListsModel::load))
     });
     let new_list = lists.clone();
     let create = NavRow::new("nav-new-list", IconName::Plus, "New list…")

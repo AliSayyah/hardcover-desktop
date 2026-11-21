@@ -58,6 +58,23 @@ impl Avatar {
         }
     }
 
+    /// The account avatar, using the display name and falling back to a
+    /// caller-provided label when the account is unavailable or unnamed.
+    pub(crate) fn for_user(
+        user: Option<&hardcover_core::User>,
+        fallback: impl Into<SharedString>,
+    ) -> Self {
+        let fallback = fallback.into();
+        let name = user
+            .and_then(|user| user.name.as_deref())
+            .filter(|name| !name.trim().is_empty())
+            .map_or(fallback, SharedString::from);
+        let image = user
+            .and_then(|user| user.avatar.as_ref())
+            .map(|avatar| avatar.url.clone());
+        Self::new(name).image(image)
+    }
+
     /// The picture's URL: a raster image or an SVG.
     pub fn image(mut self, url: Option<impl Into<SharedString>>) -> Self {
         self.image = url.map(Into::into);

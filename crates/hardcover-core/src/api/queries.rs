@@ -729,13 +729,13 @@ mod tests {
 
     #[test]
     fn scope_check_sees_argument_and_column_gates() {
-        let caps = committed_scope_map();
-        let library_only = ["read:me", "read:catalog", "read:library", "write:library"];
-
         // `review_markdown` is gated by write:reviews, which grants no operation of its own.
         const LITERAL_REVIEW: &str = "mutation R($id: Int!) {
   update_user_book(id: $id, object: {review_markdown: \"Great\"}) { id }
 }";
+        let caps = committed_scope_map();
+        let library_only = ["read:me", "read:catalog", "read:library", "write:library"];
+
         let docs = usages(&[("LITERAL_REVIEW", LITERAL_REVIEW)]);
         let report = sdl::check_scopes(&caps, &library_only, &docs).unwrap();
         assert_eq!(report.problems.len(), 1, "{:#?}", report.problems);

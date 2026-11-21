@@ -244,7 +244,7 @@ impl Element for Region {
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
         child: &mut AnyElement,
-        _: &mut (),
+        (): &mut (),
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -354,7 +354,7 @@ impl Element for FocusProbe {
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
         child: &mut AnyElement,
-        _: &mut (),
+        (): &mut (),
         window: &mut Window,
         cx: &mut App,
     ) {

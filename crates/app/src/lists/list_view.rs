@@ -83,7 +83,7 @@ pub struct ListBooks {
     current: Option<ListId>,
     /// Lists opened this session, so going back to one costs no request.
     pages: HashMap<ListId, BooksPage>,
-    _fetch: Option<Task<()>>,
+    fetch: Option<Task<()>>,
     focus: RowFocus,
 }
 
@@ -106,13 +106,17 @@ impl ListBooks {
         if page.loading || !page.more {
             return;
         }
+        let Ok(offset) = u32::try_from(page.books.len()) else {
+            page.more = false;
+            cx.notify();
+            return;
+        };
         page.loading = true;
         page.error = None;
-        let offset = page.books.len() as u32;
         let client = Services::global(cx).client().clone();
         cx.notify();
         // Replacing the task drops a fetch for a list no longer shown.
-        self._fetch = Some(cx.spawn_in(window, async move |state, cx| {
+        self.fetch = Some(cx.spawn_in(window, async move |state, cx| {
             let result = cx
                 .background_spawn(async move { client.list_books(id, offset) })
                 .await;
@@ -128,7 +132,7 @@ impl ListBooks {
                 page.loading = false;
                 match result {
                     Ok(books) => {
-                        page.more = books.len() as u32 >= LIST_BOOKS_PER_PAGE;
+                        page.more = books.len() >= LIST_BOOKS_PER_PAGE as usize;
                         page.books.extend(books);
                     }
                     Err(_) => page.error = message,
@@ -145,7 +149,7 @@ impl ListBooks {
             if let Some(page) = self.current.and_then(|c| self.pages.get_mut(&c)) {
                 page.loading = false;
             }
-            self._fetch = None;
+            self.fetch = None;
             self.current = Some(id);
         }
         if self.page().is_none_or(BooksPage::needs_fetch) {
@@ -164,7 +168,7 @@ impl ListBooks {
     /// Forgets every list's books (Refresh), loading the one shown again.
     fn reload(&mut self, window: &mut Window, cx: &mut Context<ListState<Self>>) {
         self.pages.clear();
-        self._fetch = None;
+        self.fetch = None;
         self.fetch(window, cx);
     }
 
@@ -172,7 +176,7 @@ impl ListBooks {
     fn forget(&mut self, id: ListId) {
         self.pages.remove(&id);
         if self.current == Some(id) {
-            self._fetch = None;
+            self.fetch = None;
         }
     }
 
@@ -185,7 +189,7 @@ impl ListBooks {
     ) {
         let restart = self.pages.get_mut(&list).is_some_and(|p| p.remove(row));
         if restart && self.current == Some(list) {
-            self._fetch = None;
+            self.fetch = None;
             self.fetch(window, cx);
         }
     }
@@ -265,21 +269,21 @@ impl ListDelegate for ListBooks {
         };
         let lists = self.lists.clone();
         Some(
-            ListItem::new(("list-book", book.id.get() as u64))
+            ListItem::new(("list-book", book.id.get().cast_unsigned()))
                 .list_row(focused, cx)
                 .accessibility_label(book.book.title.clone())
                 .child(BookRow::for_catalog(&book.book, details, status))
                 .suffix(move |_, _| {
                     let (lists, book) = (lists.clone(), book.clone());
                     row_action(
-                        Button::new(("remove-list-book", book.id.get() as u64))
+                        Button::new(("remove-list-book", book.id.get().cast_unsigned()))
                             .ghost()
                             .small_icon_button()
                             .icon(IconName::Close)
                             .tooltip(remove_tooltip.clone())
                             .disabled(busy || !can_write)
                             .on_click(move |_, window, cx| {
-                                remove_book(&lists, list, &book, window, cx)
+                                remove_book(&lists, list, &book, window, cx);
                             }),
                     )
                 }),
@@ -370,7 +374,7 @@ impl ListView {
                     lists: lists.clone(),
                     current: None,
                     pages: HashMap::new(),
-                    _fetch: None,
+                    fetch: None,
                     focus: RowFocus::default(),
                 },
                 window,
@@ -396,7 +400,7 @@ impl ListView {
                             }
                         }
                         ListsEvent::BookRemoved { list, row } => {
-                            delegate.removed(*list, *row, window, cx)
+                            delegate.removed(*list, *row, window, cx);
                         }
                         ListsEvent::Deleted(id) => delegate.forget(*id),
                         ListsEvent::Reloaded => delegate.reload(window, cx),
@@ -405,7 +409,7 @@ impl ListView {
                 });
             }),
             on_keyboard_entry(&list, window, cx, |this, window, cx| {
-                select_first_row(&this.list, window, cx)
+                select_first_row(&this.list, window, cx);
             }),
             cx.subscribe(&list, |_, list, event: &ListEvent, cx| match event {
                 ListEvent::Confirm(ix) => {
@@ -460,7 +464,7 @@ impl ListView {
             return;
         };
         self.list.update(cx, |state, cx| {
-            state.delegate_mut().remove(ix.row, window, cx)
+            state.delegate_mut().remove(ix.row, window, cx);
         });
     }
 
@@ -496,10 +500,44 @@ impl ListView {
         });
     }
 
-    fn render_header(&self, list: &UserList, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted = colors(cx).fg_muted;
+    fn list_actions(&self, list: &UserList, cx: &mut Context<Self>) -> Option<gpui_kit::Div> {
         let can_write = Services::global(cx).has_scope(WRITE_LISTS);
         let writing = self.lists.read(cx).is_writing();
+        let permission: Option<SharedString> =
+            (!can_write).then(|| needs_permission(WRITE_LISTS).into());
+        (!list.is_owned()).then(|| {
+            let edit_lists = self.lists.clone();
+            let id = list.id;
+            let delete_list = list.clone();
+            h_flex()
+                .flex_shrink_0()
+                .gap_2()
+                .child(
+                    Button::new("edit-list")
+                        .small_control()
+                        .label("Edit…")
+                        .disabled(!can_write || writing)
+                        .when_some(permission.clone(), Button::tooltip)
+                        .on_click(move |_, window, cx| {
+                            open_edit_list(edit_lists.clone(), id, window, cx);
+                        }),
+                )
+                .child(
+                    Button::new("delete-list")
+                        .danger()
+                        .small_control()
+                        .label("Delete…")
+                        .disabled(!can_write || writing)
+                        .when_some(permission, Button::tooltip)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.confirm_delete(&delete_list, window, cx);
+                        })),
+                )
+        })
+    }
+
+    fn render_header(&self, list: &UserList, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = colors(cx).fg_muted;
         let mut facts = vec![crate::format::books_count_text(list.books_count)];
         if list.ranked {
             facts.push("Ranked".into());
@@ -526,37 +564,7 @@ impl ListView {
                     .page()
                     .is_some_and(|p| !p.books.is_empty())
             });
-        let permission: Option<SharedString> =
-            (!can_write).then(|| needs_permission(WRITE_LISTS).into());
-        let actions = (!list.is_owned()).then(|| {
-            let edit_lists = self.lists.clone();
-            let id = list.id;
-            let delete_list = list.clone();
-            h_flex()
-                .flex_shrink_0()
-                .gap_2()
-                .child(
-                    Button::new("edit-list")
-                        .small_control()
-                        .label("Edit…")
-                        .disabled(!can_write || writing)
-                        .when_some(permission.clone(), |this, tip| this.tooltip(tip))
-                        .on_click(move |_, window, cx| {
-                            open_edit_list(edit_lists.clone(), id, window, cx)
-                        }),
-                )
-                .child(
-                    Button::new("delete-list")
-                        .danger()
-                        .small_control()
-                        .label("Delete…")
-                        .disabled(!can_write || writing)
-                        .when_some(permission, |this, tip| this.tooltip(tip))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.confirm_delete(&delete_list, window, cx)
-                        })),
-                )
-        });
+        let actions = self.list_actions(list, cx);
         v_flex()
             .gap_4()
             .child(
@@ -624,11 +632,9 @@ impl Render for ListView {
         v_flex()
             .id("list-page")
             .key_context(KEY_CONTEXT)
-            .on_action(
-                cx.listener(|this, _: &RemoveFromList, window, cx| {
-                    this.remove_selected(window, cx)
-                }),
-            )
+            .on_action(cx.listener(|this, _: &RemoveFromList, window, cx| {
+                this.remove_selected(window, cx);
+            }))
             .size_full()
             .min_w_0()
             .when_some(list, |this, list| {
@@ -680,7 +686,7 @@ mod tests {
         assert!(!page.remove(ListBookId::new(9)));
         assert!(page.loading);
         assert!(page.remove(ListBookId::new(2)));
-        assert!(page.books.is_empty());
+        assert_eq!(page.books, []);
         assert!(!page.loading);
     }
 }

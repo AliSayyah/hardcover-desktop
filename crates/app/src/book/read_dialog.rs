@@ -98,7 +98,7 @@ impl ReadDialog {
                 .title(title)
                 .w(size::DIALOG_FORM.to_pixels(window.rem_size()))
                 .child(view.clone())
-                .on_ok(move |_, _, cx| ok_view.update(cx, |this, cx| this.confirm(cx)))
+                .on_ok(move |_, _, cx| ok_view.update(cx, ReadDialog::confirm))
                 .footer(
                     DialogFooter::new()
                         .child(
@@ -111,7 +111,7 @@ impl ReadDialog {
                                 .primary()
                                 .label(confirm)
                                 .on_click(move |_, window, cx| {
-                                    if confirm_view.update(cx, |this, cx| this.confirm(cx)) {
+                                    if confirm_view.update(cx, ReadDialog::confirm) {
                                         window.close_dialog(cx);
                                     }
                                 }),

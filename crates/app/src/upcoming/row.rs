@@ -9,18 +9,17 @@
 //! - the date lane, right-aligned and tabular: the date in `body-strong`,
 //!   with a caption under it when it is within two weeks ("In 6 days");
 //! - the action lane, 136 wide: a small ghost "Want to read", or the
-//!   StatusChip once the book is on a shelf. The lane is kept either way, so
+//!   `StatusChip` once the book is on a shelf. The lane is kept either way, so
 //!   the dates line up.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex};
+use gpui_kit::component::{Disableable as _, IconName, h_flex};
 use gpui_kit::{
-    App, AppContext as _, Entity, IntoElement, ParentElement as _, RenderOnce, SharedString,
-    Styled as _, Window, div, prelude::FluentBuilder as _,
+    App, Entity, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _, Window,
+    div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
-use hardcover_core::{BookSummary, Date, ReadingStatus, UpcomingBook};
+use hardcover_core::{BookId, Date, ReadingStatus, UpcomingBook};
 
 use super::schedule::{release_text, series_text, soon_text};
 use crate::app_state::Services;
@@ -30,6 +29,7 @@ use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRoles as _, colors};
 use crate::format::needs_permission;
 use crate::library::model::LibraryModel;
+use crate::library::writes;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{Lane, TextButton};
 
@@ -71,26 +71,25 @@ impl RenderOnce for UpcomingRow {
         let soon = soon_text(self.book.release_date, self.today);
         let series = series_text(&self.book);
 
-        let action = match status {
-            Some(status) => StatusChip(status).into_any_element(),
-            None => {
-                let library = self.library.clone();
-                let book = self.book.book.clone();
-                Button::new(SharedString::from(format!("{prefix}-add-{id}")))
-                    .ghost()
-                    .small_control()
-                    .icon(IconName::Plus)
-                    .label("Want to read")
-                    .loading(adding)
-                    .disabled(adding || !can_write)
-                    .when(!can_write, |this| {
-                        this.tooltip(needs_permission(WRITE_LIBRARY))
-                    })
-                    .on_click(move |_, window, cx| {
-                        add_to_want_to_read(library.clone(), book.clone(), window, cx)
-                    })
-                    .into_any_element()
-            }
+        let action = if let Some(status) = status {
+            StatusChip(status).into_any_element()
+        } else {
+            let library = self.library.clone();
+            let book = id;
+            Button::new(SharedString::from(format!("{prefix}-add-{id}")))
+                .ghost()
+                .small_control()
+                .icon(IconName::Plus)
+                .label("Want to read")
+                .loading(adding)
+                .disabled(adding || !can_write)
+                .when(!can_write, |this| {
+                    this.tooltip(needs_permission(WRITE_LIBRARY))
+                })
+                .on_click(move |_, window, cx| {
+                    add_to_want_to_read(library.clone(), book, window, cx);
+                })
+                .into_any_element()
         };
 
         h_flex()
@@ -137,37 +136,9 @@ impl RenderOnce for UpcomingRow {
 /// notification.
 pub fn add_to_want_to_read(
     library: Entity<LibraryModel>,
-    book: BookSummary,
+    book: BookId,
     window: &mut Window,
     cx: &mut App,
 ) {
-    if !library.update(cx, |m, cx| m.begin_add(book.id, cx)) {
-        return;
-    }
-    let client = Services::global(cx).client().clone();
-    let book_id = book.id;
-    window
-        .spawn(cx, async move |cx| {
-            let result = cx
-                .background_spawn(async move {
-                    client.add_to_library(book_id, ReadingStatus::WantToRead)
-                })
-                .await;
-            library.update(cx, |m, cx| {
-                m.end_add(book_id, cx);
-                if let Ok(entry) = &result {
-                    m.apply_written(entry.clone(), cx);
-                }
-            });
-            if let Err(error) = result {
-                let _ = cx.update(|window, cx| {
-                    let message = Services::error_message(&error, Some(WRITE_LIBRARY), cx);
-                    window.push_notification(
-                        Notification::error(message).title("Couldn't add the book"),
-                        cx,
-                    );
-                });
-            }
-        })
-        .detach();
+    writes::add_to_library(library, book, ReadingStatus::WantToRead, window, cx);
 }

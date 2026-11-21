@@ -3,6 +3,7 @@
 //! and similar books (`hardcover-design`, Shelf → Book pane, and Full book
 //! page).
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -74,7 +75,7 @@ impl BookDetailView {
         self.similar_loading = Some(id);
         let client = Services::global(cx).client().clone();
         // Replacing the task cancels the fetch for a book no longer shown.
-        self._similar_task = Some(cx.spawn(async move |this, cx| {
+        self.similar_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SIMILAR_DELAY).await;
             let result = cx
                 .background_spawn(async move { client.books_by_ids(&ids) })
@@ -187,7 +188,7 @@ impl BookDetailView {
                             .label(if expanded {
                                 "Show fewer".to_owned()
                             } else {
-                                format!("Show {} more", count_text(hidden as u32))
+                                format!("Show {} more", count_text(hidden))
                             })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.tags_expanded = !this.tags_expanded;
@@ -232,7 +233,6 @@ impl BookDetailView {
 
     /// Also known as: the book's other titles, muted.
     pub(super) fn render_other_titles(
-        &self,
         details: Option<&BookDetails>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
@@ -247,7 +247,8 @@ impl BookDetailView {
             .collect::<Vec<_>>()
             .join(" · ");
         if titles.len() > TITLES_SHOWN {
-            text.push_str(&format!(" · and {} more", titles.len() - TITLES_SHOWN));
+            write!(text, " · and {} more", titles.len() - TITLES_SHOWN)
+                .expect("writing to a String");
         }
         Some(
             Block::new("Also known as")
@@ -265,7 +266,6 @@ impl BookDetailView {
     /// page's rail leads with the average as a figure; the pane has the
     /// average in its header.
     pub(super) fn render_on_hardcover(
-        &self,
         book: &BookSummary,
         details: Option<&BookDetails>,
         in_rail: bool,
@@ -366,7 +366,7 @@ impl BookDetailView {
             Some(Similar::Ready(books)) if books.is_empty() => return None,
             Some(Similar::Ready(books)) => CoverShelf::new(CoverSize::Lg)
                 .books(books.iter().map(|book| {
-                    let id = book.id.get() as u64;
+                    let id = book.id.get().cast_unsigned();
                     (
                         Cover::new(CoverSize::Lg, book.title.clone())
                             .author(book.authors.first().cloned())
@@ -419,7 +419,7 @@ fn render_breakdown(details: &BookDetails, cx: &mut Context<BookDetailView>) -> 
         .gap_1()
         .children(rating_rows(buckets).into_iter().map(|bucket| {
             let (rating, count) = (bucket.rating, bucket.count);
-            let percent = count as f32 / max as f32 * 100.;
+            let percent = crate::format::bar_percent(f64::from(count) / f64::from(max));
             h_flex()
                 .gap_2()
                 .caption(cx)
@@ -460,7 +460,10 @@ fn rating_rows(buckets: &[RatingBucket]) -> Vec<RatingBucket> {
     let mut rows = Vec::new();
     let mut rating = 5.0_f32;
     while rating >= lowest {
-        let found = buckets.iter().find(|b| b.rating == rating).copied();
+        let found = buckets
+            .iter()
+            .find(|b| b.rating.total_cmp(&rating).is_eq())
+            .copied();
         rows.push(found.unwrap_or(RatingBucket::new(rating, 0)));
         rating -= step;
     }
@@ -510,6 +513,6 @@ mod tests {
                 (1.0, 1)
             ]
         );
-        assert!(rows(&[]).is_empty());
+        assert_eq!(rows(&[]), []);
     }
 }

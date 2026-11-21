@@ -15,8 +15,8 @@
 //! Phases:
 //! - `add-remove`: raw insert (reports whether the payload's nested `user_book`
 //!   is populated and what a duplicate insert does), then `remove_from_library`.
-//! - `full`: add, set_status, set_rating (set + clear), update_progress (open
-//!   read + percent), set_read_dates, Read, remove.
+//! - `full`: add, `set_status`, `set_rating` (set + clear), `update_progress` (open
+//!   read + percent), `set_read_dates`, Read, remove.
 
 use std::collections::BTreeSet;
 use std::io::Read;
@@ -41,6 +41,8 @@ struct Raw {
 
 impl Raw {
     fn q(&self, doc: &str, vars: Value) -> R<Value> {
+        let mut body = json!({ "query": doc });
+        body["variables"] = vars;
         let mut last = String::new();
         for attempt in 0..4 {
             // Stay well under 60/min alongside the client's own limiter.
@@ -50,7 +52,7 @@ impl Raw {
                 .post("https://api.hardcover.app/v1/graphql")
                 .header("authorization", &format!("Bearer {}", self.token))
                 .header("user-agent", hardcover_core::USER_AGENT)
-                .send_json(json!({ "query": doc, "variables": vars }));
+                .send_json(&body);
             let mut resp = match resp {
                 Ok(r) => r,
                 Err(e) => {
@@ -357,27 +359,15 @@ fn dump(raw: &Raw, id: i64, label: &str) {
     }
 }
 
-fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i64) -> R<()> {
-    let e = client
-        .add_to_library_with_privacy(
-            BookId::new(book),
-            ReadingStatus::WantToRead,
-            Privacy::Private,
-        )
-        .map_err(|e| format!("add_to_library: {e}"))?;
-    guard.seen_user_books.insert(e.user_book_id.get());
-    let id = e.user_book_id;
-    let ub = id.get();
-    println!(
-        "add_to_library: status={} read={}",
-        e.status,
-        e.current_read().is_some()
-    );
-    dump(raw, ub, "after add");
-    let check = |label: &str,
-                 r: hardcover_core::Result<hardcover_core::LibraryEntry>|
-     -> R<hardcover_core::LibraryEntry> { r.map_err(|e| format!("{label}: {e}")) };
+fn check(
+    label: &str,
+    result: hardcover_core::Result<hardcover_core::LibraryEntry>,
+) -> R<hardcover_core::LibraryEntry> {
+    result.map_err(|e| format!("{label}: {e}"))
+}
 
+fn check_read_progress(raw: &Raw, client: &Client, id: UserBookId) -> R<()> {
+    let ub = id.get();
     let e = check(
         "update_progress(None, Pages(5)) without a read",
         client.update_progress(id, None, ProgressUpdate::Pages(5)),
@@ -438,13 +428,18 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
     );
     dump(raw, ub, "after set_read_dates");
 
+    Ok(())
+}
+
+fn check_ratings_and_finish(raw: &Raw, client: &Client, id: UserBookId) -> R<()> {
+    let ub = id.get();
     let e = check(
         "set_rating(4.5)",
         client.set_rating(id, Rating::new(4.5), ReadingStatus::CurrentlyReading),
     )?;
     println!(
         "set_rating 4.5: rating={:?} status={}",
-        e.rating.map(|r| r.value()),
+        e.rating.map(hardcover_core::Rating::value),
         e.status
     );
     dump(raw, ub, "after set_rating(4.5)");
@@ -454,7 +449,7 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
     )?;
     println!(
         "set_rating None: rating={:?} status={}",
-        e.rating.map(|r| r.value()),
+        e.rating.map(hardcover_core::Rating::value),
         e.status
     );
     dump(raw, ub, "after set_rating(None)");
@@ -490,11 +485,34 @@ fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i
     )?;
     println!(
         "set_rating 4.0 on Read entry: rating={:?} status={} finished={:?}",
-        e.rating.map(|r| r.value()),
+        e.rating.map(hardcover_core::Rating::value),
         e.status,
         e.current_read().and_then(|r| r.finished_at)
     );
     dump(raw, ub, "after set_rating on Read");
+
+    Ok(())
+}
+
+fn full(raw: &Raw, client: &Client, guard: &mut Guard<'_>, user: UserId, book: i64) -> R<()> {
+    let e = client
+        .add_to_library_with_privacy(
+            BookId::new(book),
+            ReadingStatus::WantToRead,
+            Privacy::Private,
+        )
+        .map_err(|e| format!("add_to_library: {e}"))?;
+    guard.seen_user_books.insert(e.user_book_id.get());
+    let id = e.user_book_id;
+    let ub = id.get();
+    println!(
+        "add_to_library: status={} read={}",
+        e.status,
+        e.current_read().is_some()
+    );
+    dump(raw, ub, "after add");
+    check_read_progress(raw, client, id)?;
+    check_ratings_and_finish(raw, client, id)?;
 
     let looked_up = client
         .library_entry_for_book(user, BookId::new(book))

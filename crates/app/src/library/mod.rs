@@ -5,3 +5,4 @@ pub mod book_row;
 pub mod collection;
 pub mod library_view;
 pub mod model;
+pub(crate) mod writes;

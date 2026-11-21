@@ -129,6 +129,7 @@ impl ReadingStatus {
     ];
 
     /// `status_id` used by the API.
+    #[must_use]
     pub const fn id(self) -> i64 {
         match self {
             Self::WantToRead => 1,
@@ -140,6 +141,7 @@ impl ReadingStatus {
         }
     }
 
+    #[must_use]
     pub const fn from_id(id: i64) -> Option<Self> {
         Some(match id {
             1 => Self::WantToRead,
@@ -153,6 +155,7 @@ impl ReadingStatus {
     }
 
     /// Hardcover's English label (`user_book_statuses.status`).
+    #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::WantToRead => "Want to Read",
@@ -165,6 +168,7 @@ impl ReadingStatus {
     }
 
     /// Hardcover's slug (`user_book_statuses.slug`).
+    #[must_use]
     pub const fn slug(self) -> &'static str {
         match self {
             Self::WantToRead => "want-to-read",
@@ -176,6 +180,7 @@ impl ReadingStatus {
         }
     }
 
+    #[must_use]
     pub const fn is_shelf(self) -> bool {
         !matches!(self, Self::Ignored)
     }
@@ -199,6 +204,7 @@ pub enum Privacy {
 impl Privacy {
     pub const ALL: [Privacy; 3] = [Self::Public, Self::FollowersOnly, Self::Private];
 
+    #[must_use]
     pub const fn id(self) -> i64 {
         match self {
             Self::Public => 1,
@@ -207,6 +213,7 @@ impl Privacy {
         }
     }
 
+    #[must_use]
     pub const fn from_id(id: i64) -> Option<Self> {
         Some(match id {
             1 => Self::Public,
@@ -217,6 +224,7 @@ impl Privacy {
     }
 
     /// Hardcover's label (`privacy_settings.setting`).
+    #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Public => "Public",
@@ -236,23 +244,29 @@ impl Rating {
     pub const MAX: f32 = 5.0;
 
     /// `None` unless `value` is within 0.5..=5.0 and a multiple of 0.5.
+    #[must_use]
     pub fn new(value: f32) -> Option<Self> {
         let doubled = value * 2.0;
-        ((Self::MIN..=Self::MAX).contains(&value) && doubled == doubled.round())
-            .then_some(Self(value))
+        ((Self::MIN..=Self::MAX).contains(&value) && doubled.fract() == 0.0).then_some(Self(value))
     }
 
     /// Lenient conversion for values coming from the API: rounds to the nearest half
     /// star and treats anything below a quarter star as "no rating".
+    #[must_use]
     pub fn from_api(value: f64) -> Option<Self> {
         if !value.is_finite() || value < 0.25 {
             return None;
         }
         let rounded =
             ((value * 2.0).round() / 2.0).clamp(f64::from(Self::MIN), f64::from(Self::MAX));
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "all ten permitted half-star values have exact f32 representations"
+        )]
         Some(Self(rounded as f32))
     }
 
+    #[must_use]
     pub fn value(self) -> f32 {
         self.0
     }
@@ -359,6 +373,7 @@ impl BookSummary {
     }
 
     /// `https://hardcover.app/books/<slug>`, when the book has a slug.
+    #[must_use]
     pub fn web_url(&self) -> Option<String> {
         self.slug
             .as_deref()
@@ -389,6 +404,7 @@ pub struct EditionSummary {
 }
 
 impl EditionSummary {
+    #[must_use]
     pub fn new(id: EditionId) -> Self {
         Self {
             id,
@@ -407,12 +423,9 @@ impl EditionSummary {
 
     /// The edition's length: pages, or for an audiobook without a page count,
     /// its running time.
+    #[must_use]
     pub fn length(&self) -> Option<Length> {
-        match (self.pages, self.audio_seconds) {
-            (Some(p), _) if p > 0 => Some(Length::Pages(p)),
-            (_, Some(s)) if s > 0 => Some(Length::Seconds(s)),
-            _ => None,
-        }
+        length_from_parts(self.pages, self.audio_seconds)
     }
 }
 
@@ -421,6 +434,14 @@ impl EditionSummary {
 pub enum Length {
     Pages(u32),
     Seconds(u32),
+}
+
+pub(crate) fn length_from_parts(pages: Option<u32>, audio_seconds: Option<u32>) -> Option<Length> {
+    match (pages, audio_seconds) {
+        (Some(p), _) if p > 0 => Some(Length::Pages(p)),
+        (_, Some(s)) if s > 0 => Some(Length::Seconds(s)),
+        _ => None,
+    }
 }
 
 /// One read-through of a book (`user_book_reads`).
@@ -441,6 +462,7 @@ pub struct ReadSession {
 }
 
 impl ReadSession {
+    #[must_use]
     pub fn new(id: ReadId) -> Self {
         Self {
             id,
@@ -454,11 +476,13 @@ impl ReadSession {
         }
     }
 
+    #[must_use]
     pub fn is_finished(&self) -> bool {
         self.finished_at.is_some()
     }
 
     /// The date that places the read in time: when it finished, or else when it started.
+    #[must_use]
     pub fn date(&self) -> Option<Date> {
         self.finished_at.or(self.started_at)
     }
@@ -468,6 +492,7 @@ impl ReadSession {
 /// then finished ones by date, most recent first. Ids break ties, newest first.
 ///
 /// Ids alone are not enough: a past read added today gets the highest id.
+#[must_use]
 pub fn read_order(a: &ReadSession, b: &ReadSession) -> std::cmp::Ordering {
     a.is_finished()
         .cmp(&b.is_finished())
@@ -504,6 +529,7 @@ pub struct LibraryEntry {
 }
 
 impl LibraryEntry {
+    #[must_use]
     pub fn new(
         user_book_id: UserBookId,
         user_id: UserId,
@@ -528,15 +554,18 @@ impl LibraryEntry {
 
     /// The read progress and the date fields act on: the newest unfinished
     /// read, or else the most recently finished one.
+    #[must_use]
     pub fn current_read(&self) -> Option<&ReadSession> {
         self.reads.iter().min_by(|a, b| read_order(a, b))
     }
 
     /// The current read if it is unfinished.
+    #[must_use]
     pub fn open_read(&self) -> Option<&ReadSession> {
         self.current_read().filter(|r| !r.is_finished())
     }
 
+    #[must_use]
     pub fn read(&self, id: ReadId) -> Option<&ReadSession> {
         self.reads.iter().find(|r| r.id == id)
     }
@@ -549,6 +578,7 @@ impl LibraryEntry {
     }
 
     /// The cover to show: the edition's, falling back to the book's.
+    #[must_use]
     pub fn cover(&self) -> Option<&Cover> {
         self.edition
             .as_ref()
@@ -568,6 +598,7 @@ impl LibraryEntry {
     }
 
     /// Page count of what is being read; `None` for an audiobook.
+    #[must_use]
     pub fn total_pages(&self) -> Option<u32> {
         match self.length() {
             Some(Length::Pages(p)) => Some(p),
@@ -625,6 +656,7 @@ impl Contributor {
     }
 
     /// No role, or the "Author" role.
+    #[must_use]
     pub fn is_author(&self) -> bool {
         self.role
             .as_deref()
@@ -642,6 +674,7 @@ pub struct RatingBucket {
 }
 
 impl RatingBucket {
+    #[must_use]
     pub fn new(rating: f32, count: u32) -> Self {
         Self { rating, count }
     }
@@ -681,6 +714,7 @@ pub struct BookDetails {
 }
 
 impl BookDetails {
+    #[must_use]
     pub fn new(summary: BookSummary) -> Self {
         Self {
             summary,
@@ -728,6 +762,7 @@ pub struct SeriesBook {
 }
 
 impl SeriesBook {
+    #[must_use]
     pub fn new(book: BookSummary) -> Self {
         Self {
             book,
@@ -737,6 +772,7 @@ impl SeriesBook {
 
     /// A whole-numbered entry: the series' main books, as opposed to
     /// novellas in between (1.5) and unnumbered extras.
+    #[must_use]
     pub fn is_main(&self) -> bool {
         self.position.is_some_and(|p| p.fract() == 0.0)
     }
@@ -775,6 +811,7 @@ impl SeriesDetails {
     }
 
     /// `https://hardcover.app/series/<slug>`, when the series has a slug.
+    #[must_use]
     pub fn web_url(&self) -> Option<String> {
         self.slug
             .as_deref()
@@ -792,6 +829,7 @@ pub struct AuthorBook {
 }
 
 impl AuthorBook {
+    #[must_use]
     pub fn new(book: BookSummary) -> Self {
         Self { book, role: None }
     }
@@ -831,6 +869,7 @@ impl AuthorDetails {
     }
 
     /// `https://hardcover.app/authors/<slug>`, when the author has a slug.
+    #[must_use]
     pub fn web_url(&self) -> Option<String> {
         self.slug
             .as_deref()
@@ -851,6 +890,7 @@ pub struct SearchPage {
 }
 
 impl SearchPage {
+    #[must_use]
     pub fn new(books: Vec<BookSummary>, page: u32, per_page: u32) -> Self {
         Self {
             books,
@@ -860,11 +900,9 @@ impl SearchPage {
         }
     }
 
+    #[must_use]
     pub fn has_more(&self) -> bool {
-        match self.total {
-            Some(total) => u64::from(self.page) * u64::from(self.per_page) < u64::from(total),
-            None => self.books.len() as u32 >= self.per_page,
-        }
+        has_more(self.page, self.per_page, self.total, self.books.len())
     }
 }
 
@@ -883,6 +921,7 @@ pub enum GoalMetric {
 }
 
 impl GoalMetric {
+    #[must_use]
     pub fn from_api(name: &str) -> Self {
         match name {
             "book" => Self::Books,
@@ -892,6 +931,7 @@ impl GoalMetric {
         }
     }
 
+    #[must_use]
     pub fn api_name(&self) -> &str {
         match self {
             Self::Books => "book",
@@ -920,17 +960,19 @@ const GOAL_CONDITION_FIELDS: [&str; 5] = [
 
 impl GoalConditions {
     /// True if every book counts.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         match &self.0 {
             serde_json::Value::Object(map) => map
                 .values()
-                .all(|v| v.is_null() || v.as_array().is_some_and(|a| a.is_empty())),
+                .all(|v| v.is_null() || v.as_array().is_some_and(std::vec::Vec::is_empty)),
             _ => true,
         }
     }
 
     /// The conditions as a `GoalConditionInput`, or `None` if they hold a
     /// field this version can't send back (it would be lost on update).
+    #[must_use]
     pub fn to_input(&self) -> Option<serde_json::Value> {
         match &self.0 {
             serde_json::Value::Object(map) => {
@@ -976,6 +1018,7 @@ pub struct Goal {
 }
 
 impl Goal {
+    #[must_use]
     pub fn new(id: GoalId, metric: GoalMetric, target: u32, start: Date, end: Date) -> Self {
         Self {
             id,
@@ -998,6 +1041,7 @@ impl Goal {
     }
 
     /// Progress as a fraction of the target; above 1 once it is passed.
+    #[must_use]
     pub fn fraction(&self) -> f64 {
         if self.target == 0 {
             return 0.0;
@@ -1006,21 +1050,25 @@ impl Goal {
     }
 
     /// True if `day` falls within the goal's dates.
+    #[must_use]
     pub fn is_current(&self, day: Date) -> bool {
         (self.start..=self.end).contains(&day)
     }
 
     /// Where steady progress would be by the end of `day`, in the metric's unit.
+    #[must_use]
     pub fn expected_by(&self, day: Date) -> f64 {
-        let total = (self.end - self.start).num_days() + 1;
+        use chrono::Datelike as _;
+        let total = self.end.num_days_from_ce() - self.start.num_days_from_ce() + 1;
         if total <= 0 {
             return f64::from(self.target);
         }
-        let elapsed = ((day - self.start).num_days() + 1).clamp(0, total);
-        f64::from(self.target) * elapsed as f64 / total as f64
+        let elapsed = (day.num_days_from_ce() - self.start.num_days_from_ce() + 1).clamp(0, total);
+        f64::from(self.target) * f64::from(elapsed) / f64::from(total)
     }
 
     /// Ahead (positive) or behind (negative) of steady progress on `day`.
+    #[must_use]
     pub fn pace(&self, day: Date) -> f64 {
         self.progress - self.expected_by(day)
     }
@@ -1108,6 +1156,7 @@ pub struct SearchHits<T> {
 }
 
 impl<T> SearchHits<T> {
+    #[must_use]
     pub fn new(hits: Vec<T>, page: u32, per_page: u32) -> Self {
         Self {
             hits,
@@ -1117,11 +1166,16 @@ impl<T> SearchHits<T> {
         }
     }
 
+    #[must_use]
     pub fn has_more(&self) -> bool {
-        match self.total {
-            Some(total) => u64::from(self.page) * u64::from(self.per_page) < u64::from(total),
-            None => self.hits.len() as u32 >= self.per_page,
-        }
+        has_more(self.page, self.per_page, self.total, self.hits.len())
+    }
+}
+
+fn has_more(page: u32, per_page: u32, total: Option<u32>, item_count: usize) -> bool {
+    match total {
+        Some(total) => u64::from(page) * u64::from(per_page) < u64::from(total),
+        None => item_count >= per_page as usize,
     }
 }
 
@@ -1149,6 +1203,7 @@ pub enum TrendingPeriod {
 
 impl TrendingPeriod {
     /// `TrendingDuration` in the schema.
+    #[must_use]
     pub fn api_name(self) -> &'static str {
         match self {
             Self::Week => "week",
@@ -1208,11 +1263,13 @@ impl UserList {
 
     /// The list Hardcover keeps owned editions on. It is managed through
     /// [`crate::api::Client::mark_owned`], not edited like other lists.
+    #[must_use]
     pub fn is_owned(&self) -> bool {
         self.slug.as_deref() == Some(OWNED_LIST_SLUG)
     }
 
     /// `https://hardcover.app/@<username>/lists/<slug>`, when the list has a slug.
+    #[must_use]
     pub fn web_url(&self, username: &str) -> Option<String> {
         self.slug
             .as_deref()
@@ -1264,6 +1321,7 @@ pub struct ListBook {
 }
 
 impl ListBook {
+    #[must_use]
     pub fn new(id: ListBookId, book: BookSummary) -> Self {
         Self {
             id,
@@ -1514,11 +1572,13 @@ impl Review {
     }
 
     /// True if the entry has a review, readable here or not.
+    #[must_use]
     pub fn exists(&self) -> bool {
         self.has_review || self.text().is_some()
     }
 
     /// The text to show and to edit: the Markdown, else the plain text.
+    #[must_use]
     pub fn text(&self) -> Option<&str> {
         self.markdown.as_deref().or(self.plain.as_deref())
     }
@@ -1599,6 +1659,7 @@ pub struct Reviewer {
 }
 
 impl Reviewer {
+    #[must_use]
     pub fn new(id: UserId) -> Self {
         Self {
             id,
@@ -1610,6 +1671,7 @@ impl Reviewer {
     }
 
     /// The name to show: the name, else `@username`, else "A reader".
+    #[must_use]
     pub fn display_name(&self) -> String {
         match (&self.name, &self.username) {
             (Some(name), _) => name.clone(),
@@ -1619,6 +1681,7 @@ impl Reviewer {
     }
 
     /// The reviewer's profile on hardcover.app, if their username is known.
+    #[must_use]
     pub fn profile_url(&self) -> Option<String> {
         self.username
             .as_deref()
@@ -1683,6 +1746,7 @@ pub struct UpcomingBook {
 }
 
 impl UpcomingBook {
+    #[must_use]
     pub fn new(book: BookSummary, release_date: Date) -> Self {
         Self {
             book,
@@ -1740,6 +1804,7 @@ pub struct TrackedBook {
 }
 
 impl TrackedBook {
+    #[must_use]
     pub fn new(book: BookSummary, position: f32) -> Self {
         Self {
             book,

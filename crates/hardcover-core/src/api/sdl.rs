@@ -6,8 +6,6 @@
 //! (against the live ones), which includes this file with `#[path]` because
 //! apollo-compiler is a dev-dependency.
 
-#![allow(dead_code)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use apollo_compiler::ast::{OperationType, Value as GqlValue};
@@ -18,6 +16,7 @@ use apollo_compiler::{ExecutableDocument, Schema};
 use serde_json::Value;
 
 /// The committed schema, parsed once.
+#[cfg(test)]
 pub fn schema() -> &'static Valid<Schema> {
     static SCHEMA: std::sync::OnceLock<Valid<Schema>> = std::sync::OnceLock::new();
     SCHEMA.get_or_init(|| {
@@ -270,7 +269,7 @@ pub fn check_scopes(
             .push(format!("scope {scope} is no longer in the scope map"));
     }
     let needs = |gated: &BTreeMap<String, Vec<String>>, name: &str| -> String {
-        gated.get(name).map(|s| s.join(" or ")).unwrap_or_default()
+        gated.get(name).map_or_default(|s| s.join(" or "))
     };
     for (name, usage) in documents {
         for field in &usage.top_level {

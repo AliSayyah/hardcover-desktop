@@ -38,7 +38,7 @@ pub struct EditionPicker {
     has_more: bool,
     loading: bool,
     error: Option<SharedString>,
-    _fetch: Option<Task<()>>,
+    fetch: Option<Task<()>>,
 }
 
 impl EventEmitter<EditionChosen> for EditionPicker {}
@@ -53,7 +53,7 @@ impl EditionPicker {
             has_more: true,
             loading: false,
             error: None,
-            _fetch: None,
+            fetch: None,
         };
         this.fetch_more(cx);
         this
@@ -71,13 +71,17 @@ impl EditionPicker {
         if self.loading || !self.has_more {
             return;
         }
+        let Ok(offset) = u32::try_from(self.editions.len()) else {
+            self.has_more = false;
+            cx.notify();
+            return;
+        };
         self.loading = true;
         self.error = None;
         cx.notify();
         let client = Services::global(cx).client().clone();
         let book = self.book;
-        let offset = self.editions.len() as u32;
-        self._fetch = Some(cx.spawn(async move |this, cx| {
+        self.fetch = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move { client.book_editions(book, offset) })
                 .await;
@@ -95,7 +99,7 @@ impl EditionPicker {
                     }
                     Err(e) => {
                         this.error =
-                            Some(Services::error_message(&e, Some(READ_CATALOG), cx).into())
+                            Some(Services::error_message(&e, Some(READ_CATALOG), cx).into());
                     }
                 }
                 cx.notify();

@@ -101,7 +101,7 @@ pub(super) struct ReviewEditor {
     writing: Option<ReviewWrite>,
     /// The entry whose review fetch waits out [`REVIEW_DELAY`].
     scheduled: Option<UserBookId>,
-    _fetch_task: Option<Task<()>>,
+    fetch_task: Option<Task<()>>,
 }
 
 impl ReviewEditor {
@@ -131,7 +131,7 @@ impl ReviewEditor {
                 },
             ),
             cx.subscribe_in(&date, window, |_, _, _: &DatePickerEvent, _, cx| {
-                cx.notify()
+                cx.notify();
             }),
         ];
         let editor = Self {
@@ -143,7 +143,7 @@ impl ReviewEditor {
             saved: None,
             writing: None,
             scheduled: None,
-            _fetch_task: None,
+            fetch_task: None,
         };
         (editor, subscriptions)
     }
@@ -175,7 +175,7 @@ impl BookDetailView {
         }
         let Some(id) = current else {
             self.review.scheduled = None;
-            self.review._fetch_task = None;
+            self.review.fetch_task = None;
             return;
         };
         if self.review.editing.is_none()
@@ -186,7 +186,7 @@ impl BookDetailView {
         if !self.model.read(cx).wants_review(id) {
             // Also drops a wait for a book left behind.
             self.review.scheduled = None;
-            self.review._fetch_task = None;
+            self.review.fetch_task = None;
             return;
         }
         if self.review.scheduled == Some(id) {
@@ -195,7 +195,7 @@ impl BookDetailView {
         self.review.scheduled = Some(id);
         let model = self.model.clone();
         // Replacing the task cancels the wait for a book no longer shown.
-        self.review._fetch_task = Some(cx.spawn(async move |this, cx| {
+        self.review.fetch_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(REVIEW_DELAY).await;
             let _ = this.update(cx, |this, cx| {
                 if this.review.scheduled == Some(id) {
@@ -260,7 +260,7 @@ impl BookDetailView {
         cx: &mut Context<Self>,
     ) {
         self.review.text.update(cx, |s, cx| {
-            s.set_value(draft.text.clone(), window, cx);
+            s.set_value(draft.text, window, cx);
             if focus {
                 // The cursor at the end, to go on writing.
                 let end = s.value().len();
@@ -269,7 +269,7 @@ impl BookDetailView {
             }
         });
         self.review.date.update(cx, |s, cx| {
-            s.set_date(CalendarDate::Single(draft.date), window, cx)
+            s.set_date(CalendarDate::Single(draft.date), window, cx);
         });
         self.review.spoilers = draft.spoilers;
         self.review.editing = Some((id, base));
@@ -309,7 +309,7 @@ impl BookDetailView {
                 .ok_text("Discard changes")
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, _, cx| {
-                    let _ = view.update(cx, |this, cx| this.close_review_editor(cx));
+                    let _ = view.update(cx, BookDetailView::close_review_editor);
                     true
                 })
         });
@@ -408,7 +408,7 @@ impl BookDetailView {
                             },
                             window,
                             cx,
-                        )
+                        );
                     });
                     true
                 })
@@ -532,7 +532,7 @@ impl BookDetailView {
                 )
         });
         Block::new("Your review")
-            .when_some(action, |this, action| this.action(action))
+            .when_some(action, crate::ui::Block::action)
             .child(body)
             .children(refresh_failed)
     }
@@ -711,7 +711,7 @@ impl BookDetailView {
                                     this.tooltip(needs_permission(WRITE_REVIEWS))
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.confirm_delete_review(window, cx)
+                                    this.confirm_delete_review(window, cx);
                                 })),
                         )
                     }),
@@ -747,7 +747,7 @@ mod tests {
         let today = Date::from_ymd_opt(2026, 5, 6).unwrap();
         let new = Draft::base(None, today);
         assert_eq!(new.date, Some(today));
-        assert!(new.text.is_empty());
+        assert_eq!(new.text, "");
 
         let mut undated = Review::new("Loved it.", true, None);
         assert_eq!(Draft::base(Some(&undated), today).date, None);

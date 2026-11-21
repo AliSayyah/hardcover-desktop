@@ -145,7 +145,7 @@ impl RenderOnce for TextButton {
                     .rounded(radius)
                     .text_color(colors(cx).fg)
                     .body_strong()
-                    .when(underline, |this| this.hover(|style| style.underline()))
+                    .when(underline, |this| this.hover(gpui_kit::Styled::underline))
                     .when_some(on_click, |this, handler| {
                         this.on_click(move |event, window, cx| handler(event, window, cx))
                     })
@@ -156,8 +156,8 @@ impl RenderOnce for TextButton {
                             .min_w_0()
                             .child(
                                 WrappingText::new(label)
-                                    .when_some(line_clamp, |this, lines| this.line_clamp(lines))
-                                    .when_some(width, |this, width| this.width(width)),
+                                    .when_some(line_clamp, WrappingText::line_clamp)
+                                    .when_some(width, WrappingText::width),
                             )
                             .into_any_element()
                     } else {
