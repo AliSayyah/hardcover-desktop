@@ -1,7 +1,10 @@
 //! Where tokens live between runs.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use dbus_secret_service_keyring_store::Store as SecretServiceStore;
+use keyring_core::{CredentialStore, Entry};
 
 use super::{DEFAULT_CLIENT_ID, Tokens};
 use crate::lock::FileLock;
@@ -40,11 +43,18 @@ pub trait TokenStore: Send + Sync {
     }
 }
 
-/// The desktop's secret service (GNOME Keyring, `KWallet`, ...) via `keyring`,
-/// service `"hardcover-desktop"`. Tokens are stored as one JSON secret, in an
-/// entry per OAuth client ([`KeyringTokenStore::account_for`]).
+/// The desktop's secret service (GNOME Keyring, `KWallet`, ...) via
+/// `keyring-core` and its D-Bus Secret Service store, service
+/// `"hardcover-desktop"`. Tokens are stored as one JSON secret, in an entry
+/// per OAuth client ([`KeyringTokenStore::account_for`]).
+///
+/// Items are found by their `service` and `username` attributes, in any
+/// collection. keyring 3 (up to 0.4.0) also set `target = "default"` and
+/// looked for items without one too, so an entry written by either version
+/// is found by the other: updating doesn't sign anyone out, and an older copy
+/// still running finds a newer one's tokens.
 pub struct KeyringTokenStore {
-    entry: keyring::Entry,
+    entry: Entry,
     /// The cross-process lock beside the entry: in `$XDG_RUNTIME_DIR`, else
     /// in the data directory.
     lock_path: Option<PathBuf>,
@@ -72,7 +82,8 @@ impl KeyringTokenStore {
                 .join(lock_file_name(&account))
         });
         Ok(Self {
-            entry: keyring::Entry::new(Self::SERVICE, &account).map_err(keyring_err)?,
+            entry: Entry::new_in_store(&secret_service()?, Self::SERVICE, &account)
+                .map_err(keyring_err)?,
             lock_path,
         })
     }
@@ -97,13 +108,30 @@ impl KeyringTokenStore {
     ///
     /// The keyring's error if it can't store a secret.
     pub fn check_available() -> Result<()> {
-        let probe = keyring::Entry::new(Self::SERVICE, Self::PROBE_ACCOUNT).map_err(keyring_err)?;
+        let probe = Entry::new_in_store(&secret_service()?, Self::SERVICE, Self::PROBE_ACCOUNT)
+            .map_err(keyring_err)?;
         probe.set_password("ok").map_err(keyring_err)?;
         match probe.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(e) => Err(keyring_err(e)),
         }
     }
+}
+
+/// The connection to the secret service, made on first use and kept. A
+/// failure isn't kept: a secret service that starts later (the sign-in
+/// screen's "Try again") is found then.
+fn secret_service() -> Result<Arc<CredentialStore>> {
+    static STORE: Mutex<Option<Arc<CredentialStore>>> = Mutex::new(None);
+    let mut store = STORE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(store) = &*store {
+        return Ok(Arc::clone(store));
+    }
+    let connected: Arc<CredentialStore> = SecretServiceStore::new().map_err(keyring_err)?;
+    *store = Some(Arc::clone(&connected));
+    Ok(connected)
 }
 
 /// The lock file's name for a keyring account: the account, with anything
@@ -132,7 +160,7 @@ impl std::fmt::Debug for KeyringTokenStore {
     clippy::needless_pass_by_value,
     reason = "map_err passes the owned error to this conversion"
 )]
-fn keyring_err(e: keyring::Error) -> Error {
+fn keyring_err(e: keyring_core::Error) -> Error {
     // keyring errors describe the platform failure, never the secret.
     Error::Storage(format!("keyring: {e}"))
 }
@@ -147,7 +175,7 @@ impl TokenStore for KeyringTokenStore {
                 eprintln!("hardcover: the saved sign-in is unreadable; ignoring it");
                 None
             })),
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(e) => Err(keyring_err(e)),
         }
     }
@@ -159,7 +187,7 @@ impl TokenStore for KeyringTokenStore {
 
     fn clear(&self) -> Result<()> {
         match self.entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(e) => Err(keyring_err(e)),
         }
     }
