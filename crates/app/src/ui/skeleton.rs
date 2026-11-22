@@ -22,8 +22,6 @@
 //! Covers show their own skeleton until the image lands; don't put one over
 //! a [`crate::cover::Cover`].
 
-use std::time::Duration;
-
 use gpui_kit::component::StyledExt as _;
 use gpui_kit::{
     Animation, AnimationExt as _, App, IntoElement, ParentElement as _, RenderOnce,
@@ -32,10 +30,7 @@ use gpui_kit::{
 
 use super::focus::{box_radius, control_radius};
 use crate::cover::CoverSize;
-use crate::design::{TypeRole, colors, size};
-
-/// One full pulse, there and back.
-const PULSE: Duration = Duration::from_secs(2);
+use crate::design::{TypeRole, colors, motion, size};
 
 #[derive(Clone, Copy)]
 enum Shape {
@@ -120,7 +115,7 @@ impl RenderOnce for Skeleton {
             shape
                 .with_animation(
                     "skeleton-pulse",
-                    Animation::new(PULSE)
+                    Animation::new(motion::PULSE)
                         .repeat_synced()
                         .with_easing(bounce(ease_in_out)),
                     |this, delta| this.opacity(1. - delta * 0.5),

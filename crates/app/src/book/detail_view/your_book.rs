@@ -99,7 +99,11 @@ impl BookDetailView {
                     }),
             )
             .when_some(progress.percent, |this, percent| {
-                this.child(Meter::new("reading-progress", percent, "Reading progress"))
+                this.child(Meter::new(
+                    ("reading-progress", entry.user_book_id.get().cast_unsigned()),
+                    percent,
+                    "Reading progress",
+                ))
             })
             .child(
                 h_flex()

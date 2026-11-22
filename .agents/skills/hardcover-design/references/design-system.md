@@ -262,6 +262,33 @@ There are three levels and no others:
    - Light: `0 0 0 1px rgba(30,20,10,.10), 0 4px 12px rgba(40,28,16,.12)`
    - Dark: `0 0 0 1px rgba(255,255,255,.08), 0 4px 12px rgba(0,0,0,.5)`
 
+### Motion
+
+The app moves only to explain a change: something left, or a value changed.
+Nothing is decoration, and nothing waits for motion to finish. These are all
+the motions there are; a new one is added here first (`design::motion`).
+
+| Motion | Where | How |
+| --- | --- | --- |
+| Pulse | A skeleton while its content really loads | Opacity 100% to 50% and back over 2 s, every skeleton in step |
+| Row leaving | A row taken out of the collection on screen: the selected book moved to another shelf or out of the library, a book taken off a list | It keeps its place and fades out over 150 ms, ease-out, without its focus ring; then the rows below close the gap at once |
+| Meter | A meter's value changing: progress saved, the goal after a sync | The fill moves on a critically damped spring (90% of the way in about 150 ms, settled in about 350 ms, no overshoot); a change mid-way carries on from where the fill is. The words beside it change at once |
+| Kit overlays | Dialogs, menus, popovers, tooltips, notifications | The kit's own short fades and slides, unchanged |
+
+- **Only what the reader is looking at moves.** A row fades only when the
+  list is otherwise the same (same shelf, filter and sort; nothing added or
+  moved) and at most three rows leave together; a leaving row can't be
+  acted on. A meter moves only when the same thing's value changes: one shown
+  for the first time, or for another book, starts at its value. Hardcover's
+  figures (the muted ratings breakdown) never move.
+- **Instant everywhere else:** pages, Back, destinations, the pane following
+  the selection, rows arriving or moving, a filter or sort, expanding text,
+  covers landing, hover and focus.
+- **Reduced motion** (the desktop's setting): every motion shows its end
+  state at once. The skeleton holds still.
+- **Not motion:** content that arrives later and pushes the page down is
+  fixed by keeping its place, never by animating it in.
+
 ## Covers
 
 There is one cover component. Never draw a cover box by hand.
@@ -428,6 +455,7 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   wide, `fg`, 3 px proud of the meter on each side.
 - Words come with every meter ("Page 312 of 476", "66%"). The bar is never
   the only carrier.
+- A new value moves the fill there (Motion); the words change at once.
 - Every meter has an accessible name, what it measures ("Reading
   progress", "Progress toward the goal", "5 stars"): `Meter::new` takes
   it.
@@ -610,7 +638,7 @@ Each state has one treatment, on every control. Hover is never the only cue.
 | Error | Say what happened and how to recover, next to the thing that failed (`session::error_message`): one muted sentence with a small "Try again" (`ui::LoadFailed`); where the whole region has nothing else to show (the library never loaded), the same in the empty state's place, titled ("Couldn't load your library"), and counts that would read 0 read "—" |
 
 Switching between content that is already loaded is immediate: no skeleton,
-no transition.
+no transition. The few things that move are listed under Motion.
 
 ## Screens
 
