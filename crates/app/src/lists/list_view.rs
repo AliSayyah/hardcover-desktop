@@ -191,11 +191,15 @@ impl ListBooks {
         }
     }
 
-    /// Takes the book at `ix` off the list shown.
+    /// Takes the book at `ix` off the list shown. A row already fading out
+    /// is off it.
     fn remove(&mut self, ix: usize, window: &mut Window, cx: &mut Context<ListState<Self>>) {
         let (Some(list), Some(book)) = (self.current, self.book(ix).cloned()) else {
             return;
         };
+        if self.leaving.is_leaving(&book.id) {
+            return;
+        }
         remove_book(&self.lists, list, &book, window, cx);
     }
 }
@@ -317,7 +321,7 @@ impl ListDelegate for ListBooks {
                         .small_icon_button()
                         .icon(IconName::Close)
                         .tooltip(remove_tooltip.clone())
-                        .disabled(busy || !can_write)
+                        .disabled(busy || !can_write || opacity.is_some())
                         .on_click(move |_, window, cx| {
                             remove_book(&lists, list, &book, window, cx);
                         }),

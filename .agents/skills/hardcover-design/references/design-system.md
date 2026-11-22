@@ -277,7 +277,8 @@ the motions there are; a new one is added here first (`design::motion`).
 
 - **Only what the reader is looking at moves.** A row fades only when the
   list is otherwise the same (same shelf, filter and sort; nothing added or
-  moved). A meter moves only when the same thing's value changes: one shown
+  moved) and at most three rows leave together; a leaving row can't be
+  acted on. A meter moves only when the same thing's value changes: one shown
   for the first time, or for another book, starts at its value. Hardcover's
   figures (the muted ratings breakdown) never move.
 - **Instant everywhere else:** pages, Back, destinations, the pane following

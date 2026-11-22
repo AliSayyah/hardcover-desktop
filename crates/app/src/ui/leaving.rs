@@ -5,8 +5,8 @@
 //! Without it the row is gone in one frame and the rows under the pointer
 //! jump up, and nothing says which one went.
 //!
-//! Only a pure removal fades: the new rows are the old ones with some taken
-//! out, in the same order. Anything else (another shelf, a new filter or
+//! Only a pure removal of a few rows ([`MAX_LEAVING`]) fades: the new rows
+//! are the old ones with those taken out, in the same order. Anything else (another shelf, a new filter or
 //! sort, rows added or moved, the first load) shows the new rows at once.
 //! So does everything under reduced motion.
 //!
@@ -53,6 +53,10 @@ impl<K> Default for Leaving<K> {
     }
 }
 
+/// The most rows that fade out at once. More leaving together (a sync, a
+/// list fetched again) is not something the reader did here: they go at once.
+pub const MAX_LEAVING: usize = 3;
+
 /// What [`Leaving::rows`] worked out.
 #[derive(Debug, PartialEq)]
 pub struct Shown<K> {
@@ -72,7 +76,7 @@ impl<K: Clone + PartialEq> Leaving<K> {
     pub fn rows(&mut self, old: &[K], new: Vec<K>, animate: bool, now: Instant) -> Shown<K> {
         let previous = std::mem::take(&mut self.rows);
         let gone = match departures(old, &new) {
-            Some(gone) if animate && !gone.is_empty() => gone,
+            Some(gone) if animate && !gone.is_empty() && gone.len() <= MAX_LEAVING => gone,
             _ => {
                 return Shown {
                     rows: new,
@@ -80,6 +84,7 @@ impl<K: Clone + PartialEq> Leaving<K> {
                 };
             }
         };
+        let gone_keys = gone.clone();
         let mut started = false;
         for key in gone {
             match previous.iter().find(|(k, _)| *k == key) {
@@ -95,9 +100,10 @@ impl<K: Clone + PartialEq> Leaving<K> {
                 }
             }
         }
+        // `new` is `old` less `gone`: keep the rest, and the gone still fading.
         let rows = old
             .iter()
-            .filter(|k| new.contains(k) || self.is_leaving(k))
+            .filter(|k| !gone_keys.contains(k) || self.is_leaving(k))
             .cloned()
             .collect();
         Shown { rows, started }
@@ -218,6 +224,10 @@ mod tests {
             },
             "not animating"
         );
+
+        let shown = leaving.rows(&[1, 2, 3, 4, 5], vec![1], true, now);
+        assert_eq!(shown.rows, vec![1], "too many at once");
+        assert!(!shown.started);
     }
 
     #[test]
