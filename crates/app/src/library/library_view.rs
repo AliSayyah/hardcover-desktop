@@ -20,7 +20,7 @@ use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, ScrollStrategy,
     SharedString, StyleRefinement, Styled as _, Subscription, Window, div,
 };
-use hardcover_core::{ReadingStatus, UserBookId};
+use hardcover_core::{LibraryEntry, ReadingStatus, UserBookId};
 
 use super::book_row::{BookRow, loading_rows};
 use super::collection::{SortOrder, shelf_rows};
@@ -31,6 +31,7 @@ use crate::design::{colors, size};
 use crate::format::status_label;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::gutter_list;
+use crate::ui::leaving::{Leaving, ROW_LEAVE};
 use crate::ui::{ListRow as _, PageHeader, RowFocus, empty_state, on_keyboard_entry};
 
 #[derive(Clone)]
@@ -69,6 +70,10 @@ pub struct ShelfDelegate {
     loading: bool,
     empty: Empty,
     focus: RowFocus,
+    /// Rows fading out as they leave the shelf (`ui::leaving`).
+    leaving: Leaving<UserBookId>,
+    /// What the leaving rows are drawn from: each as it was when it left.
+    gone: Vec<LibraryEntry>,
 }
 
 impl ShelfDelegate {
@@ -92,15 +97,32 @@ impl ListDelegate for ShelfDelegate {
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
         let id = *self.rows.get(ix.row)?;
-        let entry = self.model.read(cx).entry(id)?;
+        let opacity = self.leaving.opacity(&id, cx.background_executor().now());
+        let model = self.model.read(cx);
+        let entry = match opacity {
+            Some(_) => self
+                .gone
+                .iter()
+                .find(|e| e.user_book_id == id)
+                .or_else(|| model.entry(id))?,
+            None => model.entry(id)?,
+        };
         let title = entry.book.title.clone();
         let row = BookRow::for_entry(entry).selected(self.focus.is_selected(ix));
-        Some(
-            ListItem::new(("library-book", id.get().cast_unsigned()))
-                .list_row(self.focus.shows_focus(ix, window), cx)
-                .accessibility_label(title)
-                .child(row),
-        )
+        let mut item = ListItem::new(("library-book", id.get().cast_unsigned()))
+            .list_row(
+                // The ring is drawn outside the row's opacity: a leaving
+                // row has none.
+                opacity.is_none() && self.focus.shows_focus(ix, window),
+                cx,
+            )
+            .accessibility_label(title)
+            .child(row);
+        if let Some(opacity) = opacity {
+            window.request_animation_frame();
+            item = item.opacity(opacity);
+        }
+        Some(item)
     }
 
     fn set_selected_index(
@@ -156,6 +178,20 @@ struct RowsKey {
     failure: Option<SharedString>,
 }
 
+impl RowsKey {
+    /// Whether `next` shows the same shelf, filter and sort with loaded rows,
+    /// so a row that leaves it fades out (`ui::leaving`).
+    fn same_rows_as(&self, next: &RowsKey) -> bool {
+        self.status == next.status
+            && self.query == next.query
+            && self.order == next.order
+            && !self.loading
+            && !next.loading
+            && self.failure.is_none()
+            && next.failure.is_none()
+    }
+}
+
 pub struct LibraryView {
     model: Entity<LibraryModel>,
     status: ReadingStatus,
@@ -168,6 +204,12 @@ pub struct LibraryView {
     selection: HashMap<ReadingStatus, UserBookId>,
     /// Inputs of the rows currently in the list, to skip needless rebuilds.
     rows_key: Option<RowsKey>,
+    /// The selected entry as the shelf last drew it, so the row can fade out
+    /// as it was when the book leaves the shelf, or the library.
+    selected_entry: Option<LibraryEntry>,
+    /// A leaving row has faded: work the rows out again, though nothing
+    /// they're built from changed.
+    leaving_due: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -191,6 +233,8 @@ impl LibraryView {
                         description: SharedString::default(),
                     },
                     focus: RowFocus::default(),
+                    leaving: Leaving::default(),
+                    gone: Vec::new(),
                 },
                 window,
                 cx,
@@ -264,6 +308,8 @@ impl LibraryView {
             detail,
             selection: HashMap::new(),
             rows_key: None,
+            selected_entry: None,
+            leaving_due: false,
             _subscriptions: subscriptions,
         };
         this.refresh_rows(window, cx);
@@ -306,6 +352,7 @@ impl LibraryView {
 
     fn select(&mut self, id: UserBookId, window: &mut Window, cx: &mut Context<Self>) {
         self.selection.insert(self.status, id);
+        self.selected_entry = self.model.read(cx).entry(id).cloned();
         self.sync_list_selection(window, cx);
         self.detail.update(cx, |d, cx| {
             d.set_subject(Some(Subject::Entry(id)), window, cx);
@@ -337,9 +384,15 @@ impl LibraryView {
             loading,
             failure: failure.clone(),
         };
-        if self.rows_key.as_ref() == Some(&key) {
+        let due = std::mem::take(&mut self.leaving_due);
+        if !due && self.rows_key.as_ref() == Some(&key) {
             return;
         }
+        let animate = !cx.reduce_motion()
+            && self
+                .rows_key
+                .as_ref()
+                .is_some_and(|previous| previous.same_rows_as(&key));
         let entries = model.entries();
         let rows: Vec<UserBookId> = shelf_rows(entries, self.status, &query, self.order)
             .into_iter()
@@ -368,13 +421,49 @@ impl LibraryView {
             }
         };
         self.rows_key = Some(key);
-        self.list.update(cx, |list, cx| {
+        let now = cx.background_executor().now();
+        let model = self.model.clone();
+        let selected = self.selected_entry.take();
+        let started = self.list.update(cx, |list, cx| {
             let delegate = list.delegate_mut();
-            delegate.rows = rows;
+            let shown = delegate.leaving.rows(&delegate.rows, rows, animate, now);
+            delegate.rows = shown.rows;
+            let leaving = &delegate.leaving;
+            delegate
+                .gone
+                .retain(|e| leaving.is_leaving(&e.user_book_id));
+            for id in &delegate.rows {
+                if !leaving.is_leaving(id) || delegate.gone.iter().any(|e| e.user_book_id == *id) {
+                    continue;
+                }
+                // The selected row as the shelf drew it: its entry has moved
+                // on, or is gone from the library.
+                let entry = match &selected {
+                    Some(entry) if entry.user_book_id == *id => Some(entry.clone()),
+                    _ => model.read(cx).entry(*id).cloned(),
+                };
+                delegate.gone.extend(entry);
+            }
             delegate.loading = loading;
             delegate.empty = empty;
             cx.notify();
+            shown.started
         });
+        if started {
+            cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor().timer(ROW_LEAVE).await;
+                this.update_in(cx, |this, window, cx| {
+                    this.leaving_due = true;
+                    this.refresh_rows(window, cx);
+                })
+                .ok();
+            })
+            .detach();
+        }
+        self.selected_entry = self
+            .selection
+            .get(&self.status)
+            .and_then(|id| self.model.read(cx).entry(*id).cloned());
         self.sync_list_selection(window, cx);
     }
 

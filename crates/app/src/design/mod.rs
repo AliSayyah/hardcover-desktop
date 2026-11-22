@@ -15,6 +15,8 @@
 //! - `contrast_audit` (tests only): the WCAG ratio of every token pair
 //!   that carries meaning, in both themes, so a token edit can't silently
 //!   break one.
+//! - [`motion`]: the motion tokens: the skeleton's pulse, a leaving row's
+//!   fade, a meter's spring.
 //! - [`size`]: the named sizes: control heights, chip, rail, list and sidebar
 //!   widths, meters, prose. Cover sizes are on [`crate::cover::CoverSize`].
 //!
@@ -25,6 +27,7 @@
 pub mod color;
 #[cfg(test)]
 mod contrast_audit;
+pub mod motion;
 pub mod size;
 pub mod theme;
 pub mod type_roles;

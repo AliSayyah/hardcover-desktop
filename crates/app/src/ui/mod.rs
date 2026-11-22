@@ -32,6 +32,7 @@
 //! | [`MonthBars`] | Books finished in each month of a year, the counts over the bars: Home's reading goal |
 //! | [`EmptyState`], [`empty_state`] | A region with nothing to show: icon, title, one sentence, a button |
 //! | [`LoadFailed`] | A load that failed: one muted sentence and "Try again", or the whole region's empty state when nothing else can show |
+//! | [`leaving`] | A row leaving a collection while it is shown: it fades out in its place, then the gap closes |
 //! | [`Skeleton`], [`SkeletonText`], [`SkeletonRow`] | Content still loading: pulsing shapes, lines, a row |
 //! | [`TextButton`] | In-app navigation inside content: a book title, an author, a series |
 //! | [`ExternalLink`] | Something that opens the browser: "Open on Hardcover" (accent, underlined, the external-link icon) |
@@ -57,6 +58,7 @@ pub mod focus;
 pub mod gallery;
 mod headers;
 pub mod kit;
+pub mod leaving;
 mod load_failed;
 mod meter;
 mod month_bars;

@@ -816,7 +816,7 @@ impl HomeView {
             .child(
                 div().pt_1().child(
                     Meter::new(
-                        "home-goal-bar",
+                        SharedString::from(format!("home-goal-bar-{goal_id}")),
                         crate::format::bar_percent(goal.fraction()),
                         "Progress toward the goal",
                     )

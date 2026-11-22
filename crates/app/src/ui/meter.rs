@@ -11,6 +11,12 @@
 //!   progress. Their counts sit beside them.
 //! - It fills its width; set one where the system names it
 //!   (`size::METER_IN_ROW`, at most `size::METER_MAX`).
+//! - A new value moves the fill there on a spring (`design::motion::METER`),
+//!   so the change shows. A meter shown for the first time starts at its
+//!   value, so `id` must name what the meter measures (the entry, the goal),
+//!   not its place: a pane showing another book then draws its meter at
+//!   once instead of moving it from the last book's. Muted meters
+//!   (Hardcover's figures) don't move: they change only with the book shown.
 //! - Exposed as a progress indicator with its value and an accessible name,
 //!   which every meter must give: what it measures ("Reading progress",
 //!   "2026 reading goal", "5-star ratings").
@@ -21,14 +27,16 @@
 //!     .w(size::METER_IN_ROW)
 //! ```
 
+use std::sync::Arc;
+
 use gpui_kit::base::Progress;
 use gpui_kit::component::StyledExt as _;
 use gpui_kit::{
-    App, ElementId, IntoElement, ParentElement as _, RenderOnce, SharedString, StyleRefinement,
-    Styled, Window, div, prelude::FluentBuilder as _, relative,
+    AnimationExt as _, App, ElementId, IntoElement, ParentElement as _, RenderOnce, SharedString,
+    SpringAnimation, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, relative,
 };
 
-use crate::design::{colors, size};
+use crate::design::{colors, motion, size};
 
 /// A progress meter. Values are percentages, 0 to 100, like the kit's.
 #[derive(IntoElement)]
@@ -111,6 +119,24 @@ impl RenderOnce for Meter {
         };
         let tick = self.pace.map(fraction);
         let overhang = size::PACE_TICK_OVERHANG;
+        let bar = div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left_0()
+            .rounded_full()
+            .bg(fill);
+        let bar = if self.muted {
+            bar.w(relative(filled)).into_any_element()
+        } else {
+            let id = ElementId::NamedChild(Arc::new(self.id.clone()), "fill".into());
+            bar.with_spring(
+                id,
+                SpringAnimation::new(motion::METER).to(filled),
+                |bar, filled| bar.w(relative(filled.clamp(0., 1.))),
+            )
+            .into_any_element()
+        };
         Progress::new(self.id)
             .value(filled * 100.)
             .accessibility_label(self.label)
@@ -121,18 +147,7 @@ impl RenderOnce for Meter {
             .rounded_full()
             .bg(colors.track)
             .refine_style(&self.style)
-            .when(filled > 0., |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .left_0()
-                        .w(relative(filled))
-                        .rounded_full()
-                        .bg(fill),
-                )
-            })
+            .child(bar)
             .when_some(tick, |this, tick| {
                 // Centred on its position: half its width back.
                 this.child(

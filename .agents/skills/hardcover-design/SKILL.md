@@ -15,7 +15,7 @@ components; this skill tells you *what* to build and how it must look.
 
 - [references/design-system.md](references/design-system.md): the system
   itself. It covers the thesis, tokens (colour, type, space, radius, frames,
-  elevation), covers, components, states, screen layouts, right-to-left
+  elevation, motion), covers, components, states, screen layouts, right-to-left
   text, and copy. Read it in full before a new screen or a redesign. For a
   narrow change, read "Thesis", "Tokens" and the section for the change.
 - [references/desktop-practice.md](references/desktop-practice.md): the

@@ -13,6 +13,7 @@
 //! after the header's controls; each row's remove button follows it.
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -27,7 +28,7 @@ use gpui_kit::{
     prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::WRITE_LISTS;
-use hardcover_core::{ListBook, ListId, UserList};
+use hardcover_core::{ListBook, ListBookId, ListId, UserList};
 
 use super::list_dialog::open_edit_list;
 use super::model::{ListsEvent, ListsModel};
@@ -47,6 +48,7 @@ use crate::resource::{Catalog, Demand, Paged, SharedChanged};
 use crate::session;
 use crate::ui::kit::{SmallControl as _, SmallIconButton as _};
 use crate::ui::kit::{open_alert_dialog, row_action};
+use crate::ui::leaving::{Leaving, ROW_LEAVE};
 use crate::ui::{
     ExternalLink, ListRow as _, LoadFailed, PageHeader, RowFocus, empty_state,
     empty_state_with_action, on_keyboard_entry, select_first_row,
@@ -61,6 +63,8 @@ pub const KEY_CONTEXT: &str = "ListPage";
 /// rows read them without the app.
 #[derive(Default)]
 struct BooksShown {
+    /// The list these are the books of.
+    list: Option<ListId>,
     page: Option<Arc<Paged<ListBook>>>,
     loading: bool,
     /// The first page failed.
@@ -75,6 +79,10 @@ pub struct ListBooks {
     catalog: Option<Catalog>,
     current: Option<ListId>,
     shown: BooksShown,
+    /// Rows fading out as they leave the list (`ui::leaving`).
+    leaving: Leaving<ListBookId>,
+    /// While a row fades out: the rows shown, it included.
+    fading: Option<Vec<ListBook>>,
     focus: RowFocus,
     /// The book pane is beside the list ([`ListPane`]).
     beside: Rc<Cell<bool>>,
@@ -87,29 +95,80 @@ impl ListBooks {
     }
 
     fn books(&self) -> &[ListBook] {
-        self.shown
-            .page
-            .as_deref()
-            .map_or(&[], |p| p.items.as_slice())
+        match &self.fading {
+            Some(rows) => rows,
+            None => self
+                .shown
+                .page
+                .as_deref()
+                .map_or(&[], |p| p.items.as_slice()),
+        }
     }
 
     fn book(&self, ix: usize) -> Option<&ListBook> {
         self.books().get(ix)
     }
 
-    /// Copies the shown list's books from the catalogue.
-    fn follow_store(&mut self, cx: &App) {
-        let (Some(id), Some(catalog)) = (self.current, &self.catalog) else {
-            self.shown = BooksShown::default();
-            return;
+    /// Copies the shown list's books from the catalogue. A book that left
+    /// the list shown fades out in its place first (`ui::leaving`).
+    fn follow_store(&mut self, cx: &mut Context<ListState<Self>>) {
+        let old_fading = self.fading.take();
+        let previous = std::mem::take(&mut self.shown);
+        let old = match &old_fading {
+            Some(rows) => rows.as_slice(),
+            None => previous
+                .page
+                .as_deref()
+                .map_or(&[][..], |p| p.items.as_slice()),
         };
-        let store = catalog.list_books.read(cx).resource();
-        self.shown = BooksShown {
-            page: store.value(&id).cloned(),
-            loading: store.is_loading(&id),
-            error: store.error(&id).cloned(),
-            more_error: store.more_error(&id).cloned(),
-        };
+        if let (Some(id), Some(catalog)) = (self.current, &self.catalog) {
+            let store = catalog.list_books.read(cx).resource();
+            self.shown = BooksShown {
+                list: Some(id),
+                page: store.value(&id).cloned(),
+                loading: store.is_loading(&id),
+                error: store.error(&id).cloned(),
+                more_error: store.more_error(&id).cloned(),
+            };
+        }
+        let animate = !cx.reduce_motion()
+            && previous.list.is_some()
+            && previous.list == self.shown.list
+            && previous.page.is_some()
+            && self.shown.page.is_some();
+        let new = self
+            .shown
+            .page
+            .as_deref()
+            .map_or(&[][..], |p| p.items.as_slice());
+        let shown = self.leaving.rows(
+            &old.iter().map(|b| b.id).collect::<Vec<_>>(),
+            new.iter().map(|b| b.id).collect(),
+            animate,
+            cx.background_executor().now(),
+        );
+        self.fading = (shown.rows.len() != new.len()).then(|| {
+            // The new rows' books, and the leaving ones' as they were.
+            let mut new = new.iter().map(|b| (b.id, b)).collect::<HashMap<_, _>>();
+            let mut old = old.iter().map(|b| (b.id, b)).collect::<HashMap<_, _>>();
+            shown
+                .rows
+                .iter()
+                .filter_map(|id| new.remove(id).or_else(|| old.remove(id)).cloned())
+                .collect()
+        });
+        if shown.started {
+            cx.spawn(async move |state, cx| {
+                cx.background_executor().timer(ROW_LEAVE).await;
+                state
+                    .update(cx, |state, cx| {
+                        state.delegate_mut().follow_store(cx);
+                        cx.notify();
+                    })
+                    .ok();
+            })
+            .detach();
+        }
     }
 
     fn request(&self, demand: Demand, cx: &mut App) {
@@ -216,9 +275,13 @@ impl ListDelegate for ListBooks {
         window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let focused = self.focus.shows_focus(ix, window);
         let list = self.current?;
         let book = self.book(ix.row)?.clone();
+        let opacity = self
+            .leaving
+            .opacity(&book.id, cx.background_executor().now());
+        // The ring is drawn outside the row's opacity: a leaving row has none.
+        let focused = opacity.is_none() && self.focus.shows_focus(ix, window);
         let lists = self.lists.read(cx);
         let ranked = lists.list(list).is_some_and(|l| l.ranked);
         let busy = lists.is_busy(book.book.id);
@@ -260,6 +323,13 @@ impl ListDelegate for ListBooks {
                         }),
                 )
             });
+        let item = match opacity {
+            Some(opacity) => {
+                window.request_animation_frame();
+                item.opacity(opacity)
+            }
+            None => item,
+        };
         Some(select_on_click(item, ix, &self.beside, cx))
     }
 
@@ -357,6 +427,8 @@ impl ListView {
                     catalog: catalog.clone(),
                     current: None,
                     shown: BooksShown::default(),
+                    leaving: Leaving::default(),
+                    fading: None,
                     focus: RowFocus::default(),
                     beside: pane.beside().clone(),
                 },

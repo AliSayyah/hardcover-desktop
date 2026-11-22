@@ -206,6 +206,8 @@ Rules for overlays:
   every move.
 - **Feedback reflects reality:** a skeleton only while content is genuinely
   loading. Moving between content that is already loaded is instant.
+- **The app's motions** are listed, with their timings, under Motion in
+  `design-system.md`. Add a new one there before building it.
 
 ## Lists and large collections
 
