@@ -367,46 +367,46 @@ fn sequence(cx: &App) -> AnyElement {
     )
 }
 
-/// The series strip in every state, a long one with "+N", and a series row's
-/// main column with a right-to-left name and author.
+/// The series strip in every state, and a series row's main column with a
+/// right-to-left name and author, shut to one line and opened.
 fn series_strips(cx: &App) -> AnyElement {
     use crate::series::progress::{Activity, Group, SeriesBook, SeriesSummary};
     use hardcover_core::{BookId, BookSummary, SeriesId};
 
-    let cover = |title: &'static str| Cover::new(CoverSize::Sm, title);
+    let cover = |title: &'static str| Cover::new(CoverSize::Md, title);
     let legend = SeriesStrip::new()
         .item(
             StripItem::cover("g-s1", cover("Dune"))
                 .shelf(ReadingStatus::Read)
-                .position("1"),
+                .position("#1"),
         )
         .item(
             StripItem::cover("g-s2", cover("Dune Messiah"))
                 .shelf(ReadingStatus::CurrentlyReading)
-                .position("2")
+                .position("#2")
                 .progress(Some(42.))
                 .next(true),
         )
         .item(
             StripItem::cover("g-s3", cover("Children of Dune"))
                 .shelf(ReadingStatus::WantToRead)
-                .position("3"),
+                .position("#3"),
         )
         .item(
             StripItem::cover("g-s4", cover("God Emperor of Dune"))
                 .shelf(ReadingStatus::Paused)
-                .position("4"),
+                .position("#4"),
         )
         .item(
             StripItem::cover("g-s5", cover("Heretics of Dune"))
                 .shelf(ReadingStatus::DidNotFinish)
-                .position("5"),
+                .position("#5"),
         )
-        .item(StripItem::missing("g-s6", "Chapterhouse: Dune").position("6"))
-        .item(StripItem::unreleased("g-s7", "Untitled Dune #7").position("6.5"));
+        .item(StripItem::missing("g-s6", cover("Chapterhouse: Dune")).position("#6"))
+        .item(StripItem::unreleased("g-s7", "Untitled Dune #7").position("#6.5"));
 
     // A Persian series of ten: two read, the third paused, the rest not in
-    // the library, cut to six slots with "+N".
+    // the library, on a line with room for six: shut, then opened.
     let today: hardcover_core::Date = "2026-11-20".parse().unwrap_or_default();
     let books = (1_u8..=10)
         .map(|n| {
@@ -457,11 +457,18 @@ fn series_strips(cx: &App) -> AnyElement {
                     .child(CoverSlot::new(CoverSize::Md))
                     .child(CoverSlot::new(CoverSize::Md).icon(crate::icons::clock())),
             )
-            .child(
+            .children([false, true].map(|open| {
+                let strip = crate::series::row::RowStrip {
+                    capacity: 6,
+                    open,
+                    on_toggle: std::rc::Rc::new(|_, _, _| {}),
+                };
+                // An id each, so the two copies' elements don't share ids.
                 div()
+                    .id(("g-series", usize::from(open)))
                     .max_w(rems(30.))
-                    .child(crate::series::row::series_body(&persian, today, 6, cx)),
-            ),
+                    .child(crate::series::row::series_body(&persian, today, &strip, cx))
+            })),
     )
 }
 

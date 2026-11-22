@@ -18,8 +18,7 @@ use fast_image_resize::{self as fir, PixelType};
 use gpui_kit::RenderImage;
 use image::ImageDecoder as _;
 
-/// Height of decoded xs and sm covers (list rows, series strips, md
-/// avatars), in image pixels. An sm cover is 48 px tall, so this is sharp up
+/// Height of decoded xs and sm covers (list rows, md avatars), in image pixels. An sm cover is 48 px tall, so this is sharp up
 /// to 3x scale.
 pub(crate) const THUMBNAIL_HEIGHT: u32 = 144;
 /// Height of decoded md and lg covers (Home's rows and shelves, similar

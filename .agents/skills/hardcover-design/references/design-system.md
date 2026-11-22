@@ -90,8 +90,9 @@ selected row.
 | `scrim` | ink 16% | black 48% | The backdrop behind a dialog |
 
 Accent is used on progress, the primary commit, the focus ring, the selected
-sidebar icon, links that open the browser, the brand icon, and a genre
-chip's icon. Nothing else.
+sidebar icon, links that open the browser, the brand icon, a genre chip's
+icon, and the ring and "Next" label on a series strip's next book. Nothing
+else.
 
 Contrast, checked over every surface alone, hovered and selected
 (`design::contrast_audit` fails the build when a token breaks one):
@@ -140,7 +141,7 @@ Every size has a fixed line height.
 | `label` | Inter 500, muted | 12 / 16 | `.label(cx)` | Sidebar and rail section labels: "Reading goal", "On Hardcover" |
 | `caption` | Inter 400, muted | 12 / 16 | `.caption(cx)` | Counts, trailing figures, timestamps, helper text |
 | `display-30` | Literata Display 600 | 30 / 36 | `.display_30()` | Book title on the full page; the Home greeting; figures ("9", "4.63") |
-| `display-24` | Literata Display 600 | 24 / 30 | `.display_24()` | Book title in the pane and the Home lead |
+| `display-24` | Literata Display 600 | 24 / 30 | `.display_24()` | Book title in the pane and the Home lead; a series' name on the Series page |
 | `title-18` | Literata Text 600 | 18 / 24 | `.title_18()` | Book titles in Home rows and Up next |
 | `prose` | Literata Text 400 | 16 / 26 | `.prose()` | Descriptions; at most 640 px wide |
 | `reader` | Inter 400 | 14 / 22 | `.reader()` | Readers' words: your review, other readers' reviews, notes that run long; at most 640 px wide, 8 between paragraphs |
@@ -230,7 +231,7 @@ selection fill or a nested surface its own radius.
 | Shelf list | 384 wide by default, resizable from 272 (its filter, a small select and the inset) to 640 | `size::LIST`, `LIST_MIN`, `LIST_MAX` |
 | Rail (Home, full book page) | 272 wide | `w(rems(17.))` |
 | Next lane (a series row) | 240 wide, 24 after the row's body | `size::NEXT_LANE`, `NEXT_LANE_GAP` |
-| Strip item (a series row) | 40 wide | `size::STRIP_ITEM` |
+| Strip item (a series row) | 72 wide (an md cover in a 2 px inset and a 2 px ring), 8 apart; opened, lines 16 apart | `SeriesStrip::item_width`, `size::STRIP_GAP`, `STRIP_LINE_GAP`, `STRIP_RING_INSET`, `STRIP_RING` |
 | Key column in a property list | 96; 72 in a rail | `w_24`, `w(rems(4.5))` |
 | Select | 168; small 128 | `size::SELECT`, `size::SELECT_SMALL` |
 | Number field (a page, a time) | 128 wide | `size::FIELD_NUMBER` |
@@ -506,30 +507,50 @@ Never colour-code chips, and never use a badge for ordinary metadata.
     kept either way, so the dates line up.
 - **Series row** (`series/row.rs`), a sequence row with 16 above and below,
   top-aligned:
-  - the series name in `title-18`, a text button that opens the series page;
-  - a muted line: the author, "2 of 6 read", "#6 not out yet" when a later
-    book is still to come, and the activity ("Reading now", "Last finished
-    Sep 28", "Caught up since Feb 2", "Paused since Jun 2, 2024", "Finished
-    Jan 12, 2025");
-  - the strip, 12 below;
+  - the series name in `display-24`, a text button that opens the series
+    page;
+  - a muted line: the author, "#6 not out yet" when a later book is still
+    to come, and the activity ("Reading now", "Last finished Sep 28",
+    "Caught up since Feb 2", "Paused since Jun 2, 2024", "Finished Jan 12,
+    2025");
+  - 8 below, the series' meter (read of what is out, at most 400 wide) with
+    "6 of 31 read" beside it in `body-strong`;
+  - 4 below, the key, a caption line: each mark the strip shows with how
+    many books carry it, 16 apart, in the key's order ("✓ 6 read", "📖 1
+    currently reading", "⏸ 1 paused", "📥 9 want to read", "1 did not
+    finish", "1 ignored", a small faded cover with "11 not in your library",
+    the clock with "1 not out yet"), so the marks explain themselves;
+  - the strip, 24 below (room for "Next" over the next book);
   - the next lane, 240 wide and kept on every row so the lanes line up: an
-    sm cover, a caption ("Reading · #1", "Next · #3", "Paused · #3"), the
+    md cover, a caption ("Reading · #1", "Next · #3", "Paused · #3"), the
     title as a text button, a line ("Page 418 of 1,007 · 42%", "Paused at
     page 140 of 412", or the date in `body-strong` with "· In 6 days"
     muted), then one small command: "Update progress…", "Start reading", a
     ghost "Want to read" with a plus, or the StatusChip. A finished series
     leaves the lane empty.
-- **Strip** (`ui::SeriesStrip`): the books of a series in order, 4 apart,
-  each 40 wide: the sm cover, a 2 px line under it (a meter for the book
-  being read, else empty, so the positions sit on one line), then the
-  shelf's 12 px icon and the position in a caption. The next book's position
-  is ink at weight 600. A book not in the library is an empty **slot**
-  (`ui::CoverSlot`: a dashed `border-strong` outline in the cover's shape,
-  no fill); one not out yet is a slot with a 12 px clock. An Ignored book
-  keeps its cover and the Ignored icon, and is never the next book. A strip
-  that can't show every book keeps the next one in view and ends with a
-  "+N" caption.
-  State never relies on colour: the icon, the slot and the clock carry it.
+- **Strip** (`ui::SeriesStrip`): the books of a series in order, 8 apart,
+  each 72 wide: the md cover inside a 2 px inset and a 2 px ring, clear but
+  for the series' next book, whose ring is `accent` with "Next" (caption,
+  600, `accent`) over it; a 2 px line under it (a meter for the book being
+  read, else empty, so the positions sit on one line); the shelf's 12 px
+  icon and the position ("#3") in a caption, the next book's in ink at
+  weight 600; then the title, two caption lines at most, centred, in ink
+  (muted for a book not in the library). A book that is out but not in the
+  library shows its cover faded to 40% (`series_strip::MISSING_OPACITY`),
+  with no shelf icon; one not out yet is a **slot** (`ui::CoverSlot`: a
+  dashed `border-strong` outline in the cover's shape, no fill) with a 12 px
+  clock. Every book opens on a click, the slot too, and shows its whole
+  title in a tooltip. An Ignored book keeps its cover and the Ignored icon,
+  and is never the next book.
+  - **One line until opened:** a strip that fits shows every book. One that
+    doesn't shows as many books as fit beside a small ghost "Show the other
+    15 books" (the room of three books), starting at the book before the
+    next one, so the line shows what came last and what comes next.
+    "Show the other N books" opens the strip to every book, wrapping onto as
+    many lines as it needs, 16 apart, and "Show fewer" (the room of two)
+    ends it. The series opened are kept for the session.
+  State never relies on colour: the shelf icon (a faded cover has none), the
+  slot, the clock and the "Next" label carry it.
   Each book is named for a screen reader with what the eye reads from it:
   "#2, Dune Messiah: Currently reading, 40%, next", "#3, Children of Dune:
   not in your library".
@@ -701,8 +722,9 @@ every width below (the tiers' thresholds included) is in design px too.
     the rail equally. With nothing for the second column, Home keeps two
     columns.
   - **Series:** the column fills the region. The strip takes the width,
-    showing as many books as fit (45 at 2560) before it windows; the next
-    lanes stay 240 and lined up on the trailing edge.
+    showing as many books on its line as fit (25 at 2560) before it is cut
+    to one line with "Show the other N books"; the next lanes stay 240 and
+    lined up on the trailing edge.
   - **Stats:** one column filling the region; two columns of at least 544,
     32 apart (a 1424 window), each filling its half: Finished per year;
     Your ratings, then Shelves. The figures fill one row across both, 32

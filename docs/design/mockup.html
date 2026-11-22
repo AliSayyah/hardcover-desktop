@@ -435,14 +435,28 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 /* The next lane: 240 wide on every row, so the lanes line up down the page. */
 .nx { width: 240px; flex: none; display: flex; gap: var(--s-12); align-items: flex-start; }
 .nx-ghost { margin-left: calc(-1 * var(--s-8)); }
-/* The strip: the series as a row of sm covers. */
-.strip { display: flex; gap: var(--s-4); }
-.sb-it { width: 40px; flex: none; display: flex; flex-direction: column; align-items: center; gap: var(--s-4); }
-.sb-it .mslot { width: var(--cv-sm); background: transparent; }
+/* The series' meter with "6 of 31 read", and the key: each mark the strip shows, with its count. */
+.smeter { display: flex; align-items: center; gap: var(--s-12); margin-top: var(--s-8); }
+.smeter .bar { flex: 1; max-width: 400px; }
+.skey { display: flex; gap: var(--s-16); margin-top: var(--s-4); white-space: nowrap; overflow: hidden; }
+.skey > span { display: inline-flex; align-items: center; gap: var(--s-4); }
+.skey .sw { width: 8px; height: 12px; border-radius: 2px; background: var(--fg-muted); opacity: .4; }
+/* The strip: the series as a shelf of md covers, one line until "Show the other N books" opens it. */
+.strip { display: flex; flex-wrap: wrap; gap: var(--s-16) var(--s-8); margin-top: var(--s-24); }
+.sb-it { width: 72px; flex: none; display: flex; flex-direction: column; align-items: center; gap: var(--s-4); }
+/* Every cover keeps the ring's room; the next book's ring is accent, with "Next" over it. */
+.sb-ring { position: relative; padding: 2px; border: 2px solid transparent; border-radius: 6px; }
+.sb-it.next .sb-ring { border-color: var(--accent); }
+.sb-next { position: absolute; top: -20px; left: 0; right: 0; text-align: center; font: 600 var(--t-12)/var(--l-12) var(--sans); color: var(--accent); }
+.sb-it .mslot { width: var(--cv-md); background: transparent; }
 .sb-it .mslot:has(i) { background: var(--track); }
+.sb-tt { width: 72px; height: calc(2 * var(--l-12)); font-size: var(--t-12); line-height: var(--l-12); text-align: center; color: var(--fg); }
+.sb-it.missing .sb-tt { color: var(--fg-muted); }
+.sb-it .faded { opacity: .4; }
+.sb-more { width: 232px; height: calc(var(--cv-md) * 1.5 + 8px); display: flex; align-items: center; }
 .pos { display: flex; align-items: center; gap: var(--s-2); font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); white-space: nowrap; }
 .sb-it.next .pos { color: var(--fg); font-weight: 600; }
-.slot { width: var(--cv-sm); height: calc(var(--cv-sm) * 1.5); flex: none; border: 1px dashed var(--border-strong); border-radius: var(--r-cover-s); display: flex; align-items: center; justify-content: center; color: var(--fg-muted); }
+.slot { width: var(--cv-md); height: calc(var(--cv-md) * 1.5); flex: none; border: 1px dashed var(--border-strong); border-radius: var(--r-cover); display: flex; align-items: center; justify-content: center; color: var(--fg-muted); }
 .fwrap { position: relative; }
 .fmenu { position: absolute; top: calc(100% + var(--s-4)); right: 0; width: 200px; z-index: 2; }
 .fmenu .ck { width: var(--icon); height: var(--icon); flex: none; display: flex; }
@@ -783,8 +797,9 @@ function bookPage() {
     </div></div></div>`;
 }
 
-// Series, wide: the column fills the region; the strip shows as many books as fit (45 at 2560), and
-// the lanes stay 240 and lined up on the trailing edge.
+// Series, wide: the column fills the region; the strip's line holds as many books as fit (25 at
+// 2560), a longer series shut to it with "Show the other N books", and the lanes stay 240 and lined
+// up on the trailing edge.
 function seriesWide() {
   const dresden = ["Storm Front", "Fool Moon", "Grave Peril", "Summer Knight", "Death Masks", "Blood Rites", "Dead Beat", "Proven Guilty", "White Night", "Small Favor", "Turn Coat", "Changes", "Ghost Story", "Cold Days", "Skin Game", "Peace Talks", "Battle Ground"]
     .map(t => ({ t, a: "Jim Butcher" }));
@@ -795,7 +810,7 @@ function seriesWide() {
   return sidebar("series", 6) + `<div class="main"><div class="scroll page"><div class="series-page">
     ${pageHead().replace('<span class="muted num">5</span>', '<span class="muted num">6</span>')}
     <div class="row-b g-8 group-label"><span class="label">In progress</span><span class="small muted num">3</span></div>
-    <div class="col">${rows.map(rowB).join("")}</div>
+    <div class="col">${rows.map(s => rowB(s, 25)).join("")}</div>
   </div></div></div>`;
 }
 function statsWide(wide = true) {
@@ -1186,10 +1201,26 @@ const dirAttr = o => o.rtl ? ' dir="rtl"' : "";
 const rtlCls = o => o.rtl ? " rtl" : "";
 const released = s => s.books.filter(([, , st]) => st !== "soon");
 const readCount = s => s.books.filter(([, , st]) => st === "read").length;
+// The facts after the author: "#6 not out yet" (unless the next step says it); the read count is the meter's.
 const facts = s => {
-  const out = released(s).length, soon = s.books.find(([, , st]) => st === "soon");
-  return `${readCount(s)} of ${out} read${soon && s.next?.kind !== "waiting" ? ` · #${soon[1]} not out yet` : ""}`;
+  const soon = s.books.find(([, , st]) => st === "soon");
+  return soon && s.next?.kind !== "waiting" ? `#${soon[1]} not out yet` : "";
 };
+const readText = s => `${readCount(s)} of ${released(s).length} read`;
+// The key, in its order: the shelves, then the books not in the library and those not out yet.
+const KEY = [["read", "read"], ["cr", "currently reading"], ["paused", "paused"], ["wtr", "want to read"], ["dnf", "did not finish"], ["none", "not in your library"], ["soon", "not out yet"]];
+function seriesKey(s) {
+  return `<div class="skey small muted num">${KEY.map(([st, label]) => {
+    const n = s.books.filter(([, , x]) => x === st).length;
+    if (!n) return "";
+    const mark = st === "none" ? '<i class="sw"></i>' : st === "soon" ? ic("clock", "xs") : ic(STATUS_ICON[st], "xs");
+    return `<span>${mark}${n} ${label}</span>`;
+  }).join("")}</div>`;
+}
+function seriesMeter(s) {
+  const pct = released(s).length ? readCount(s) / released(s).length * 100 : 0;
+  return `<div class="smeter"><div class="bar"><i style="width:${pct}%"></i></div><span class="strong num">${readText(s)}</span></div>`;
+}
 
 // ---------- Series tracker: shared parts ----------
 // The filter: a select beside the filter input. "Not finished" is the default, so ~200 finished
@@ -1220,35 +1251,53 @@ function nextLane(s) {
     waiting: n.onShelf ? `<span class="chip">${ic("inbox", "xs")}Want to read</span>` : `<span class="btn sm ghost nx-ghost">${ic("plus", "xs")}Want to read</span>`,
   }[n.kind];
   const line = n.kind === "waiting" ? `<div class="num"><span class="strong">${n.d}</span><span class="small muted"> · ${n.soon}</span></div>` : n.line ? `<div class="small muted num">${n.line}</div>` : "";
-  return `<div class="nx">${cover(n.b, "sm")}<div class="fill col">
+  return `<div class="nx">${cover(n.b, "md")}<div class="fill col">
       <div class="small muted num">${head} · #${n.pos}</div>
       <div class="strong one-line${rtlCls(n.b)}"${dirAttr(n.b)}><span class="textbtn">${n.b.t}</span></div>
       ${line}<div class="mt-8 row-c">${act}</div>
     </div></div>`;
 }
-const seriesName = s => `<div class="title-18 one-line${rtlCls(s)}"${dirAttr(s)}><span class="textbtn">${s.name}</span></div>`;
-const seriesFacts = s => `<div class="muted one-line num"><span${dirAttr(s)}>${s.a}</span> · ${facts(s)}</div>`;
+const seriesName = s => `<div class="display d-24 one-line${rtlCls(s)}"${dirAttr(s)}><span class="textbtn">${s.name}</span></div>`;
 
 // ---------- The strip: the series as a shelf of covers ----------
-// Every book in order at sm, with its position and status icon under it. A book that isn't in
-// your library is an empty slot; one that isn't out yet is a slot with its date.
-function strip(s) {
-  return `<div class="strip">${s.books.map(([b, pos, st, pct]) => {
+// Every book in order at md, ringed when it is the next one, with its position, status icon and
+// title under it. A book that isn't in your library is its cover, faded; one that isn't out yet is
+// a slot with a clock. A strip with more books than its line holds (`fits`) is shut to one line,
+// from the book before the next one, ending in "Show the other N books"; opened, every book.
+function strip(s, fits = 99, open = false) {
+  const all = s.books;
+  const nextIx = Math.max(0, all.findIndex(([b]) => s.next && s.next.b === b));
+  let shown = all, more = "";
+  if (all.length > fits) {
+    if (open) more = `<div class="sb-more" style="width:152px"><span class="btn sm ghost">Show fewer</span></div>`;
+    else {
+      const n = Math.max(1, fits - 3), start = Math.min(Math.max(0, nextIx - 1), all.length - n);
+      shown = all.slice(start, start + n);
+      more = `<div class="sb-more"><span class="btn sm ghost">Show the other ${all.length - n} books</span></div>`;
+    }
+  }
+  return `<div class="strip">${shown.map(([b, pos, st, pct]) => {
     const isNext = s.next && s.next.b === b;
-    const body = st === "none" || st === "soon"
-      ? `<div class="slot${st === "soon" ? " soon" : ""}">${st === "soon" ? ic("clock", "xs") : ""}</div>`
-      : cover(b, "sm");
+    const body = st === "soon"
+      ? `<div class="slot">${ic("clock", "xs")}</div>`
+      : st === "none" ? `<div class="faded">${cover(b, "md")}</div>` : cover(b, "md");
     const meter = `<div class="bar thin mslot">${st === "cr" ? `<i style="width:${pct}%"></i>` : ""}</div>`;
     const mark = STATUS_ICON[st] ? ic(STATUS_ICON[st], "xs") : "";
-    return `<div class="sb-it${isNext ? " next" : ""}">${body}${meter}<div class="pos num">${mark}<span>${pos}</span></div></div>`;
-  }).join("")}</div>`;
+    return `<div class="sb-it${isNext ? " next" : ""}${st === "none" ? " missing" : ""}" title="${b.t}">
+      <div class="sb-ring">${body}${isNext ? '<div class="sb-next">Next</div>' : ""}</div>${meter}
+      <div class="pos num">${mark}<span>#${pos}</span></div>
+      <div class="sb-tt clamp-2${rtlCls(b)}"${dirAttr(b)}>${b.t}</div></div>`;
+  }).join("")}${more}</div>`;
 }
-function rowB(s) {
+function rowB(s, fits) {
+  const f = facts(s);
   return `<div class="sr top">
     <div class="fill col">
       ${seriesName(s)}
-      <div class="muted one-line num"><span${dirAttr(s)}>${s.a}</span> · ${facts(s)} · ${s.when}</div>
-      <div class="mt-12">${strip(s)}</div>
+      <div class="muted one-line num"><span${dirAttr(s)}>${s.a}</span>${f ? ` · ${f}` : ""} · ${s.when}</div>
+      ${seriesMeter(s)}
+      ${seriesKey(s)}
+      ${strip(s, fits)}
     </div>
     ${nextLane(s)}
   </div>`;
@@ -1262,7 +1311,7 @@ function seriesPage(filter = "Not finished", open = false) {
     ${GROUPS.filter(([g]) => shown.includes(g)).map(([g, label, n]) => {
       const rows = SERIES.filter(s => s.g === g);
       return `<div class="row-b g-8 group-label"><span class="label">${label}</span><span class="small muted num">${n}</span></div>
-        <div class="col">${rows.map(rowB).join("")}</div>`;
+        <div class="col">${rows.map(s => rowB(s, 8)).join("")}</div>`;
     }).join("")}
     ${hidden}
   </div></div></div>`;
@@ -1290,7 +1339,7 @@ function legend() {
 const shots = [
   ["Home, wide (2560)", "light · a 4K monitor at 1.5, full height · the two content columns share the width and their rows fill them · Newest on Want to read leaves the rail for the second column, under Rate what you finished: one row of md covers, as many as fit", "light", 1400, homeFluid(), 2560],
   ["Library, wide (2560)", "light · the pane fills the window · the header, progress and rail as now · reading text keeps its 640 measure (About, Your review, Reviews); the width beside it holds Tags and Similar books, which add covers as it grows", "light", 1400, libraryFluid(), 2560],
-  ["Series, wide (2560)", "light · the column fills the region; the strip takes the width (here all 17 books; up to 45 fit), the next lanes stay 240 and lined up on the trailing edge", "light", 760, seriesWide(), 2560],
+  ["Series, wide (2560)", "light · the column fills the region; the strip takes the width (here all 17 books; up to 25 fit on its line), the next lanes stay 240 and lined up on the trailing edge", "light", 1130, seriesWide(), 2560],
   ["Stats, wide (2560)", "dark · two columns, each filling its half: Finished per year; Your ratings, then Shelves · charts fill their column, bars at most 48 · the figures one row across both, 32 apart, so the third starts on the second column's spine", "dark", 860, statsWide(), 2560],
   ["Discover, wide (2560)", "light · a catalogue page's list is 704 beside the pane (the prose measure and its inset); the selected book shows in the pane, which takes the rest, with its rail; a click selects, Enter or a double click opens the full page", "light", 1000, discoverWide(), 2560],
   ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail; Coming soon closes the main column (scrolled content shown in full)", "light", 1020, home()],
@@ -1300,8 +1349,8 @@ const shots = [
   ["Book page over Discover", "light · the rail starts at the top; scrolled content shown in full", "light", 1140, bookPage()],
   ["Book page, scrolled to Reviews", "dark · other readers' reviews: a byline that opens their profile, muted stars, a collapsed long review, a spoiler, a Persian review", "dark", 900, reviewsPage()],
   ["Coming soon", "light · the full list over Home, grouped by month, then by year", "light", 760, upcomingPage()],
-  ["Series", "light · the default filter, Not finished: finished series are left out, and a line at the foot says how many", "light", 1150, seriesPage()],
-  ["Series, choosing a filter", "dark · the filter select open: Not finished, Finished, All series, each with its count · a Persian series (کلیدر) on the leading edge, running right to left", "dark", 1150, seriesPage("Not finished", true)],
+  ["Series", "light · the default filter, Not finished: finished series are left out, and a line at the foot says how many · each strip one line of md covers, the next book ringed, books not in the library faded; کلیدر, longer than its line, ends in “Show the other N books”", "light", 1950, seriesPage()],
+  ["Series, choosing a filter", "dark · the filter select open: Not finished, Finished, All series, each with its count · a Persian series (کلیدر) on the leading edge, running right to left", "dark", 1950, seriesPage("Not finished", true)],
   ["Series, filtered to Finished", "light · the same rows; a finished series has no next step, so its lane stays empty", "light", 760, seriesPage("Finished")],
   ["The marks under each book", "light · drawn at 2× · the icon and position carry the state; colour never does", "light", 330, legend()],
   ["Series: empty", "light · nobody has started a series yet", "light", 760, seriesEmpty()],

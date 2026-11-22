@@ -25,8 +25,8 @@
 //! | [`ListRow`] | The list row treatment on a collection's `ListItem`: padding, fills, focus ring and edge |
 //! | [`RowFocus`], [`on_keyboard_entry`], [`select_first_row`], [`enter_list`] | A collection delegate's copy of its list's focus and selection, for `ListRow`'s focus treatment; the list as a tab stop that lands on a row |
 //! | [`Lane`] | A fixed, right-aligned lane for trailing figures or actions, kept when empty |
-//! | [`SeriesStrip`], [`StripItem`] | A series as a row of sm covers, each with its shelf's icon and position under it; the next one in ink; "+N" for the rest |
-//! | [`CoverSlot`] | A dashed place the size of a cover, for a book not in the library (empty) or not out yet (a clock) |
+//! | [`SeriesStrip`], [`StripItem`], [`strip_layout`] | A series as a shelf of md covers, each with its shelf's icon, position and title under it; the next one ringed; one line with "Show the other N books" until opened |
+//! | [`CoverSlot`] | A dashed place the size of a cover, empty or with an icon (the series strip's book not out yet: a clock) |
 //! | [`PropertyList`] | Key and value rows: Edition, Owned, Privacy, Added |
 //! | [`Meter`] | Progress: 6 px beside words, 2 px in a row, with an optional pace tick |
 //! | [`MonthBars`] | Books finished in each month of a year, the counts over the bars: Home's reading goal |
@@ -92,7 +92,7 @@ pub use self::{
     object_bar::{BackTo, ObjectBar, ObjectTools, back_label, tools_of},
     row_focus::{RowFocus, enter_list, on_keyboard_entry, select_first_row},
     rows::{Lane, ListRow, PropertyList, RowSpacing, Sequence},
-    series_strip::{SeriesStrip, StripItem},
+    series_strip::{MISSING_OPACITY, SeriesStrip, StripItem, Toggle, strip_layout},
     sidebar::{AccountRow, GoalRow, brand_row, sidebar_label},
     skeleton::{Skeleton, SkeletonRow, SkeletonText},
     stars::Stars,

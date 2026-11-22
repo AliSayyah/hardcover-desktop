@@ -29,7 +29,6 @@
 //!   activity first, and the waiting ones by the release date.
 
 use std::collections::HashMap;
-use std::ops::Range;
 
 use chrono::Datelike as _;
 use hardcover_core::{
@@ -111,7 +110,7 @@ impl SeriesBook {
 pub enum Mark {
     /// Its cover, with its shelf's icon.
     Shelved(ReadingStatus),
-    /// Not in the library: an empty slot.
+    /// Out, but not in the library: its cover, faded.
     Missing,
     /// Not out yet: a slot with a clock.
     Unreleased,
@@ -243,15 +242,54 @@ impl SeriesSummary {
         self.books.iter().find(|b| !b.out)
     }
 
-    /// "2 of 6 read · #6 not out yet · Last finished Sep 28": the facts after
-    /// the author. "Not out yet" is left out where the next step already
-    /// says it.
-    pub fn facts(&self, today: Date) -> String {
-        let mut parts = vec![format!(
+    /// "2 of 6 read", beside the series' meter.
+    pub fn read_text(&self) -> String {
+        format!(
             "{} of {} read",
             count_text(self.read_count()),
             count_text(self.out_count())
-        )];
+        )
+    }
+
+    /// How much of what is out has been read, 0 to 100, for the meter.
+    pub fn read_percent(&self) -> f32 {
+        match self.out_count() {
+            0 => 0.,
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "book counts in a series are far below f32's exact range"
+            )]
+            out => self.read_count() as f32 / out as f32 * 100.,
+        }
+    }
+
+    /// What the strip's marks stand for, with how many books carry each, in
+    /// the key's order: the shelves from read to ignored, then the books not
+    /// in the library and those not out yet. Marks no book carries are left
+    /// out.
+    pub fn key(&self) -> Vec<(Mark, usize)> {
+        const ORDER: [Mark; 8] = [
+            Mark::Shelved(ReadingStatus::Read),
+            Mark::Shelved(ReadingStatus::CurrentlyReading),
+            Mark::Shelved(ReadingStatus::Paused),
+            Mark::Shelved(ReadingStatus::WantToRead),
+            Mark::Shelved(ReadingStatus::DidNotFinish),
+            Mark::Shelved(ReadingStatus::Ignored),
+            Mark::Missing,
+            Mark::Unreleased,
+        ];
+        ORDER
+            .into_iter()
+            .map(|mark| (mark, self.books.iter().filter(|b| b.mark() == mark).count()))
+            .filter(|(_, n)| *n > 0)
+            .collect()
+    }
+
+    /// "#6 not out yet · Last finished Sep 28": the facts after the author.
+    /// "Not out yet" is left out where the next step already says it. The
+    /// read count is the meter's ([`Self::read_text`]).
+    pub fn facts(&self, today: Date) -> String {
+        let mut parts = Vec::new();
         if self.group != Group::Waiting
             && let Some(book) = self.first_unreleased()
         {
@@ -669,26 +707,15 @@ pub fn hidden_line(finished: usize) -> String {
 
 // ----- the strip and the lane -----
 
-/// The books a strip with room for `capacity` slots shows, and how many
-/// after them it leaves out (its "+N"). A strip that can't show every book
-/// keeps the next one in view, with the book after it when there is room,
-/// and keeps a slot's room for the "+N". It always shows at least one book.
-pub fn strip_window(len: usize, next: Option<usize>, capacity: usize) -> (Range<usize>, usize) {
-    let capacity = capacity.max(1);
-    if len <= capacity {
-        return (0..len, 0);
-    }
-    let slots = (capacity - 1).max(1);
-    let next = next.unwrap_or(0).min(len - 1);
-    if next < slots {
-        return (0..slots, len - slots);
-    }
-    // The next book, then the one after it if a slot is left for it.
-    let end = (next + 1 + usize::from(slots > 1)).min(len);
-    if end == len {
-        return (len - capacity..len, 0);
-    }
-    (end - slots..end, len - end)
+/// One entry of the key under a series' meter: "6 read", "1 currently
+/// reading", "11 not in your library", "1 not out yet".
+pub fn key_text(mark: Mark, count: usize) -> String {
+    let what = match mark {
+        Mark::Shelved(status) => crate::format::status_label(status).to_lowercase(),
+        Mark::Missing => "not in your library".to_owned(),
+        Mark::Unreleased => "not out yet".to_owned(),
+    };
+    format!("{} {what}", count_text(count))
 }
 
 /// The lane's caption: "Reading · #1", "Paused · #3", "Next · #3".
@@ -852,7 +879,9 @@ mod tests {
         // A DNF book is done but not read.
         assert_eq!(s.read_count(), 2);
         assert_eq!(s.out_count(), 4);
-        assert_eq!(s.facts(day(TODAY)), "2 of 4 read · Last finished Oct 5");
+        assert_eq!(s.facts(day(TODAY)), "Last finished Oct 5");
+        assert_eq!(s.read_text(), "2 of 4 read");
+        assert!((s.read_percent() - 50.).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -872,6 +901,30 @@ mod tests {
         assert_eq!(s.group, Group::InProgress);
         assert_eq!(s.activity, Activity::ReadingNow);
         assert_eq!(s.books[2].progress, Some(25.0));
+        // The key: one read, one being read, one not in the library.
+        assert_eq!(
+            s.key(),
+            [
+                (Mark::Shelved(ReadingStatus::Read), 1),
+                (Mark::Shelved(ReadingStatus::CurrentlyReading), 1),
+                (Mark::Missing, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_key_names_each_mark_with_its_count() {
+        assert_eq!(key_text(Mark::Shelved(ReadingStatus::Read), 6), "6 read");
+        assert_eq!(
+            key_text(Mark::Shelved(ReadingStatus::WantToRead), 9),
+            "9 want to read"
+        );
+        assert_eq!(
+            key_text(Mark::Shelved(ReadingStatus::CurrentlyReading), 1),
+            "1 currently reading"
+        );
+        assert_eq!(key_text(Mark::Missing, 1_200), "1,200 not in your library");
+        assert_eq!(key_text(Mark::Unreleased, 1), "1 not out yet");
     }
 
     #[test]
@@ -905,7 +958,7 @@ mod tests {
         assert_eq!(s.books[4].mark(), Mark::Unreleased);
         assert_eq!(
             s.facts(day(TODAY)),
-            "1 of 4 read · #3.5 not out yet · Last finished Oct 1"
+            "#3.5 not out yet · Last finished Oct 1"
         );
     }
 
@@ -979,7 +1032,7 @@ mod tests {
         assert_eq!(s.books[2].release_date, Some(day("2026-11-26")));
         assert_eq!(s.books[2].mark(), Mark::Unreleased);
         assert_eq!(s.activity, Activity::CaughtUpSince(day("2026-02-02")));
-        assert_eq!(s.facts(day(TODAY)), "2 of 2 read · Caught up since Feb 2");
+        assert_eq!(s.facts(day(TODAY)), "Caught up since Feb 2");
 
         // A later year counts as not out, without a date.
         let mut later = tracked(20, "Later", &[(1, 1.0), (2, 2.0)]);
@@ -1015,10 +1068,7 @@ mod tests {
         let s = summary(&series, std::slice::from_ref(&older));
         assert_eq!(s.group, Group::Untouched);
         assert_eq!(s.activity, Activity::LastFinished(day("2025-11-19")));
-        assert_eq!(
-            s.facts(day(TODAY)),
-            "1 of 2 read · Last finished Nov 19, 2025"
-        );
+        assert_eq!(s.facts(day(TODAY)), "Last finished Nov 19, 2025");
         // A recent update to an entry of the series touches it.
         let mut touched = older;
         touched.updated_at = Some("2026-03-01T10:00:00Z".parse().unwrap());
@@ -1176,42 +1226,6 @@ mod tests {
         assert_eq!(grouped(&all, Filter::All, "").len(), 2);
         assert_eq!(hidden_line(1), "1 finished series isn't shown.");
         assert_eq!(hidden_line(3), "3 finished series aren't shown.");
-    }
-
-    #[test]
-    fn a_long_strip_keeps_the_next_book_in_view() {
-        // Everything fits.
-        assert_eq!(strip_window(6, Some(2), 6), (0..6, 0));
-        // The next is near the start: the first slots and "+N".
-        assert_eq!(strip_window(10, Some(2), 6), (0..5, 5));
-        // Further on: the window slides to show it and the one after.
-        assert_eq!(strip_window(10, Some(6), 6), (3..8, 2));
-        // Near the end: no "+N" needed, so every slot shows a book.
-        assert_eq!(strip_window(10, Some(8), 6), (4..10, 0));
-        assert_eq!(strip_window(10, None, 6), (0..5, 5));
-        assert_eq!(strip_window(3, Some(0), 0), (0..1, 2));
-        // Room for one book and the "+N": the next one, not the one after.
-        assert_eq!(strip_window(10, Some(5), 2), (5..6, 4));
-        assert_eq!(strip_window(10, Some(5), 1), (5..6, 4));
-    }
-
-    #[test]
-    fn every_strip_window_shows_the_next_book() {
-        for len in 1..12 {
-            for capacity in 0..14 {
-                for next in 0..len {
-                    let (shown, more) = strip_window(len, Some(next), capacity);
-                    let what = format!("len {len}, next {next}, capacity {capacity}");
-                    assert!(!shown.is_empty(), "{what}");
-                    assert!(shown.contains(&next), "{what}: {shown:?}");
-                    assert!(shown.end <= len, "{what}");
-                    assert_eq!(shown.end + more, len, "{what}");
-                    // The "+N" takes a slot of its own.
-                    let used = shown.len() + usize::from(more > 0);
-                    assert!(used <= capacity.max(2), "{what}: {shown:?} +{more}");
-                }
-            }
-        }
     }
 
     #[test]
