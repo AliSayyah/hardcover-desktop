@@ -105,6 +105,11 @@ packaging:
 shellcheck:
     shellcheck install.sh packaging/linux/*.sh ci/*.sh scripts/*.sh
 
+# Test the release script's handling of a flaky network, offline (a fake gh)
+[group('check')]
+release-test:
+    scripts/release-test.sh
+
 # Lint the GitHub workflows
 [group('check')]
 actionlint:
@@ -115,9 +120,9 @@ actionlint:
 [group('check')]
 check: fmt-check clippy test
 
-# Everything CI runs offline: check, plus cargo deny, packaging, shellcheck and actionlint
+# Everything CI runs offline: check, plus cargo deny, packaging, shellcheck, the release script's test and actionlint
 [group('check')]
-ci: check deny packaging shellcheck actionlint
+ci: check deny packaging shellcheck release-test actionlint
 
 # Live read tests (needs HARDCOVER_TOKEN, from the environment or .env)
 [group('live')]

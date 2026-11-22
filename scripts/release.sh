@@ -9,8 +9,16 @@
 # `ship` opens the release PR, waits for CI, squash-merges it, waits for CI on
 # the merge commit, then tags that commit, pushes the tag, and waits for
 # release.yml to publish. It asks once, before the first step. Run it again
-# after a failure and it picks up where it stopped: an open release PR is
-# reused, and a bump already merged to master is tagged without a level.
+# after a failure and it picks up where it stopped: an open release PR (or a
+# pushed release branch without one) is reused, a bump already merged to
+# master is tagged, and a tag not yet published is followed, all without a
+# level.
+#
+# It rides out a flaky network: a call to GitHub that the network fails is
+# tried again for about three minutes, a change that seemed to fail is first
+# checked for having gone through, and a wait for CI polls the run and keeps
+# going through 15 minutes without contact. When the network stays down, it
+# says so and stops; running it again picks up from there.
 #
 # What is tagged is always the bump commit itself, never whatever master's tip
 # is by then, and only once it is checked to change nothing but the version.
@@ -126,18 +134,157 @@ $(git diff "$parent" "$commit" -- "$file")"
 }
 
 # --- git and GitHub ---------------------------------------------------------
+#
+# The network drops: an "unexpected EOF" from GitHub once ended the wait for
+# a release build that then passed. So every read from GitHub goes through
+# `retry`, every change through `write`, and a CI run is followed by polling
+# it. When the network stays down the script stops in a state `ship` picks up
+# again (`lost_contact`).
 
-fetch() { git fetch --quiet --tags "$remote" "$base"; }
+# Seconds to wait before each new try of a call the network failed.
+retry_delays=(5 10 20 30 60 60)
+# A CI run is polled every `poll` seconds. A wait gives up once its failed
+# polls add up to `patience` seconds; a suspended laptop doesn't count.
+poll=15
+patience=900
+
+# True if the error $1 is the network's, not an answer: gh's transport errors
+# (Go's `Get "https://…": …`), git's (`unable to access '…'`), a server error
+# or a rate limit.
+transient() {
+  grep -qiE '^(Get|Post|Put|Patch|Delete|Head) "https?://[^"]*": |unable to access|error connecting to|HTTP (5[0-9]{2}|429)|rate limit|Something went wrong|RPC failed|early EOF|remote end hung up|unexpected EOF|connection (reset|refused|closed|timed out)|could not resolve host|TLS handshake|deadline exceeded|timed out|timeout' <<<"$1"
+}
+
+lost_contact() {
+  echo "release: can't reach GitHub. Once the network is back, run \`just release\` (no level needed) again: it picks up where this stopped." >&2
+}
+
+# Says why a try failed (the first line of $1) and waits $2 seconds.
+again() {
+  info "${1%%$'\n'*}"
+  info "trying again in $2 s"
+  sleep "$2"
+}
+
+# Runs the read $@ and prints its output, trying again while the network
+# fails it. An answer is not tried again:
+#   -a PATTERN  an error matching it is an answer ("release not found"):
+#               returns 1, quietly
+#   -s STATUS   so is that exit status (`git ls-remote --exit-code`'s 2)
+# Any other error is shown and returns 2; a network that stays down, 75.
+retry() {
+  local answer='' answer_status='' errfile out err status try
+  while [[ ${1-} == -[as] ]]; do
+    case $1 in
+      -a) answer=$2 ;;
+      -s) answer_status=$2 ;;
+    esac
+    shift 2
+  done
+  errfile=$(mktemp)
+  for ((try = 0; ; try++)); do
+    status=0
+    out=$("$@" 2>"$errfile") || status=$?
+    err=$(<"$errfile")
+    if ((status == 0)); then
+      rm -f "$errfile"
+      [[ -z $out ]] || printf '%s\n' "$out"
+      return 0
+    fi
+    if [[ $status == "$answer_status" ]] || { [[ -n $answer ]] && grep -qiE "$answer" <<<"$err"; }; then
+      rm -f "$errfile"
+      return 1
+    fi
+    if ! transient "$err" || ((try == ${#retry_delays[@]})); then
+      rm -f "$errfile"
+      printf '%s\n' "$err" >&2
+      if transient "$err"; then
+        lost_contact
+        return 75
+      fi
+      return 2
+    fi
+    again "$err" "${retry_delays[try]}"
+  done
+}
+
+# `write CHECK… -- COMMAND…` runs the change COMMAND (its output to stderr).
+# When it fails, CHECK says whether it happened anyway and only the answer was
+# lost; if not, a network failure is tried again as in `retry`, and anything
+# else returns 1, shown. CHECK is one call, and a network failure there counts
+# as not yet: each change here is safe to send twice.
+write() {
+  local check=() err status try
+  while [[ $1 != -- ]]; do
+    check+=("$1")
+    shift
+  done
+  shift
+  for ((try = 0; ; try++)); do
+    status=0
+    { err=$("$@" 2>&1 >&3 3>&-); } 3>&2 || status=$?
+    ((status != 0)) || return 0
+    if "${check[@]}" >/dev/null 2>&1; then
+      info "it went through, though the answer was lost"
+      return 0
+    fi
+    if ! transient "$err" || ((try == ${#retry_delays[@]})); then
+      printf '%s\n' "$err" >&2
+      ! transient "$err" || lost_contact
+      return 1
+    fi
+    again "$err" "${retry_delays[try]}"
+  done
+}
+
+# Fetches $base and the tags, and notes which release tags $remote has: those
+# count, not a local tag that a stopped run made and never pushed.
+fetch() {
+  retry git fetch --quiet --tags "$remote" "$base"
+  remote_tags=$(retry git ls-remote --tags --refs "$remote" 'refs/tags/v[0-9]*' | sed 's|.*refs/tags/||')
+}
 base_sha() { git rev-parse "$remote/$base"; }
 base_version() { git show "$remote/$base:$app_toml" | cargo_version; }
 base_listed() { git show "$remote/$base:$metainfo" | metainfo_version; }
-latest_tag() { git tag -l 'v[0-9]*' --sort=-v:refname | head -n1; }
-tag_exists() { git rev-parse -q --verify "refs/tags/$1" >/dev/null; }
-released() { gh release view "$1" >/dev/null 2>&1; }
+# The newest release tag on $remote, as of the last `fetch`.
+latest_tag() { sed '/^$/d' <<<"$remote_tags" | sort -V | tail -n1; }
+tag_on_remote() { grep -qxF -- "$1" <<<"$remote_tags"; }
+
+# Whether tag $1 has a GitHub release. Stops when GitHub can't say.
+released() {
+  local status=0
+  retry -a 'release not found' gh release view "$1" --json tagName >/dev/null || status=$?
+  case $status in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) exit 1 ;; # retry said why
+  esac
+}
+
+# The versions of the release branches (`release-X.Y.Z`) in `git ls-remote`'s
+# output, on stdin.
+release_branches() { sed -n 's|.*\trefs/heads/release-\([0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}\)$|\1|p'; }
+
+# The number of the open PR from this repository's branch $1, if any. A fork
+# can name its branch anything.
+pr_for_branch() {
+  gh pr list --base "$base" --head "$1" --state open --json number,isCrossRepository \
+    --jq '[.[] | select(.isCrossRepository | not)][0].number // empty'
+}
+
+# The checks `write` asks after a failure, one try each.
+pr_opened() { [[ -n $(pr_for_branch "$1") ]]; }
+pr_merged() { [[ $(gh pr view "$1" --json state --jq .state) == MERGED ]]; }
+branch_at() { [[ $(git ls-remote --heads "$remote" "refs/heads/$1" | cut -f1) == "$2" ]]; }
+# Tag $1 on $remote, peeled, is commit $2.
+tag_at() {
+  [[ $(git ls-remote --tags "$remote" "refs/tags/$1" "refs/tags/$1^{}" | awk '{ sha = $1 } END { print sha }') == "$2" ]]
+}
 
 need_gh() {
   command -v gh >/dev/null || die "needs the GitHub CLI (gh)"
-  gh auth status >/dev/null 2>&1 || die "gh is not signed in: gh auth login"
+  # Not `gh auth status`: offline, it says the token is invalid.
+  gh auth token >/dev/null 2>&1 || die "gh is not signed in: gh auth login"
 }
 
 # The changes since the latest tag, one "- subject" line each.
@@ -157,29 +304,89 @@ confirm() {
 }
 
 # The newest run of workflow $1 for commit $2 and event $3, waiting up to five
-# minutes for it to appear.
+# minutes for it to appear (and longer while GitHub can't be reached).
 find_run() {
-  local id i
-  for ((i = 0; i < 60; i++)); do
-    id=$(gh run list --workflow "$1" --commit "$2" --event "$3" --limit 1 \
-      --json databaseId --jq '.[0].databaseId // empty')
-    if [[ -n $id ]]; then
-      echo "$id"
-      return
+  local id polls=0 offline=0 status
+  while :; do
+    status=0
+    id=$(poll_once gh run list --workflow "$1" --commit "$2" --event "$3" --limit 1 \
+      --json databaseId --jq '.[0].databaseId // empty') || status=$?
+    if ((status == 0)); then
+      if [[ -n $id ]]; then
+        echo "$id"
+        return
+      fi
+      ((++polls < 60)) || die "no $1 run started for ${2:0:7} ($3) after five minutes"
+    else
+      ((status == 1)) || die "couldn't look for the $1 run of ${2:0:7} (above)"
+      ((offline += 5))
+      if ((offline >= patience)); then
+        lost_contact
+        exit 1
+      fi
     fi
     sleep 5
   done
-  die "no $1 run started for ${2:0:7} ($3) after five minutes"
 }
 
-# Waits for workflow $1 on commit $2 (event $3) to finish; dies unless it passed.
+# One poll of a wait: runs $@ and prints its output. Returns 1 when the
+# network failed it, and 2, shown, on any other error: no reason to wait on.
+poll_once() {
+  local errfile status=0
+  errfile=$(mktemp)
+  "$@" 2>"$errfile" || status=$?
+  if ((status != 0)); then
+    if transient "$(<"$errfile")"; then
+      status=1
+    else
+      cat "$errfile" >&2
+      status=2
+    fi
+  fi
+  rm -f "$errfile"
+  return "$status"
+}
+
+# A run's state for `wait_for_run`: "status|conclusion|what it is doing".
+run_state='"\(.status)|\(.conclusion // "")|\([.jobs[] | select(.status == "in_progress")
+  | .name + (first(.steps[]? | select(.status == "in_progress") | ": " + .name) // "")] | join("; "))"'
+
+# Waits for workflow $1 on commit $2 (event $3) to finish; dies unless it
+# passed. It polls the run rather than use `gh run watch`, which ends at the
+# first dropped connection, so a run that failed and a network that did are
+# told apart.
 wait_for_run() {
-  local id
-  id=$(find_run "$1" "$2" "$3")
-  info "$(gh run view "$id" --json url --jq .url)"
-  gh run watch "$id" --exit-status --compact --interval 10 >&2 ||
-    die "$1 failed on ${2:0:7}: $(gh run view "$id" --json url --jq .url)
+  local workflow=$1 sha=$2 event=$3 id url state status conclusion now shown='' offline=0 polled
+  id=$(find_run "$workflow" "$sha" "$event")
+  url=$(retry gh run view "$id" --json url --jq .url)
+  info "$url"
+  while :; do
+    polled=0
+    state=$(poll_once gh run view "$id" --json status,conclusion,jobs --jq "$run_state") || polled=$?
+    if ((polled == 0)); then
+      ((offline == 0)) || info "reached GitHub again"
+      offline=0
+      IFS='|' read -r status conclusion now <<<"$state"
+      if [[ $status == completed ]]; then
+        [[ $conclusion != success ]] || return 0
+        die "$workflow ended in $conclusion on ${sha:0:7}: $url
   Push a fix (or re-run it: gh run rerun --failed $id), then run \`just release\` again."
+      fi
+      now=${now:-$status}
+      [[ $now == "$shown" ]] || info "$now"
+      shown=$now
+    else
+      ((polled == 1)) || die "couldn't follow $workflow: $url (above)"
+      ((offline > 0)) || info "can't reach GitHub; still waiting (the run goes on regardless)"
+      ((offline += poll))
+      if ((offline >= patience)); then
+        info "as far as is known, $workflow is still running: $url"
+        lost_contact
+        exit 1
+      fi
+    fi
+    sleep "$poll"
+  done
 }
 
 # --- steps ------------------------------------------------------------------
@@ -196,40 +403,49 @@ cmd_bump() {
 }
 
 # Opens (or finds) the PR that bumps origin/master to $1; prints its number.
+# A branch an earlier run pushed but couldn't open the PR for is reused, if it
+# is still exactly the bump on master's tip.
 open_pr() {
-  local new=$1 branch="release-$1" number tmp
-  # Only a PR from this repository: a fork can name its branch anything.
-  number=$(gh pr list --base "$base" --head "$branch" --state open --json number,isCrossRepository \
-    --jq '[.[] | select(.isCrossRepository | not)][0].number // empty')
+  local new=$1 branch="release-$1" number tmp head tip latest body
+  number=$(retry pr_for_branch "$branch")
   if [[ -n $number ]]; then
     info "reusing the open PR #$number"
     echo "$number"
     return
   fi
-  ! git ls-remote --exit-code --heads "$remote" "$branch" >/dev/null ||
-    die "$branch exists on $remote but has no open PR: delete it (git push $remote --delete $branch) and run again"
 
-  tmp=$(mktemp -d)
-  # shellcheck disable=SC2064 # expand now: tmp is local
-  trap "git -C '$root' worktree remove --force '$tmp/tree' 2>/dev/null || true; rm -rf '$tmp'; git -C '$root' worktree prune" EXIT
-  git worktree add --quiet --detach "$tmp/tree" "$remote/$base"
-  apply_bump "$tmp/tree" "$new"
-  git -C "$tmp/tree" commit --quiet -am "Release $new"
-  git -C "$tmp/tree" push --quiet "$remote" "HEAD:refs/heads/$branch"
+  tip=$(base_sha)
+  head=$(retry git ls-remote --heads "$remote" "refs/heads/$branch" | cut -f1)
+  if [[ -n $head ]]; then
+    retry git fetch --quiet "$remote" "refs/heads/$branch"
+    [[ $(git rev-parse FETCH_HEAD) == "$head" && $(git rev-parse "$head^") == "$tip" ]] ||
+      die "$branch exists on $remote with no open PR, and is not the bump on $base's tip: delete it (git push $remote --delete $branch) and run again"
+    check_bump "$tip" "$head" "$new" "$branch"
+    info "$branch is already pushed; opening its PR"
+  else
+    tmp=$(mktemp -d)
+    # shellcheck disable=SC2064 # expand now: tmp is local
+    trap "git -C '$root' worktree remove --force '$tmp/tree' 2>/dev/null || true; rm -rf '$tmp'; git -C '$root' worktree prune" EXIT
+    git worktree add --quiet --detach "$tmp/tree" "$tip"
+    apply_bump "$tmp/tree" "$new"
+    git -C "$tmp/tree" commit --quiet -am "Release $new"
+    head=$(git -C "$tmp/tree" rev-parse HEAD)
+    write branch_at "$branch" "$head" -- git -C "$tmp/tree" push --quiet "$remote" "HEAD:refs/heads/$branch"
+  fi
 
-  local latest url
   latest=$(latest_tag)
-  url=$(
-    {
-      echo "Bumps the app to $new and adds the metainfo release entry. Once CI passes, \`just release\` merges it and tags \`v$new\` to publish."
-      echo
-      echo "Since ${latest:-the start}:"
-      echo
-      changes
-    } | gh pr create --base "$base" --head "$branch" --title "Release $new" --assignee @me --body-file -
+  body=$(
+    echo "Bumps the app to $new and adds the metainfo release entry. Once CI passes, \`just release\` merges it and tags \`v$new\` to publish."
+    echo
+    echo "Since ${latest:-the start}:"
+    echo
+    changes
   )
-  info "$url"
-  echo "${url##*/}"
+  write pr_opened "$branch" -- \
+    gh pr create --base "$base" --head "$branch" --title "Release $new" --assignee @me --body "$body"
+  number=$(retry pr_for_branch "$branch")
+  [[ -n $number ]] || die "opened the PR for $branch, but GitHub doesn't list it; run \`just release\` again"
+  echo "$number"
 }
 
 # Dies unless PR $1 is exactly the bump to $2: from this repository, into
@@ -237,12 +453,12 @@ open_pr() {
 # version lines. A PR on an older master would ship changes it doesn't list.
 check_pr() {
   local number=$1 version=$2 head=$3 shape tip
-  shape=$(gh pr view "$number" --json isCrossRepository,baseRefName \
+  shape=$(retry gh pr view "$number" --json isCrossRepository,baseRefName \
     --jq '"\(.isCrossRepository) \(.baseRefName)"')
   [[ $shape == "false $base" ]] ||
     die "PR #$number is not from this repository into $base ($shape), so it is not merged automatically"
   fetch
-  git fetch --quiet "$remote" "refs/pull/$number/head"
+  retry git fetch --quiet "$remote" "refs/pull/$number/head"
   [[ $(git rev-parse FETCH_HEAD) == "$head" ]] || die "PR #$number moved while being checked; run again"
   tip=$(base_sha)
   git merge-base --is-ancestor "$tip" "$head" ||
@@ -257,17 +473,23 @@ check_pr() {
 # passed; prints the merge commit. Dies unless that commit is exactly what the
 # PR's CI tested: had master moved while it merged, it would hold more.
 merge_pr() {
-  local number=$1 version=$2 head merged
-  head=$(gh pr view "$number" --json headRefOid --jq .headRefOid)
+  local number=$1 version=$2 head merged i
+  head=$(retry gh pr view "$number" --json headRefOid --jq .headRefOid)
   check_pr "$number" "$version" "$head"
   step "Waiting for CI on PR #$number"
   wait_for_run ci.yml "$head" pull_request
   check_pr "$number" "$version" "$head"
   step "Merging PR #$number"
-  gh pr merge "$number" --squash --delete-branch --match-head-commit "$head" \
-    --subject "Release $version (#$number)" --body "" >&2
-  merged=$(gh pr view "$number" --json mergeCommit --jq '.mergeCommit.oid // empty')
-  [[ -n $merged ]] || die "PR #$number shows no merge commit; finish with \`just release\`"
+  # --match-head-commit makes a second try safe.
+  write pr_merged "$number" -- gh pr merge "$number" --squash --delete-branch --match-head-commit "$head" \
+    --subject "Release $version (#$number)" --body ""
+  # GitHub can take a moment to show the merge commit.
+  for ((i = 0; ; i++)); do
+    merged=$(retry gh pr view "$number" --json mergeCommit --jq '.mergeCommit.oid // empty')
+    [[ -z $merged ]] || break
+    ((i < 12)) || die "PR #$number shows no merge commit; finish with \`just release\`"
+    sleep 5
+  done
   fetch
   git merge-base --is-ancestor "$merged" "$remote/$base" || die "the merge of PR #$number (${merged:0:7}) is not on $remote/$base"
   [[ $(git rev-parse "$merged^{tree}") == "$(git rev-parse "$head^{tree}")" ]] ||
@@ -299,15 +521,20 @@ base_release() {
 }
 
 # Tags commit $1, the bump to $2 on $base, and pushes the tag. Unless asked
-# to wait ($3 = wait), CI on that commit must already have passed.
+# to wait ($3 = wait), CI on that commit must already have passed. A local
+# tag left by a run that stopped while pushing it is pushed as it is, if it
+# is on that commit.
 tag_release() {
   local sha=$1 version=$2 tag="v$2" latest ci later
   [[ $(git show "$sha:$app_toml" | cargo_version) == "$version" &&
     $(git show "$sha:$metainfo" | metainfo_version) == "$version" ]] ||
     die "${sha:0:7} is not version $version"
   git merge-base --is-ancestor "$sha" "$remote/$base" || die "${sha:0:7} is not on $remote/$base"
-  ! tag_exists "$tag" || die "$tag already exists: start a new release with \`just release patch\` (or minor, major)"
-  ! git ls-remote --exit-code --tags "$remote" "refs/tags/$tag" >/dev/null || die "$tag already exists on $remote"
+  ! tag_on_remote "$tag" || die "$tag already exists on $remote: start a new release with \`just release patch\` (or minor, major)"
+  if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    [[ $(git rev-parse "$tag^{commit}") == "$sha" ]] ||
+      die "a local tag $tag, not on $remote, points at $(git rev-parse --short "$tag^{commit}"), not ${sha:0:7}: delete it (git tag -d $tag) and run again"
+  fi
   latest=$(latest_tag)
   [[ -z $latest ]] || newer "$version" "${latest#v}" || die "$version is not newer than the latest release, $latest"
 
@@ -315,7 +542,7 @@ tag_release() {
     step "Waiting for CI on ${sha:0:7}"
     wait_for_run ci.yml "$sha" push
   else
-    ci=$(gh run list --workflow ci.yml --commit "$sha" --event push --limit 1 \
+    ci=$(retry gh run list --workflow ci.yml --commit "$sha" --event push --limit 1 \
       --json status,conclusion --jq '.[0] | select(.) | "\(.status) \(.conclusion)"')
     [[ $ci == "completed success" ]] || die "CI on ${sha:0:7} has not passed: ${ci:-no run yet}"
   fi
@@ -326,11 +553,12 @@ tag_release() {
   later=$(git rev-list --count "$sha..$remote/$base")
   [[ $later == 0 ]] || info "not in it: the $later later commits on $base"
   confirm "Tag and push $tag? This publishes a release that installed copies update to."
-  git tag -a "$tag" -m "Hardcover Desktop $version" "$sha"
-  git push --quiet "$remote" "refs/tags/$tag" || {
-    git tag -d "$tag" >/dev/null
-    die "pushing $tag failed; removed the local tag"
-  }
+  if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    info "pushing the local tag $tag, from a run that stopped"
+  else
+    git tag -a "$tag" -m "Hardcover Desktop $version" "$sha"
+  fi
+  write tag_at "$tag" "$sha" -- git push --quiet "$remote" "refs/tags/$tag" || die "couldn't push $tag"
   info "pushed $tag"
 }
 
@@ -342,7 +570,8 @@ watch_release() {
   wait_for_run release.yml "$sha" push
   released "$tag" || die "release.yml passed but there is no GitHub release for $tag"
   step "Released $tag"
-  info "$(gh release view "$tag" --json url --jq .url)"
+  local url
+  ! url=$(gh release view "$tag" --json url --jq .url 2>/dev/null) || info "$url"
 }
 
 cmd_pr() {
@@ -371,7 +600,7 @@ cmd_ship() {
   local level=${1:-}
   need_gh
   fetch
-  local current latest open
+  local current latest
   current=$(base_version)
   latest=$(latest_tag)
 
@@ -387,26 +616,41 @@ cmd_ship() {
     watch_release "v$current"
     return
   fi
-  if tag_exists "v$current" && ! released "v$current"; then
+  if tag_on_remote "v$current" && ! released "v$current"; then
     # Tagged, but the release build hasn't published it.
     [[ -z $level ]] || die "v$current is tagged but not published yet: run \`just release\` without a level to follow it"
     watch_release "v$current"
     return
   fi
-  open=$(gh pr list --state open --base "$base" --json number,headRefName,isCrossRepository \
-    --jq '[.[] | select((.isCrossRepository | not) and (.headRefName | startswith("release-")))][0]
+  # A release PR, or a release branch whose PR a run couldn't open.
+  # Only `release-X.Y.Z` is a release branch.
+  local open version='' what pushed drop
+  open=$(retry gh pr list --state open --base "$base" --json number,headRefName,isCrossRepository \
+    --jq '[.[] | select((.isCrossRepository | not) and (.headRefName | test("^release-[0-9]+\\.[0-9]+\\.[0-9]+$")))][0]
       | select(.) | "\(.number) \(.headRefName)"')
   if [[ -n $open ]]; then
-    local number=${open%% *} branch=${open#* }
-    [[ -z $level || ${branch#release-} == "$(next_version "$current" "$level")" ]] ||
-      die "PR #$number already releases ${branch#release-}: finish it with \`just release\`, or close it"
-    step "Finishing ${branch#release-}: PR #$number is open"
-    confirm "Merge PR #$number once CI passes, then tag and publish v${branch#release-}?"
+    version=${open#* release-}
+    what="PR #${open%% *} is open"
+    drop="close it (gh pr close ${open%% *} --delete-branch)"
+  else
+    pushed=$(retry git ls-remote --heads "$remote" 'refs/heads/release-*' | release_branches | sort -V | tail -n1)
+    if [[ -n $pushed ]] && newer "$pushed" "$current"; then
+      version=$pushed
+      what="release-$pushed is pushed, with no PR yet"
+      drop="delete it (git push $remote --delete release-$pushed)"
+    fi
+  fi
+  if [[ -n $version ]]; then
+    [[ -z $level || $version == "$(next_version "$current" "$level")" ]] ||
+      die "$version is already under way ($what): finish it with \`just release\`, or $drop"
+    step "Finishing $version: $what"
+    confirm "Merge its PR once CI passes, then tag and publish v$version?"
     yes=1
-    local merged
-    merged=$(merge_pr "$number" "${branch#release-}")
-    tag_release "$merged" "${branch#release-}" wait
-    watch_release "v${branch#release-}"
+    local number merged
+    number=$(open_pr "$version")
+    merged=$(merge_pr "$number" "$version")
+    tag_release "$merged" "$version" wait
+    watch_release "v$version"
     return
   fi
 

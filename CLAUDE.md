@@ -29,7 +29,7 @@ A build without `demo` runs once per data directory (`instance`): with the insta
 
 The `justfile` wraps these; `just` lists the recipes.
 - `just check` runs fmt-check, clippy (`-D warnings`, also over the demo build, which CI does not) and the tests.
-- `just ci` adds `cargo deny`, the packaging validation, ShellCheck (`just shellcheck`) and actionlint.
+- `just ci` adds `cargo deny`, the packaging validation, ShellCheck (`just shellcheck`), the release script's test (`just release-test`) and actionlint.
 - `just package` builds the release tarball into `target/package/`; `just appimage` repacks it as an AppImage and its `.zsync`, next to it. An AppImage bundles the build system's libraries, so a release one is built on Ubuntu 22.04.
 - `just demo-faults <faults>` runs the demo with `HARDCOVER_DEMO_FAULTS` set, e.g. `just demo-faults scope=read:goals`.
 - `just api-check` is `api_check --check`; `just schema-update` is the run that rewrites `schema/`.
@@ -277,7 +277,7 @@ Two skills live in `.claude/skills`:
   - `cargo deny` (`deny.toml`)
   - cargo-deny and actionlint are downloaded by version and checked against a pinned SHA-256 (from their releases' own checksum files); bump each version and its checksum together.
   - desktop-entry and metainfo validation
-  - ShellCheck over `install.sh`, `packaging/linux/`, `ci/` and `scripts/`, then `install.sh` against the latest published release: it must install it, and refuse that tarball modified or renamed to another version
+  - ShellCheck over `install.sh`, `packaging/linux/`, `ci/` and `scripts/`, and `scripts/release-test.sh` (the release script's network handling, offline, with a fake `gh`), then `install.sh` against the latest published release: it must install it, and refuse that tarball modified or renamed to another version
   - actionlint
 - Clippy and the tests run in an `ubuntu:22.04` container, the same one the release builds in. `ci/install-build-deps.sh` holds the system packages; it is the single list for both.
 - `.github/actions/setup-rust` sets up every build job. Its caches are saved only from `master`; other branches restore them.
@@ -297,7 +297,9 @@ Two skills live in `.claude/skills`:
   - waits for CI on the merge commit, then tags that very commit (never whatever `master`'s tip is by then) with the annotated tag `vX.Y.Z` ("Hardcover Desktop X.Y.Z") and pushes it;
   - follows `release.yml` until the GitHub release exists, and prints its URL.
 
-  It refuses a version that isn't newer than the current one and the latest tag, and a release with no commits since the last tag. After a failure (red CI, say), fix it and run `just release` again with no level: it resumes an open `release-*` PR, a bump on master that has no tag yet, or a tag that hasn't been published. `--yes` skips the question; without a terminal it is required.
+  It refuses a version that isn't newer than the current one and the latest tag, and a release with no commits since the last tag. After a failure (red CI, say), fix it and run `just release` again with no level: it resumes an open `release-*` PR (or a pushed `release-*` branch whose PR wasn't opened), a bump on master that has no tag yet, or a tag that hasn't been published. Tags count as they are on the remote: a local tag left by a run that stopped while pushing it is pushed as it is, if it is on the bump commit. `--yes` skips the question; without a terminal it is required.
+
+  It rides out a flaky network. Every read from GitHub (gh or git) goes through `retry`, which tries again for about three minutes when the error is the network's (`transient`: gh's `Get "https://…": …`, git's `unable to access`, a 5xx or a rate limit), and never when it is an answer (a 404, "release not found"). Every change (pushing the branch and the tag, opening and merging the PR) goes through `write`, which, when it fails, first asks whether it went through anyway (the PR is open or merged, the remote tag peels to the commit), and tries again only if not; each is safe to send twice. A CI run is followed by polling `gh run view`, not `gh run watch` (which ended 0.4.0's run at its first dropped connection, saying the build failed), so a run that failed and a network that did are told apart; a wait gives up after 15 minutes' worth of failed polls. Whenever the network stays down it says so (`lost_contact`) and stops in a state the next run picks up. `scripts/release-test.sh` covers this against a fake `gh`; add a case there when you change it.
 
   The steps also run on their own:
   - `just bump <level>` edits this checkout and commits nothing.
