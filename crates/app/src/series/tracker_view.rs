@@ -3,8 +3,10 @@
 //! the one next step.
 //!
 //! - **Column:** inset 32, filling the region. The strip takes the width
-//!   (as many books as fit, `row::strip_capacity`), and the 240 next lanes
-//!   stay lined up on the trailing edge.
+//!   (as many books as fit on a line, `row::strip_capacity`), and the 240
+//!   next lanes stay lined up on the trailing edge. A strip that doesn't fit
+//!   is one line until its "Show the other N books" opens it; the series
+//!   opened are kept for the session.
 //! - **Header:** the `page-title` "Series" with
 //!   the shown count, the line under it, and on the trailing edge the text
 //!   filter and the filter select (168 each). It sits above the list, not
@@ -21,6 +23,7 @@
 //!   library's own failure fills the page when it has never loaded; with no
 //!   series started, the empty state.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -35,11 +38,13 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Rems, Render, SharedString,
     Size, Styled as _, Subscription, Window, div, px, rems, size as pt_size,
 };
-use hardcover_core::Date;
+use hardcover_core::{Date, SeriesId};
 
 use super::model::SeriesModel;
 use super::progress::{Counts, Filter, Group, SeriesSummary, counts, grouped, hidden_line};
-use super::row::{SeriesRow, row_height, skeleton_row, strip_capacity};
+use super::row::{
+    OnToggle, RowStrip, SeriesRow, row_height, skeleton_row, strip_capacity, strip_lines,
+};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
 use crate::resource::LoadStatus;
@@ -127,6 +132,10 @@ struct ListKey {
     filter: Filter,
     query: String,
     rem: Pixels,
+    /// Books a strip's line has room for, and which strips are opened: the
+    /// rows' heights follow both.
+    capacity: usize,
+    opened: Rc<HashSet<SeriesId>>,
 }
 
 impl PartialEq for ListKey {
@@ -135,6 +144,8 @@ impl PartialEq for ListKey {
             && self.filter == other.filter
             && self.query == other.query
             && self.rem == other.rem
+            && self.capacity == other.capacity
+            && self.opened == other.opened
     }
 }
 
@@ -146,6 +157,9 @@ pub struct SeriesTrackerView {
     select: Entity<SelectState<Vec<FilterOption>>>,
     /// The select's choice, kept for the session.
     filter: Filter,
+    /// The series whose strips show every book, kept for the session. A new
+    /// set on every change.
+    opened: Rc<HashSet<SeriesId>>,
     counts: Counts,
     scroll: VirtualListScrollHandle,
     list: Option<(ListKey, Rc<Vec<Item>>, ItemSizes)>,
@@ -219,6 +233,7 @@ impl SeriesTrackerView {
             filter_input,
             select,
             filter: Filter::default(),
+            opened: Rc::default(),
             counts: Counts::default(),
             scroll: VirtualListScrollHandle::new(),
             list: None,
@@ -263,6 +278,16 @@ impl SeriesTrackerView {
         cx.notify();
     }
 
+    /// "Show the other N books" or "Show fewer" on a series' strip.
+    fn toggle(&mut self, id: SeriesId, cx: &mut Context<Self>) {
+        let mut opened = (*self.opened).clone();
+        if !opened.remove(&id) {
+            opened.insert(id);
+        }
+        self.opened = Rc::new(opened);
+        cx.notify();
+    }
+
     fn retry(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, SeriesModel::load);
     }
@@ -274,12 +299,15 @@ impl SeriesTrackerView {
         summaries: &Rc<Vec<SeriesSummary>>,
         query: &str,
         rem: Pixels,
+        capacity: usize,
     ) -> (Rc<Vec<Item>>, Rc<Vec<Size<Pixels>>>) {
         let key = ListKey {
             summaries: summaries.clone(),
             filter: self.filter,
             query: query.to_owned(),
             rem,
+            capacity,
+            opened: self.opened.clone(),
         };
         if let Some((k, items, sizes)) = &self.list
             && *k == key
@@ -311,7 +339,11 @@ impl SeriesTrackerView {
             .map(|item| {
                 let height = match item {
                     Item::Nothing => (LINE_ABOVE + TypeRole::Body.line_height()).to_pixels(rem),
-                    Item::Row(_, label) => row_height(label.is_some(), rem),
+                    Item::Row(series, label) => row_height(
+                        label.is_some(),
+                        strip_lines(series, capacity, self.opened.contains(&series.id)),
+                        rem,
+                    ),
                     // The page's inset under the last row.
                     Item::Foot { hidden: 0 } => size::PAGE_INSET.to_pixels(rem),
                     Item::Foot { .. } => {
@@ -483,10 +515,15 @@ impl Render for SeriesTrackerView {
             LoadStatus::Failed(message) => Some(message),
             _ => None,
         };
-        let (items, sizes) = self.list(&summaries, &query, rem);
-        let shown = items.iter().filter(|i| matches!(i, Item::Row(..))).count();
         let capacity = strip_capacity(column_width, rem);
+        let (items, sizes) = self.list(&summaries, &query, rem, capacity);
+        let shown = items.iter().filter(|i| matches!(i, Item::Row(..))).count();
         let library = self.library.clone();
+        let opened = self.opened.clone();
+        let view = cx.entity().downgrade();
+        let on_toggle: OnToggle = Rc::new(move |id, _, cx| {
+            view.update(cx, |this, cx| this.toggle(id, cx)).ok();
+        });
         let scroll = self.scroll.base_handle().clone();
         let list = v_virtual_list(
             cx.entity(),
@@ -504,7 +541,11 @@ impl Render for SeriesTrackerView {
                                 *label,
                                 library.clone(),
                                 today,
-                                capacity,
+                                RowStrip {
+                                    capacity,
+                                    open: opened.contains(&series.id),
+                                    on_toggle: on_toggle.clone(),
+                                },
                                 scroll.clone(),
                             ))
                             .into_any_element(),
@@ -540,6 +581,8 @@ mod tests {
             filter: Filter::default(),
             query: String::new(),
             rem: px(16.),
+            capacity: 12,
+            opened: Rc::default(),
         }
     }
 
