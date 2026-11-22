@@ -13,7 +13,8 @@
 //! Assumed where it is unverified: adding a book that is already in the
 //! library is refused; moving to Read with no open read adds a read finished
 //! today; a new read without an edition takes the entry's; a goal counts
-//! the reads finished within its dates, both included.
+//! the reads finished within its dates, both included; a book put on a
+//! ranked list at a `position` takes it, and no other row moves.
 
 use chrono::NaiveDate;
 use serde_json::{Map, Value, json};
@@ -615,10 +616,13 @@ fn delete_list(state: &mut State, id: i64) -> Value {
     json!({ "delete_list": { "success": state.lists.len() < before } })
 }
 
-/// Adds a book to a list; one already there returns its row.
+/// Adds a book to a list; one already there returns its row. On a ranked
+/// list it goes at the `position` given, else after the last; the other
+/// rows keep theirs (unverified on Hardcover).
 fn insert_list_book(state: &mut State, object: &Value) -> Result<Value, String> {
     let object = self::object(object)?;
-    only(object, &["list_id", "book_id", "edition_id"])?;
+    only(object, &["list_id", "book_id", "edition_id", "position"])?;
+    let asked = object.get("position").and_then(Value::as_i64);
     let list_id = object
         .get("list_id")
         .and_then(Value::as_i64)
@@ -644,9 +648,9 @@ fn insert_list_book(state: &mut State, object: &Value) -> Result<Value, String> 
             json!({ "insert_list_book": { "id": row.id, "list_book": list_book(l.id, row) } }),
         );
     }
-    let position = l
-        .ranked
-        .then(|| l.rows.iter().filter_map(|r| r.position).max().unwrap_or(0) + 1);
+    let position = l.ranked.then(|| {
+        asked.unwrap_or_else(|| l.rows.iter().filter_map(|r| r.position).max().unwrap_or(0) + 1)
+    });
     l.rows.push(ListRow {
         id: row_id,
         book,

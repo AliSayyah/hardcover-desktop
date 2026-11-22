@@ -97,6 +97,15 @@ pub use self::{
     surfaces::{Block, Rail, RailSection, blocks, panel},
     text_button::TextButton,
 };
+/// Draws every view again on the next frame, cached ones too: what an
+/// element learns as it is drawn (its width, whether its text was cut, a
+/// scroll that reveals focus) shows only on a frame drawn after it.
+/// `window.refresh()` does nothing while a frame is drawn, and a cached view
+/// isn't drawn again unless something asks.
+pub fn refresh_after_draw(window: &gpui_kit::Window) {
+    window.on_next_frame(|window, _| window.refresh());
+}
+
 // Parts only the gallery names: `greeting` is Home's greeting for the current
 // time (Home passes its own clock to `greeting_at`), and a lone `CoverSlot`
 // is drawn by `SeriesStrip` on screens.

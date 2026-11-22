@@ -709,10 +709,6 @@ impl<T: Written> LibraryWrite<T> {
         }
     }
 
-    pub fn kind(&self) -> WriteKind {
-        self.kind
-    }
-
     pub fn target(&self) -> WriteTarget {
         self.target
     }

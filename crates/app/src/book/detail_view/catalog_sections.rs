@@ -1,95 +1,38 @@
 //! The book's catalogue parts: About this book, the tags, other titles, On
 //! Hardcover (the average and the ratings breakdown; "Open on Hardcover" is
-//! in the book's "more" menu, `header.rs`),
-//! and similar books (`hardcover-design`, Shelf → Book pane, and Full book
-//! page).
+//! in the book's "more" menu, `header.rs`) (`hardcover-design`, Shelf →
+//! Book pane, and Full book page). Similar books are `similar_books.rs`.
 
 use std::fmt::Write as _;
-use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, Context, IntoElement, ParentElement as _, Pixels, SharedString, Styled as _,
-    Window, div, prelude::FluentBuilder as _,
+    AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled as _, div,
+    prelude::FluentBuilder as _,
 };
-use hardcover_core::{BookDetails, BookId, BookSummary, RatingBucket};
+use hardcover_core::{BookDetails, BookSummary, RatingBucket};
 
 use super::BookDetailView;
 use super::header::HEADER_GENRES;
 use super::your_book::paragraphs;
-use crate::app_state::release_cover_medium;
 use crate::bidi::WrappingText;
-use crate::catalog::navigation::Page;
 use crate::chip::{TagChip, TagGroup, tag_groups};
-use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{average_rating_text, count_text};
-use crate::resource::Demand;
-use crate::resource::catalog::SIMILAR_FETCHED;
 use crate::ui::kit::SmallControl as _;
-use crate::ui::{
-    Block, CoverShelf, Lane, Meter, RailSection, Skeleton, SkeletonText, Stars, TextButton,
-    books_that_fit,
-};
+use crate::ui::{Block, Lane, LoadFailed, Meter, RailSection, SkeletonText, Stars};
 
-/// Similar books shown in one column (the narrow pane, the page without a
-/// side column).
-const SIMILAR_IN_COLUMN: usize = 8;
 /// Tags shown per group until "Show all tags".
 const TAGS_SHOWN: usize = 6;
 /// Other titles shown.
 const TITLES_SHOWN: usize = 5;
 
 impl BookDetailView {
-    // ----- similar books -----
-
-    /// The books Hardcover lists as similar to `book`, if fetched.
-    fn similar(&self, book: BookId, cx: &App) -> Option<Arc<Vec<BookSummary>>> {
-        self.catalog
-            .as_ref()?
-            .similar
-            .read(cx)
-            .resource()
-            .value(&book)
-            .cloned()
-    }
-
-    /// Releases the md/lg covers of similar books no longer shown, now that
-    /// `book` (if any) is: those of the book shown before, once it changes.
-    pub(super) fn keep_similar_covers(
-        &mut self,
-        book: Option<BookId>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let shown: Vec<String> = match book.and_then(|id| self.similar(id, cx)) {
-            Some(books) => books
-                .iter()
-                .filter_map(|b| b.cover.as_ref().map(|c| c.url.clone()))
-                .collect(),
-            None => Vec::new(),
-        };
-        if shown == self.similar_covers {
-            return;
-        }
-        for url in std::mem::replace(&mut self.similar_covers, shown) {
-            if !self.similar_covers.contains(&url) {
-                release_cover_medium(&url, Some(window), cx);
-            }
-        }
-    }
-
-    fn retry_similar(&mut self, cx: &mut Context<Self>) {
-        if let Some(book) = self.book(cx) {
-            self.fetch(book.id, super::Fetch::Similar, Demand::Now, cx);
-        }
-    }
-
     // ----- blocks -----
 
     /// About this book: the description in `prose`, or why there is none.
-    pub(super) fn render_about(&self, book: &BookSummary, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_about(&self, book: &BookSummary, cx: &Context<Self>) -> AnyElement {
         let muted = colors(cx).fg_muted;
         let (details, error, loading) = match &self.catalog {
             Some(catalog) => {
@@ -116,16 +59,8 @@ impl BookDetailView {
                     .child("No description on Hardcover")
                     .into_any_element(),
             },
-            (None, Some(message)) if !loading => h_flex()
-                .flex_wrap()
-                .gap_2()
-                .child(div().body().text_color(muted).child(message))
-                .child(
-                    Button::new("retry-details")
-                        .small_control()
-                        .label("Try again")
-                        .on_click(cx.listener(|this, _, _, cx| this.retry_details(cx))),
-                )
+            (None, Some(message)) if !loading => LoadFailed::new("retry-details", message)
+                .on_retry(cx.listener(|this, _, _, cx| this.retry_details(cx)))
                 .into_any_element(),
             // In flight: the placeholder pulses. Waiting out the delay, it
             // holds still: a pulse while arrowing past books would redraw
@@ -142,7 +77,7 @@ impl BookDetailView {
     pub(super) fn render_tags(
         &self,
         details: Option<&BookDetails>,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Option<AnyElement> {
         let details = details?;
         /// Which chips a group's tags get.
@@ -216,7 +151,7 @@ impl BookDetailView {
     /// Also known as: the book's other titles, muted.
     pub(super) fn render_other_titles(
         details: Option<&BookDetails>,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Option<AnyElement> {
         let titles = &details?.alternative_titles;
         if titles.is_empty() {
@@ -251,7 +186,7 @@ impl BookDetailView {
         book: &BookSummary,
         details: Option<&BookDetails>,
         in_rail: bool,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Option<AnyElement> {
         let muted = colors(cx).fg_muted;
         let average = book
@@ -324,106 +259,6 @@ impl BookDetailView {
                 .into_any_element(),
         )
     }
-
-    /// Similar books: lg covers with their shadow, 16 apart, each with its
-    /// title under it, a text button in two lines at most.
-    /// Similar books: in one column, the first [`SIMILAR_IN_COLUMN`]; in the
-    /// side column (`side`, the books it holds), a grid of them.
-    pub(super) fn render_similar(
-        &self,
-        book: &BookSummary,
-        details: Option<&BookDetails>,
-        side: Option<SideGrid>,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let details = details?;
-        if details.similar_book_ids.is_empty() {
-            return None;
-        }
-        let muted = colors(cx).fg_muted;
-        let (books, error, loading) = match &self.catalog {
-            Some(catalog) => {
-                let store = catalog.similar.read(cx).resource();
-                (
-                    store.value(&book.id).cloned(),
-                    store.error(&book.id).cloned(),
-                    store.is_loading(&book.id),
-                )
-            }
-            None => (None, None, false),
-        };
-        let body = match (books, error) {
-            (Some(books), _) if books.is_empty() => return None,
-            (Some(books), _) => CoverShelf::new(CoverSize::Lg)
-                .when(side.is_some(), CoverShelf::grid)
-                .books(
-                    books
-                        .iter()
-                        .take(side.map_or(SIMILAR_IN_COLUMN, |grid| grid.shown(books.len())))
-                        .map(|book| {
-                            let id = book.id.get().cast_unsigned();
-                            (
-                                Cover::new(CoverSize::Lg, book.title.clone())
-                                    .author(book.authors.first().cloned())
-                                    .thumbnail(book.cover.as_ref().map(|c| c.url.clone()))
-                                    .shadow(true)
-                                    .opens(("similar-cover", id), Page::Book(book.clone())),
-                                TextButton::book(("similar-title", id), book),
-                            )
-                        }),
-                )
-                .into_any_element(),
-            (None, Some(message)) if !loading => h_flex()
-                .flex_wrap()
-                .gap_2()
-                .child(div().body().text_color(muted).child(message))
-                .child(
-                    Button::new("retry-similar")
-                        .small_control()
-                        .label("Try again")
-                        .on_click(cx.listener(|this, _, _, cx| this.retry_similar(cx))),
-                )
-                .into_any_element(),
-            // Waiting out the delay or loading: the strip's shape, still.
-            _ => h_flex()
-                .gap_4()
-                .children((0..4).map(|_| Skeleton::cover(CoverSize::Lg).still()))
-                .into_any_element(),
-        };
-        Some(Block::new("Similar books").child(body).into_any_element())
-    }
-}
-
-/// The similar books' grid in a side column: how many lg covers a row holds
-/// and how many it shows at most.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct SideGrid {
-    per_row: usize,
-    max: usize,
-}
-
-impl SideGrid {
-    /// How many of `available` books the grid shows: at most [`Self::max`],
-    /// and past one row only whole rows, so no cover sits alone on the last.
-    pub(super) fn shown(self, available: usize) -> usize {
-        let n = available.min(self.max);
-        if n <= self.per_row {
-            n
-        } else {
-            n - n % self.per_row
-        }
-    }
-}
-
-/// The similar books' grid in a side column `width` wide: two rows of lg
-/// covers (at least the eight one column shows, at most those fetched), cut
-/// to whole rows by [`SideGrid::shown`].
-pub(super) fn similar_in_side(width: Pixels, rem_size: Pixels) -> SideGrid {
-    let per_row = books_that_fit(width, CoverSize::Lg, rem_size).max(1);
-    SideGrid {
-        per_row,
-        max: (per_row * 2).clamp(SIMILAR_IN_COLUMN, SIMILAR_FETCHED),
-    }
 }
 
 /// "1 rating", "9,223 ratings".
@@ -437,7 +272,7 @@ fn plural(n: u32, one: &str, many: &str) -> String {
 /// The ratings breakdown: a row per star level, its share of the most
 /// common level as a bar, and its count. Hardcover's figures, so muted ink
 /// on `track`, not the accent of progress.
-fn render_breakdown(details: &BookDetails, cx: &mut Context<BookDetailView>) -> AnyElement {
+fn render_breakdown(details: &BookDetails, cx: &Context<BookDetailView>) -> AnyElement {
     let colors = colors(cx);
     let buckets = &details.ratings_distribution;
     let max = buckets.iter().map(|b| b.count).max().unwrap_or(1).max(1);
@@ -522,36 +357,6 @@ mod tests {
             .into_iter()
             .map(|b| (b.rating, b.count))
             .collect()
-    }
-
-    #[test]
-    fn the_side_column_shows_two_rows_of_similar_books() {
-        let rem = gpui_kit::px(16.);
-        // The side at its narrowest holds three lg covers a row: still the
-        // eight one column shows.
-        assert_eq!(similar_in_side(gpui_kit::px(320.), rem).max, 8);
-        // Five a row (464): two rows.
-        assert_eq!(similar_in_side(gpui_kit::px(464.), rem).max, 10);
-        // A 2560 pane's side (920) holds nine a row: all that were fetched.
-        assert_eq!(similar_in_side(gpui_kit::px(920.), rem).max, 16);
-    }
-
-    #[test]
-    fn the_side_grid_shows_only_whole_rows() {
-        let nine = SideGrid {
-            per_row: 9,
-            max: 16,
-        };
-        // Ten books, nine a row: one full row, not nine and one alone.
-        assert_eq!(nine.shown(10), 9);
-        // All sixteen fetched: still one full row.
-        assert_eq!(nine.shown(16), 9);
-        // Fewer than a row: all of them.
-        assert_eq!(nine.shown(4), 4);
-        let three = SideGrid { per_row: 3, max: 8 };
-        // Eight at most, three a row: two full rows.
-        assert_eq!(three.shown(16), 6);
-        assert_eq!(three.shown(3), 3);
     }
 
     #[test]

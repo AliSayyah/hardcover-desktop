@@ -191,7 +191,7 @@ fn audiobooks_count_time() {
         .find(|e| e.book.id == BookId::new(CRUEL_PRINCE))
         .unwrap();
     assert_eq!(cruel.book.pages, None);
-    assert!(cruel.book_audio_seconds.is_some());
+    assert!(cruel.book_audio_edition.is_some());
     assert!(!cruel.is_audio());
     assert_eq!(cruel.length(), Some(crate::api::Length::Pages(370)));
     // One of its audiobook editions lists no length.
@@ -619,15 +619,15 @@ fn lists_are_written() {
     let list = client.create_list(&draft).unwrap();
     assert_eq!(list.slug.as_deref(), Some("beach-reads"));
     let first = client
-        .add_to_list(list.id, BookId::new(427_578), None)
+        .add_to_list(list.id, BookId::new(427_578), None, None)
         .unwrap();
     let second = client
-        .add_to_list(list.id, BookId::new(312_460), None)
+        .add_to_list(list.id, BookId::new(312_460), None, None)
         .unwrap();
     // Adding it again returns its row.
     assert_eq!(
         client
-            .add_to_list(list.id, BookId::new(427_578), None)
+            .add_to_list(list.id, BookId::new(427_578), None, None)
             .unwrap(),
         first
     );
@@ -639,6 +639,14 @@ fn lists_are_written() {
     client.remove_from_list(first.id).unwrap();
     assert_eq!(client.list_books(list.id, 0).unwrap().items.len(), 1);
     assert!(client.list_memberships().unwrap().rows.contains(&second));
+    // Undo puts it back at its place, not after the last.
+    let back = client
+        .add_to_list(list.id, BookId::new(427_578), None, Some(1))
+        .unwrap();
+    let books = client.list_books(list.id, 0).unwrap().items;
+    let place = books.iter().find(|b| b.id == back.id).map(|b| b.position);
+    assert_eq!(place, Some(Some(1)));
+    client.remove_from_list(back.id).unwrap();
 
     let lists = client.lists().unwrap();
     let list = lists.iter().find(|l| l.id == list.id).unwrap();

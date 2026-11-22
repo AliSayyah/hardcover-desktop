@@ -1699,7 +1699,7 @@ fn progress_percent_follows_the_reading_format_not_the_first_length() {
 #[test]
 fn a_synced_entry_knows_its_books_audiobook_and_its_editions_format() {
     let mut ub = user_book(3, 2);
-    ub["book"]["audio_seconds"] = json!(34_200);
+    ub["book"]["default_audio_edition_id"] = json!(6000);
     ub["user_book_reads"] = json!([{
         "id": 91, "started_at": "2026-11-01", "finished_at": null, "progress": null,
         "progress_pages": null, "progress_seconds": 600, "edition_id": 6000,
@@ -1708,7 +1708,7 @@ fn a_synced_entry_knows_its_books_audiobook_and_its_editions_format() {
     }]);
     let entry: wire::RawUserBook = serde_json::from_value(ub).unwrap();
     let entry = entry.into_entry().unwrap();
-    assert_eq!(entry.book_audio_seconds, Some(34_200));
+    assert_eq!(entry.book_audio_edition, Some(EditionId::new(6000)));
     let read_edition = entry.open_read().unwrap().edition.as_ref().unwrap();
     assert!(read_edition.is_audiobook());
     // The read's audiobook decides, though its running time is unknown.
@@ -2518,7 +2518,7 @@ fn add_to_list_returns_the_row() {
         &data(json!({"insert_list_book": {"id": 9, "list_book": membership(9, 40, 1003, None)}})),
     );
     let row = c
-        .add_to_list(ListId::new(40), BookId::new(1003), None)
+        .add_to_list(ListId::new(40), BookId::new(1003), None, None)
         .unwrap();
     assert_eq!(row.id, ListBookId::new(9));
     assert_eq!(
@@ -2535,17 +2535,20 @@ fn add_to_list_returns_the_row() {
             ListId::new(40),
             BookId::new(1003),
             Some(EditionId::new(5003)),
+            Some(3),
         )
         .unwrap();
     assert_eq!(row.id, ListBookId::new(10));
     assert_eq!(row.edition_id, Some(EditionId::new(5003)));
     assert_eq!(vars(&http, 1)["object"]["edition_id"], 5003);
+    // Undo on a ranked list sends the place the book had.
+    assert_eq!(vars(&http, 1)["object"]["position"], 3);
     http.push(
         200,
         &data(json!({"insert_list_book": {"id": null, "list_book": null}})),
     );
     assert!(matches!(
-        c.add_to_list(ListId::new(40), BookId::new(1003), None),
+        c.add_to_list(ListId::new(40), BookId::new(1003), None, None),
         Err(Error::Api(_))
     ));
 }

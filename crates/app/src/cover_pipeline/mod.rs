@@ -12,8 +12,9 @@
 //! - **Copies.** A download is decoded once into every size and deleted; the
 //!   scaled copies are the cache ([`scaled`]).
 //! - **Memory.** Loaded thumbnails and medium covers past a budget are
-//!   released, those drawn longest ago first ([`CoverService::release_unused`]).
-//!   The detail cover is released by the pane that shows it.
+//!   released, those drawn longest ago first ([`CoverService::release_unused`]),
+//!   and every window is drawn again, since a cached view that sits still
+//!   stamps nothing. The detail cover is released by the pane that shows it.
 
 mod queue;
 mod scaled;
@@ -162,11 +163,19 @@ impl CoverService {
             let mut usage = lock(&service.usage);
             (usage.evict(Kind::Thumbnail), usage.evict(Kind::Medium))
         };
+        let released = !thumbnails.is_empty() || !medium.is_empty();
         for url in thumbnails {
             release::<CoverThumbnail>(&url, None, cx);
         }
         for url in medium {
             release::<CoverMedium>(&url, None, cx);
+        }
+        // A cached view that sits still shows its covers without drawing
+        // them, so it stamps none: draw every view again, so one still
+        // showing a released cover loads it again, and the others' covers
+        // count as drawn now.
+        if released {
+            cx.refresh_windows();
         }
     }
 }

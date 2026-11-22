@@ -409,6 +409,10 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   differ from a saved rating by shape, not by lightness alone. It is the
   pointer's preview, never a saved rating; the keyboard changes the rating
   itself.
+- **Keys:** Left and Right move the stars half a star at a time, shown
+  solid at once; the value is saved once the keys rest (half a second), or
+  at once on Enter or when focus leaves. Up and Down stay the page's, so
+  they scroll past the control. Backspace and Delete clear, at once.
 - **Pointer targets:** each half star is a slice of the whole control, its
   full height, and the 2 px gaps belong to the halves beside them: ten
   equal slices, no dead space.
@@ -1073,6 +1077,7 @@ commit that fixes it.
   not only after keyboard input. A press never focuses one, so this shows
   only where focus is handed to it after a pointer action: a menu closing
   onto its trigger, a dialog closing onto its opener, Back. Buttons whose
-  focus the app keeps (the alert footers, `ui::kit::KeyboardRing`) follow
-  the rule.
+  focus the app keeps (`ui::kit::KeyboardRing`: the alert footers, and the
+  book view's buttons focus is handed to after an in-place change) follow
+  the rule; a switch can't be given a handle.
 - Empty-state icons are Lucide's, at stroke 2, not 1.5.

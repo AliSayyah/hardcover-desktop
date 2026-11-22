@@ -18,7 +18,7 @@ use gpui_kit::{
     Action, Anchor, AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, Modifiers, ModifiersChangedEvent,
     ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
+    StyleRefinement, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::READ_CATALOG;
 use hardcover_core::store::LibraryCache;
@@ -318,12 +318,27 @@ impl Workspace {
             .new(|cx| SeriesTrackerView::new(series.clone(), model.clone(), &upcoming, window, cx));
         model.update(cx, LibraryModel::start);
         lists.update(cx, ListsModel::load);
-        let clock = cx.spawn(async move |this, cx| {
+        // Views read today as they render. The cached ones (the book view,
+        // Home, Stats, Series) draw again only when they change, so a new
+        // day refreshes the whole window, and every tick draws Home, whose
+        // greeting reads the time.
+        let clock = cx.spawn_in(window, async move |this, cx| {
+            let mut day = crate::dates::today();
             loop {
                 cx.background_executor()
                     .timer(Duration::from_secs(30))
                     .await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                let ticked = this.update_in(cx, |this, window, cx| {
+                    let today = crate::dates::today();
+                    if today != day {
+                        day = today;
+                        window.refresh();
+                    }
+                    // Home's greeting follows the time of day.
+                    this.home.update(cx, |_, cx| cx.notify());
+                    cx.notify();
+                });
+                if ticked.is_err() {
                     break;
                 }
             }
@@ -606,7 +621,7 @@ impl Workspace {
         let content: AnyElement = match page {
             Page::Series(_) => self.series_page.clone().into_any_element(),
             Page::Author(_) => self.author_page.clone().into_any_element(),
-            Page::Book(_) => self.book_page.clone().into_any_element(),
+            Page::Book(_) => BookDetailView::embedded(&self.book_page),
             Page::Upcoming => self.upcoming_page.clone().into_any_element(),
         };
         let tools = match page {
@@ -1314,14 +1329,24 @@ impl Render for Workspace {
             .child(div().flex_1().min_w_0().h_full().map(|this| {
                 match (self.pages.current().cloned(), self.destination) {
                     (Some(page), _) => this.child(self.render_page(&page, window, cx)),
-                    (None, Destination::Home) => this.child(self.home.clone()),
+                    // Cached: they fill the region, and observe what they
+                    // show, so the sidebar's frames (a sync's spinner)
+                    // don't draw them again.
+                    (None, Destination::Home) => this.child(self.home.clone().cached(fill())),
                     (None, Destination::Search) => this.child(self.search.clone()),
                     (None, Destination::Discover) => this.child(self.discover.clone()),
-                    (None, Destination::Series) => this.child(self.series_view.clone()),
-                    (None, Destination::Stats) => this.child(self.stats.clone()),
+                    (None, Destination::Series) => {
+                        this.child(self.series_view.clone().cached(fill()))
+                    }
+                    (None, Destination::Stats) => this.child(self.stats.clone().cached(fill())),
                     (None, Destination::Shelf(_)) => this.child(self.library.clone()),
                     (None, Destination::List(_)) => this.child(self.list_page.clone()),
                 }
             }))
     }
+}
+
+/// How a cached view fills the region it is given.
+fn fill() -> StyleRefinement {
+    StyleRefinement::default().size_full()
 }

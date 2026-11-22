@@ -877,7 +877,7 @@ impl SearchView {
                             < size::LIST_COMPACT_BELOW.to_pixels(window.rem_size());
                         if compact.replace(narrow) != narrow {
                             // The rows were drawn for the other width.
-                            window.refresh();
+                            crate::ui::refresh_after_draw(window);
                         }
                     })
                     .child(list),
@@ -887,7 +887,7 @@ impl SearchView {
     /// Beside the list: the selected book, or what opening a result does.
     fn render_detail(&self) -> AnyElement {
         match self.kind {
-            SearchKind::Books => self.detail.clone().into_any_element(),
+            SearchKind::Books => BookDetailView::embedded(&self.detail),
             SearchKind::Authors => empty_state(
                 IconName::User,
                 "Authors".into(),

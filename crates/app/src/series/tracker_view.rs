@@ -188,6 +188,8 @@ impl SeriesTrackerView {
             cx.observe_in(upcoming, window, |this, _, window, cx| {
                 this.changed(window, cx);
             }),
+            // The rows' commands follow the grant (`write:library`).
+            crate::session::observe_grant(cx, |_, cx| cx.notify()),
             cx.subscribe_in(
                 &filter_input,
                 window,

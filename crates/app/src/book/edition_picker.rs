@@ -6,8 +6,8 @@
 //! entry's. Choosing an edition emits [`EditionChosen`]; the view that opened
 //! it makes the write.
 
-use crate::ui::Skeleton;
 use crate::ui::reveal::RevealScroll as _;
+use crate::ui::{LoadFailed, Skeleton};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::{Disableable as _, Icon, IconName, WindowExt as _, h_flex, v_flex};
@@ -207,16 +207,8 @@ impl Render for EditionPicker {
             })
             .when_some(error.clone(), |this, error| {
                 this.child(
-                    h_flex()
-                        .gap_2()
-                        .body()
-                        .child(div().text_color(muted).child(error))
-                        .child(
-                            Button::new("retry-editions")
-                                .small_control()
-                                .label("Try again")
-                                .on_click(cx.listener(|this, _, _, cx| this.fetch_more(cx))),
-                        ),
+                    LoadFailed::new("retry-editions", error)
+                        .on_retry(cx.listener(|this, _, _, cx| this.fetch_more(cx))),
                 )
             })
             .when(

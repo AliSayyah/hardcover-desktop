@@ -9,8 +9,9 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::{Disableable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
-    App, AppContext as _, Axis, Context, Entity, IntoElement, ParentElement as _, Pixels, Render,
-    SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, rems,
+    App, AppContext as _, Axis, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, Render, SharedString, Styled as _, Subscription, Window, div,
+    prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::auth::scopes::WRITE_LISTS;
 use hardcover_core::{BookSummary, ListDraft, ListId, Privacy};
@@ -21,7 +22,7 @@ use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::needs_permission;
 use crate::session;
 use crate::ui::kit::RaisedField as _;
-use crate::ui::kit::open_dialog;
+use crate::ui::kit::{close_own_dialog, open_dialog};
 
 fn dialog_width(window: &Window) -> Pixels {
     size::DIALOG_FORM.to_pixels(window.rem_size())
@@ -85,6 +86,12 @@ struct ListDialog {
     privacy: Option<Privacy>,
     ranked: bool,
     error: Option<SharedString>,
+    /// Tracked on the form's root: which dialog is in front, and when focus
+    /// comes back to this one.
+    focus_handle: FocusHandle,
+    /// Saved while another dialog was in front: closes once it is again,
+    /// and can't be saved twice meanwhile.
+    saved: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -115,8 +122,14 @@ impl ListDialog {
             }
             state
         });
+        let focus_handle = cx.focus_handle();
         let subscriptions = vec![
             cx.observe(&lists, |_, _, cx| cx.notify()),
+            cx.on_focus_in(&focus_handle, window, |this, window, cx| {
+                if this.saved {
+                    window.close_dialog(cx);
+                }
+            }),
             cx.subscribe_in(
                 &name,
                 window,
@@ -142,6 +155,8 @@ impl ListDialog {
             },
             ranked: existing.as_ref().is_some_and(|l| l.ranked),
             error: None,
+            focus_handle,
+            saved: false,
             _subscriptions: subscriptions,
         }
     }
@@ -164,6 +179,9 @@ impl ListDialog {
     }
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saved {
+            return;
+        }
         let draft = match self.draft(cx) {
             Ok(draft) => draft,
             Err(message) => {
@@ -190,7 +208,11 @@ impl ListDialog {
             };
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(warning) => {
-                    window.close_dialog(cx);
+                    // Only this form's dialog: another may have opened above.
+                    if !close_own_dialog(&this.focus_handle, window, cx) {
+                        this.saved = true;
+                        cx.notify();
+                    }
                     if let Some(message) = warning {
                         window.push_notification(
                             Notification::warning(message)
@@ -241,7 +263,7 @@ impl ListDialog {
 
 impl Render for ListDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let writing = self.lists.read(cx).is_writing();
+        let writing = self.lists.read(cx).is_writing() || self.saved;
         let can_write = session::has_scope(cx, WRITE_LISTS);
         let colors = colors(cx);
         let (privacy, ranked) = self.options(writing, cx);
@@ -251,6 +273,7 @@ impl Render for ListDialog {
         };
         // Dialogs don't inherit the shell's family, so the roles set it.
         v_flex()
+            .track_focus(&self.focus_handle)
             .gap_4()
             .body()
             .child(
@@ -333,5 +356,88 @@ impl Render for ListDialog {
                             .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use gpui_kit::{TestAppContext, VisualTestContext};
+    use hardcover_core::store::LibraryCache;
+
+    use super::*;
+    use crate::library::model::LibraryModel;
+    use crate::session::SessionScope;
+    use crate::ui::test_support::redraw;
+
+    struct Empty;
+
+    impl Render for Empty {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    fn dialog_open(cx: &mut VisualTestContext) -> bool {
+        cx.update(gpui_kit::component::WindowExt::has_active_dialog)
+    }
+
+    /// C3: a list saved while another dialog sits above its own closes its
+    /// own dialog, once it is in front again, never the one above.
+    #[gpui_kit::test]
+    fn a_saved_list_closes_its_own_dialog_not_the_one_above(cx: &mut TestAppContext) {
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::ui::kit::bind_keys(cx);
+            session.install(cx);
+        });
+        let library = cx.new(|_| LibraryModel::new(session.clone()));
+        let lists = cx.update(|cx| ListsModel::init(session, &library, cx));
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|_| Empty);
+            gpui_kit::base::Root::new(view, window, cx)
+        });
+        cx.update(|window, _| window.activate_window());
+        let form = cx.update(|window, cx| {
+            let form = cx.new(|cx| ListDialog::new(lists.clone(), Mode::Create(None), window, cx));
+            open_dialog(window, cx, {
+                let form = form.clone();
+                move |dialog, _, _| dialog.child(form.clone())
+            });
+            form.update(cx, |form, cx| form.focus(window, cx));
+            form
+        });
+        redraw(cx);
+        cx.update(|window, cx| {
+            form.update(cx, |form, cx| {
+                form.name
+                    .update(cx, |name, cx| name.set_value("Picks", window, cx));
+                form.save(window, cx);
+            });
+            // Another dialog opens over it while the list saves.
+            open_dialog(window, cx, |dialog, _, _| {
+                dialog.child(div().debug_selector(|| "upper".into()).child("Above"))
+            });
+        });
+        cx.run_until_parked();
+        redraw(cx);
+        redraw(cx);
+        assert!(
+            cx.debug_bounds("upper").is_some(),
+            "the dialog above stays open"
+        );
+        let created = lists.read_with(cx, |m, _| m.lists().iter().any(|l| l.name == "Picks"));
+        assert!(created, "the list was saved");
+
+        // The one above closes: the form, in front again, closes itself.
+        cx.update(|window, cx| window.close_dialog(cx));
+        cx.run_until_parked();
+        redraw(cx);
+        cx.run_until_parked();
+        redraw(cx);
+        assert!(!dialog_open(cx), "the saved form closed itself");
     }
 }

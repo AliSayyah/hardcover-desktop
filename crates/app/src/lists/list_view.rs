@@ -142,8 +142,8 @@ impl ListBooks {
 }
 
 /// Takes one row off `list`. Once it's off, a notification says so with
-/// Undo, which puts the book back as the same edition; a failure is
-/// notified instead.
+/// Undo, which puts the book back as the same edition, at its place on a
+/// ranked list; a failure is notified instead.
 fn remove_book(
     lists: &Entity<ListsModel>,
     list: ListId,
@@ -152,6 +152,8 @@ fn remove_book(
     cx: &mut App,
 ) {
     let (book_id, row, edition) = (book.book.id, book.id, book.edition_id);
+    // A ranked list's place; others have none, and Undo sends none.
+    let position = book.position;
     let title = book.book.title.clone();
     let list_name = lists.read(cx).list(list).map(|l| l.name.clone());
     let task = lists.update(cx, |m, cx| m.remove_rows(list, book_id, vec![row], cx));
@@ -172,8 +174,9 @@ fn remove_book(
                         Button::new("undo-remove")
                             .label("Undo")
                             .on_click(move |_, window, cx| {
-                                let task =
-                                    lists.update(cx, |m, cx| m.add(list, book_id, edition, cx));
+                                let task = lists.update(cx, |m, cx| {
+                                    m.add(list, book_id, edition, position, cx)
+                                });
                                 notify_failure(task, "Couldn't put the book back", window, cx);
                                 let _ = note.update(cx, |note, cx| note.dismiss(window, cx));
                             })

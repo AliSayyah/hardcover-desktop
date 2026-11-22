@@ -4,37 +4,36 @@
 //! - The one panel under the header: progress (Currently reading, Paused)
 //!   or Not started (Want to read).
 //! - Details: a property list of Edition, Owned, Privacy and Added.
-//! - Notes: the notes, with an editor opened in place.
 //! - Reads: every read of the book, each with its menu, and "Add a past
 //!   read…".
 //!
-//! Each is a block in the pane and a rail section on the page.
+//! Each is a block in the pane and a rail section on the page. Notes, beside
+//! them, are `notes.rs`.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::Textarea;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::select::Select;
 use gpui_kit::component::{Disableable as _, Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, Context, ElementId, IntoElement, ParentElement as _, SharedString, Styled as _,
-    div, prelude::FluentBuilder as _,
+    Window, div, prelude::FluentBuilder as _,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
 use hardcover_core::{Date, LibraryEntry, ReadSession, ReadingStatus};
 
 use super::BookDetailView;
 use super::header::saving;
-use crate::bidi::WrappingText;
 use crate::book::progress_dialog::open_progress;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{
-    ProgressSummary, count_text, date_text, duration_text, edition_text, needs_permission,
-    progress_summary, read_dates_text,
+    date_text, edition_text, needs_permission, progress_summary, read_dates_text, short_position,
 };
 use crate::library::model::WriteKind;
 use crate::lists::book_lists;
 use crate::ui::kit::RaisedField as _;
-use crate::ui::kit::{SmallControl as _, SmallIconButton as _, danger_menu_item};
+use crate::ui::kit::{
+    KeyboardRing as _, SmallControl as _, SmallIconButton as _, danger_menu_item,
+};
 use crate::ui::{Block, Meter, PropertyList, RailSection, panel};
 
 impl BookDetailView {
@@ -42,20 +41,26 @@ impl BookDetailView {
     pub(super) fn render_panel(
         &self,
         entry: &LibraryEntry,
-        cx: &mut Context<Self>,
+        window: &Window,
+        cx: &Context<Self>,
     ) -> Option<AnyElement> {
         match entry.status {
             ReadingStatus::CurrentlyReading | ReadingStatus::Paused => {
-                Some(self.render_progress(entry, cx))
+                Some(self.render_progress(entry, window, cx))
             }
-            ReadingStatus::WantToRead => Some(self.render_not_started(entry, cx)),
+            ReadingStatus::WantToRead => Some(self.render_not_started(entry, window, cx)),
             _ => None,
         }
     }
 
     /// Where the reader is: the position and percentage over a meter, then
     /// when the read started and its pace, and "Update progress…".
-    fn render_progress(&self, entry: &LibraryEntry, cx: &mut Context<Self>) -> AnyElement {
+    fn render_progress(
+        &self,
+        entry: &LibraryEntry,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let progress = progress_summary(entry);
         let muted = colors(cx).fg_muted;
@@ -67,7 +72,7 @@ impl BookDetailView {
         let today = crate::dates::today();
         let meta = pace_line(entry, today);
         let model = self.model.clone();
-        let update_entry = entry.clone();
+        let id = entry.user_book_id;
         panel(cx)
             .flex()
             .flex_col()
@@ -115,13 +120,17 @@ impl BookDetailView {
                             Button::new("update-progress")
                                 .small_control()
                                 .label("Update progress…")
+                                .keyboard_ring(&self.panel_focus, window)
                                 .loading(pending == Some(WriteKind::Progress))
                                 .disabled(pending.is_some() || !can_write)
                                 .when(!can_write, |this| {
                                     this.tooltip(needs_permission(WRITE_LIBRARY))
                                 })
                                 .on_click(move |_, window, cx| {
-                                    open_progress(model.clone(), &update_entry, window, cx);
+                                    let entry = model.read(cx).entry(id).cloned();
+                                    if let Some(entry) = entry {
+                                        open_progress(model.clone(), &entry, window, cx);
+                                    }
                                 }),
                         )
                     }),
@@ -130,7 +139,14 @@ impl BookDetailView {
     }
 
     /// A book on Want to read: what starting it does, and "Start reading".
-    fn render_not_started(&self, entry: &LibraryEntry, cx: &mut Context<Self>) -> AnyElement {
+    /// Starting moves focus, if on "Start reading", to "Update progress…",
+    /// which takes its place.
+    fn render_not_started(
+        &self,
+        entry: &LibraryEntry,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let can_write = Self::can_write(cx);
         panel(cx)
@@ -152,6 +168,7 @@ impl BookDetailView {
             .child(
                 Button::new("start-reading")
                     .label("Start reading")
+                    .keyboard_ring(&self.panel_focus, window)
                     .loading(pending == Some(WriteKind::Status))
                     .disabled(pending.is_some() || !can_write)
                     .when(!can_write, |this| {
@@ -169,7 +186,7 @@ impl BookDetailView {
         &self,
         entry: &LibraryEntry,
         in_rail: bool,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let busy = pending.is_some();
@@ -240,131 +257,14 @@ impl BookDetailView {
         }
     }
 
-    /// Notes: the saved notes with "Edit…", or "No notes" with "Add a
-    /// note…"; the editor in place once opened, or while it holds a draft.
-    pub(super) fn render_notes(
-        &self,
-        entry: &LibraryEntry,
-        in_rail: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let id = entry.user_book_id;
-        let pending = self.model.read(cx).pending_write(id);
-        let can_write = Self::can_write(cx);
-        let muted = colors(cx).fg_muted;
-        let saved_text = entry
-            .private_notes
-            .as_deref()
-            .map(str::trim)
-            .filter(|n| !n.is_empty());
-        let editing = self.notes_open(id, cx);
-        let (body, action): (AnyElement, Option<AnyElement>) = if editing {
-            (self.render_notes_editor(entry, cx), None)
-        } else {
-            let saved = self.notes_saved == Some(id);
-            let edit = |id: &'static str, label: &'static str| {
-                Button::new(id)
-                    .small_control()
-                    .label(label)
-                    .disabled(pending.is_some() || !can_write)
-                    .when(!can_write, |this| {
-                        this.tooltip(needs_permission(WRITE_LIBRARY))
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| this.edit_notes(window, cx)))
-            };
-            match saved_text {
-                Some(text) => (
-                    v_flex()
-                        .gap_2()
-                        .max_w(size::PROSE)
-                        .reader()
-                        .children(paragraphs(text).map(WrappingText::new))
-                        .when(saved, |this| this.child(saved_note(cx)))
-                        .into_any_element(),
-                    Some(edit("edit-notes", "Edit…").ghost().into_any_element()),
-                ),
-                None => (
-                    v_flex()
-                        .items_start()
-                        .gap_3()
-                        .child(div().body().text_color(muted).child("No notes"))
-                        .child(edit("add-notes", "Add a note…"))
-                        .into_any_element(),
-                    None,
-                ),
-            }
-        };
-        if in_rail {
-            RailSection::new("Notes")
-                .when_some(action, crate::ui::RailSection::action)
-                .child(body)
-                .into_any_element()
-        } else {
-            Block::new("Notes")
-                .when_some(action, crate::ui::Block::action)
-                .child(body)
-                .into_any_element()
-        }
-    }
-
-    fn render_notes_editor(&self, entry: &LibraryEntry, cx: &mut Context<Self>) -> AnyElement {
-        let pending = self.model.read(cx).pending_write(entry.user_book_id);
-        let saving_notes = pending == Some(WriteKind::Notes);
-        let dirty = self.notes_dirty(cx);
-        let can_write = Self::can_write(cx);
-        v_flex()
-            .w_full()
-            .gap_2()
-            .child(
-                Textarea::new(&self.notes)
-                    .disabled(saving_notes)
-                    .raised_field(saving_notes, cx),
-            )
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Button::new("save-notes")
-                            .primary()
-                            .small_control()
-                            .label("Save")
-                            .tooltip(if can_write {
-                                "Ctrl+Enter".to_owned()
-                            } else {
-                                needs_permission(WRITE_LIBRARY)
-                            })
-                            .loading(saving_notes)
-                            .disabled(!dirty || pending.is_some() || !can_write)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.save_notes(window, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("discard-notes")
-                            .ghost()
-                            .small_control()
-                            .label(if dirty { "Discard" } else { "Cancel" })
-                            .disabled(saving_notes)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.discard_notes(window, cx)),
-                            ),
-                    )
-                    .when(dirty && !saving_notes, |this| {
-                        this.child(div().caption(cx).child("Not saved"))
-                    }),
-            )
-            .into_any_element()
-    }
-
     /// Every read of the book: the current one first, then the others, each
     /// with its menu; "Add a past read…" on the heading.
     pub(super) fn render_reads(
         &self,
         entry: &LibraryEntry,
         in_rail: bool,
-        cx: &mut Context<Self>,
+        window: &Window,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let pending = self.model.read(cx).pending_write(entry.user_book_id);
         let can_write = Self::can_write(cx);
@@ -416,7 +316,7 @@ impl BookDetailView {
                                 this.child(div().caption(cx).tabular().child(facts.join(" · ")))
                             }),
                     )
-                    .child(Self::read_menu(read, pending.is_some() || !can_write, cx))
+                    .child(self.read_menu(read, pending.is_some() || !can_write, window, cx))
                     .into_any_element()
             })
             .collect();
@@ -425,6 +325,7 @@ impl BookDetailView {
             .small_control()
             .icon(IconName::Plus)
             .label("Add a past read…")
+            .keyboard_ring(&self.add_read_focus, window)
             .loading(pending == Some(WriteKind::Reads))
             .disabled(pending.is_some() || !can_write)
             .when(!can_write, |this| {
@@ -456,24 +357,41 @@ impl BookDetailView {
     }
 
     /// A read's actions: changing its dates and deleting it.
-    fn read_menu(read: &ReadSession, disabled: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Its commands focus the trigger first, so the dialog they open gives
+    /// focus back to it, not to the closed menu.
+    fn read_menu(
+        &self,
+        read: &ReadSession,
+        disabled: bool,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
         let view = cx.entity().downgrade();
         let session = read.clone();
         let read_id = read.id;
+        let trigger = self
+            .read_focus
+            .borrow_mut()
+            .entry(read_id)
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
         Button::new(ElementId::Name(format!("read-{}", read.id).into()))
             .ghost()
             .small_icon_button()
             .icon(IconName::Ellipsis)
             .tooltip("Read actions")
+            .keyboard_ring(&trigger, window)
             .disabled(disabled)
             .dropdown_menu(move |menu, _, cx| {
                 let edit_view = view.clone();
                 let delete_view = view.clone();
                 let session = session.clone();
+                let (edit_trigger, delete_trigger) = (trigger.clone(), trigger.clone());
                 menu.item(
                     PopupMenuItem::new("Change dates…")
                         .icon(IconName::Calendar)
                         .on_click(move |_, window, cx| {
+                            window.focus(&edit_trigger, cx);
                             let _ = edit_view.update(cx, |this, cx| {
                                 this.open_read_dialog(Some(&session), window, cx);
                             });
@@ -481,21 +399,13 @@ impl BookDetailView {
                 )
                 .item(
                     danger_menu_item("Delete read…", true, cx).on_click(move |_, window, cx| {
+                        window.focus(&delete_trigger, cx);
                         let _ = delete_view.update(cx, |this, cx| {
                             this.confirm_delete_read(read_id, window, cx);
                         });
                     }),
                 )
             })
-    }
-}
-
-/// "page 418" or "2h 5m" for the current read's row.
-fn short_position(progress: &ProgressSummary) -> Option<String> {
-    match (progress.page, progress.seconds) {
-        (Some(page), _) => Some(format!("page {}", count_text(page))),
-        (None, Some(seconds)) => Some(duration_text(seconds)),
-        (None, None) => None,
     }
 }
 
@@ -558,6 +468,7 @@ pub(super) fn saved_note(cx: &gpui_kit::App) -> impl IntoElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::format::ProgressSummary;
 
     fn progress(page: Option<u32>, total: Option<u32>, seconds: Option<u32>) -> ProgressSummary {
         ProgressSummary {

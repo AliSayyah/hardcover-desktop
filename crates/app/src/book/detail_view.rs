@@ -38,8 +38,13 @@
 //! with every other book view: the view asks for its book's ([`Demand`]),
 //! waiting a moment after the book changes so arrowing through a list asks
 //! for nothing, and keeps only UI state.
+//!
+//! Other readers' reviews (`community_reviews.rs`), similar books
+//! (`similar_books.rs`), Notes (`notes.rs`) and Your review
+//! (`review_section.rs`) are views of their own, each following the stores
+//! it shows; the view hands them the book shown.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -47,32 +52,32 @@ use std::time::Duration;
 
 use crate::ui::reveal::RevealScroll as _;
 use gpui_kit::component::button::ButtonVariant;
-use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{ElementExt as _, IconName, WindowExt as _, v_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, Render, RenderImage, SharedString, Styled as _, Subscription, Task,
-    Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, Render, RenderImage, SharedString, StyleRefinement,
+    Styled as _, Subscription, Task, Window, div,
 };
-use hardcover_core::auth::scopes::READ_SOCIAL;
 use hardcover_core::{
     BookDetails, BookId, BookSummary, LibraryEntry, Privacy, Rating, ReadId, ReadSession,
     ReadingStatus, UserBookId,
 };
 
 use self::community_reviews::CommunityReviews;
-use self::review_section::ReviewEditor;
+use self::notes::Notes;
+use self::review_section::YourReview;
+use self::similar_books::{SideGrid, SimilarBooks};
 use super::edition_picker::{EditionChosen, EditionPicker};
 use super::read_dialog::{ReadDatesChosen, ReadDialog, ReadDialogKind};
-use crate::app_state::release_cover_medium;
+use crate::cover::CoverArt;
 use crate::design::size;
 use crate::format::read_dates_text;
 use crate::library::model::{
     LibraryModel, LibraryWrite, Removed, WriteKind, WriteOutcome, WriteTarget, Written,
 };
-use crate::library::writes;
+use crate::library::writes::{self, Ratings};
 use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::resource::{Catalog, Demand, SharedChanged};
@@ -86,7 +91,9 @@ use crate::ui::{
 mod catalog_sections;
 mod community_reviews;
 mod header;
+mod notes;
 mod review_section;
+mod similar_books;
 mod your_book;
 
 /// What the pane shows.
@@ -143,9 +150,11 @@ impl Shown {
     }
 }
 
-/// The notes field's text compared with the entry's saved notes.
-fn notes_differ(text: &str, saved: Option<&str>) -> bool {
-    text.trim() != saved.unwrap_or("").trim()
+/// Whether focus is on `on` (if any) or nowhere: after an in-place change
+/// took away the control focus was on, it may be moved somewhere sensible
+/// without taking it from wherever the reader went meanwhile.
+fn focus_gone(on: Option<&FocusHandle>, window: &Window, cx: &App) -> bool {
+    window.focused(cx).is_none() || on.is_some_and(|handle| handle.is_focused(window))
 }
 
 /// Whether a book pane `width` wide takes the page's rail: inside its inset,
@@ -176,7 +185,7 @@ struct PaneLayout {
     /// The page's columns, with the rail ([`pane_has_rail`]).
     rail: bool,
     /// The blocks split beside the text: the similar books the side holds.
-    side: Option<catalog_sections::SideGrid>,
+    side: Option<SideGrid>,
 }
 
 impl PaneLayout {
@@ -188,7 +197,7 @@ impl PaneLayout {
                 side_width(main_column_width(columns, rem_size, false, false), rem_size)
             })
             .flatten()
-            .map(|side| catalog_sections::similar_in_side(side, rem_size));
+            .map(|side| similar_books::similar_in_side(side, rem_size));
         Self { rail, side }
     }
 }
@@ -222,20 +231,7 @@ pub struct BookDetailView {
     catalog: Option<Catalog>,
     /// Asks for what the book shows, a step at a time ([`SETTLE`]).
     settle: Option<Task<()>>,
-    /// The book whose similar books are due: asked for once its details
-    /// land, if they weren't in yet.
-    similar_due: Option<BookId>,
     privacy: Entity<SelectState<Vec<PrivacyOption>>>,
-    notes: Entity<TextareaState>,
-    /// The entry and saved notes the notes field was last filled from.
-    notes_base: Option<(UserBookId, Option<String>)>,
-    /// Unsaved notes of entries no longer shown, restored when they are.
-    notes_drafts: HashMap<UserBookId, String>,
-    /// The entry whose notes were just saved, until the field changes again.
-    notes_saved: Option<UserBookId>,
-    /// The entry whose notes editor was opened ("Add a note…", "Edit"). An
-    /// unsaved draft keeps it open too.
-    notes_editing: Option<UserBookId>,
     /// One picker per book, so editions are fetched once per run.
     edition_pickers: HashMap<BookId, (Entity<EditionPicker>, Subscription)>,
     read_dialog: Option<(Entity<ReadDialog>, Subscription)>,
@@ -243,10 +239,8 @@ pub struct BookDetailView {
     /// The cover URL last requested and its image once loaded, released when
     /// the pane moves to another cover.
     cover: Option<(String, Option<Arc<RenderImage>>)>,
-    /// The cover URLs of the similar books shown, released when the view
-    /// moves to another book or goes away: browsing books would otherwise
-    /// keep every lg cover it passed for the run.
-    similar_covers: Vec<String>,
+    /// The cover as loaded for this frame.
+    art: CoverArt,
     /// "Show all tags" was pressed for the book shown.
     tags_expanded: bool,
     /// The full book page, under the object bar the shell draws: the book's
@@ -255,56 +249,69 @@ pub struct BookDetailView {
     tools_in_bar: bool,
     /// The pane's layout, as measured when it was last laid out.
     layout: Rc<Cell<PaneLayout>>,
-    review: ReviewEditor,
-    community_reviews: CommunityReviews,
+    /// Your review, a view of its own.
+    review: Entity<YourReview>,
+    /// Other readers' reviews, a view of their own.
+    community_reviews: Entity<CommunityReviews>,
+    /// Similar books, a view of their own, and the side column's grid the
+    /// view hands it as it lays the blocks out.
+    similar_books: Entity<SimilarBooks>,
+    similar_side: Rc<Cell<Option<SideGrid>>>,
+    /// Notes, a view of their own, and whether the view lays them out in
+    /// the rail.
+    notes: Entity<Notes>,
+    notes_in_rail: Rc<Cell<bool>>,
+    /// Ratings asked for and not yet saved.
+    ratings: Entity<Ratings>,
+    /// The status menu's trigger, which its commands and their
+    /// confirmations give focus back to.
+    status_focus: FocusHandle,
+    /// The panel's button, "Start reading" then "Update progress…": one
+    /// handle, so focus moves from one to the other as the panel changes.
+    panel_focus: FocusHandle,
+    /// The "more" menu's trigger, which its commands focus first.
+    more_focus: FocusHandle,
+    /// "Add to library", where focus goes once a book shown is removed.
+    add_focus: FocusHandle,
+    /// "Add a past read…", where focus goes once a read is deleted.
+    add_read_focus: FocusHandle,
+    /// Each read's menu trigger, which its commands focus first.
+    read_focus: RefCell<HashMap<ReadId, FocusHandle>>,
     _subscriptions: Vec<Subscription>,
+    /// Frames this view drew, for the tests.
+    #[cfg(test)]
+    renders: usize,
 }
 
 impl BookDetailView {
     pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let privacy = cx.new(|cx| SelectState::new(privacy_options(), None, window, cx));
-        let notes = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Only you can see these notes")
-                .auto_grow(3, 10)
-        });
 
-        let (review, review_subscriptions) = ReviewEditor::new(window, cx);
-        let mut subscriptions =
-            vec![
-                cx.observe_in(&model, window, |this, _, window, cx| {
-                    this.sync_controls(window, cx);
-                    cx.notify();
-                }),
-                cx.subscribe_in(
-                    &privacy,
-                    window,
-                    |this, _, event: &SelectEvent<Vec<PrivacyOption>>, window, cx| {
-                        if let SelectEvent::Confirm(Some(privacy)) = event {
-                            this.change_privacy(*privacy, window, cx);
-                        }
-                    },
-                ),
-                cx.subscribe_in(&notes, window, |this, _, event: &InputEvent, window, cx| {
-                    match event {
-                        InputEvent::PressEnter {
-                            secondary: true, ..
-                        } => this.save_notes(window, cx),
-                        InputEvent::Change => {
-                            this.notes_saved = None;
-                            cx.notify();
-                        }
-                        _ => {}
+        let review = cx.new(|cx| YourReview::new(model.clone(), window, cx));
+        let ratings = cx.new(|cx| Ratings::new(model.clone(), window, cx));
+        let community_reviews = cx.new(|cx| CommunityReviews::new(model.clone(), cx));
+        let similar_side = Rc::new(Cell::new(None));
+        let notes_in_rail = Rc::new(Cell::new(false));
+        let notes = cx.new(|cx| Notes::new(model.clone(), notes_in_rail.clone(), window, cx));
+        let similar_books = cx.new(|cx| SimilarBooks::new(similar_side.clone(), window, cx));
+        let mut subscriptions = vec![
+            cx.observe_in(&model, window, |this, _, window, cx| {
+                this.sync_controls(window, cx);
+                cx.notify();
+            }),
+            cx.subscribe_in(
+                &privacy,
+                window,
+                |this, _, event: &SelectEvent<Vec<PrivacyOption>>, window, cx| {
+                    if let SelectEvent::Confirm(Some(privacy)) = event {
+                        this.change_privacy(*privacy, window, cx);
                     }
-                }),
-            ];
-        subscriptions.extend(review_subscriptions);
-        subscriptions.push(Self::observe_review_scope(cx));
-        subscriptions.push(cx.on_release_in(window, |this: &mut Self, window, cx| {
-            for url in this.similar_covers.drain(..) {
-                release_cover_medium(&url, Some(window), cx);
-            }
-        }));
+                },
+            ),
+        ];
+        subscriptions.push(cx.observe(&ratings, |_, _, cx| cx.notify()));
+        // The Reviews block shows only with `read:social`.
+        subscriptions.push(session::observe_grant(cx, |_, cx| cx.notify()));
         // Restarting into an update asks first while this view holds drafts.
         let this = cx.entity().downgrade();
         crate::drafts::register(
@@ -325,24 +332,31 @@ impl BookDetailView {
             subject: None,
             catalog,
             settle: None,
-            similar_due: None,
             privacy,
             notes,
-            notes_base: None,
-            notes_drafts: HashMap::new(),
-            notes_saved: None,
-            notes_editing: None,
+            notes_in_rail,
             edition_pickers: HashMap::new(),
             read_dialog: None,
             shown: None,
             cover: None,
-            similar_covers: Vec::new(),
+            art: CoverArt::None,
+            similar_books,
+            similar_side,
             tags_expanded: false,
             tools_in_bar: false,
             layout: Rc::new(Cell::new(PaneLayout::default())),
             review,
-            community_reviews: CommunityReviews::default(),
+            community_reviews,
+            ratings,
+            status_focus: cx.focus_handle(),
+            panel_focus: cx.focus_handle(),
+            more_focus: cx.focus_handle(),
+            add_focus: cx.focus_handle(),
+            add_read_focus: cx.focus_handle(),
+            read_focus: RefCell::default(),
             _subscriptions: subscriptions,
+            #[cfg(test)]
+            renders: 0,
         }
     }
 
@@ -366,6 +380,7 @@ impl BookDetailView {
         }
         self.subject = subject;
         self.shown = None;
+        self.read_focus.get_mut().clear();
         self.sync_controls(window, cx);
         if let Some(book) = self.book(cx) {
             book_lists::book_shown(book.id, cx);
@@ -380,7 +395,6 @@ impl BookDetailView {
     /// stores already hold shows at once, and only what is missing or
     /// stale is fetched.
     fn settle(&mut self, cx: &mut Context<Self>) {
-        self.similar_due = None;
         let Some(book) = self.book(cx).map(|b| b.id) else {
             self.settle = None;
             return;
@@ -405,23 +419,15 @@ impl BookDetailView {
         };
         match fetch {
             Fetch::Details => catalog.request_details(book, demand, cx),
-            Fetch::OwnReview => {
-                self.review.asked = Some(book);
-                if let Some(entry) = self.entry(self.model.read(cx)).map(|e| e.user_book_id) {
-                    self.model
-                        .update(cx, |m, cx| m.request_review(entry, demand, cx));
-                }
-            }
-            Fetch::Similar => {
-                self.similar_due = Some(book);
-                catalog.request_similar(book, demand, cx);
-            }
-            Fetch::Reviews => {
-                if session::has_scope(cx, READ_SOCIAL) {
-                    let me = self.model.read(cx).verified_user_id();
-                    catalog.request_reviews(book, me, demand, cx);
-                }
-            }
+            Fetch::OwnReview => self
+                .review
+                .update(cx, |review, cx| review.fetch(demand, cx)),
+            Fetch::Similar => self
+                .similar_books
+                .update(cx, |similar, cx| similar.fetch(demand, cx)),
+            Fetch::Reviews => self
+                .community_reviews
+                .update(cx, |reviews, cx| reviews.fetch(demand, cx)),
         }
     }
 
@@ -433,11 +439,6 @@ impl BookDetailView {
                 &catalog.details,
                 |this, _, SharedChanged(id): &SharedChanged<BookId>, cx| {
                     if this.shows(*id, cx) {
-                        if this.similar_due == Some(*id)
-                            && let Some(catalog) = this.catalog.clone()
-                        {
-                            catalog.request_similar(*id, Demand::Active, cx);
-                        }
                         cx.notify();
                     }
                 },
@@ -450,15 +451,22 @@ impl BookDetailView {
                     }
                 },
             ),
-            cx.subscribe(
-                &catalog.reviews,
-                |this, _, SharedChanged(id): &SharedChanged<BookId>, cx| {
-                    if this.shows(*id, cx) {
-                        cx.notify();
-                    }
-                },
-            ),
         ]
+    }
+
+    /// The "Reviews" block, left out without `read:social`.
+    fn render_community_reviews(&self, cx: &App) -> Option<AnyElement> {
+        CommunityReviews::visible(cx).then(|| self.community_reviews.clone().into_any_element())
+    }
+
+    /// The "Similar books" block, laid out as `side`'s grid or in one
+    /// column; left out when there are none.
+    fn render_similar(&self, side: Option<SideGrid>, cx: &App) -> Option<AnyElement> {
+        self.similar_side.set(side);
+        self.similar_books
+            .read(cx)
+            .shows(cx)
+            .then(|| self.similar_books.clone().into_any_element())
     }
 
     /// The book shown is `book`.
@@ -525,11 +533,17 @@ impl BookDetailView {
     /// Points the controls at the entry's current values when they differ from
     /// what is shown. Never emits control events, so it cannot loop.
     fn sync_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let entry = self.entry(self.model.read(cx));
-        let notes = entry.map(|e| (e.user_book_id, e.private_notes.clone()));
-        let next = entry.map(Shown::of);
-        self.sync_notes(notes, window, cx);
-        self.sync_review(window, cx);
+        let book = self.book(cx).map(|b| b.id);
+        self.community_reviews
+            .update(cx, |reviews, cx| reviews.set_book(book, cx));
+        self.similar_books
+            .update(cx, |similar, cx| similar.set_book(book, window, cx));
+        let entry = self.entry(self.model.read(cx)).map(|e| e.user_book_id);
+        self.notes
+            .update(cx, |notes, cx| notes.set_entry(entry, window, cx));
+        self.review
+            .update(cx, |review, cx| review.set_subject(entry, book, window, cx));
+        let next = self.entry(self.model.read(cx)).map(Shown::of);
         let Some(next) = next else {
             self.shown = None;
             return;
@@ -542,55 +556,6 @@ impl BookDetailView {
             Some(p) => s.set_selected_value(p, window, cx),
             None => s.set_selected_index(None, window, cx),
         });
-    }
-
-    /// Fills the notes field from `next` (entry id and saved notes) unless the
-    /// field holds an unsaved draft for that entry. A draft for another entry is
-    /// set aside and restored when that entry is shown again.
-    fn sync_notes(
-        &mut self,
-        next: Option<(UserBookId, Option<String>)>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.notes_base == next {
-            return;
-        }
-        let text = self.notes.read(cx).value().to_string();
-        let same_entry =
-            self.notes_base.as_ref().map(|(id, _)| *id) == next.as_ref().map(|(id, _)| *id);
-        if let Some((id, saved)) = &self.notes_base
-            && notes_differ(&text, saved.as_deref())
-        {
-            if same_entry {
-                // The saved notes changed under a draft (or a save made them
-                // equal): keep the text, and compare it with the new value.
-                self.notes_base = next;
-                return;
-            }
-            self.notes_drafts.insert(*id, text);
-        }
-        let Some((id, saved)) = next.clone() else {
-            self.notes_base = None;
-            return;
-        };
-        let value = self
-            .notes_drafts
-            .remove(&id)
-            .unwrap_or_else(|| saved.unwrap_or_default());
-        if *self.notes.read(cx).value() != *value {
-            self.notes
-                .update(cx, |s, cx| s.set_value(value, window, cx));
-        }
-        self.notes_base = next;
-        self.notes_saved = None;
-    }
-
-    /// Unsaved notes in the field for the entry shown.
-    fn notes_dirty(&self, cx: &App) -> bool {
-        self.notes_base
-            .as_ref()
-            .is_some_and(|(_, saved)| notes_differ(&self.notes.read(cx).value(), saved.as_deref()))
     }
 
     /// Resets the controls to the model after a rejected or failed change.
@@ -615,19 +580,25 @@ impl BookDetailView {
     /// failure. `warning` names what to say despite success.
     fn run_write<T: Written>(
         &mut self,
-        mut write: LibraryWrite<T>,
+        write: LibraryWrite<T>,
         warning: impl FnOnce(&T) -> Option<(&'static str, &'static str)> + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (kind, target) = (write.kind(), write.target());
-        let WriteTarget::Entry(id) = target else {
+        self.run_write_then(write, warning, |_, _, _| {}, window, cx);
+    }
+
+    /// [`Self::run_write`], then `saved` once it succeeded.
+    fn run_write_then<T: Written>(
+        &mut self,
+        write: LibraryWrite<T>,
+        warning: impl FnOnce(&T) -> Option<(&'static str, &'static str)> + 'static,
+        saved: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(write.target(), WriteTarget::Entry(_)) {
             return;
-        };
-        // A review write needs write:reviews and, for its status,
-        // write:library: an unnamed refusal can't be pinned on either.
-        if kind == WriteKind::Review {
-            write = write.any_scope();
         }
         let outcome = self.model.update(cx, |m, cx| m.write(write, window, cx));
         cx.spawn_in(window, async move |this, cx| {
@@ -637,16 +608,7 @@ impl BookDetailView {
                     if let Some((title, message)) = warning(&written) {
                         window.push_notification(Notification::warning(message).title(title), cx);
                     }
-                    if kind == WriteKind::Notes {
-                        this.notes_saved = Some(id);
-                        if this.notes_editing == Some(id) {
-                            this.notes_editing = None;
-                        }
-                        cx.notify();
-                    }
-                    if kind == WriteKind::Review {
-                        this.review_written(id, cx);
-                    }
+                    saved(this, window, cx);
                 }
                 WriteOutcome::Failed { .. } | WriteOutcome::Busy => {
                     this.revert_controls(window, cx);
@@ -661,60 +623,33 @@ impl BookDetailView {
         self.entry(self.model.read(cx)).cloned()
     }
 
+    /// Moves the entry to `status`, asking first when that starts or
+    /// finishes a read (`writes::change_status`).
     fn change_status(
         &mut self,
         status: ReadingStatus,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(entry) = self.current_entry(cx) else {
+        let Some(id) = self.entry(self.model.read(cx)).map(|e| e.user_book_id) else {
             return;
         };
-        if entry.status == status {
-            return;
-        }
-        let id = entry.user_book_id;
-        self.run_write(
-            LibraryWrite::entry(
-                id,
-                WriteKind::Status,
-                "Couldn't change the status",
-                move |client| client.set_status(id, status),
-            ),
-            |_| None,
-            window,
-            cx,
-        );
+        writes::change_status(&self.model, id, status, window, cx);
     }
 
+    /// Saves a rating, now or once the write running on the entry ends
+    /// ([`Ratings`]); the stars show it meanwhile.
     fn change_rating(
         &mut self,
         rating: Option<Rating>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(entry) = self.current_entry(cx) else {
+        let Some(id) = self.entry(self.model.read(cx)).map(|e| e.user_book_id) else {
             return;
         };
-        let id = entry.user_book_id;
-        // A change while another write runs is dropped: the stars stay
-        // enabled during a write only so that they keep the keyboard focus.
-        if self.model.read(cx).pending_write(id).is_some() {
-            return;
-        }
-        // Sending the shown status keeps Hardcover from marking the book Read.
-        let keep = entry.status;
-        self.run_write(
-            LibraryWrite::entry(
-                id,
-                WriteKind::Rating,
-                "Couldn't save the rating",
-                move |client| client.set_rating(id, rating, keep),
-            ),
-            |_| None,
-            window,
-            cx,
-        );
+        self.ratings
+            .update(cx, |r, cx| r.rate(id, rating, window, cx));
     }
 
     fn change_privacy(&mut self, privacy: Privacy, window: &mut Window, cx: &mut Context<Self>) {
@@ -738,65 +673,16 @@ impl BookDetailView {
         );
     }
 
-    fn save_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(entry) = self.current_entry(cx) else {
-            return;
-        };
-        if !self.notes_dirty(cx) {
-            return;
-        }
-        let id = entry.user_book_id;
-        let text = self.notes.read(cx).value().to_string();
-        self.run_write(
-            LibraryWrite::entry(
-                id,
-                WriteKind::Notes,
-                "Couldn't save your notes",
-                move |client| client.set_private_notes(id, &text),
-            ),
-            |_| None,
-            window,
-            cx,
-        );
-    }
-
-    fn discard_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let saved = self
-            .notes_base
-            .as_ref()
-            .and_then(|(_, saved)| saved.clone())
-            .unwrap_or_default();
-        self.notes
-            .update(cx, |s, cx| s.set_value(saved, window, cx));
-        self.notes_editing = None;
-        cx.notify();
-    }
-
-    /// Opens the notes editor on the entry shown, with the cursor at the end
-    /// of the notes, ready to add a line.
-    fn edit_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(entry) = self.current_entry(cx) else {
-            return;
-        };
-        self.notes_editing = Some(entry.user_book_id);
-        self.notes_saved = None;
-        self.notes.update(cx, |s, cx| {
-            let end = s.value().len();
-            s.set_selected_range(end..end, cx);
-            s.focus(window, cx);
-        });
-        cx.notify();
-    }
-
     /// Whether this view holds words not saved: in the notes or review
     /// editor, or set aside for another book (`crate::drafts`).
     pub fn has_unsaved_drafts(&self, cx: &App) -> bool {
-        self.notes_dirty(cx) || !self.notes_drafts.is_empty() || self.review_unsaved(cx)
+        self.notes.read(cx).has_unsaved(cx) || self.review.read(cx).review_unsaved(cx)
     }
 
-    /// Whether the notes editor shows for `id`: opened, or holding a draft.
-    fn notes_open(&self, id: UserBookId, cx: &App) -> bool {
-        self.notes_editing == Some(id) || self.notes_dirty(cx)
+    /// Notes, as a rail section or a block.
+    fn render_notes(&self, in_rail: bool) -> AnyElement {
+        self.notes_in_rail.set(in_rail);
+        self.notes.clone().into_any_element()
     }
 
     fn open_edition_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -935,7 +821,7 @@ impl BookDetailView {
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
                     let _ = view.update(cx, |this, cx| {
-                        this.run_write(
+                        this.run_write_then(
                             LibraryWrite::entry(
                                 id,
                                 WriteKind::Reads,
@@ -943,6 +829,14 @@ impl BookDetailView {
                                 move |client| client.delete_read(id, read),
                             ),
                             |_| None,
+                            // Its menu went with it: focus to "Add a past
+                            // read…", if it was there.
+                            move |this, window, cx| {
+                                let trigger = this.read_focus.borrow_mut().remove(&read);
+                                if focus_gone(trigger.as_ref(), window, cx) {
+                                    window.focus(&this.add_read_focus, cx);
+                                }
+                            },
                             window,
                             cx,
                         );
@@ -978,7 +872,7 @@ impl BookDetailView {
     }
 
     fn remove(&mut self, id: UserBookId, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_write(
+        self.run_write_then(
             LibraryWrite::entry(
                 id,
                 WriteKind::Remove,
@@ -986,6 +880,14 @@ impl BookDetailView {
                 move |client| client.remove_from_library(id).map(|()| Removed),
             ),
             |_| None,
+            // The book still shown, now out of the library: focus from the
+            // menu it was removed with to "Add to library".
+            |this, window, cx| {
+                let shown = matches!(this.subject, Some(Subject::Book(_)));
+                if shown && focus_gone(Some(&this.more_focus), window, cx) {
+                    window.focus(&this.add_focus, cx);
+                }
+            },
             window,
             cx,
         );
@@ -1005,12 +907,16 @@ impl BookDetailView {
 }
 
 impl BookDetailView {
-    /// The subject's entry and book, if there is a subject.
-    fn shown_book(&self, cx: &App) -> Option<(BookSummary, Option<LibraryEntry>)> {
-        let entry = self.entry(self.model.read(cx)).cloned();
-        let book = match (&self.subject, &entry) {
-            (_, Some(entry)) => entry.book.clone(),
-            (Some(Subject::Book(book)), None) => book.clone(),
+    /// The subject's book and entry, if there is a subject: borrowed from
+    /// the model, so a frame clones neither.
+    fn shown_book<'a>(
+        &'a self,
+        model: &'a LibraryModel,
+    ) -> Option<(&'a BookSummary, Option<&'a LibraryEntry>)> {
+        let entry = self.entry(model);
+        let book = match (&self.subject, entry) {
+            (_, Some(entry)) => &entry.book,
+            (Some(Subject::Book(book)), None) => book,
             _ => return None,
         };
         Some((book, entry))
@@ -1019,12 +925,12 @@ impl BookDetailView {
     /// The pane: its bar over one scrolling column of the header, the panel
     /// and every block; or, when it is wide, over the page's columns.
     fn render_pane(
-        &mut self,
+        &self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let layout = self.layout.get();
         let content = if layout.rail {
@@ -1049,6 +955,7 @@ impl BookDetailView {
                 .into_any_element()
         };
         let measured = self.layout.clone();
+        let view = cx.entity_id();
         v_flex()
             .size_full()
             // GPUI has no container queries, and the pane sits beside a
@@ -1056,10 +963,13 @@ impl BookDetailView {
             .on_prepaint(move |bounds, window, _| {
                 let layout = PaneLayout::at(bounds.size.width, window.rem_size());
                 if measured.replace(layout) != layout {
-                    window.refresh();
+                    // Drawn for the other layout. `refresh` does nothing
+                    // while a frame is drawn, and the view is cached: draw
+                    // it again on the next frame.
+                    window.on_next_frame(move |_, cx| cx.notify(view));
                 }
             })
-            .child(ObjectBar::new().tools(self.render_tools(book, entry, cx)))
+            .child(ObjectBar::new().tools(self.render_tools(book, entry, window, cx)))
             .child(
                 div()
                     // Keyed by book, so another book (a similar one) opens at
@@ -1075,35 +985,35 @@ impl BookDetailView {
 
     /// The narrow pane's one column: the header, the panel and every block.
     fn render_column(
-        &mut self,
+        &self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let header = self.render_header(book, entry, details, false, window, cx);
         let mut column: Vec<AnyElement> = Vec::new();
-        if let Some(entry) = entry {
-            column.push(self.render_notes(entry, false, cx));
+        if entry.is_some() {
+            column.push(self.render_notes(false));
         }
         column.push(self.render_about(book, cx));
         column.extend(self.render_tags(details, cx));
         column.extend(Self::render_other_titles(details, cx));
         if let Some(entry) = entry {
             column.push(self.render_details(entry, false, cx));
-            column.push(self.render_review(entry, cx).into_any_element());
-            column.push(self.render_reads(entry, false, cx));
+            column.push(self.review.clone().into_any_element());
+            column.push(self.render_reads(entry, false, window, cx));
         }
         column.extend(Self::render_on_hardcover(book, details, false, cx));
-        column.extend(self.render_community_reviews(book.id, window, cx));
-        column.extend(self.render_similar(book, details, None, cx));
+        column.extend(self.render_community_reviews(cx));
+        column.extend(self.render_similar(None, cx));
 
         v_flex()
             .w_full()
             .gap_6()
             .child(header)
-            .children(entry.and_then(|entry| self.render_panel(entry, cx)))
+            .children(entry.and_then(|entry| self.render_panel(entry, window, cx)))
             .child(blocks().children(column))
             .into_any_element()
     }
@@ -1116,22 +1026,22 @@ impl BookDetailView {
     /// a side column. The caller wraps them in its inset as a tab group.
     #[allow(clippy::too_many_arguments)]
     fn render_columns(
-        &mut self,
+        &self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         folded: bool,
-        side: Option<catalog_sections::SideGrid>,
+        side: Option<SideGrid>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Columns {
         let header = self.render_header(book, entry, details, true, window, cx);
         let about = self.render_about(book, cx);
         let tags = self.render_tags(details, cx);
         let other_titles = Self::render_other_titles(details, cx);
-        let review = entry.map(|entry| self.render_review(entry, cx).into_any_element());
-        let reviews = self.render_community_reviews(book.id, window, cx);
-        let similar = self.render_similar(book, details, side, cx);
+        let review = entry.map(|_| self.review.clone().into_any_element());
+        let reviews = self.render_community_reviews(cx);
+        let similar = self.render_similar(side, cx);
 
         // Keyboard order follows the task, not the tree: the header and
         // panel, then the rail beside them (your book), then the main
@@ -1176,15 +1086,15 @@ impl BookDetailView {
         rail.extend(Self::render_on_hardcover(book, details, true, cx));
         if let Some(entry) = entry {
             rail.push(self.render_details(entry, true, cx));
-            rail.push(self.render_reads(entry, true, cx));
-            rail.push(self.render_notes(entry, true, cx));
+            rail.push(self.render_reads(entry, true, window, cx));
+            rail.push(self.render_notes(true));
         }
 
         let main = v_flex()
             .w_full()
             .gap_6()
             .child(header)
-            .children(entry.and_then(|entry| self.render_panel(entry, cx)))
+            .children(entry.and_then(|entry| self.render_panel(entry, window, cx)))
             .child(blocks.tab_group().tab_index(1));
         Columns::new(Tier::rail(folded), main).rail(rail)
     }
@@ -1192,12 +1102,12 @@ impl BookDetailView {
     /// The full page: the columns in the page's inset; the rail folds under
     /// the main column when the page is too narrow.
     fn render_page(
-        &mut self,
+        &self,
         book: &BookSummary,
         entry: Option<&LibraryEntry>,
         details: Option<&BookDetails>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         // The page is the window less the sidebar and its own insets: GPUI
         // has no container queries.
@@ -1205,7 +1115,7 @@ impl BookDetailView {
         let width = region_width(window, size::PAGE_INSET);
         let folded = folds(width, rem, false);
         let side = side_width(main_column_width(width, rem, false, folded), rem)
-            .map(|side| catalog_sections::similar_in_side(side, rem));
+            .map(|side| similar_books::similar_in_side(side, rem));
         let columns = self.render_columns(book, entry, details, folded, side, window, cx);
         div()
             .id(("book-detail", book.id.get().cast_unsigned()))
@@ -1227,13 +1137,28 @@ impl BookDetailView {
     }
 }
 
+impl BookDetailView {
+    /// `view` as its hosts embed it: cached, filling the place they give
+    /// it, so a host's own frames (a list's hover, a sync's spinner) don't
+    /// draw the book again. It draws again when it changes: everything it
+    /// shows is observed (the library, the catalogue, the lists, the grant,
+    /// its own child views), and the shell refreshes the window when the
+    /// day changes.
+    pub fn embedded(view: &Entity<Self>) -> AnyElement {
+        view.clone()
+            .cached(StyleRefinement::default().size_full())
+            .into_any_element()
+    }
+}
+
 impl ObjectTools for BookDetailView {
-    fn object_tools(&mut self, _: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn object_tools(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         if !self.tools_in_bar {
             return Vec::new();
         }
-        match self.shown_book(cx) {
-            Some((book, entry)) => self.render_tools(&book, entry.as_ref(), cx),
+        let model = self.model.read(cx);
+        match self.shown_book(model) {
+            Some((book, entry)) => self.render_tools(book, entry, window, cx),
             None => Vec::new(),
         }
     }
@@ -1241,18 +1166,31 @@ impl ObjectTools for BookDetailView {
 
 impl Render for BookDetailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let shown = self.shown_book(cx);
-        self.keep_similar_covers(shown.as_ref().map(|(book, _)| book.id), window, cx);
-        let Some((book, entry)) = shown else {
-            self.load_cover(None, window, cx);
+        #[cfg(test)]
+        {
+            self.renders += 1;
+        }
+        // The cover first: loading it needs the context mutably, and the
+        // rest borrows the book and the entry from the model.
+        let cover_url = self
+            .shown_book(self.model.read(cx))
+            .and_then(|(book, entry)| {
+                entry
+                    .and_then(|e| e.cover())
+                    .or(book.cover.as_ref())
+                    .map(|c| c.url.clone())
+            });
+        self.art = self.load_cover(cover_url, window, cx);
+        let cx: &Context<Self> = cx;
+        let Some((book, entry)) = self.shown_book(self.model.read(cx)) else {
             return EmptyState::new(IconName::BookOpen, "Select a book to see its details")
                 .into_any_element();
         };
         let details = self.details(book.id, cx);
         if self.tools_in_bar {
-            self.render_page(&book, entry.as_ref(), details.as_deref(), window, cx)
+            self.render_page(book, entry, details.as_deref(), window, cx)
         } else {
-            self.render_pane(&book, entry.as_ref(), details.as_deref(), window, cx)
+            self.render_pane(book, entry, details.as_deref(), window, cx)
         }
     }
 }
@@ -1318,6 +1256,341 @@ mod tests {
         catalog
             .details
             .read_with(cx, |s, _| s.resource().is_loading(&BOOK))
+    }
+
+    /// A book view inside the kit's root (dialogs need it), on the demo
+    /// library, synced.
+    pub(super) fn rooted_view(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<BookDetailView>,
+        Entity<LibraryModel>,
+        &mut VisualTestContext,
+    ) {
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::ui::kit::bind_keys(cx);
+            session.install(cx);
+            Catalog::init(&session, cx);
+        });
+        let model = cx.new(|_| LibraryModel::new(session));
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let view = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let (_, cx) = cx.add_window_view({
+            let (model, view) = (model.clone(), view.clone());
+            move |window, cx| {
+                let detail = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
+                *view.borrow_mut() = Some(detail.clone());
+                gpui_kit::base::Root::new(detail, window, cx)
+            }
+        });
+        cx.update(|window, _| window.activate_window());
+        let view = view.borrow_mut().take().unwrap();
+        (view, model, cx)
+    }
+
+    /// Shows the first entry with `status` that `matches`.
+    pub(super) fn show_entry(
+        view: &Entity<BookDetailView>,
+        model: &Entity<LibraryModel>,
+        cx: &mut VisualTestContext,
+        matches: impl Fn(&LibraryEntry) -> bool,
+    ) -> UserBookId {
+        let id = model.read_with(cx, |m, _| {
+            m.entries()
+                .iter()
+                .find(|e| matches(e))
+                .map(|e| e.user_book_id)
+                .expect("the demo has such an entry")
+        });
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.set_subject(Some(Subject::Entry(id)), window, cx);
+            });
+        });
+        settle(cx);
+        crate::ui::test_support::redraw(cx);
+        id
+    }
+
+    fn dialog_open(cx: &mut VisualTestContext) -> bool {
+        cx.update(gpui_kit::component::WindowExt::has_active_dialog)
+    }
+
+    /// D3: moving a paused book back to Currently reading asks first; Cancel
+    /// changes nothing and gives focus back to the status menu's trigger.
+    #[gpui_kit::test]
+    fn a_status_change_that_starts_a_read_asks_first(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (view, model, cx) = rooted_view(cx);
+        let id = show_entry(&view, &model, cx, |e| {
+            e.status == ReadingStatus::Paused && e.open_read().is_some()
+        });
+        let trigger = view.read_with(cx, |v, _| v.status_focus.clone());
+        cx.update(|window, cx| {
+            window.focus(&trigger, cx);
+            view.update(cx, |v, cx| {
+                v.change_status(ReadingStatus::CurrentlyReading, window, cx);
+            });
+        });
+        redraw(cx);
+        redraw(cx);
+        assert!(dialog_open(cx), "asked first");
+        press(cx, "enter");
+        cx.run_until_parked();
+        redraw(cx);
+        assert!(!dialog_open(cx), "Cancel, where focus opened");
+        let status = model.read_with(cx, |m, _| m.entry(id).map(|e| e.status));
+        assert_eq!(status, Some(ReadingStatus::Paused), "nothing changed");
+        assert!(
+            cx.update(|window, _| trigger.is_focused(window)),
+            "focus is back on the status menu's trigger"
+        );
+
+        // A change that starts nothing goes at once.
+        cx.update(|window, cx| {
+            view.update(cx, |v, cx| {
+                v.change_status(ReadingStatus::DidNotFinish, window, cx);
+            });
+        });
+        redraw(cx);
+        assert!(!dialog_open(cx));
+        cx.run_until_parked();
+        let status = model.read_with(cx, |m, _| m.entry(id).map(|e| e.status));
+        assert_eq!(status, Some(ReadingStatus::DidNotFinish));
+    }
+
+    /// C3: "Start reading" from the keyboard leaves focus on "Update
+    /// progress…", which takes its place: Enter opens the progress dialog.
+    #[gpui_kit::test]
+    fn starting_a_book_leaves_focus_on_update_progress(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (view, model, cx) = rooted_view(cx);
+        let id = show_entry(&view, &model, cx, |e| e.status == ReadingStatus::WantToRead);
+        let panel = view.read_with(cx, |v, _| v.panel_focus.clone());
+        cx.update(|window, cx| window.focus(&panel, cx));
+        redraw(cx);
+        press(cx, "enter");
+        cx.run_until_parked();
+        redraw(cx);
+        let status = model.read_with(cx, |m, _| m.entry(id).map(|e| e.status));
+        assert_eq!(
+            status,
+            Some(ReadingStatus::CurrentlyReading),
+            "Start reading"
+        );
+        assert!(!dialog_open(cx));
+        press(cx, "enter");
+        redraw(cx);
+        assert!(
+            dialog_open(cx),
+            "Enter on Update progress… opened its dialog"
+        );
+    }
+
+    /// C3: a book removed from the "more" menu, still shown, gives focus
+    /// to "Add to library"; a read deleted from its menu, to "Add a past
+    /// read…".
+    #[gpui_kit::test]
+    fn removing_gives_focus_to_what_takes_its_place(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (view, model, cx) = rooted_view(cx);
+        let id = show_entry(&view, &model, cx, |e| e.reads.len() >= 2);
+
+        // A read deleted after its confirmation.
+        let read = model.read_with(cx, |m, _| m.entry(id).unwrap().reads[0].id);
+        let trigger = view.read_with(cx, |v, _| v.read_focus.borrow().get(&read).cloned());
+        let trigger = trigger.expect("each read's menu has its trigger");
+        cx.update(|window, cx| {
+            window.focus(&trigger, cx);
+            view.update(cx, |v, cx| v.confirm_delete_read(read, window, cx));
+        });
+        redraw(cx);
+        redraw(cx);
+        assert!(dialog_open(cx));
+        press(cx, "tab");
+        press(cx, "enter");
+        cx.run_until_parked();
+        redraw(cx);
+        let reads = model.read_with(cx, |m, _| m.entry(id).unwrap().reads.len());
+        assert!(
+            reads >= 1 && model.read_with(cx, |m, _| m.entry(id).unwrap().read(read).is_none())
+        );
+        let add_read = view.read_with(cx, |v, _| v.add_read_focus.clone());
+        assert!(
+            cx.update(|window, _| add_read.is_focused(window)),
+            "on Add a past read…"
+        );
+
+        // The book, shown from the catalogue, removed.
+        let book = model.read_with(cx, |m, _| m.entry(id).unwrap().book.clone());
+        cx.update(|window, cx| {
+            view.update(cx, |v, cx| {
+                v.set_subject(Some(Subject::Book(book)), window, cx)
+            });
+        });
+        redraw(cx);
+        let more = view.read_with(cx, |v, _| v.more_focus.clone());
+        cx.update(|window, cx| {
+            window.focus(&more, cx);
+            view.update(cx, |v, cx| v.remove(id, window, cx));
+        });
+        cx.run_until_parked();
+        redraw(cx);
+        assert!(model.read_with(cx, |m, _| m.entry(id).is_none()), "removed");
+        let add = view.read_with(cx, |v, _| v.add_focus.clone());
+        assert!(
+            cx.update(|window, _| add.is_focused(window)),
+            "on Add to library"
+        );
+    }
+
+    /// A host that embeds a book view, as the shelf, search, a list and
+    /// the book page do.
+    struct Host(Entity<BookDetailView>);
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(BookDetailView::embedded(&self.0))
+        }
+    }
+
+    /// A book view embedded in a [`Host`], showing the demo's first entry.
+    fn embedded_view(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<Host>,
+        Entity<BookDetailView>,
+        Entity<LibraryModel>,
+        &mut VisualTestContext,
+    ) {
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            session.install(cx);
+            Catalog::init(&session, cx);
+        });
+        let model = cx.new(|_| LibraryModel::new(session));
+        model.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            Host(cx.new(|cx| BookDetailView::new(model.clone(), window, cx)))
+        });
+        let view = host.read_with(cx, |h, _| h.0.clone());
+        cx.update(|window, cx| {
+            let id = model.read(cx).entries()[0].user_book_id;
+            view.update(cx, |v, cx| {
+                v.set_subject(Some(Subject::Entry(id)), window, cx)
+            });
+        });
+        settle(cx);
+        crate::ui::test_support::redraw(cx);
+        (host, view, model, cx)
+    }
+
+    fn renders(view: &Entity<BookDetailView>, cx: &mut VisualTestContext) -> usize {
+        view.read_with(cx, |v, _| v.renders)
+    }
+
+    /// C1: a host's own frames (a hover, a spinner) don't draw the book
+    /// view again; a change to what it shows does.
+    #[gpui_kit::test]
+    fn an_embedded_book_view_draws_only_when_it_changes(cx: &mut TestAppContext) {
+        use crate::ui::test_support::redraw;
+
+        let (host, view, model, cx) = embedded_view(cx);
+        let before = renders(&view, cx);
+
+        host.update(cx, |_, cx| cx.notify());
+        redraw(cx);
+        redraw(cx);
+        assert_eq!(
+            renders(&view, cx),
+            before,
+            "the host drew; the book view didn't"
+        );
+
+        model.update(cx, |_, cx| cx.notify());
+        redraw(cx);
+        assert_eq!(
+            renders(&view, cx),
+            before + 1,
+            "the library changed: drawn again"
+        );
+    }
+
+    /// A pane widened past `pane_has_rail` is drawn again with the rail on
+    /// the next frame, though it is cached: it measures itself only as it
+    /// is drawn.
+    #[gpui_kit::test]
+    fn a_widened_pane_takes_the_rail_on_the_next_frame(cx: &mut TestAppContext) {
+        use crate::ui::test_support::redraw;
+
+        let (_host, view, _, cx) = embedded_view(cx);
+        cx.simulate_resize(gpui_kit::size(px(600.), px(800.)));
+        redraw(cx);
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        redraw(cx);
+        assert!(!view.read_with(cx, |v, _| v.layout.get().rail));
+        cx.simulate_resize(gpui_kit::size(px(1400.), px(800.)));
+        redraw(cx);
+        assert!(view.read_with(cx, |v, _| v.layout.get().rail), "measured");
+        let drawn = renders(&view, cx);
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        redraw(cx);
+        assert!(renders(&view, cx) > drawn, "drawn again for the new layout");
+    }
+
+    /// Focus moved below the fold from the keyboard scrolls into view in a
+    /// cached book view: the scroll is worked out as a frame is drawn, and
+    /// shown on the next one.
+    #[gpui_kit::test]
+    fn focus_below_the_fold_is_revealed_in_a_cached_view(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (_host, view, _, cx) = embedded_view(cx);
+        cx.simulate_resize(gpui_kit::size(px(700.), px(400.)));
+        redraw(cx);
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        redraw(cx);
+        let opener = view.read_with(cx, |v, cx| v.notes.read(cx).opener_for_tests());
+        // Keyboard input, so the focus counts as the keyboard's.
+        press(cx, "f12");
+        cx.update(|window, cx| window.focus(&opener, cx));
+        redraw(cx);
+        let drawn = renders(&view, cx);
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        redraw(cx);
+        assert!(renders(&view, cx) > drawn, "drawn again, scrolled");
+    }
+
+    /// Controls inside a cached book view draw their own changes: moving
+    /// the caret in the notes field, with no text changed, draws it again.
+    #[gpui_kit::test]
+    fn a_caret_moved_in_a_cached_view_is_drawn(cx: &mut TestAppContext) {
+        use crate::ui::test_support::{press, redraw};
+
+        let (_host, view, _, cx) = embedded_view(cx);
+        let notes = view.read_with(cx, |v, _| v.notes.clone());
+        cx.update(|window, cx| notes.update(cx, |n, cx| n.edit_for_tests(window, cx)));
+        redraw(cx);
+        cx.simulate_input("Some words");
+        redraw(cx);
+        let drawn = renders(&view, cx);
+        press(cx, "left");
+        redraw(cx);
+        assert!(renders(&view, cx) > drawn, "the caret moved: drawn again");
+        let drawn = renders(&view, cx);
+        press(cx, "shift-left");
+        redraw(cx);
+        assert!(renders(&view, cx) > drawn, "a selection: drawn again");
     }
 
     #[gpui_kit::test]

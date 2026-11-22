@@ -24,6 +24,9 @@
 //! - [`Alert`], built by [`open_alert_dialog`]: the app's own footer, whose
 //!   buttons take focus by handle and show the ring only after keyboard
 //!   input ([`KeyboardRing`]).
+//! - [`close_own_dialog`]: a dialog that closes itself after an awaited
+//!   save (the list form) closes only while it is the one in front; the
+//!   kit's `close_dialog` closes the newest, whichever that is.
 //! - [`OnTextSpine`]: a quiet button (ghost, or a danger label) that starts a
 //!   line puts its label, not its padding, on the content's leading edge.
 //! - [`danger_menu_item`]: a destructive menu command ("Delete read…") in
@@ -77,7 +80,10 @@
 //!   a dialog closing onto the button that opened it, Back returning to the
 //!   control that opened the page. A button that takes its focus from a
 //!   handle the app keeps follows the rule ([`KeyboardRing`]: the alert
-//!   footers); a switch can't be given one.
+//!   footers, and the book view's buttons focus is handed to: the status,
+//!   "more" and read menus' triggers, the panel's button, "Add to library",
+//!   "Add a past read…" and the Notes and review openers); a switch can't
+//!   be given one.
 //! - **Empty-state icons** are Lucide's fixed SVGs, drawn at stroke 2, not
 //!   the system's 1.5.
 
@@ -280,6 +286,31 @@ pub fn open_dialog(
         let raised = colors(cx).raised;
         build(dialog.on_ok(|_, _, _| false), window, cx).bg(raised)
     });
+}
+
+/// Whether the dialog holding `content` (a handle its content tracks on its
+/// root) is the one in front: focus is in the content, on the dialog around
+/// it, or nowhere. A dialog opened over it takes focus into itself.
+///
+/// The kit closes only the newest dialog (`close_dialog`), so a dialog that
+/// closes itself after an awaited save checks this first, and waits for
+/// focus to come back otherwise ([`close_own_dialog`]).
+pub fn dialog_in_front(content: &FocusHandle, window: &Window, cx: &mut App) -> bool {
+    window.focused(cx).is_none()
+        || content.contains_focused(window, cx)
+        || content.within_focused(window, cx)
+}
+
+/// Closes the dialog holding `content` if it is in front
+/// ([`dialog_in_front`]) and returns `true`; otherwise leaves every dialog
+/// open and returns `false`, and the caller closes it once focus comes back
+/// into it (`cx.on_focus_in(content, ..)`).
+pub fn close_own_dialog(content: &FocusHandle, window: &mut Window, cx: &mut App) -> bool {
+    let in_front = dialog_in_front(content, window, cx);
+    if in_front {
+        window.close_dialog(cx);
+    }
+    in_front
 }
 
 /// A button that takes its focus from `handle`, a handle the app keeps, so
@@ -708,6 +739,43 @@ mod tests {
                 .ok_text("Install")
         };
         assert_eq!(confirm_with_enter(cx, true, install), 1);
+    }
+
+    /// C3: a dialog that hands over to a confirmation (Settings → "Sign
+    /// out…", a goal → "Delete goal…") closes itself first; Cancel on the
+    /// confirmation gives focus back to what opened the dialog.
+    #[gpui_kit::test]
+    fn cancel_on_a_confirmation_that_replaced_a_dialog_returns_to_its_opener(
+        cx: &mut TestAppContext,
+    ) {
+        let cx = open(cx);
+        cx.update(|window, _| window.activate_window());
+        let opener = cx.update(|_, cx| cx.focus_handle());
+        cx.update(|window, cx| {
+            window.focus(&opener, cx);
+            open_dialog(window, cx, |dialog, _, _| {
+                dialog.child(Button::new("sign-out").label("Sign out…"))
+            });
+        });
+        redraw(cx);
+        cx.update(|window, cx| {
+            // As Settings' "Sign out…" does.
+            window.close_all_dialogs(cx);
+            open_alert_dialog(window, cx, |alert, _, _| {
+                alert
+                    .title("Sign out of Hardcover?")
+                    .confirm()
+                    .ok_text("Sign out")
+                    .ok_variant(ButtonVariant::Danger)
+            });
+        });
+        redraw(cx);
+        redraw(cx);
+        press(cx, "enter");
+        cx.run_until_parked();
+        redraw(cx);
+        assert!(!dialog_open(cx), "Cancel closed it");
+        assert!(cx.update(|window, _| opener.is_focused(window)));
     }
 
     /// The update alert with nothing to install has a link before its one

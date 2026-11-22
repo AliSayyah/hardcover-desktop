@@ -1646,7 +1646,10 @@ impl Client {
         }
     }
 
-    /// Puts `book` on `list`, as `edition` if given. Needs `write:lists`.
+    /// Puts `book` on `list`, as `edition` if given, at `position` if given
+    /// (Undo puts a book back at its place on a ranked list; whether
+    /// Hardcover moves the rows after it down is unverified). Needs
+    /// `write:lists`.
     ///
     /// # Errors
     ///
@@ -1656,6 +1659,7 @@ impl Client {
         list: ListId,
         book: BookId,
         edition: Option<EditionId>,
+        position: Option<i32>,
     ) -> Result<ListMembership> {
         #[derive(Deserialize)]
         struct Data {
@@ -1664,6 +1668,9 @@ impl Client {
         let mut object = json!({ "list_id": list.get(), "book_id": book.get() });
         if let Some(edition) = edition {
             object["edition_id"] = json!(edition.get());
+        }
+        if let Some(position) = position {
+            object["position"] = json!(position);
         }
         let data: Data = self.query(
             "InsertListBook",

@@ -88,7 +88,7 @@ pub fn lists_button(book: &BookSummary, cx: &App) -> Option<AnyElement> {
                                     if on {
                                         m.remove(id, book_id, cx)
                                     } else {
-                                        m.add(id, book_id, None, cx)
+                                        m.add(id, book_id, None, None, cx)
                                     }
                                 });
                                 notify_failure(task, "Couldn't change the list", window, cx);

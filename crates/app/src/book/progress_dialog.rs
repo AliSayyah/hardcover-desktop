@@ -13,8 +13,9 @@
 //! writes the exact place it came from.
 //!
 //! Progress in time belongs to an audiobook edition's read. A book whose
-//! edition counts pages but that has an audiobook offers "Choose an
-//! audiobook edition…", which opens the edition picker over the dialog; the
+//! edition counts pages but that has an audiobook (Hardcover names one,
+//! `LibraryEntry::book_audio_edition`) offers "Choose an audiobook
+//! edition…", which opens the edition picker over the dialog; the
 //! edition change moves the read, and the field switches to time when it
 //! lands.
 //!
@@ -355,8 +356,7 @@ impl Render for ProgressDialog {
         let entry = model.entry(self.id);
         let measure = entry.and_then(LibraryEntry::measure);
         let title = entry.map(|e| e.book.title.clone());
-        let offer_audiobook =
-            entry.is_some_and(|e| !e.is_audio() && e.book_audio_seconds.is_some());
+        let offer_audiobook = entry.is_some_and(offers_audiobook);
         let can_write = session::has_scope(cx, WRITE_LIBRARY);
         let percent = has_length(measure);
         let muted = colors(cx).fg_muted;
@@ -454,9 +454,33 @@ impl Render for ProgressDialog {
     }
 }
 
+/// Whether the dialog offers "Choose an audiobook edition…": the entry
+/// counts pages, and Hardcover names an audiobook edition of the book.
+fn offers_audiobook(entry: &LibraryEntry) -> bool {
+    !entry.is_audio() && entry.book_audio_edition.is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Offered from Hardcover's audiobook edition, not the book's running
+    /// time, which it seldom fills.
+    #[test]
+    fn an_audiobook_edition_is_offered_when_hardcover_names_one() {
+        use hardcover_core::{BookId, BookSummary, EditionId, ReadingStatus, UserBookId, UserId};
+        let mut book = BookSummary::new(BookId::new(1), "Dune");
+        book.pages = Some(400);
+        let mut entry = LibraryEntry::new(
+            UserBookId::new(1),
+            UserId::new(1),
+            book,
+            ReadingStatus::CurrentlyReading,
+        );
+        assert!(!offers_audiobook(&entry), "no audiobook");
+        entry.book_audio_edition = Some(EditionId::new(7));
+        assert!(offers_audiobook(&entry));
+    }
 
     #[test]
     fn percent_says_why_it_is_off() {

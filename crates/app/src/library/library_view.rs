@@ -489,7 +489,7 @@ impl Render for LibraryView {
             .child(
                 resizable_panel()
                     .size_range(rem * size::PANE_MIN.0..gpui_kit::Pixels::MAX)
-                    .child(self.detail.clone()),
+                    .child(BookDetailView::embedded(&self.detail)),
             )
     }
 }

@@ -703,11 +703,15 @@ pub struct LibraryEntry {
     /// was stored, until the next sync.
     #[serde(default)]
     pub series: Vec<SeriesRef>,
-    /// `books.audio_seconds`: the running time of the book's audiobook, when
-    /// Hardcover knows one. `None` in caches written before it was stored,
+    /// `books.default_audio_edition_id`: the book's audiobook edition, which
+    /// Hardcover sets whenever it lists one (checked live, read-only: 625 of
+    /// 834 entries had one, and no book without one had an edition with
+    /// `reading_format_id` 2; `books.audio_seconds` was set on 16). It says
+    /// the book has an audiobook, for "Choose an audiobook edition…"; one in
+    /// 625 named an ebook. `None` in caches written before it was stored,
     /// until the next sync.
     #[serde(default)]
-    pub book_audio_seconds: Option<u32>,
+    pub book_audio_edition: Option<EditionId>,
 }
 
 impl LibraryEntry {
@@ -731,7 +735,7 @@ impl LibraryEntry {
             private_notes: None,
             privacy: None,
             series: Vec::new(),
-            book_audio_seconds: None,
+            book_audio_edition: None,
         }
     }
 
