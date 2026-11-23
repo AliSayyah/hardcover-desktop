@@ -745,7 +745,7 @@ function upcomingPage() {
     <div class="objbar line"><span class="btn ghost back">${ic("left")}Home</span></div>
     <div class="scroll page"><div class="list-page">
       <div class="page-title">Coming soon</div>
-      <div class="muted mt-4">5 books still to come in the series on your shelves</div>
+      <div class="muted mt-4">5 books still to come in the series you follow</div>
       ${groups.map(g => `<div class="label group-label">${g}</div><div class="col">${UP.filter(u => u.g === g).map(upRow).join("")}</div>`).join("")}
     </div></div></div>`;
 }
@@ -1224,22 +1224,23 @@ function seriesMeter(s) {
 
 // ---------- Series tracker: shared parts ----------
 // The filter: a select beside the filter input. "Not finished" is the default, so ~200 finished
-// series don't bury the ones that need you; the choice is kept for the session. "Hidden" holds the
-// series hidden from a row's "more" menu, which show nowhere else. Then the sort select: "Status"
+// series don't bury the ones that need you; the choice is kept for the session. The page shows only
+// the series the reader follows; "Add series…" adds more. Then the sort select: "Status"
 // (the groups) by default; Recently active, Name, Author, Most read and Fewest left to read are
 // one list without the group labels.
-const FILTERS = [["Not finished", 5], ["Finished", 1], ["All series", 6], ["Hidden", 0]];
+const FILTERS = [["Not finished", 5], ["Finished", 1], ["All series", 6]];
 function pageHead(filter = "Not finished", open = false) {
   const n = FILTERS.find(([f]) => f === filter)[1];
   const menu = open ? `<div class="popover fmenu">${FILTERS.map(([f, c]) => `<div class="menu-item${f === filter ? " hover" : ""}"><span class="ck">${f === filter ? ic("checkmark") : ""}</span><span class="fill">${f}</span><span class="small muted num">${c}</span></div>`).join("")}</div>` : "";
   return `<div class="row-c g-16"><div class="fill">
       <div class="row-b g-8"><span class="page-title">Series</span><span class="muted num">${n}</span></div>
-      <div class="muted mt-4">The series you've started, and what's next in each.</div>
+      <div class="muted mt-4">The series you follow, and what's next in each.</div>
     </div>
     <div class="row-c g-8">
       <div class="input" style="width:var(--w-select)">${ic("search")}Filter series</div>
       <div class="fwrap"><span class="select${open ? " btn pressed" : ""}" style="width:var(--w-select)">${filter}${ic("down", "xs")}</span>${menu}</div>
       <span class="select" style="width:var(--w-select)">Status${ic("down", "xs")}</span>
+      <span class="btn">${ic("plus")}Add series…</span>
     </div></div>`;
 }
 // The next lane: the one thing to do in a series. 240 wide, kept on every row so the lanes line up.
@@ -1261,7 +1262,7 @@ function nextLane(s) {
       ${line}<div class="mt-8 row-c">${act}</div>
     </div></div>`;
 }
-// The name, and on its line's trailing edge the small "more" button ("Hide series").
+// The name, and on its line's trailing edge the small "more" button ("Unfollow series", "Add N books to Want to read…").
 const seriesName = s => `<div class="row-c g-8"><div class="fill display d-24 one-line${rtlCls(s)}"${dirAttr(s)}><span class="textbtn">${s.name}</span></div><span class="btn sm ghost icon" style="width:var(--h-control-s)">${ic("more", "xs")}</span></div>`;
 
 // ---------- The strip: the series as a shelf of covers ----------

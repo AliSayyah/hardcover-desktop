@@ -50,9 +50,6 @@ use crate::ui::{EmptyState, Lane, LoadFailed, PageHeader, Sequence, Skeleton, Te
 /// Skeleton rows while the page loads.
 const SKELETON_ROWS: usize = 5;
 
-/// The line under the header without `write:social`.
-pub const NO_PERMISSION: &str = "Hardcover Desktop has no permission to follow series. Sign in again from the sidebar to grant it.";
-
 /// What the rows were worked out from: the library's and the follows'
 /// revisions, and how many series were followed here.
 type RowsKey = (u64, u64, usize);
@@ -331,7 +328,7 @@ impl Render for AddSeriesView {
                 .pt_4()
                 .body()
                 .text_color(colors(cx).fg_muted)
-                .child(NO_PERMISSION)
+                .child(needs_permission(WRITE_SOCIAL))
         });
 
         let Some(rows) = self.rows(cx) else {

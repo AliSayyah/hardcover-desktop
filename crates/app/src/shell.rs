@@ -366,6 +366,8 @@ impl Workspace {
         model.update(cx, LibraryModel::start);
         lists.update(cx, ListsModel::load);
         vibes.update(cx, VibesModel::load);
+        // The Series page, Up next and Coming soon wait on the follows.
+        follows.update(cx, FollowsModel::load);
         // Views read today as they render. The cached ones (the book view,
         // Home, Stats, Series) draw again only when they change, so a new
         // day refreshes the whole window, and every tick draws Home, whose

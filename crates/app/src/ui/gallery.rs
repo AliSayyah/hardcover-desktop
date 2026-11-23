@@ -228,7 +228,7 @@ fn headers() -> AnyElement {
             .child(PageHeader::new("Currently reading").count(1204_u32))
             .child(
                 PageHeader::new("Coming soon")
-                    .line("5 books still to come in the series on your shelves"),
+                    .line("5 books still to come in the series you follow"),
             )
             .child(
                 div().max_w(rems(28.)).child(

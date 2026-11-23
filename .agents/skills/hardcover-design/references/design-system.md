@@ -274,7 +274,7 @@ the motions there are; a new one is added here first (`design::motion`).
 | Motion | Where | How |
 | --- | --- | --- |
 | Pulse | A skeleton while its content really loads | Opacity 100% to 50% and back over 2 s, every skeleton in step |
-| Row leaving | A row taken out of the collection on screen: the selected book moved to another shelf or out of the library, a book taken off a list, a series hidden from the Series page, a book the reader said never to recommend (a vibe's page) | It keeps its place and fades out over 150 ms, ease-out, without its focus ring; then the rows below close the gap at once |
+| Row leaving | A row taken out of the collection on screen: the selected book moved to another shelf or out of the library, a book taken off a list, a series unfollowed on the Series page, a book the reader said never to recommend (a vibe's page) | It keeps its place and fades out over 150 ms, ease-out, without its focus ring; then the rows below close the gap at once |
 | Meter | A meter's value changing: progress saved, the goal after a sync | The fill moves on a critically damped spring (90% of the way in about 150 ms, settled in about 350 ms, no overshoot); a change mid-way carries on from where the fill is. The words beside it change at once |
 | Kit overlays | Dialogs, menus, popovers, tooltips, notifications | The kit's own short fades and slides, unchanged |
 
@@ -1036,8 +1036,9 @@ and the sort.
     one sentence ("2 behind pace, 3 to go in 41 days. *Project Hail Mary*
     should finish in time.", with the title in ink 500).
   - A hairline.
-  - **Up next:** an md cover with shadow; "Next in Dune · #2" as a caption;
-    the title in `title-18`; the author; a small "Start reading".
+  - **Up next:** the next book of a series the reader follows (Series): an
+    md cover with shadow; "Next in Dune · #2" as a caption; the title in
+    `title-18`; the author; a small "Start reading".
   - A hairline.
   - **Newest on Want to read:** three md covers without shadow, 16 apart,
     with titles at 12 px in two lines; the section's `label` has a small
@@ -1060,8 +1061,8 @@ and the sort.
 
 - **Object bar:** 56 high with a hairline; Back ("Home") on the leading edge.
 - **Content:** inset 32, filling the region. The `page-title` "Coming
-  soon", then a muted line ("5 books still to come in the series on your
-  shelves").
+  soon", then a muted line ("5 books still to come in the series you
+  follow").
 - **Groups:** a `label` per month for the coming 12 months ("November",
   "February 2027"), then per year ("Later in 2027", "2028"), with 24 above
   and 4 below. Under each, upcoming rows.
@@ -1070,50 +1071,87 @@ and the sort.
 
 ### Series (a destination)
 
+- **Which series:** only those the reader follows on Hardcover. Nothing
+  joins by itself: a series is followed from Add series, a series page or
+  Undo, and leaves only when unfollowed. Home's Up next and Coming soon
+  look at the same set. A series shows its whole-numbered books, and a
+  fractional one (a novella) only when it is in the library or not out yet.
 - **Sidebar:** "Series" after Discover, with the `library` icon and the
-  count of series not finished and not hidden. It hides, with the page,
-  without `read:catalog`.
+  count of followed series not finished. It hides, with the page, without
+  `read:catalog` or `read:social` (the follows).
 - **Content:** inset 32, filling the region (see "Wide windows").
 - **Header:** the `page-title` "Series" with the count shown beside it,
-  then the muted line "The series you've started, and what's next in each."
+  then the muted line "The series you follow, and what's next in each."
   On the trailing edge, 8 apart: the filter input (168, "Filter series":
   every word must begin a word of the name or the author), the filter
-  select (168): Not finished (the default), Finished, All series and
-  Hidden, each with its count, and the sort select (168): Status (the
-  default: the groups below), Recently active, Name (a leading article left
-  out), Author (by last name), Most read (the meter's share) and Fewest left
-  to read (books out and still to read; a series with none left last).
-  Every sort but Status is one list without group labels, its first row
-  with no hairline over it. Both choices are kept for the session. In a
-  narrow window the controls wrap under the title, and onto a second line.
-  The header stays put while the series scroll under it, so the filters are
-  always at hand.
-- **Hiding:** each row's name line ends in a small "more" icon button
-  ("Series actions") whose menu has "Hide series" (the `eye-off` icon), for
-  a series the reader dropped. A hidden series leaves the list as a row
-  leaving does (Motion), counts only under Hidden, and a
-  notification says so with Undo ("“Mistborn” is hidden. It's under Hidden
-  in the filter."). Under Hidden its menu has "Show series again" (`eye`).
-  The hidden series are kept in the preferences, on this computer, so they
-  survive signing out; Hardcover has no such thing.
-- **Which series:** those in which the reader has read, is reading, paused
-  or gave up on a book. A series shows its whole-numbered books, and a
-  fractional one (a novella) only when it is in the library or not out yet.
+  select (168): Not finished (the default), Finished and All series, each
+  with its count, the sort select (168): Status (the default: the groups
+  below), Recently active, Name (a leading article left out), Author (by
+  last name), Most read (the meter's share) and Fewest left to read (books
+  out and still to read; a series with none left last), and "Add series…"
+  (a button with `plus`), which opens Add series. Every sort but Status is
+  one list without group labels, its first row with no hairline over it.
+  Both choices are kept for the session. In a narrow window the controls
+  wrap under the title, and onto a second line. The header stays put while
+  the series scroll under it, so the filters are always at hand.
+- **Nudge:** under the header, once the follows are known, one muted line
+  names the started series not followed that the reader touched in the
+  last 30 days ("You've been reading 2 series you don't follow: “Elfhame”
+  and “The Folk of the Air”."), with a small ghost "Add series…". It never
+  follows anything itself, and an old library doesn't nag.
+- **A row's menu:** each row's name line ends in a small "more" icon button
+  ("Series actions"): "Unfollow series" (`bookmark-minus`), and "Add N
+  books to Want to read…" (`plus`) while whole-numbered books that are out
+  aren't in the library; it asks first (below). Unfollowing leaves the list
+  as a row leaving does (Motion), and a notification says so with Undo
+  ("You no longer follow “Mistborn”. It's left Home too."). Without
+  `write:social` or `write:library` the command is disabled with its reason
+  under it.
 - **Groups:** a `label` with its count, 24 above and 4 below. In progress (a
   book is being read, or the next is out and the series was touched within a
-  year), Waiting for the next book (by release date), Not touched in a year,
-  and Finished. Within a group, the latest activity first. Under each,
-  series rows.
+  year), Waiting for the next book (by release date), Not started (followed,
+  nothing read, being read, paused or given up on; its next step is the
+  first book out), Not touched in a year, and Finished. Within a group, the
+  latest activity first (a series not started: when it was followed).
+  Under each, series rows.
 - **Foot:** with Not finished, one muted line ("1 finished series isn't
   shown.") and a small ghost "Show finished", which switches the select to
   All series.
 - **States:** skeleton rows while loading; a failed load says so in one
-  muted sentence with "Try again"; with nothing started, the empty state
-  (the `library` icon, "No series yet", "When you read a book that belongs
-  to a series, the series shows here with what comes next."). A filter with
-  no match says so in one muted line under the header ("Every series you've
-  started is finished or hidden.", "Every series you've started is
-  hidden.", "You haven't hidden a series. Hide one from its menu.").
+  muted sentence with "Try again"; following nothing, the empty state (the
+  `library` icon, "You don't follow any series", "Follow a series to see
+  where you are in it and what comes next.", and "Add series…"), with the
+  filter and sort left out until there is something to filter. Not loaded
+  is never "follows nothing": the empty state waits for the follows. A
+  filter with no match says so in one muted line under the header ("Every
+  series you follow is finished.", "No series match “dune”.").
+
+### Add series (over Series)
+
+- **Object bar:** 56 high with a hairline; Back ("Series") on the leading
+  edge.
+- **Content:** inset 32, at most 704 wide. The `page-title` "Add series"
+  and the muted line "The series of the books on your shelves that you
+  don't follow yet.", with the filter input (168, "Filter series", as on
+  Series) on the header's trailing edge.
+- **Groups:** "Started" (a book read, being read, paused or given up on;
+  the most recently active first, so the nudge's series lead), then "Only
+  on Want to read" (the latest added first), each a `label` with its count
+  on the trailing edge, 24 above and 4 below, over a sequence of rows.
+  Ignored books count for nothing.
+- **Row:** the sm cover of the series' first book on the shelves (opens
+  the book), the name (a text button that opens the series page), the
+  muted line "author · how far" ("Holly Black · Reading now", "2 read ·
+  Last finished Oct 30", "1 on Want to read"), and a small "Follow"
+  (`bookmark-plus`). A series followed here stays where it is as a pressed
+  "Following" (`bookmark-check`), which unfollows again, until the page is
+  opened again, so nothing moves under the pointer and a slip is one press
+  to undo.
+- **Without `write:social`:** every Follow is disabled, and one muted line
+  under the header says why (`needs_permission`).
+- **States:** skeleton rows until the library and the follows are known; a
+  failed load says so with "Try again"; nothing left to follow, or nothing
+  matching the filter, is the empty state.
 
 ### Discover (a destination)
 
@@ -1193,6 +1231,22 @@ its Votes popover, a genre chip, Discover's Browse), with Back.
 - **States:** skeleton rows while loading; a failed load is one muted
   sentence with "Try again"; a choice with no books is the empty state
   ("No matches", "Hardcover has no Mystery books readers call relaxing.").
+
+### A series page
+
+- **Header:** the series' name as the `page-title` (wrapping), "by" its
+  author (a text button), the facts ("4 books · Ongoing", and "· Following"
+  when followed), "You've read 1 of 4", the description in `prose` (three
+  lines) and "Open on Hardcover". The books follow as catalogue rows.
+- **Commands,** on the header's trailing edge, 8 apart: "Follow"
+  (`bookmark-plus`), or a pressed "Following" (`bookmark-check`) that
+  unfollows, with Undo; and "Add N books to Want to read…" (`plus`) while
+  whole-numbered books that are out aren't in the library. It asks first
+  ("Add 3 books to Want to read?", naming up to five books and counting the
+  rest, and saying when books not out yet are left out); the result
+  ("Add 3 books") is primary and Cancel has the focus. Without
+  `write:social` Follow is disabled with its reason as a tooltip; without
+  `write:library`, so is Add.
 
 ### A vibe's page
 
