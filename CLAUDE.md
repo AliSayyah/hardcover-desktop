@@ -29,7 +29,7 @@ A build without `demo` runs once per data directory (`instance`): with the insta
 
 The `justfile` wraps these; `just` lists the recipes.
 - `just check` runs fmt-check, clippy (`-D warnings`, also over the demo build, which CI does not) and the tests.
-- `just ci` adds `cargo deny`, the packaging validation, ShellCheck (`just shellcheck`), the release script's test (`just release-test`) and actionlint.
+- `just ci` adds `cargo deny`, the packaging validation, ShellCheck (`just shellcheck`), the release script's test (`just release-test`), the apt wrapper's test (`just apt-test`) and actionlint.
 - `just package` builds the release tarball into `target/package/`; `just appimage` repacks it as an AppImage and its `.zsync`, next to it. An AppImage bundles the build system's libraries, so a release one is built on Ubuntu 22.04.
 - `just demo-faults <faults>` runs the demo with `HARDCOVER_DEMO_FAULTS` set, e.g. `just demo-faults scope=read:goals`.
 - `just api-check` is `api_check --check`; `just schema-update` is the run that rewrites `schema/`.
@@ -289,9 +289,11 @@ Two skills live in `.claude/skills`:
   - `cargo deny` (`deny.toml`)
   - cargo-deny and actionlint are downloaded by version and checked against a pinned SHA-256 (from their releases' own checksum files); bump each version and its checksum together.
   - desktop-entry and metainfo validation
-  - ShellCheck over `install.sh`, `packaging/linux/`, `ci/` and `scripts/`, and `scripts/release-test.sh` (the release script's network handling, offline, with a fake `gh`), then `install.sh` against the latest published release: it must install it, and refuse that tarball modified or renamed to another version
+  - ShellCheck over `install.sh`, `packaging/linux/`, `ci/` and `scripts/`, `scripts/release-test.sh` (the release script's network handling, offline, with a fake `gh`) and `ci/apt-get-test.sh` (the apt wrapper, with a fake `apt-get`), then `install.sh` against the latest published release: it must install it, and refuse that tarball modified or renamed to another version
   - actionlint
 - Clippy and the tests run in an `ubuntu:22.04` container, the same one the release builds in. `ci/install-build-deps.sh` holds the system packages; it is the single list for both.
+- Every job in `ci.yml` and `release.yml` has a `timeout-minutes`, a few times its usual length, so a hung network wait fails the job (and `just release` with it) instead of holding it for GitHub's six hours.
+- Every apt install in CI goes through `ci/apt-get.sh install [--update] [--download-only] <packages>`, never `apt-get` directly. The mirrors sometimes stall or trickle, which apt's own timeouts (inactivity only) don't catch: on 2026-11-23 a two-package install sat in `apt-get update` for 22 minutes. The wrapper refreshes the lists and downloads the packages each within a generous time limit (8 and 15 minutes: a slow mirror often finishes), tried three times, and drops a connection silent for 10 s (apt waits 120: silent connections to `archive.ubuntu.com`, not slow transfers, are where the time went), then installs offline with no limit (dpkg is never killed). Without `--update` it first tries the lists already there and refreshes them only if that fails.
 - `.github/actions/setup-rust` sets up every build job. Its caches are saved only from `master`; other branches restore them.
   - apt: the Ubuntu mirrors sometimes stall for minutes, so the package lists and `.deb`s are cached under a monthly key. On an exact hit, CI jobs install without `apt-get update`. The release always updates (`fresh-packages: true`), so its packages are checked against freshly signed lists.
   - zstd is installed after the apt cache is saved, so that cache stays gzip; it is restored before zstd exists. The cargo caches (`Swatinem/rust-cache`, one per job) then use zstd.

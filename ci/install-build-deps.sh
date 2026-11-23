@@ -4,9 +4,6 @@
 # Vulkan and OpenGL are loaded at run time, so they are not needed to build.
 set -euo pipefail
 
-sudo=
-if [[ $(id -u) != 0 ]]; then sudo=sudo; fi
-
 packages=(
   build-essential
   ca-certificates
@@ -19,15 +16,13 @@ packages=(
   libxkbcommon-x11-dev
 )
 
-install_packages() {
-  DEBIAN_FRONTEND=noninteractive $sudo apt-get install -y -qq --no-install-recommends "${packages[@]}"
-}
-
+here=$(dirname "${BASH_SOURCE[0]}")
 # CI restores the package lists along with the packages from its cache and
-# sets APT_LISTS_CACHED=1, so a slow mirror can't stall the job. If the
-# cached lists no longer work, update them and try again.
-if [[ ${APT_LISTS_CACHED:-} == 1 ]] && install_packages; then
-  exit 0
+# sets APT_LISTS_CACHED=1, so a slow mirror can't stall the job; apt-get.sh
+# refreshes them if they no longer work. Otherwise the lists are refreshed
+# first.
+if [[ ${APT_LISTS_CACHED:-} == 1 ]]; then
+  "$here/apt-get.sh" install "${packages[@]}"
+else
+  "$here/apt-get.sh" install --update "${packages[@]}"
 fi
-$sudo apt-get update -qq
-install_packages

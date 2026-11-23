@@ -110,6 +110,11 @@ shellcheck:
 release-test:
     scripts/release-test.sh
 
+# Test CI's apt-get wrapper, offline (a fake apt-get)
+[group('check')]
+apt-test:
+    ci/apt-get-test.sh
+
 # Lint the GitHub workflows
 [group('check')]
 actionlint:
@@ -120,9 +125,9 @@ actionlint:
 [group('check')]
 check: fmt-check clippy test
 
-# Everything CI runs offline: check, plus cargo deny, packaging, shellcheck, the release script's test and actionlint
+# Everything CI runs offline: check, plus cargo deny, packaging, shellcheck, the release script's and apt-get wrapper's tests and actionlint
 [group('check')]
-ci: check deny packaging shellcheck release-test actionlint
+ci: check deny packaging shellcheck release-test apt-test actionlint
 
 # Live read tests (needs HARDCOVER_TOKEN, from the environment or .env)
 [group('live')]
