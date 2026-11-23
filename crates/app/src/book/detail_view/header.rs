@@ -149,9 +149,10 @@ impl BookDetailView {
             .children(details.and_then(|d| MoodLine::new(book.id, &d.votes)))
             .when(!genres.is_empty(), |this| {
                 this.child(
-                    div()
-                        .pt_2()
-                        .child(TagRow::new(genres.into_iter().map(TagChip::genre))),
+                    div().pt_2().child(
+                        TagRow::new(genres.into_iter().map(TagChip::genre_page))
+                            .keys("header-genres", &self.header_genre_keys),
+                    ),
                 )
             });
         // The action row sits at the cover's foot, or 16 under the info

@@ -82,6 +82,7 @@ use crate::lists::book_lists;
 use crate::lists::model::ListsModel;
 use crate::resource::{Catalog, Demand, SharedChanged};
 use crate::session;
+use crate::ui::chip_keys::ChipKeys;
 use crate::ui::kit::open_alert_dialog;
 use crate::ui::{
     Columns, EmptyState, ObjectBar, ObjectTools, Tier, blocks, folds, main_column_width,
@@ -278,6 +279,10 @@ pub struct BookDetailView {
     from_vibe: Option<hardcover_core::VibeId>,
     /// "Add to library", where focus goes once a book shown is removed.
     add_focus: FocusHandle,
+    /// The header's genres and the Tags block's: each row of page chips
+    /// one Tab stop (`ui::chip_keys`).
+    header_genre_keys: Entity<ChipKeys>,
+    tags_genre_keys: Entity<ChipKeys>,
     /// "Add a past read…", where focus goes once a read is deleted.
     add_read_focus: FocusHandle,
     /// Each read's menu trigger, which its commands focus first.
@@ -358,6 +363,8 @@ impl BookDetailView {
             more_focus: cx.focus_handle(),
             from_vibe: None,
             add_focus: cx.focus_handle(),
+            header_genre_keys: cx.new(|cx| ChipKeys::new(window, cx)),
+            tags_genre_keys: cx.new(|cx| ChipKeys::new(window, cx)),
             add_read_focus: cx.focus_handle(),
             read_focus: RefCell::default(),
             _subscriptions: subscriptions,

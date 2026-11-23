@@ -193,6 +193,7 @@ fn main() {
             bind_keys(cx);
             ui::kit::bind_keys(cx);
             sidebar_keys::bind_keys(cx);
+            ui::chip_keys::bind_keys(cx);
             // An AppImage's restart path replaces this once the first update
             // check has worked out how the app was installed (`update`).
             if let Some(path) = &exe {
