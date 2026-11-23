@@ -3,9 +3,10 @@
 //!
 //! Hardcover's genres are free text with many spellings ("Science Fiction",
 //! "Sci-fi", "SF"; "Children's"; "Literature & Fiction"), so a name is
-//! normalised to lowercase words first: `&` reads "and", apostrophes go, and
-//! any other punctuation separates words. A name that equals one of a
-//! genre's names takes its icon; otherwise the first genre in [`GENRES`]
+//! normalised to lowercase words first (`hardcover_core::tags::genre_words`,
+//! which genre filters merge spellings by too): `&` reads "and", apostrophes
+//! go, and any other punctuation separates words. A name that equals one of
+//! a genre's names takes its icon; otherwise the first genre in [`GENRES`]
 //! with a name that appears in it as whole words, which is why the more
 //! specific genres come first ("Non-Fiction" before "Fiction", "Science
 //! Fiction" before "Science", "Historical Fiction" before "History"). A name
@@ -16,6 +17,7 @@
 //! missing from both draws nothing.
 
 use gpui_kit::assets::IconName;
+use hardcover_core::tags::genre_words;
 
 /// A genre that gets an icon: an example of its name as Hardcover writes
 /// it (for the gallery), its icon and every name it goes by, normalised.
@@ -302,7 +304,7 @@ pub fn genre_icon(name: &str) -> Option<IconName> {
     // genre's name (already in that form) matches only whole words.
     let mut padded = String::with_capacity(name.len() + 2);
     padded.push(' ');
-    for word in normalise(name).split_whitespace() {
+    for word in genre_words(name).split_whitespace() {
         padded.push_str(word);
         padded.push(' ');
     }
@@ -327,22 +329,6 @@ fn contains_words(padded: &str, phrase: &str) -> bool {
     padded
         .match_indices(phrase)
         .any(|(at, _)| padded[..at].ends_with(' ') && padded[at + phrase.len()..].starts_with(' '))
-}
-
-/// Lowercase words separated by single spaces: `&` reads "and",
-/// apostrophes are dropped ("Children's" is "childrens"), and any other
-/// character that is not a letter or a digit separates words.
-fn normalise(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    for c in name.chars().flat_map(char::to_lowercase) {
-        match c {
-            '&' => out.push_str(" and "),
-            '\'' | '\u{2018}' | '\u{2019}' => {}
-            c if c.is_alphanumeric() => out.push(c),
-            _ => out.push(' '),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -377,7 +363,7 @@ mod tests {
     fn names_are_already_normalised() {
         for genre in GENRES {
             for name in genre.names {
-                let normalised = normalise(name);
+                let normalised = genre_words(name);
                 let words: Vec<&str> = normalised.split_whitespace().collect();
                 assert_eq!(words.join(" "), *name);
             }
