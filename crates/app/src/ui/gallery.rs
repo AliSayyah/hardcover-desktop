@@ -37,8 +37,8 @@ use super::{
     AccountRow, Avatar, AvatarSize, Block, BylineLink, Columns, CoverShelf, CoverSlot, EmptyState,
     ExternalLink, GoalRow, Greeting, Lane, ListRow, LoadFailed, Meter, MonthBars, NavRow,
     ObjectBar, PageHeader, PropertyList, Rail, RailSection, RowSpacing, SectionHeader, Sequence,
-    SeriesStrip, Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton, Tier, blocks,
-    books_that_fit, brand_row, date_line, greeting, panel, see_all, sidebar_label,
+    SeriesStrip, ShelfSection, Skeleton, SkeletonRow, SkeletonText, Stars, StripItem, TextButton,
+    Tier, blocks, books_that_fit, brand_row, date_line, greeting, panel, see_all, sidebar_label,
 };
 use crate::app_state::CoverService;
 use crate::bidi::WrappingText;
@@ -174,6 +174,7 @@ impl Render for Gallery {
             .child(empty(cx))
             .child(stars_and_links())
             .child(shelf_and_columns(window, cx))
+            .child(shelf_sections(window))
             .child(wrapping_text(cx));
 
         v_flex()
@@ -1194,6 +1195,127 @@ fn rail(selected_nav: usize, cx: &mut Context<Gallery>) -> Rail {
                     ),
             ),
         )
+}
+
+/// Discover's shelf sections in a 640 column: the lead (lg, the shadow, its
+/// muted line and "See all"), Browse's groups of page chips, a full md
+/// shelf with a long title cut short (the demo's Because you loved has one
+/// book), and in the shelf's place: loading, failed, and a vibe Hardcover
+/// hasn't built.
+fn shelf_sections(window: &Window) -> AnyElement {
+    const TITLES: [&str; 9] = [
+        "Children of Dune",
+        "The Left Hand of Darkness",
+        "Piranesi",
+        "A Wizard of Earthsea",
+        "Babel",
+        "Station Eleven",
+        "The Fifth Season",
+        "Hyperion",
+        "Kindred",
+    ];
+    let width = rems(40.);
+    let rem = window.rem_size();
+    let row = |key: &'static str, size: CoverSize, shadow: bool| {
+        let fit = books_that_fit(width.to_pixels(rem), size, rem);
+        CoverShelf::new(size)
+            .one_row()
+            .books(
+                TITLES
+                    .into_iter()
+                    .take(fit)
+                    .enumerate()
+                    .map(move |(ix, title)| {
+                        (
+                            Cover::new(size, title).shadow(shadow),
+                            TextButton::new((key, ix), title),
+                        )
+                    }),
+            )
+    };
+    specimen(
+        "Shelf sections (Discover): the lead, a shelf, loading, failed, not built",
+        v_flex()
+            .w(width)
+            .gap_8()
+            .child(
+                ShelfSection::new("For you")
+                    .intro("Hardcover's recommendations from your library.")
+                    .action(see_all("g-shelf-see-all", Some(250), |_, _, _| {}))
+                    .books(row("g-shelf-lead", CoverSize::Lg, true)),
+            )
+            .child(browse())
+            .child(
+                ShelfSection::new(
+                    "Because you loved The Exceedingly Long and Winding Chronicle of the North",
+                )
+                .books(row("g-shelf-md", CoverSize::Md, false)),
+            )
+            .child(ShelfSection::new("Top picks").loading(CoverSize::Md, 6))
+            .child(
+                ShelfSection::new("Trending this month").failed(
+                    LoadFailed::new(
+                        "g-shelf-retry",
+                        "No connection. Check your network and try again.",
+                    )
+                    .on_retry(|_, _, _| {}),
+                ),
+            )
+            .child(ShelfSection::new("Top picks").note(
+                "Hardcover builds this list when you open it on hardcover.app.",
+                ExternalLink::new(
+                    "g-shelf-on-hardcover",
+                    "Open on Hardcover",
+                    "https://hardcover.app",
+                ),
+            )),
+    )
+}
+
+/// Discover's Browse: the moods, the genres with their icons, and featured
+/// vibes (two of the same name, each its own chip), all page chips.
+fn browse() -> AnyElement {
+    use crate::catalog::navigation::Page;
+    use crate::catalog::tag::Tag;
+    use hardcover_core::VibeId;
+    use hardcover_core::tags::{BROWSE_GENRES, Mood};
+    let featured = [
+        (601, "Worlds to get lost in"),
+        (602, "Hidden gems"),
+        (603, "Hidden gems"),
+    ];
+    v_flex()
+        .gap_3()
+        .child(SectionHeader::new("Browse"))
+        .child(tag_groups([
+            TagGroup::new(
+                "By mood",
+                Mood::ALL.map(|m| {
+                    TagChip::new(m.name()).opens(Page::Tag {
+                        tag: Tag::Mood(m),
+                        within: None,
+                    })
+                }),
+            ),
+            TagGroup::new(
+                "By genre",
+                BROWSE_GENRES.map(|g| {
+                    TagChip::genre(g.name).opens(Page::Tag {
+                        tag: Tag::Genre(g),
+                        within: None,
+                    })
+                }),
+            ),
+            TagGroup::new(
+                "Featured on Hardcover",
+                featured.map(|(id, name)| {
+                    TagChip::new(name)
+                        .key(("g-featured", id as usize))
+                        .opens(Page::Vibe(VibeId::new(id)))
+                }),
+            ),
+        ]))
+        .into_any_element()
 }
 
 fn shelf_and_columns(window: &Window, cx: &App) -> AnyElement {

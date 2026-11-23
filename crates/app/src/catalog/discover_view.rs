@@ -456,16 +456,16 @@ impl DiscoverView {
         section: Section,
         title: SharedString,
         shelf: Shelf,
-        lead: bool,
-        width: gpui_kit::Pixels,
-        window: &Window,
+        size: CoverSize,
+        fit: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let size = if lead { CoverSize::Lg } else { CoverSize::Md };
-        let fit = books_that_fit(width, size, window.rem_size()).max(1);
+        // The lead's covers take the shadow.
+        let lead = size == CoverSize::Lg;
         let id = section_id(section);
         let mut out = ShelfSection::new(title);
-        if section == Section::ForYou {
+        // For you's line sits between its title and its shelf.
+        if section == Section::ForYou && matches!(shelf, Shelf::Books { .. } | Shelf::Loading) {
             out = out.intro(FOR_YOU_INTRO);
         }
         match shelf {
@@ -601,26 +601,38 @@ fn section_id(section: Section) -> &'static str {
     }
 }
 
-impl Render for DiscoverView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl DiscoverView {
+    /// What each shelf shows, the sections in order and the lead.
+    fn sections(&mut self, cx: &App) -> (Vec<(Section, Shelf)>, Vec<Section>, Option<Section>) {
         let seed = self.seed(cx);
         let for_you = self.vibe_shelf(VibeKind::Recommendations, cx);
         let top_picks = self.vibe_shelf(VibeKind::TopPicks, cx);
         let top_pick_ids = self.top_pick_ids(&top_picks, cx);
         let loved = self.loved_shelf(seed.as_ref(), &top_pick_ids, cx);
         let trending = self.trending_shelf(cx);
-        let (order, lead) = discover::layout(&[
-            (Section::ForYou, for_you.shows()),
-            (Section::TopPicks, top_picks.shows()),
-            (Section::Loved, loved.shows()),
-            (Section::Trending, trending.shows()),
-        ]);
-        let mut shelves = [
-            (Section::ForYou, Some(for_you)),
-            (Section::TopPicks, Some(top_picks)),
-            (Section::Loved, Some(loved)),
-            (Section::Trending, Some(trending)),
+        let shelves = vec![
+            (Section::ForYou, for_you),
+            (Section::TopPicks, top_picks),
+            (Section::Loved, loved),
+            (Section::Trending, trending),
         ];
+        let shows: Vec<(Section, Shows)> = shelves
+            .iter()
+            .map(|(s, shelf)| (*s, shelf.shows()))
+            .collect();
+        let (order, lead) = discover::layout(&shows);
+        (shelves, order, lead)
+    }
+}
+
+impl Render for DiscoverView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let seed = self.seed(cx);
+        let (shelves, order, lead) = self.sections(cx);
+        let mut shelves: Vec<(Section, Option<Shelf>)> = shelves
+            .into_iter()
+            .map(|(s, shelf)| (s, Some(shelf)))
+            .collect();
         // The column inside the page's 32 insets.
         let width = region_width(window, size::PAGE_INSET);
         let sections: Vec<AnyElement> = order
@@ -644,15 +656,13 @@ impl Render for DiscoverView {
                     .into(),
                     _ => "Trending this month".into(),
                 };
-                self.render_shelf(
-                    section,
-                    title,
-                    shelf,
-                    Some(section) == lead,
-                    width,
-                    window,
-                    cx,
-                )
+                let size = if Some(section) == lead {
+                    CoverSize::Lg
+                } else {
+                    CoverSize::Md
+                };
+                let fit = books_that_fit(width, size, window.rem_size()).max(1);
+                self.render_shelf(section, title, shelf, size, fit, cx)
             })
             .collect();
         let page = v_flex()
@@ -679,5 +689,230 @@ impl Render for DiscoverView {
                     .reveals_focus(&self.scroll),
             )
             .vertical_scrollbar(&self.scroll)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use gpui_kit::{TestAppContext, VisualTestContext, px, size as gsize};
+    use hardcover_core::VibeId;
+    use hardcover_core::demo::Faults;
+    use hardcover_core::prefs::Preferences;
+    use hardcover_core::store::LibraryCache;
+    use hardcover_core::tags::browse_genre;
+
+    use super::*;
+    use crate::catalog::navigation::{NavigationEvent, Navigator};
+    use crate::session::SessionScope;
+    use crate::ui::test_support::{press, redraw, tab};
+
+    /// The demo reader's Recommendations ("For you").
+    const FOR_YOU: VibeId = VibeId::new(501);
+
+    fn settle(cx: &mut VisualTestContext) {
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        redraw(cx);
+    }
+
+    type Harness<'a> = (
+        Entity<DiscoverView>,
+        Rc<RefCell<Vec<Page>>>,
+        Entity<VibesModel>,
+        &'a mut VisualTestContext,
+    );
+
+    /// Discover over the demo with `faults`, 900 wide (six lg covers fit
+    /// For you's row), the pages it opened, and the vibes model it reads
+    /// (the workspace owns it; the test holds it).
+    fn discover<'a>(faults: &str, cx: &'a mut TestAppContext) -> Harness<'a> {
+        let faults = Faults::parse(faults).unwrap();
+        let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
+        let session = SessionScope::for_tests(hardcover_core::demo::client_with(&faults), cache);
+        let library = cx.new(|_| LibraryModel::new(session.clone()));
+        let opened: Rc<RefCell<Vec<Page>>> = Rc::default();
+        let vibes = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::ui::kit::bind_keys(cx);
+            crate::ui::chip_keys::bind_keys(cx);
+            session.install(cx);
+            Catalog::init(&session, cx);
+            crate::preferences::init(Preferences::default(), None, cx);
+            let vibes = VibesModel::init(session.clone(), &library, cx);
+            let navigator = Navigator::init(cx);
+            let opened = opened.clone();
+            cx.subscribe(&navigator, move |_, event: &NavigationEvent, _| {
+                if let NavigationEvent::Open(page) = event {
+                    opened.borrow_mut().push(page.clone());
+                }
+            })
+            .detach();
+            vibes
+        });
+        library.update(cx, LibraryModel::start);
+        cx.run_until_parked();
+        let (view, cx) = cx.add_window_view(|window, cx| DiscoverView::new(&library, window, cx));
+        cx.simulate_resize(gsize(px(900.), px(700.)));
+        cx.update(|window, cx| {
+            view.update(cx, |v, cx| {
+                v.show(window, cx);
+                v.focus(window, cx);
+            });
+        });
+        settle(cx);
+        (view, opened, vibes, cx)
+    }
+
+    fn sections(
+        view: &Entity<DiscoverView>,
+        cx: &mut VisualTestContext,
+    ) -> (Vec<(Section, Shelf)>, Vec<Section>, Option<Section>) {
+        view.update(cx, |v, cx| v.sections(cx))
+    }
+
+    fn titles(shelves: &[(Section, Shelf)], section: Section) -> Vec<String> {
+        match shelves.iter().find(|(s, _)| *s == section) {
+            Some((_, Shelf::Books { books, .. })) => {
+                books.iter().map(|b| b.title.clone()).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    #[gpui_kit::test]
+    fn for_you_leads_then_browse_top_picks_loved_and_trending(cx: &mut TestAppContext) {
+        let (view, _, _vibes, cx) = discover("", cx);
+        let (shelves, order, lead) = sections(&view, cx);
+        use Section::*;
+        assert_eq!(order, [ForYou, Browse, TopPicks, Loved, Trending]);
+        assert_eq!(lead, Some(ForYou));
+        // Dune is the demo's latest 5-star read; of its similar books only
+        // Children of Dune is neither in the library nor in Top picks.
+        assert_eq!(titles(&shelves, Loved), ["Children of Dune"]);
+        // One book per series: Dune's four books bring one.
+        let trending = titles(&shelves, Trending);
+        let dune = trending
+            .iter()
+            .filter(|t| {
+                [
+                    "Dune",
+                    "Dune Messiah",
+                    "Children of Dune",
+                    "God Emperor of Dune",
+                ]
+                .contains(&t.as_str())
+            })
+            .count();
+        assert_eq!(dune, 1, "{trending:?}");
+        let see_all = shelves.iter().find_map(|(s, shelf)| match (s, shelf) {
+            (Trending, Shelf::Books { see_all, .. }) => see_all.as_ref().map(|m| m.page.clone()),
+            _ => None,
+        });
+        assert_eq!(see_all, Some(Page::Trending(TrendingPeriod::Month)));
+    }
+
+    #[gpui_kit::test]
+    fn without_the_vibes_scope_because_you_loved_leads(cx: &mut TestAppContext) {
+        let (view, _, _vibes, cx) = discover("scope=read:vibes", cx);
+        let (shelves, order, lead) = sections(&view, cx);
+        use Section::*;
+        assert_eq!(order, [Loved, Browse, Trending]);
+        assert_eq!(lead, Some(Loved));
+        assert_eq!(
+            titles(&shelves, Loved),
+            ["Children of Dune"],
+            "Top picks doesn't show, so it takes nothing away"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn a_vibe_not_built_keeps_its_place_and_gives_up_the_lead(cx: &mut TestAppContext) {
+        let (view, _, _vibes, cx) = discover("vibes=unbuilt", cx);
+        let (shelves, order, lead) = sections(&view, cx);
+        use Section::*;
+        assert_eq!(order, [ForYou, Browse, TopPicks, Loved, Trending]);
+        assert!(matches!(shelves[0].1, Shelf::NotBuilt(_)));
+        assert_eq!(lead, Some(Loved));
+    }
+
+    #[gpui_kit::test]
+    fn a_failed_shelf_says_so_and_the_others_stay(cx: &mut TestAppContext) {
+        let (view, _, _vibes, cx) = discover("500", cx);
+        let (shelves, order, _) = sections(&view, cx);
+        assert!(
+            shelves
+                .iter()
+                .any(|(_, shelf)| matches!(shelf, Shelf::Failed(_))),
+            "every request fails: a failure in a shelf's place"
+        );
+        assert!(order.contains(&Section::Browse), "Browse needs no request");
+    }
+
+    /// From the page: Tab reaches For you's "See all 12", which opens the
+    /// vibe; then past its six titles, the moods (one Tab stop, the arrows
+    /// moving along it) and the genres, each chip opening its tag's page.
+    #[gpui_kit::test]
+    fn see_all_and_the_browse_chips_open_their_pages(cx: &mut TestAppContext) {
+        let (_, opened, _vibes, cx) = discover("", cx);
+        tab(cx);
+        press(cx, "enter");
+        settle(cx);
+        assert_eq!(opened.borrow().last(), Some(&Page::Vibe(FOR_YOU)));
+
+        for _ in 0..7 {
+            tab(cx);
+        }
+        press(cx, "enter");
+        press(cx, "right");
+        redraw(cx);
+        press(cx, "enter");
+        press(cx, "end");
+        redraw(cx);
+        press(cx, "enter");
+        tab(cx);
+        press(cx, "enter");
+        let tags: Vec<Tag> = opened
+            .borrow()
+            .iter()
+            .filter_map(|page| match page {
+                Page::Tag { tag, within: None } => Some(*tag),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            tags,
+            [
+                Tag::Mood(Mood::Adventurous),
+                Tag::Mood(Mood::Emotional),
+                Tag::Mood(Mood::Relaxing),
+                Tag::Genre(browse_genre("Fantasy").unwrap()),
+            ]
+        );
+    }
+
+    #[gpui_kit::test]
+    fn page_down_scrolls_the_page_from_a_chip_too(cx: &mut TestAppContext) {
+        let (view, _, _vibes, cx) = discover("", cx);
+        let offset = |cx: &mut VisualTestContext| view.read_with(cx, |v, _| v.scroll.offset().y);
+        assert_eq!(offset(cx), px(0.));
+        press(cx, "pagedown");
+        redraw(cx);
+        assert!(offset(cx) < px(0.), "scrolled down");
+        press(cx, "home");
+        redraw(cx);
+        assert_eq!(offset(cx), px(0.));
+        // On a chip, Home is the row's; Page Up and Page Down still scroll.
+        for _ in 0..8 {
+            tab(cx);
+        }
+        let on_chip = offset(cx);
+        press(cx, "pagedown");
+        redraw(cx);
+        assert!(offset(cx) < on_chip, "Page Down from a chip");
     }
 }

@@ -18,6 +18,8 @@
 //!   `hover` fill over its own and the pointing hand on hover, the focus
 //!   ring outside the pill and the 1 px accent edge inside it; nothing else
 //!   changes, so it still reads as a tag.
+//!   It is a `ui::reveal` probe, so a scrolling page keeps it in view, and
+//!   `TagChip::key` names it when its text may repeat in its row.
 //! - `TagRow`: chips wrapping across the width, 6 apart both ways (`s-6`):
 //!   the book header's genres and each group of the Tags block. A row of
 //!   page chips is one Tab stop, the arrows moving along it

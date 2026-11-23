@@ -237,6 +237,20 @@ mod tests {
     }
 
     #[test]
+    fn trending_keeps_its_period_for_back() {
+        let mut stack = PageStack::default();
+        assert!(stack.push(Page::Trending(TrendingPeriod::Month), None));
+        assert!(
+            !stack.push(Page::Trending(TrendingPeriod::Week), None),
+            "Trending is already shown, whatever its period"
+        );
+        assert!(stack.replace_current(Page::Trending(TrendingPeriod::Year)));
+        stack.push(Page::Book(BookSummary::new(BookId::new(3), "A")), None);
+        stack.pop();
+        assert_eq!(stack.current(), Some(&Page::Trending(TrendingPeriod::Year)));
+    }
+
+    #[test]
     fn history_is_bounded_and_clears() {
         let mut stack = PageStack::default();
         for id in 0..(i64::try_from(PageStack::MAX).unwrap() + 10) {
