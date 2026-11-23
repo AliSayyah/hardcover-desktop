@@ -27,8 +27,13 @@
 //!   and the series was touched within a year), "Waiting for the next book",
 //!   "Not touched in a year" and "Finished"; within each the most recent
 //!   activity first, and the waiting ones by the release date.
+//! - **Sorts:** "Status" is the groups; the others ("Recently active",
+//!   "Name", "Author", "Most read", "Fewest left to read") are one list
+//!   without them, each ending in the activity, the name and the id.
+//! - **Hidden:** a series the reader hid (kept in the preferences) shows only
+//!   under the "Hidden" filter, and counts nowhere else.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use chrono::Datelike as _;
 use hardcover_core::{
@@ -601,35 +606,138 @@ pub fn summaries(
     out
 }
 
-// ----- the filters -----
+// ----- the filters and the order -----
 
-/// The header's select.
+/// The header's filter select. Hidden series show only under
+/// [`Filter::Hidden`], and every other choice leaves them out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub enum Filter {
     #[default]
     NotFinished,
     Finished,
     All,
+    Hidden,
 }
 
 impl Filter {
-    pub const ALL: [Filter; 3] = [Filter::NotFinished, Filter::Finished, Filter::All];
+    pub const ALL: [Filter; 4] = [
+        Filter::NotFinished,
+        Filter::Finished,
+        Filter::All,
+        Filter::Hidden,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Filter::NotFinished => "Not finished",
             Filter::Finished => "Finished",
             Filter::All => "All series",
+            Filter::Hidden => "Hidden",
         }
     }
 
-    pub fn admits(self, group: Group) -> bool {
+    /// Whether a series in `group`, hidden or not, shows under this choice.
+    pub fn admits(self, group: Group, hidden: bool) -> bool {
         match self {
+            Filter::Hidden => hidden,
+            _ if hidden => false,
             Filter::NotFinished => !group.is_finished(),
             Filter::Finished => group.is_finished(),
             Filter::All => true,
         }
     }
+}
+
+/// The header's sort select. [`Sort::Status`] keeps the groups; every other
+/// order is one list without them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum Sort {
+    /// The groups, each by its own order (see the module doc).
+    #[default]
+    Status,
+    /// The latest activity first.
+    RecentlyActive,
+    /// A to Z, a leading article left out.
+    Name,
+    /// By the author's last name, then the series' name.
+    Author,
+    /// The most of what is out read first, by the meter's share.
+    MostRead,
+    /// The fewest books out and still to read first; a series with none
+    /// left (finished, or waiting for the next book) last.
+    FewestLeft,
+}
+
+impl Sort {
+    pub const ALL: [Sort; 6] = [
+        Sort::Status,
+        Sort::RecentlyActive,
+        Sort::Name,
+        Sort::Author,
+        Sort::MostRead,
+        Sort::FewestLeft,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Sort::Status => "Status",
+            Sort::RecentlyActive => "Recently active",
+            Sort::Name => "Name",
+            Sort::Author => "Author",
+            Sort::MostRead => "Most read",
+            Sort::FewestLeft => "Fewest left to read",
+        }
+    }
+
+    /// Whether the rows sit under their groups' labels.
+    pub fn is_grouped(self) -> bool {
+        self == Sort::Status
+    }
+}
+
+impl SeriesSummary {
+    /// Books that are out and still to read: not Read, Did not finish or
+    /// Ignored.
+    pub fn left_count(&self) -> usize {
+        self.books.iter().filter(|b| b.out && !b.is_done()).count()
+    }
+}
+
+/// The order of two series under a sort other than [`Sort::Status`] (whose
+/// order is [`summaries`]'). Ties go to the latest activity, then the name
+/// and the id, so the order is total.
+fn compare(a: &SeriesSummary, b: &SeriesSummary, sort: Sort) -> std::cmp::Ordering {
+    use crate::library::collection::{author_sort_key, sort_title};
+    use std::cmp::Ordering;
+    let by_activity = || b.last_activity.cmp(&a.last_activity);
+    let by_name = || sort_title(&a.name).cmp(&sort_title(&b.name));
+    let primary = match sort {
+        Sort::Status | Sort::RecentlyActive => by_activity(),
+        Sort::Name => Ordering::Equal,
+        // A series with no author last.
+        Sort::Author => match (&a.author, &b.author) {
+            (Some(x), Some(y)) => author_sort_key(x)
+                .cmp(&author_sort_key(y))
+                .then_with(|| crate::text::fold(x).cmp(&crate::text::fold(y))),
+            (x, y) => x.is_none().cmp(&y.is_none()),
+        },
+        Sort::MostRead => b
+            .read_percent()
+            .total_cmp(&a.read_percent())
+            .then_with(|| b.read_count().cmp(&a.read_count()))
+            .then_with(by_activity),
+        Sort::FewestLeft => match (a.left_count(), b.left_count()) {
+            (0, 0) => Ordering::Equal,
+            (0, _) => Ordering::Greater,
+            (_, 0) => Ordering::Less,
+            (x, y) => x.cmp(&y),
+        }
+        .then_with(by_activity),
+    };
+    primary
+        .then_with(by_name)
+        .then_with(by_activity)
+        .then(a.id.cmp(&b.id))
 }
 
 /// Whether every word of `query` starts a word of the series' name or
@@ -647,11 +755,13 @@ pub fn matches_query(series: &SeriesSummary, query: &[String]) -> bool {
         .all(|q| haystack.iter().any(|w| w.starts_with(q.as_str())))
 }
 
-/// How many series each filter shows, given the text filter.
+/// How many series each filter shows, given the text filter. Hidden series
+/// count only as hidden.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Counts {
     pub not_finished: usize,
     pub finished: usize,
+    pub hidden: usize,
 }
 
 impl Counts {
@@ -660,15 +770,22 @@ impl Counts {
             Filter::NotFinished => self.not_finished,
             Filter::Finished => self.finished,
             Filter::All => self.not_finished + self.finished,
+            Filter::Hidden => self.hidden,
         }
     }
 }
 
-pub fn counts<'a>(series: impl IntoIterator<Item = &'a SeriesSummary>, query: &str) -> Counts {
+pub fn counts<'a>(
+    series: impl IntoIterator<Item = &'a SeriesSummary>,
+    query: &str,
+    hidden: &BTreeSet<SeriesId>,
+) -> Counts {
     let query = search_words(query);
     let mut counts = Counts::default();
     for s in series.into_iter().filter(|s| matches_query(s, &query)) {
-        if s.group.is_finished() {
+        if hidden.contains(&s.id) {
+            counts.hidden += 1;
+        } else if s.group.is_finished() {
             counts.finished += 1;
         } else {
             counts.not_finished += 1;
@@ -677,21 +794,38 @@ pub fn counts<'a>(series: impl IntoIterator<Item = &'a SeriesSummary>, query: &s
     counts
 }
 
-/// The series to show, under their groups, in order.
-pub fn grouped<'a>(
+/// What the page shows: which series, in what order.
+#[derive(Debug, Clone, Copy)]
+pub struct Shown<'a> {
+    pub filter: Filter,
+    pub sort: Sort,
+    pub query: &'a str,
+    pub hidden: &'a BTreeSet<SeriesId>,
+}
+
+/// The series to show, in order: under their groups with [`Sort::Status`]
+/// (`series` is in that order already), else in one list with no group.
+pub fn sections<'a>(
     series: &'a [SeriesSummary],
-    filter: Filter,
-    query: &str,
-) -> Vec<(Group, Vec<&'a SeriesSummary>)> {
-    let query = search_words(query);
-    let mut groups: Vec<(Group, Vec<&SeriesSummary>)> = Vec::new();
-    for s in series
-        .iter()
-        .filter(|s| filter.admits(s.group) && matches_query(s, &query))
-    {
+    shown: Shown<'_>,
+) -> Vec<(Option<Group>, Vec<&'a SeriesSummary>)> {
+    let query = search_words(shown.query);
+    let rows = series.iter().filter(|s| {
+        shown.filter.admits(s.group, shown.hidden.contains(&s.id)) && matches_query(s, &query)
+    });
+    if !shown.sort.is_grouped() {
+        let mut rows: Vec<&SeriesSummary> = rows.collect();
+        if rows.is_empty() {
+            return Vec::new();
+        }
+        rows.sort_by(|a, b| compare(a, b, shown.sort));
+        return vec![(None, rows)];
+    }
+    let mut groups: Vec<(Option<Group>, Vec<&SeriesSummary>)> = Vec::new();
+    for s in rows {
         match groups.last_mut() {
-            Some((g, rows)) if *g == s.group => rows.push(s),
-            _ => groups.push((s.group, vec![s])),
+            Some((Some(g), rows)) if *g == s.group => rows.push(s),
+            _ => groups.push((Some(s.group), vec![s])),
         }
     }
     groups
@@ -1203,29 +1337,146 @@ mod tests {
             &HashMap::new(),
             day(TODAY),
         );
-        let c = counts(&all, "");
+        let none = BTreeSet::new();
+        let c = counts(&all, "", &none);
         assert_eq!(
             (
                 c.of(Filter::NotFinished),
                 c.of(Filter::Finished),
-                c.of(Filter::All)
+                c.of(Filter::All),
+                c.of(Filter::Hidden)
             ),
-            (2, 1, 3)
+            (2, 1, 3, 0)
         );
         // Every word must start a word of the name or the author.
-        let c = counts(&all, "lant");
+        let c = counts(&all, "lant", &none);
         assert_eq!((c.not_finished, c.finished), (1, 1));
-        assert_eq!(counts(&all, "ant").of(Filter::All), 0);
-        assert_eq!(counts(&all, "salt ro").of(Filter::All), 1);
-        assert_eq!(counts(&all, "salt quill").of(Filter::All), 1);
+        assert_eq!(counts(&all, "ant", &none).of(Filter::All), 0);
+        assert_eq!(counts(&all, "salt ro", &none).of(Filter::All), 1);
+        assert_eq!(counts(&all, "salt quill", &none).of(Filter::All), 1);
 
-        let shown = grouped(&all, Filter::NotFinished, "");
-        assert_eq!(shown.len(), 1);
-        assert_eq!(shown[0].1.len(), 2);
-        assert_eq!(grouped(&all, Filter::Finished, "salt"), []);
-        assert_eq!(grouped(&all, Filter::All, "").len(), 2);
+        let shown = |filter, query| {
+            sections(
+                &all,
+                Shown {
+                    filter,
+                    sort: Sort::Status,
+                    query,
+                    hidden: &none,
+                },
+            )
+        };
+        let not_finished = shown(Filter::NotFinished, "");
+        assert_eq!(not_finished.len(), 1);
+        assert_eq!(not_finished[0].1.len(), 2);
+        assert_eq!(shown(Filter::Finished, "salt"), []);
+        assert_eq!(shown(Filter::All, "").len(), 2);
+        assert_eq!(shown(Filter::Hidden, ""), []);
         assert_eq!(hidden_line(1), "1 finished series isn't shown.");
         assert_eq!(hidden_line(3), "3 finished series aren't shown.");
+    }
+
+    /// A hidden series shows only under Hidden, and counts only there.
+    #[test]
+    fn a_hidden_series_shows_only_under_hidden() {
+        let finished_series = tracked(1, "The Lantern Cycle", &[(11, 1.0)]);
+        let going = tracked(2, "Salt Roads", &[(21, 1.0), (22, 2.0)]);
+        let entries = [
+            finished(entry(11, ReadingStatus::Read, &[(1, 1.0)]), "2026-10-01"),
+            finished(entry(21, ReadingStatus::Read, &[(2, 1.0)]), "2026-10-01"),
+        ];
+        let all = summaries(
+            &[finished_series, going],
+            &entries,
+            &HashMap::new(),
+            day(TODAY),
+        );
+        let hidden: BTreeSet<SeriesId> = [SeriesId::new(2)].into();
+        let c = counts(&all, "", &hidden);
+        assert_eq!((c.not_finished, c.finished, c.hidden), (0, 1, 1));
+        let ids = |filter| -> Vec<i64> {
+            sections(
+                &all,
+                Shown {
+                    filter,
+                    sort: Sort::Status,
+                    query: "",
+                    hidden: &hidden,
+                },
+            )
+            .into_iter()
+            .flat_map(|(_, rows)| rows.into_iter().map(|s| s.id.get()))
+            .collect()
+        };
+        assert_eq!(ids(Filter::NotFinished), Vec::<i64>::new());
+        assert_eq!(ids(Filter::All), [1]);
+        assert_eq!(ids(Filter::Hidden), [2]);
+    }
+
+    /// Every sort but Status is one list without groups, in its own order.
+    #[test]
+    fn the_sorts_order_one_list() {
+        // (id, name, author, books, read, last finish)
+        let mk = |id: i64, name: &str, author: &str, books: i64, read: i64, on: &str| {
+            let positions: Vec<(i64, f32)> = (1..=books)
+                .map(|n| {
+                    #[expect(clippy::cast_precision_loss, reason = "tiny test positions")]
+                    let position = n as f32;
+                    (id * 100 + n, position)
+                })
+                .collect();
+            let mut s = tracked(id, name, &positions);
+            s.author = Some(AuthorRef::new(AuthorId::new(id), author));
+            let entries: Vec<LibraryEntry> = (1..=read)
+                .map(|n| {
+                    #[expect(clippy::cast_precision_loss, reason = "tiny test positions")]
+                    let position = n as f32;
+                    finished(
+                        entry(id * 100 + n, ReadingStatus::Read, &[(id, position)]),
+                        on,
+                    )
+                })
+                .collect();
+            (s, entries)
+        };
+        let rows = [
+            // 1 of 4 read, 3 left, active in June.
+            mk(1, "The Salt Roads", "Ada Quill", 4, 1, "2026-06-01"),
+            // 2 of 3 read, 1 left, active in October.
+            mk(2, "Ember Tales", "Bo Zeller", 3, 2, "2026-10-01"),
+            // Finished: 2 of 2, nothing left, active in March.
+            mk(3, "A Lantern Cycle", "Cy Abbot", 2, 2, "2026-03-01"),
+        ];
+        let series: Vec<TrackedSeries> = rows.iter().map(|(s, _)| s.clone()).collect();
+        let entries: Vec<LibraryEntry> = rows.iter().flat_map(|(_, e)| e.clone()).collect();
+        let all = summaries(&series, &entries, &HashMap::new(), day(TODAY));
+        let none = BTreeSet::new();
+        let order = |sort| -> Vec<i64> {
+            let sections = sections(
+                &all,
+                Shown {
+                    filter: Filter::All,
+                    sort,
+                    query: "",
+                    hidden: &none,
+                },
+            );
+            if !sort.is_grouped() {
+                assert_eq!(sections.len(), 1);
+                assert_eq!(sections[0].0, None, "no group labels");
+            }
+            sections
+                .into_iter()
+                .flat_map(|(_, rows)| rows.into_iter().map(|s| s.id.get()))
+                .collect()
+        };
+        assert_eq!(order(Sort::Status), [2, 1, 3]);
+        assert_eq!(order(Sort::RecentlyActive), [2, 1, 3]);
+        // "A Lantern", "Ember", "The Salt": the articles don't count.
+        assert_eq!(order(Sort::Name), [2, 3, 1]);
+        assert_eq!(order(Sort::Author), [3, 1, 2]);
+        assert_eq!(order(Sort::MostRead), [3, 2, 1]);
+        assert_eq!(order(Sort::FewestLeft), [2, 1, 3]);
     }
 
     #[test]

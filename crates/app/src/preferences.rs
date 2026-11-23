@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, AppContext as _, Context, Entity, Global, Window, WindowAppearance};
+use hardcover_core::SeriesId;
 use hardcover_core::prefs::{Preferences, ThemePreference};
 
 /// `HARDCOVER_THEME=light|dark` forces a theme (a development aid for
@@ -70,6 +71,22 @@ impl PreferencesModel {
 
     pub fn automatic_update_checks(&self) -> bool {
         self.preferences.automatic_update_checks
+    }
+
+    /// The series hidden from the Series page.
+    pub fn hidden_series(&self) -> &std::collections::BTreeSet<SeriesId> {
+        &self.preferences.hidden_series
+    }
+
+    /// Hides a series from the Series page, or shows it again.
+    pub fn set_series_hidden(&mut self, id: SeriesId, hidden: bool, cx: &mut Context<Self>) {
+        self.update(cx, |p| {
+            if hidden {
+                p.hidden_series.insert(id);
+            } else {
+                p.hidden_series.remove(&id);
+            }
+        });
     }
 
     pub fn set_theme(&mut self, theme: ThemePreference, cx: &mut Context<Self>) {
