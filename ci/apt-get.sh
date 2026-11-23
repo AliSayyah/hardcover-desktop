@@ -38,9 +38,15 @@ attempts=${APT_ATTEMPTS:-3}
 update_limit=${APT_UPDATE_LIMIT:-480}
 download_limit=${APT_DOWNLOAD_LIMIT:-900}
 retry_delay=${APT_RETRY_DELAY:-10}
-# A connection silent for 30 s (not apt's default 120) is dropped, and a file
-# that fails is fetched again by apt itself before the attempt fails.
-options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+# The time goes on connections that go silent, not on slow ones: on
+# 2026-11-23 a refresh fetched its 17.5 MB list in seconds, then spent 5
+# minutes on 920 kB because connections to archive.ubuntu.com went silent
+# again and again, each costing a timeout before apt asked again. A mirror
+# that works answers within a second, so a connection silent for 10 s (apt's
+# default is 120) is dropped, and apt fetches the file again itself, up to 3
+# times, before the attempt fails. A new attempt keeps the lists already
+# fetched.
+options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10)
 
 die() {
   echo "apt-get.sh: $*" >&2
