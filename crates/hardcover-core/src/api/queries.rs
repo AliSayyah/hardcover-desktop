@@ -163,8 +163,7 @@ pub(crate) const BOOKS_TRENDING: &str =
 
 /// A book page's facts, with the exact votes for the tags in `$tags` (the
 /// moods, paces and character tags of [`crate::tags::VOTE_TAG_IDS`]): the
-/// exact counts behind the mood line, which `cached_tags` only rounds off
-/// to the top few. `cached_tags` stays for the genres, warnings and tags.
+/// exact counts behind the mood line; `cached_tags` keeps only the top few. `cached_tags` stays for the genres, warnings and tags.
 pub(crate) const BOOK_DETAILS: &str = concat!(
     "query BookDetails($id: Int!, $tags: [Int!]!) {
   books_by_pk(id: $id) {
@@ -184,7 +183,8 @@ pub(crate) const BOOK_DETAILS: &str = concat!(
 /// A tag's books, the most voted for it first (`count`; never `users_count`,
 /// which puts the same blockbusters first whatever the tag). Merged
 /// duplicates are filtered here. Paged by offset; the book id breaks ties, so
-/// pages over equal counts neither repeat nor skip a book.
+/// pages over equal counts neither repeat nor skip a book (the ordering by
+/// `count` was verified live; the tiebreak was not).
 pub(crate) const BOOKS_BY_TAG: &str = concat!(
     "query BooksByTag($tag: Int!, $limit: Int!, $offset: Int!) {
   taggable_counts(

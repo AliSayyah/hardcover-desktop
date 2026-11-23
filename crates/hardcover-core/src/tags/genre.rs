@@ -176,8 +176,8 @@ const fn browse(id: i64, name: &'static str) -> BrowseGenre {
     }
 }
 
-/// Discover's Browse list, in its order: Hardcover's genre tags (ids
-/// checked live, 2026-11-23).
+/// Discover's Browse list, in its order, as the design system has it, with
+/// Hardcover's genre tag ids.
 pub const BROWSE_GENRES: [BrowseGenre; 12] = [
     browse(2, "Fantasy"),
     browse(6, "Science Fiction"),

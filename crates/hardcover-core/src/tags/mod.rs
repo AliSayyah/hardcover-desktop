@@ -2,11 +2,11 @@
 //! vote for on a book, the rule that turns those votes into a book's mood
 //! line, and genres merged across their many spellings.
 //!
-//! Hardcover's review form asks a reader for moods, a pace and a few
-//! character tags; each answer is a vote, and `taggable_counts` holds each
-//! book's exact count per tag (verified live, read-only, 2026-11-23).
-//! `cached_tags` only keeps the top few of each, rounded off, so the book
-//! page and the shelf filter ask for the counts themselves
+//! Readers vote for a book's moods, pace and character tags, and
+//! `taggable_counts` holds each book's exact count per tag (verified live,
+//! read-only, by the owner). `cached_tags` keeps only the top few of each
+//! category, so the book page and the shelf filter ask for the counts
+//! themselves
 //! ([`VOTE_TAG_IDS`], [`MOOD_IDS`]).
 //!
 //! Only the 14 [`Mood`]s count as moods: Hardcover has many more mood tags,
@@ -50,7 +50,7 @@ pub const LINE_MAX_MOODS: usize = 3;
 pub const GROUP_MIN_VOTES: u32 = 20;
 /// A book needs this many mood votes for a Rarely list.
 pub const RARELY_MIN_MOOD_VOTES: u32 = 100;
-/// Only the this many most used moods can be Rarely ([`Mood::ALL`]'s first
+/// Only this many of the most used moods can be Rarely ([`Mood::ALL`]'s first
 /// ten, Adventurous to Hopeful): the four least used (Challenging,
 /// Inspiring, Informative, Relaxing) are rare on most books, so naming
 /// them says nothing.
@@ -69,12 +69,13 @@ pub const TRAIT_MIN_PAIR_VOTES: u32 = 20;
 pub const TRAIT_MIN_SHARE: (u32, u32) = (2, 3);
 /// A tag page narrowed by a second tag lists a book only with at least this
 /// many votes for that tag (`Client::books_by_tag`), so one stray vote
-/// doesn't put a book on it. Verified live to narrow sensibly (2026-11-23).
+/// doesn't put a book on it. The narrowing query was verified live by the
+/// owner.
 pub const MIN_OTHER_TAG_VOTES: u32 = 3;
 
 // ----- the tags -----
 
-/// One of the 14 moods Hardcover's review form offers, the moods that count.
+/// One of the 14 moods that count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Mood {
     Adventurous,
@@ -133,7 +134,7 @@ impl Mood {
         })
     }
 
-    /// The name in title case, as Hardcover's review form writes it.
+    /// The name in title case.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -294,7 +295,7 @@ impl Drive {
     }
 }
 
-/// One side of a [`TraitPair`] on Hardcover's review form.
+/// One side of a [`TraitPair`], one of the review form's attribute tags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CharacterTrait {
     Loveable,
