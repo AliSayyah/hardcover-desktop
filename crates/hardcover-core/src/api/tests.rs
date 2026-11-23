@@ -440,23 +440,34 @@ fn trending_fetches_ids_then_books_in_rank_order() {
         &data(json!({"books_trending": {"error": null, "ids": [3, null, 1, 3, 2]}})),
     );
     // Hardcover returns the books in any order; one id is unknown.
-    http.push(
-        200,
-        &data(json!({ "books": [book(1, "One"), book(3, "Three")] })),
-    );
+    let mut three = book(3, "Three");
+    three["book_series"] = json!([
+        {"position": 2, "featured": true, "series": {"id": 40, "name": "Saga", "slug": "saga"}},
+        {"position": 9, "featured": false, "series": {"id": 41, "name": "Reading order", "slug": null}}
+    ]);
+    http.push(200, &data(json!({ "books": [book(1, "One"), three] })));
     let books = c.trending_books(TrendingPeriod::Year).unwrap();
-    let titles: Vec<&str> = books.iter().map(|b| b.title.as_str()).collect();
+    let titles: Vec<&str> = books.iter().map(|b| b.book.title.as_str()).collect();
     assert_eq!(titles, vec!["Three", "One"]);
+    let series: Vec<(Option<SeriesId>, bool)> =
+        books[0].series.iter().map(|s| (s.id, s.featured)).collect();
+    assert_eq!(
+        series,
+        vec![
+            (Some(SeriesId::new(40)), true),
+            (Some(SeriesId::new(41)), false)
+        ]
+    );
+    assert!(books[1].series.is_empty(), "a book in no series");
     let reqs = http.requests();
     assert_eq!(reqs.len(), 2);
     let first = reqs[0].json.as_ref().unwrap();
     assert_eq!(first["operationName"], "BooksTrending");
     assert_eq!(first["variables"]["duration"], "one_year");
     assert_eq!(first["variables"]["limit"], TRENDING_LIMIT);
-    assert_eq!(
-        reqs[1].json.as_ref().unwrap()["variables"]["ids"],
-        json!([3, 1, 2])
-    );
+    let second = reqs[1].json.as_ref().unwrap();
+    assert_eq!(second["operationName"], "TrendingBooks");
+    assert_eq!(second["variables"]["ids"], json!([3, 1, 2]));
 }
 
 #[test]

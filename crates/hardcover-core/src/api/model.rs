@@ -1503,6 +1503,25 @@ impl TrendingPeriod {
     }
 }
 
+/// A trending book ([`crate::api::Client::trending_books`]) and its series,
+/// featured first, so Discover can show one book per series.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct TrendingBook {
+    pub book: BookSummary,
+    pub series: Vec<SeriesRef>,
+}
+
+impl TrendingBook {
+    #[must_use]
+    pub fn new(book: BookSummary) -> Self {
+        Self {
+            book,
+            series: Vec::new(),
+        }
+    }
+}
+
 /// The slug of the list Hardcover keeps owned editions on. The server creates
 /// it on the first [`crate::api::Client::mark_owned`]; the official SDK finds
 /// it the same way (the user's `lists` row with this slug).

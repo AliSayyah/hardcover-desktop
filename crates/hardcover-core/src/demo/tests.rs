@@ -1005,7 +1005,10 @@ fn trending_resolves_every_id_for_every_period() {
             books.len(),
             crate::api::TRENDING_LIMIT.min(CATALOGUE.books.len())
         );
-        firsts.push(books[0].id);
+        firsts.push(books[0].book.id);
+        // Each book comes with its series, as on Hardcover.
+        let dune = books.iter().find(|b| b.book.title == "Dune Messiah");
+        assert!(dune.is_none_or(|b| b.series.iter().any(|s| s.name == "Dune")));
     }
     // Periods rank differently, so switching shows a change.
     assert_ne!(firsts[0], firsts[1]);
@@ -1162,6 +1165,36 @@ fn the_clock_gives_the_local_date() {
 }
 
 // ----- vibes -----
+
+/// Discover's "Because you loved": the reader's latest 5-star read (Dune)
+/// has a similar book that is neither in the library nor in Top picks.
+#[test]
+fn the_latest_five_star_read_has_a_similar_book_to_discover() {
+    let client = pinned();
+    let entries = library(&client);
+    let loved = entries
+        .iter()
+        .filter(|e| e.status == ReadingStatus::Read && e.rating.is_some_and(|r| r.value() >= 5.))
+        .max_by_key(|e| e.reads.iter().filter_map(|r| r.finished_at).max())
+        .expect("a 5-star read");
+    let similar = client.book_details(loved.book.id).unwrap().similar_book_ids;
+    let top_picks = client
+        .system_vibes()
+        .unwrap()
+        .into_iter()
+        .find(|v| v.kind == crate::VibeKind::TopPicks)
+        .unwrap()
+        .book_ids;
+    let fresh: Vec<BookId> = similar
+        .into_iter()
+        .filter(|b| !entries.iter().any(|e| e.book.id == *b) && !top_picks.contains(b))
+        .collect();
+    assert!(
+        !fresh.is_empty(),
+        "{} has nothing to discover",
+        loved.book.title
+    );
+}
 
 #[test]
 fn the_reader_has_built_system_vibes_over_books_they_havent_read() {

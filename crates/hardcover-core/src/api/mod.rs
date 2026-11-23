@@ -31,8 +31,8 @@ use wire::{
     ListDeletePayload, ListPayload, ProgressContext, RawAggregate, RawAuthorPage, RawBook,
     RawBookDetails, RawBookTags, RawCommunityReview, RawEdition, RawGoal, RawList, RawListBook,
     RawListMembership, RawReview, RawSearch, RawSeriesPage, RawTagBook, RawTrackedSeries,
-    RawTrending, RawUpcomingRow, RawUser, RawUserBook, RawVibe, ReadIdPayload, ReadRef,
-    ReviewedUserBookPayload, SystemVibesPayload, UserBookIdPayload, VibePayload,
+    RawTrending, RawTrendingBook, RawUpcomingRow, RawUser, RawUserBook, RawVibe, ReadIdPayload,
+    ReadRef, ReviewedUserBookPayload, SystemVibesPayload, UserBookIdPayload, VibePayload,
     author_from_search_document, search_hits, search_page, series_from_search_document,
     upcoming_books,
 };
@@ -485,12 +485,13 @@ impl Client {
     }
 
     /// The books the most readers finished in `period`, in Hardcover's order,
-    /// at most [`TRENDING_LIMIT`]. Two requests: the ranked ids, then the books.
+    /// at most [`TRENDING_LIMIT`], each with its series. Two requests: the
+    /// ranked ids, then the books (`TrendingBooks`).
     ///
     /// # Errors
     ///
     /// Returns an error if the ranking or its book details cannot be retrieved.
-    pub fn trending_books(&self, period: TrendingPeriod) -> Result<Vec<BookSummary>> {
+    pub fn trending_books(&self, period: TrendingPeriod) -> Result<Vec<TrendingBook>> {
         #[derive(Deserialize)]
         struct Data {
             books_trending: Option<RawTrending>,
@@ -507,7 +508,36 @@ impl Client {
         if let Some(e) = raw.error.as_deref().filter(|e| !e.is_empty()) {
             return Err(Error::Api(e.to_owned()));
         }
-        self.books_by_ids(&raw.into_ids())
+        self.trending_books_by_ids(&raw.into_ids())
+    }
+
+    /// [`Self::books_by_ids`] with each book's series, in the order of `ids`.
+    fn trending_books_by_ids(&self, ids: &[BookId]) -> Result<Vec<TrendingBook>> {
+        #[derive(Deserialize)]
+        struct Data {
+            books: Vec<RawTrendingBook>,
+        }
+        let ids: Vec<i64> = ids
+            .iter()
+            .take(BOOKS_BY_IDS_LIMIT)
+            .map(|id| id.get())
+            .collect();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let data: Data = self.query(
+            "TrendingBooks",
+            queries::TRENDING_BOOKS,
+            json!({ "ids": ids, "limit": ids.len() }),
+            QUERY_TIMEOUT,
+        )?;
+        let mut books: Vec<TrendingBook> = data
+            .books
+            .into_iter()
+            .map(RawTrendingBook::into_trending)
+            .collect();
+        books.sort_by_key(|b| ids.iter().position(|id| *id == b.book.id.get()));
+        Ok(books)
     }
 
     /// Full details for the book page. `Error::Api` if the book does not exist.

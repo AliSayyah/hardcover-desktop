@@ -302,6 +302,22 @@ pub(crate) const BOOKS_BY_IDS: &str = concat!(
     book_summary_fields!()
 );
 
+/// Trending books by id, each with its series (featured first), so Discover
+/// can show one book per series. `BOOKS_BY_IDS` plus `book_series`, as
+/// `BOOK_DETAILS` asks for it; only trending's second request uses it.
+pub(crate) const TRENDING_BOOKS: &str = concat!(
+    "query TrendingBooks($ids: [Int!]!, $limit: Int!) {
+  books(where: {id: {_in: $ids}}, limit: $limit) {
+    ...BookSummaryFields
+    book_series(order_by: [{featured: desc}, {position: asc_nulls_last}]) {
+      position featured series { id name slug }
+    }
+  }
+}
+",
+    book_summary_fields!()
+);
+
 /// Books in these series released after `$after`, the soonest first. Merged
 /// duplicates are filtered here; the client merges a book listed under two
 /// series and drops partial books and compilations.
@@ -775,6 +791,7 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("SERIES_PAGE", SERIES_PAGE),
     ("AUTHOR_PAGE", AUTHOR_PAGE),
     ("BOOKS_BY_IDS", BOOKS_BY_IDS),
+    ("TRENDING_BOOKS", TRENDING_BOOKS),
     ("PROGRESS_CONTEXT", PROGRESS_CONTEXT),
     ("INSERT_USER_BOOK", INSERT_USER_BOOK),
     ("UPDATE_USER_BOOK", UPDATE_USER_BOOK),
