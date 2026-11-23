@@ -16,10 +16,47 @@
       "users_count": 19561,
       "editions_count": 100,
       "genres": [
-        "Science Fiction",
-        "Space",
-        "Adventure"
+        {
+          "name": "Science Fiction",
+          "votes": 67
+        },
+        {
+          "name": "Space",
+          "votes": 15
+        },
+        {
+          "name": "Adventure",
+          "votes": 12
+        }
       ],
+      "votes": {
+        "148": 24,
+        "154": 422,
+        "180": 326,
+        "181": 86,
+        "182": 259,
+        "183": 232,
+        "184": 267,
+        "185": 379,
+        "186": 203,
+        "187": 244,
+        "188": 169,
+        "189": 124,
+        "190": 59,
+        "191": 234,
+        "192": 67,
+        "193": 51,
+        "194": 43,
+        "195": 22,
+        "196": 175,
+        "197": 31,
+        "203": 129,
+        "206": 170,
+        "207": 88,
+        "208": 130,
+        "240": 154,
+        "241": 13
+      },
       "series": [],
       "description": "A schoolteacher wakes up alone on a spaceship light-years from home, with no memory of how he got there, and slowly realises he may be Earth's last chance against a microbe that is dimming the sun.",
       "cover": {
@@ -71,10 +108,47 @@
       "users_count": 10144,
       "editions_count": 55,
       "genres": [
-        "Fantasy",
-        "Science Fiction & Fantasy",
-        "High Fantasy"
+        {
+          "name": "Fantasy",
+          "votes": 29
+        },
+        {
+          "name": "Science Fiction & Fantasy",
+          "votes": 3
+        },
+        {
+          "name": "High Fantasy",
+          "votes": 3
+        }
       ],
+      "votes": {
+        "148": 55,
+        "154": 159,
+        "180": 12,
+        "181": 2,
+        "182": 91,
+        "183": 103,
+        "184": 148,
+        "185": 131,
+        "186": 118,
+        "187": 54,
+        "188": 6,
+        "189": 10,
+        "190": 55,
+        "191": 80,
+        "192": 38,
+        "193": 29,
+        "194": 42,
+        "195": 75,
+        "196": 32,
+        "197": 24,
+        "203": 9,
+        "206": 90,
+        "207": 87,
+        "208": 12,
+        "240": 61,
+        "241": 4
+      },
       "series": [
         {
           "name": "The Stormlight Archive",
@@ -101,10 +175,33 @@
       "users_count": 6645,
       "editions_count": 79,
       "genres": [
-        "Self-Help",
-        "Psychology",
-        "Business"
+        {
+          "name": "Self-Help",
+          "votes": 10
+        },
+        {
+          "name": "Psychology",
+          "votes": 9
+        },
+        {
+          "name": "Business",
+          "votes": 8
+        }
       ],
+      "votes": {
+        "154": 1,
+        "180": 3,
+        "181": 5,
+        "182": 47,
+        "187": 18,
+        "188": 19,
+        "190": 7,
+        "191": 1,
+        "192": 44,
+        "195": 7,
+        "203": 71,
+        "240": 56
+      },
       "series": [],
       "description": "A practical guide to how small, steady changes compound, and how to shape your surroundings so good habits are easy and bad ones are hard.",
       "cover": {
@@ -155,8 +252,36 @@
       "users_count": 5578,
       "editions_count": 128,
       "genres": [
-        "Science Fiction"
+        {
+          "name": "Science Fiction",
+          "votes": 24
+        }
       ],
+      "votes": {
+        "148": 36,
+        "154": 28,
+        "182": 38,
+        "183": 30,
+        "184": 38,
+        "185": 16,
+        "186": 33,
+        "187": 1,
+        "188": 5,
+        "189": 24,
+        "190": 31,
+        "191": 18,
+        "192": 32,
+        "193": 15,
+        "194": 20,
+        "195": 27,
+        "196": 25,
+        "197": 47,
+        "203": 2,
+        "206": 29,
+        "207": 25,
+        "208": 10,
+        "240": 4
+      },
       "series": [
         {
           "name": "Dune",
@@ -182,10 +307,47 @@
       "users_count": 8762,
       "editions_count": 98,
       "genres": [
-        "Fantasy",
-        "Romance",
-        "Romantasy"
+        {
+          "name": "Fantasy",
+          "votes": 47
+        },
+        {
+          "name": "Romance",
+          "votes": 20
+        },
+        {
+          "name": "Romantasy",
+          "votes": 21
+        }
       ],
+      "votes": {
+        "148": 94,
+        "154": 295,
+        "180": 74,
+        "181": 26,
+        "182": 185,
+        "183": 183,
+        "184": 208,
+        "185": 203,
+        "186": 176,
+        "187": 25,
+        "188": 112,
+        "189": 69,
+        "190": 68,
+        "191": 170,
+        "192": 6,
+        "193": 44,
+        "194": 50,
+        "195": 14,
+        "196": 76,
+        "197": 76,
+        "203": 6,
+        "206": 153,
+        "207": 86,
+        "208": 44,
+        "240": 27,
+        "241": 3
+      },
       "series": [
         {
           "name": "The Empyrean",
@@ -211,10 +373,47 @@
       "users_count": 7115,
       "editions_count": 64,
       "genres": [
-        "Literary Fiction",
-        "Contemporary",
-        "Romance"
+        {
+          "name": "Literary Fiction",
+          "votes": 8
+        },
+        {
+          "name": "Contemporary",
+          "votes": 7
+        },
+        {
+          "name": "Romance",
+          "votes": 6
+        }
       ],
+      "votes": {
+        "148": 30,
+        "154": 27,
+        "180": 45,
+        "181": 13,
+        "182": 160,
+        "183": 58,
+        "184": 162,
+        "185": 109,
+        "186": 185,
+        "187": 72,
+        "188": 22,
+        "189": 51,
+        "190": 32,
+        "191": 204,
+        "192": 144,
+        "193": 125,
+        "194": 151,
+        "195": 45,
+        "196": 20,
+        "197": 99,
+        "203": 11,
+        "206": 15,
+        "207": 4,
+        "208": 5,
+        "240": 63,
+        "241": 7
+      },
       "series": [],
       "description": "Two friends who met as children in a hospital games room make video games together across three decades of success, rivalry and a love that never quite lines up.",
       "cover": {
@@ -234,10 +433,47 @@
       "users_count": 8360,
       "editions_count": 88,
       "genres": [
-        "Fantasy",
-        "Science Fiction",
-        "Magical Realism"
+        {
+          "name": "Fantasy",
+          "votes": 9
+        },
+        {
+          "name": "Science Fiction",
+          "votes": 9
+        },
+        {
+          "name": "Magical Realism",
+          "votes": 6
+        }
       ],
+      "votes": {
+        "148": 43,
+        "154": 56,
+        "180": 21,
+        "181": 16,
+        "182": 145,
+        "183": 47,
+        "184": 204,
+        "185": 137,
+        "186": 64,
+        "187": 160,
+        "188": 94,
+        "189": 33,
+        "190": 39,
+        "191": 185,
+        "192": 197,
+        "193": 71,
+        "194": 168,
+        "195": 27,
+        "196": 148,
+        "197": 91,
+        "203": 7,
+        "206": 9,
+        "207": 40,
+        "208": 16,
+        "240": 138,
+        "241": 9
+      },
       "series": [
         {
           "name": "The Midnight World",
@@ -263,10 +499,47 @@
       "users_count": 3845,
       "editions_count": 69,
       "genres": [
-        "Science Fiction",
-        "Dystopian",
-        "Sci-fi"
+        {
+          "name": "Science Fiction",
+          "votes": 9
+        },
+        {
+          "name": "Dystopian",
+          "votes": 5
+        },
+        {
+          "name": "Sci-fi",
+          "votes": 3
+        }
       ],
+      "votes": {
+        "148": 14,
+        "154": 7,
+        "180": 1,
+        "181": 10,
+        "182": 45,
+        "183": 14,
+        "184": 54,
+        "185": 55,
+        "186": 18,
+        "187": 35,
+        "188": 9,
+        "189": 30,
+        "190": 15,
+        "191": 64,
+        "192": 80,
+        "193": 40,
+        "194": 65,
+        "195": 46,
+        "196": 62,
+        "197": 32,
+        "203": 1,
+        "206": 6,
+        "207": 26,
+        "208": 11,
+        "240": 15,
+        "241": 4
+      },
       "series": [],
       "description": "Klara, an Artificial Friend who learns about the world from a shop window, is chosen by a sick girl and sets out to understand the people she has come to love.",
       "cover": {
@@ -286,10 +559,47 @@
       "users_count": 7553,
       "editions_count": 85,
       "genres": [
-        "Fantasy",
-        "Historical Fiction",
-        "Mythology"
+        {
+          "name": "Fantasy",
+          "votes": 13
+        },
+        {
+          "name": "Historical Fiction",
+          "votes": 7
+        },
+        {
+          "name": "Mythology",
+          "votes": 6
+        }
       ],
+      "votes": {
+        "148": 45,
+        "154": 122,
+        "180": 3,
+        "181": 3,
+        "182": 124,
+        "183": 35,
+        "184": 146,
+        "185": 91,
+        "186": 54,
+        "187": 33,
+        "188": 11,
+        "189": 17,
+        "190": 32,
+        "191": 114,
+        "192": 89,
+        "193": 53,
+        "194": 122,
+        "195": 46,
+        "196": 85,
+        "197": 64,
+        "203": 9,
+        "206": 25,
+        "207": 30,
+        "208": 3,
+        "240": 31,
+        "241": 10
+      },
       "series": [],
       "description": "The witch of Aiaia tells her own story: an unloved daughter of the sun god, exiled to an island, who learns the power of transformation and stands against gods and men.",
       "cover": {
@@ -309,10 +619,47 @@
       "users_count": 3055,
       "editions_count": 62,
       "genres": [
-        "Romance",
-        "Historical Fiction",
-        "Literary Fiction"
+        {
+          "name": "Romance",
+          "votes": 4
+        },
+        {
+          "name": "Historical Fiction",
+          "votes": 3
+        },
+        {
+          "name": "Literary Fiction",
+          "votes": 2
+        }
       ],
+      "votes": {
+        "148": 11,
+        "154": 12,
+        "180": 72,
+        "181": 13,
+        "182": 87,
+        "183": 46,
+        "184": 77,
+        "185": 100,
+        "186": 27,
+        "187": 51,
+        "188": 27,
+        "189": 32,
+        "190": 18,
+        "191": 91,
+        "192": 52,
+        "193": 44,
+        "194": 62,
+        "195": 11,
+        "196": 77,
+        "197": 19,
+        "203": 37,
+        "206": 7,
+        "207": 2,
+        "208": 5,
+        "240": 89,
+        "241": 3
+      },
       "series": [],
       "description": "In the 1960s, chemist Elizabeth Zott is pushed out of her lab and ends up hosting a television cooking show, which she teaches as chemistry, to the network's alarm.",
       "cover": {
@@ -332,8 +679,37 @@
       "users_count": 16058,
       "editions_count": 222,
       "genres": [
-        "Science Fiction"
+        {
+          "name": "Science Fiction",
+          "votes": 54
+        }
       ],
+      "votes": {
+        "148": 57,
+        "154": 167,
+        "182": 86,
+        "183": 89,
+        "184": 131,
+        "185": 50,
+        "186": 102,
+        "187": 12,
+        "188": 7,
+        "189": 33,
+        "190": 95,
+        "191": 28,
+        "192": 50,
+        "193": 13,
+        "194": 33,
+        "195": 86,
+        "196": 53,
+        "197": 110,
+        "203": 1,
+        "206": 74,
+        "207": 79,
+        "208": 35,
+        "240": 13,
+        "241": 1
+      },
       "series": [
         {
           "name": "Dune",
@@ -360,10 +736,47 @@
       "users_count": 13446,
       "editions_count": 540,
       "genres": [
-        "Fantasy",
-        "Classics",
-        "Adventure"
+        {
+          "name": "Fantasy",
+          "votes": 54
+        },
+        {
+          "name": "Classics",
+          "votes": 23
+        },
+        {
+          "name": "Adventure",
+          "votes": 13
+        }
       ],
+      "votes": {
+        "148": 9,
+        "154": 142,
+        "180": 58,
+        "181": 74,
+        "182": 81,
+        "183": 51,
+        "184": 85,
+        "185": 108,
+        "186": 58,
+        "187": 40,
+        "188": 28,
+        "189": 23,
+        "190": 9,
+        "191": 21,
+        "192": 8,
+        "193": 4,
+        "194": 6,
+        "195": 19,
+        "196": 50,
+        "197": 9,
+        "203": 1,
+        "206": 17,
+        "207": 23,
+        "208": 51,
+        "240": 35,
+        "241": 22
+      },
       "series": [
         {
           "name": "Middle Earth",
@@ -389,9 +802,41 @@
       "users_count": 19843,
       "editions_count": 736,
       "genres": [
-        "Classics",
-        "Dystopian"
+        {
+          "name": "Classics",
+          "votes": 31
+        },
+        {
+          "name": "Dystopian",
+          "votes": 36
+        }
       ],
+      "votes": {
+        "148": 151,
+        "154": 7,
+        "180": 1,
+        "182": 94,
+        "183": 73,
+        "184": 74,
+        "185": 21,
+        "186": 13,
+        "187": 3,
+        "188": 21,
+        "189": 70,
+        "190": 73,
+        "191": 42,
+        "192": 86,
+        "193": 66,
+        "194": 39,
+        "195": 46,
+        "196": 120,
+        "197": 120,
+        "203": 19,
+        "206": 112,
+        "207": 48,
+        "208": 30,
+        "240": 5
+      },
       "series": [],
       "description": "Winston Smith rewrites history for the Ministry of Truth in a state that watches everything, and begins, dangerously, to keep a diary.",
       "cover": {
@@ -411,10 +856,45 @@
       "users_count": 8104,
       "editions_count": 1325,
       "genres": [
-        "Classics",
-        "Romance",
-        "Historical Fiction"
+        {
+          "name": "Classics",
+          "votes": 25
+        },
+        {
+          "name": "Romance",
+          "votes": 17
+        },
+        {
+          "name": "Historical Fiction",
+          "votes": 4
+        }
       ],
+      "votes": {
+        "154": 16,
+        "180": 77,
+        "181": 79,
+        "182": 59,
+        "183": 33,
+        "184": 102,
+        "185": 94,
+        "186": 19,
+        "187": 33,
+        "188": 8,
+        "189": 8,
+        "190": 9,
+        "191": 51,
+        "192": 17,
+        "193": 2,
+        "194": 67,
+        "195": 59,
+        "196": 85,
+        "197": 18,
+        "206": 4,
+        "207": 1,
+        "208": 4,
+        "240": 14,
+        "241": 26
+      },
       "series": [],
       "description": "Elizabeth Bennet and Mr Darcy take an instant dislike to each other, and spend the rest of the novel finding out how wrong first impressions can be.",
       "cover": {
@@ -434,10 +914,47 @@
       "users_count": 10113,
       "editions_count": 653,
       "genres": [
-        "Classics",
-        "Literary Fiction",
-        "Romance"
+        {
+          "name": "Classics",
+          "votes": 19
+        },
+        {
+          "name": "Literary Fiction",
+          "votes": 6
+        },
+        {
+          "name": "Romance",
+          "votes": 4
+        }
       ],
+      "votes": {
+        "148": 18,
+        "154": 8,
+        "180": 9,
+        "181": 1,
+        "182": 36,
+        "183": 11,
+        "184": 19,
+        "185": 13,
+        "186": 8,
+        "187": 5,
+        "188": 21,
+        "189": 45,
+        "190": 12,
+        "191": 28,
+        "192": 42,
+        "193": 34,
+        "194": 50,
+        "195": 18,
+        "196": 56,
+        "197": 56,
+        "203": 4,
+        "206": 9,
+        "207": 22,
+        "208": 4,
+        "240": 3,
+        "241": 2
+      },
       "series": [],
       "description": "Nick Carraway spends a summer on Long Island beside his mysterious neighbour Jay Gatsby, whose lavish parties are all aimed at one woman across the bay.",
       "cover": {
@@ -457,10 +974,47 @@
       "users_count": 12691,
       "editions_count": 103,
       "genres": [
-        "Fantasy",
-        "Adventure",
-        "Young Adult"
+        {
+          "name": "Fantasy",
+          "votes": 65
+        },
+        {
+          "name": "Adventure",
+          "votes": 28
+        },
+        {
+          "name": "Young Adult",
+          "votes": 26
+        }
       ],
+      "votes": {
+        "148": 144,
+        "154": 258,
+        "180": 42,
+        "181": 14,
+        "182": 186,
+        "183": 171,
+        "184": 221,
+        "185": 225,
+        "186": 150,
+        "187": 84,
+        "188": 53,
+        "189": 25,
+        "190": 34,
+        "191": 99,
+        "192": 16,
+        "193": 37,
+        "194": 27,
+        "195": 29,
+        "196": 85,
+        "197": 25,
+        "203": 6,
+        "206": 123,
+        "207": 156,
+        "208": 48,
+        "240": 63,
+        "241": 5
+      },
       "series": [
         {
           "name": "The Mistborn Saga: The Original Trilogy",
@@ -486,10 +1040,47 @@
       "users_count": 6058,
       "editions_count": 122,
       "genres": [
-        "Romance",
-        "LGBTQ",
-        "Historical Fiction"
+        {
+          "name": "Romance",
+          "votes": 10
+        },
+        {
+          "name": "LGBTQ",
+          "votes": 6
+        },
+        {
+          "name": "Historical Fiction",
+          "votes": 5
+        }
       ],
+      "votes": {
+        "148": 35,
+        "154": 35,
+        "180": 38,
+        "181": 23,
+        "182": 190,
+        "183": 72,
+        "184": 209,
+        "185": 141,
+        "186": 229,
+        "187": 49,
+        "188": 103,
+        "189": 71,
+        "190": 41,
+        "191": 258,
+        "192": 185,
+        "193": 159,
+        "194": 194,
+        "195": 11,
+        "196": 42,
+        "197": 141,
+        "203": 6,
+        "206": 28,
+        "207": 55,
+        "208": 21,
+        "240": 102,
+        "241": 13
+      },
       "series": [
         {
           "name": "Reidverse",
@@ -516,10 +1107,34 @@
       "users_count": 3991,
       "editions_count": 65,
       "genres": [
-        "Memoir",
-        "Women",
-        "religious"
+        {
+          "name": "Memoir",
+          "votes": 14
+        },
+        {
+          "name": "Women",
+          "votes": 4
+        },
+        {
+          "name": "religious",
+          "votes": 4
+        }
       ],
+      "votes": {
+        "148": 33,
+        "154": 4,
+        "182": 43,
+        "187": 20,
+        "188": 10,
+        "190": 30,
+        "191": 53,
+        "192": 42,
+        "193": 31,
+        "195": 9,
+        "203": 11,
+        "206": 22,
+        "240": 33
+      },
       "series": [],
       "description": "A memoir of growing up in a survivalist family in rural Idaho, never going to school, and of the education that took Tara Westover to Cambridge and away from home.",
       "cover": {
@@ -539,10 +1154,45 @@
       "users_count": 11925,
       "editions_count": 140,
       "genres": [
-        "Science Fiction",
-        "Adventure",
-        "Space"
+        {
+          "name": "Science Fiction",
+          "votes": 29
+        },
+        {
+          "name": "Adventure",
+          "votes": 10
+        },
+        {
+          "name": "Space",
+          "votes": 9
+        }
       ],
+      "votes": {
+        "148": 2,
+        "154": 102,
+        "180": 96,
+        "181": 26,
+        "182": 64,
+        "183": 37,
+        "184": 36,
+        "185": 90,
+        "186": 40,
+        "187": 51,
+        "188": 37,
+        "189": 55,
+        "190": 14,
+        "191": 26,
+        "192": 10,
+        "194": 24,
+        "195": 12,
+        "196": 52,
+        "197": 9,
+        "203": 30,
+        "206": 64,
+        "207": 3,
+        "208": 35,
+        "240": 46
+      },
       "series": [
         {
           "name": "The Martian",
@@ -568,10 +1218,42 @@
       "users_count": 2625,
       "editions_count": 29,
       "genres": [
-        "Literary Fiction",
-        "Classics",
-        "General"
+        {
+          "name": "Literary Fiction",
+          "votes": 5
+        },
+        {
+          "name": "Classics",
+          "votes": 3
+        },
+        {
+          "name": "General",
+          "votes": 2
+        }
       ],
+      "votes": {
+        "148": 6,
+        "180": 10,
+        "182": 2,
+        "183": 5,
+        "184": 6,
+        "185": 4,
+        "186": 4,
+        "187": 1,
+        "188": 1,
+        "189": 3,
+        "190": 10,
+        "191": 5,
+        "192": 8,
+        "193": 7,
+        "194": 5,
+        "195": 6,
+        "196": 4,
+        "197": 6,
+        "203": 2,
+        "206": 3,
+        "208": 1
+      },
       "series": [],
       "description": "Set at a tennis academy and a halfway house in a near-future North America, a sprawling novel about addiction, entertainment and a film so engaging that its viewers lose the will to do anything else.",
       "cover": {
@@ -591,10 +1273,33 @@
       "users_count": 2043,
       "editions_count": 288,
       "genres": [
-        "Classics",
-        "General",
-        "Literary Fiction"
+        {
+          "name": "Classics",
+          "votes": 3
+        },
+        {
+          "name": "General",
+          "votes": 2
+        },
+        {
+          "name": "Literary Fiction",
+          "votes": 2
+        }
       ],
+      "votes": {
+        "154": 2,
+        "180": 2,
+        "185": 2,
+        "186": 2,
+        "189": 2,
+        "190": 5,
+        "191": 1,
+        "192": 2,
+        "194": 4,
+        "195": 5,
+        "207": 1,
+        "240": 1
+      },
       "series": [],
       "description": "One day in Dublin, 16 June 1904, following Leopold Bloom and Stephen Dedalus through the city in a novel that changes its style with every chapter.",
       "cover": {
@@ -614,10 +1319,42 @@
       "users_count": 3730,
       "editions_count": 767,
       "genres": [
-        "Classics",
-        "Adventure",
-        "Literary Fiction"
+        {
+          "name": "Classics",
+          "votes": 6
+        },
+        {
+          "name": "Adventure",
+          "votes": 3
+        },
+        {
+          "name": "Literary Fiction",
+          "votes": 2
+        }
       ],
+      "votes": {
+        "148": 4,
+        "154": 11,
+        "180": 5,
+        "182": 3,
+        "183": 7,
+        "184": 2,
+        "185": 5,
+        "186": 6,
+        "189": 8,
+        "190": 9,
+        "191": 1,
+        "192": 6,
+        "193": 1,
+        "194": 1,
+        "195": 13,
+        "196": 4,
+        "197": 5,
+        "203": 8,
+        "206": 6,
+        "208": 3,
+        "240": 1
+      },
       "series": [],
       "description": "Ishmael signs on to the whaler Pequod, whose captain, Ahab, is set on hunting down the white whale that took his leg.",
       "cover": {
@@ -637,8 +1374,36 @@
       "users_count": 3779,
       "editions_count": 101,
       "genres": [
-        "Science Fiction"
+        {
+          "name": "Science Fiction",
+          "votes": 23
+        }
       ],
+      "votes": {
+        "148": 19,
+        "154": 23,
+        "181": 1,
+        "182": 23,
+        "183": 18,
+        "184": 23,
+        "185": 8,
+        "186": 22,
+        "188": 1,
+        "189": 15,
+        "190": 23,
+        "191": 4,
+        "192": 22,
+        "193": 7,
+        "194": 13,
+        "195": 20,
+        "196": 15,
+        "197": 31,
+        "203": 2,
+        "206": 13,
+        "207": 25,
+        "208": 6,
+        "240": 1
+      },
       "series": [
         {
           "name": "Dune",
@@ -664,10 +1429,45 @@
       "users_count": 2713,
       "editions_count": 76,
       "genres": [
-        "Science Fiction",
-        "Fantasy",
-        "Classics"
+        {
+          "name": "Science Fiction",
+          "votes": 19
+        },
+        {
+          "name": "Fantasy",
+          "votes": 11
+        },
+        {
+          "name": "Classics",
+          "votes": 7
+        }
       ],
+      "votes": {
+        "148": 9,
+        "154": 7,
+        "180": 2,
+        "182": 8,
+        "183": 4,
+        "184": 16,
+        "185": 4,
+        "186": 12,
+        "187": 3,
+        "188": 1,
+        "189": 7,
+        "190": 18,
+        "191": 5,
+        "192": 20,
+        "193": 5,
+        "194": 13,
+        "195": 16,
+        "196": 10,
+        "197": 20,
+        "203": 1,
+        "206": 4,
+        "207": 16,
+        "208": 5,
+        "240": 1
+      },
       "series": [
         {
           "name": "Dune",
@@ -695,10 +1495,46 @@
       "users_count": 3929,
       "editions_count": 58,
       "genres": [
-        "Fantasy",
-        "Romance",
-        "Young Adult"
+        {
+          "name": "Fantasy",
+          "votes": 8
+        },
+        {
+          "name": "Romance",
+          "votes": 5
+        },
+        {
+          "name": "Young Adult",
+          "votes": 2
+        }
       ],
+      "votes": {
+        "148": 65,
+        "154": 94,
+        "180": 15,
+        "181": 6,
+        "182": 65,
+        "183": 69,
+        "184": 71,
+        "185": 60,
+        "186": 56,
+        "187": 4,
+        "188": 35,
+        "189": 32,
+        "190": 21,
+        "191": 30,
+        "192": 6,
+        "193": 6,
+        "194": 15,
+        "195": 12,
+        "196": 38,
+        "197": 44,
+        "206": 67,
+        "207": 51,
+        "208": 17,
+        "240": 4,
+        "241": 1
+      },
       "series": [
         {
           "name": "The Folk of the Air",
@@ -774,10 +1610,47 @@
       "users_count": 3599,
       "editions_count": 19,
       "genres": [
-        "Fantasy",
-        "Young Adult",
-        "Science Fiction"
+        {
+          "name": "Fantasy",
+          "votes": 11
+        },
+        {
+          "name": "Young Adult",
+          "votes": 1
+        },
+        {
+          "name": "Science Fiction",
+          "votes": 1
+        }
       ],
+      "votes": {
+        "148": 7,
+        "154": 66,
+        "180": 48,
+        "181": 30,
+        "182": 19,
+        "183": 20,
+        "184": 45,
+        "185": 49,
+        "186": 30,
+        "187": 20,
+        "188": 48,
+        "189": 16,
+        "190": 2,
+        "191": 13,
+        "192": 5,
+        "193": 3,
+        "194": 28,
+        "195": 3,
+        "196": 29,
+        "197": 13,
+        "203": 2,
+        "206": 9,
+        "207": 16,
+        "208": 11,
+        "240": 7,
+        "241": 4
+      },
       "series": [
         {
           "name": "The Stormlight Archive",
@@ -804,10 +1677,47 @@
       "users_count": 11133,
       "editions_count": 325,
       "genres": [
-        "Fantasy",
-        "Classics",
-        "Adventure"
+        {
+          "name": "Fantasy",
+          "votes": 32
+        },
+        {
+          "name": "Classics",
+          "votes": 13
+        },
+        {
+          "name": "Adventure",
+          "votes": 6
+        }
       ],
+      "votes": {
+        "148": 20,
+        "154": 134,
+        "180": 21,
+        "181": 9,
+        "182": 37,
+        "183": 56,
+        "184": 77,
+        "185": 109,
+        "186": 60,
+        "187": 53,
+        "188": 2,
+        "189": 35,
+        "190": 25,
+        "191": 41,
+        "192": 10,
+        "193": 9,
+        "194": 4,
+        "195": 89,
+        "196": 48,
+        "197": 4,
+        "203": 1,
+        "206": 40,
+        "207": 32,
+        "208": 52,
+        "240": 40,
+        "241": 14
+      },
       "series": [
         {
           "name": "The Lord of the Rings",
@@ -839,9 +1749,40 @@
       "users_count": 5375,
       "editions_count": 237,
       "genres": [
-        "Fantasy",
-        "Classics"
+        {
+          "name": "Fantasy",
+          "votes": 16
+        },
+        {
+          "name": "Classics",
+          "votes": 8
+        }
       ],
+      "votes": {
+        "148": 7,
+        "154": 19,
+        "180": 3,
+        "181": 2,
+        "182": 2,
+        "183": 9,
+        "184": 11,
+        "185": 13,
+        "186": 8,
+        "187": 11,
+        "188": 1,
+        "189": 3,
+        "190": 7,
+        "191": 11,
+        "192": 2,
+        "193": 2,
+        "195": 12,
+        "196": 5,
+        "206": 4,
+        "207": 4,
+        "208": 4,
+        "240": 9,
+        "241": 1
+      },
       "series": [
         {
           "name": "The Lord of the Rings",

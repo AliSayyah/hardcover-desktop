@@ -525,7 +525,7 @@ mod tests {
             .unwrap()
             .iter()
             .flat_map(|book| book["genres"].as_array().into_iter().flatten())
-            .filter_map(|genre| genre.as_str())
+            .filter_map(|genre| genre["name"].as_str())
             .collect();
         genres.sort_unstable();
         genres.dedup();

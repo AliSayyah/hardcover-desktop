@@ -1276,3 +1276,223 @@ fn unbuilt_and_missing_system_vibes() {
     assert_eq!(client.ensure_system_vibes().unwrap(), ids, "made once");
     assert!(Faults::parse("vibes=sometimes").is_err());
 }
+
+// ----- tags -----
+
+#[test]
+fn every_demo_book_has_its_real_votes_and_line() {
+    use crate::tags::{mood_line, rarely};
+    let expected: Value =
+        serde_json::from_str(include_str!("../tags/fixtures/expected-lines.json")).unwrap();
+    let counts: Value =
+        serde_json::from_str(include_str!("../tags/fixtures/catalogue-tag-counts.json")).unwrap();
+    let client = client();
+    for book in &CATALOGUE.books {
+        let details = client.book_details(BookId::new(book.id)).unwrap();
+        let want = expected["expected"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == book.id)
+            .unwrap_or_else(|| panic!("{} is not in the fixture", book.title));
+        let real = counts["books"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["id"] == book.id)
+            .unwrap();
+        assert_eq!(real["in_demo"], true, "{}", book.title);
+        for (tag, n) in real["counts"].as_object().unwrap() {
+            let tag = crate::TagId::new(tag.parse().unwrap());
+            assert_eq!(
+                u64::from(details.votes.get(tag)),
+                n.as_u64().unwrap(),
+                "{}: {tag}",
+                book.title
+            );
+        }
+        let line = mood_line(&details.votes);
+        let slugs = |moods: &[crate::tags::Mood]| -> Vec<String> {
+            moods.iter().map(|m| m.slug().to_owned()).collect()
+        };
+        match want["line"].as_array() {
+            None => assert_eq!(line, None, "{}", book.title),
+            Some(moods) => {
+                let line = line.unwrap();
+                let want: Vec<String> = moods
+                    .iter()
+                    .map(|m| m.as_str().unwrap().to_owned())
+                    .collect();
+                assert_eq!(slugs(&line.moods), want, "{}", book.title);
+            }
+        }
+        let want_rarely: Vec<String> = want["rarely"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m.as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            slugs(&rarely(&details.votes)),
+            want_rarely,
+            "{}",
+            book.title
+        );
+        // Every genre the catalogue names, with its real votes.
+        assert_eq!(details.genres.len(), book.genres.len(), "{}", book.title);
+    }
+}
+
+#[test]
+fn the_demo_shows_the_awkward_mood_lines() {
+    use crate::tags::{Pace, mood_line};
+    let client = client();
+    let line = |id: i64| mood_line(&client.book_details(BookId::new(id)).unwrap().votes);
+    // Ulysses: 14 mood votes, no line.
+    assert_eq!(line(427_513), None);
+    // Edgedancer is fast, The Fellowship of the Ring slow; most name no pace.
+    assert_eq!(line(427_544).unwrap().pace, Some(Pace::Fast));
+    assert_eq!(line(139_773).unwrap().pace, Some(Pace::Slow));
+    assert_eq!(line(PROJECT_HAIL_MARY).unwrap().pace, None);
+    // An upcoming book has no tags.
+    let upcoming = CATALOGUE.upcoming[0].id;
+    let details = client.book_details(BookId::new(upcoming)).unwrap();
+    assert!(details.votes.is_empty());
+}
+
+/// Two Want to Read books share a genre and a mood, so the shelf's filter
+/// has something to combine.
+#[test]
+fn want_to_read_books_share_a_genre_and_a_mood() {
+    use crate::tags::{Mood, has_mood};
+    let client = client();
+    let ids: Vec<BookId> = library(&client)
+        .into_iter()
+        .filter(|e| e.status == ReadingStatus::WantToRead)
+        .map(|e| e.book.id)
+        .collect();
+    let load = client.book_tags(&ids);
+    assert!(load.error.is_none() && load.missing.is_empty());
+    assert_eq!(load.books.len(), ids.len());
+    let both = |genre: &str, mood: Mood| {
+        load.books
+            .iter()
+            .filter(|b| b.genres.has(genre) && has_mood(&b.moods, mood))
+            .count()
+    };
+    // Dune Messiah, The Midnight Library, Klara and the Sun.
+    assert_eq!(both("science fiction", Mood::Reflective), 3);
+    // Fourth Wing, Circe, Edgedancer, The Fellowship of the Ring.
+    assert_eq!(both("fantasy", Mood::Adventurous), 4);
+    // Klara's "Sci-fi" 3 adds to its "Science Fiction" 9; Edgedancer's
+    // genres with a vote or two are left out.
+    let klara = load.books.iter().find(|b| b.book.get() == 266_607).unwrap();
+    assert_eq!(klara.genres.as_slice()[0].votes, 12);
+    let edgedancer = load.books.iter().find(|b| b.book.get() == 427_544).unwrap();
+    let names: Vec<&str> = edgedancer.genres.iter().map(|g| g.name.as_str()).collect();
+    assert_eq!(names, ["Fantasy"]);
+}
+
+#[test]
+fn a_tag_page_ranks_the_catalogue_by_votes() {
+    use crate::TagId;
+    use crate::tags::Mood;
+    let client = client();
+    let relaxing = client.books_by_tag(Mood::Relaxing.id(), None, 0).unwrap();
+    assert!(!relaxing.has_more);
+    let votes: Vec<u32> = relaxing.items.iter().map(|b| b.votes).collect();
+    assert!(votes.windows(2).all(|w| w[0] >= w[1]), "{votes:?}");
+    let top = CATALOGUE
+        .books
+        .iter()
+        .max_by_key(|b| b.votes.get(&Mood::Relaxing.id().get()))
+        .unwrap();
+    assert_eq!(relaxing.items[0].book.id.get(), top.id);
+    assert_eq!(
+        relaxing.items.len(),
+        CATALOGUE
+            .books
+            .iter()
+            .filter(|b| b.votes.contains_key(&Mood::Relaxing.id().get()))
+            .count()
+    );
+
+    // Paged: an offset starts further down, and pages join up.
+    let later = client.books_by_tag(Mood::Relaxing.id(), None, 2).unwrap();
+    assert_eq!(later.items, relaxing.items[2..]);
+    assert_eq!(
+        later.next_offset,
+        u32::try_from(relaxing.items.len()).unwrap()
+    );
+    let page = |offset: i64| {
+        answer_fresh(
+            "BooksByTag",
+            &json!({ "tag": Mood::Relaxing.id().get(), "limit": 3, "offset": offset }),
+        )["data"]["taggable_counts"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let (first, second) = (page(0), page(3));
+    assert_eq!(first.len(), 3);
+    assert_eq!(first[0]["book"]["id"], top.id);
+    assert_eq!(second[0]["book"]["id"], relaxing.items[3].book.id.get());
+
+    // A Browse genre: Fantasy (Hardcover's tag 2), the most voted first.
+    let fantasy = client.books_by_tag(TagId::new(2), None, 0).unwrap();
+    assert_eq!(fantasy.items[0].book.title, "Mistborn: The Final Empire");
+    assert_eq!(fantasy.items[0].votes, 65);
+    assert!(fantasy.items.iter().all(|b| b.votes > 0));
+
+    // Narrowed: adventurous books with at least 3 Fantasy votes.
+    let narrowed = client
+        .books_by_tag(Mood::Adventurous.id(), Some(TagId::new(2)), 0)
+        .unwrap();
+    let want: Vec<i64> = {
+        let mut books: Vec<&Book> = CATALOGUE
+            .books
+            .iter()
+            .filter(|b| b.votes.contains_key(&Mood::Adventurous.id().get()))
+            .filter(|b| b.genres.iter().any(|g| g.name == "Fantasy" && g.votes >= 3))
+            .collect();
+        books.sort_by_key(|b| {
+            (
+                std::cmp::Reverse(b.votes[&Mood::Adventurous.id().get()]),
+                b.id,
+            )
+        });
+        books.into_iter().map(|b| b.id).collect()
+    };
+    let got: Vec<i64> = narrowed.items.iter().map(|b| b.book.id.get()).collect();
+    assert_eq!(got, want);
+    let adventurous = client
+        .books_by_tag(Mood::Adventurous.id(), None, 0)
+        .unwrap();
+    assert!(got.len() >= 3 && got.len() < adventurous.items.len());
+    // Young Adult (3): The Cruel Prince has 2 votes for it and Edgedancer 1,
+    // under the threshold; Mistborn has 26.
+    let young_adult = client
+        .books_by_tag(Mood::Adventurous.id(), Some(TagId::new(3)), 0)
+        .unwrap();
+    let titles: Vec<&str> = young_adult
+        .items
+        .iter()
+        .map(|b| b.book.title.as_str())
+        .collect();
+    assert_eq!(titles, ["Mistborn: The Final Empire"]);
+
+    // A genre the Browse list hasn't got has a demo id of its own.
+    let sci_fi = CATALOGUE.genre_id("Sci-fi");
+    assert!(sci_fi > 90_000);
+    let page = client.books_by_tag(TagId::new(sci_fi), None, 0).unwrap();
+    let titles: Vec<&str> = page.items.iter().map(|b| b.book.title.as_str()).collect();
+    assert_eq!(titles, ["Klara and the Sun"]);
+    assert_eq!(CATALOGUE.genre_id("Science Fiction"), 6);
+    assert!(
+        client
+            .books_by_tag(TagId::new(424_242), None, 0)
+            .unwrap()
+            .items
+            .is_empty()
+    );
+}
