@@ -18,7 +18,7 @@ use gpui_kit::{
     AnyElement, App, Context, ElementId, IntoElement, ParentElement as _, SharedString,
     Styled as _, Window, div, prelude::FluentBuilder as _, relative,
 };
-use hardcover_core::auth::scopes::WRITE_LIBRARY;
+use hardcover_core::auth::scopes::{WRITE_LIBRARY, WRITE_VIBES};
 use hardcover_core::{
     BookDetails, BookSummary, Contributor, Length, LibraryEntry, Rating, ReadingStatus,
 };
@@ -388,9 +388,21 @@ impl BookDetailView {
     ) -> Vec<AnyElement> {
         let mut tools: Vec<AnyElement> = book_lists::lists_button(book, cx).into_iter().collect();
         let url = book.web_url();
-        if url.is_none() && entry.is_none() {
+        // Opened from the user's own vibe: "Never recommend…".
+        let never = self
+            .from_vibe
+            .and_then(|id| {
+                crate::vibes::model::VibesModel::global(cx)?
+                    .read(cx)
+                    .vibe(id)
+                    .cloned()
+            })
+            .filter(|vibe| vibe.kind.is_system())
+            .map(|vibe| (vibe.id, session::has_scope(cx, WRITE_VIBES)));
+        if url.is_none() && entry.is_none() && never.is_none() {
             return tools;
         }
+        let (book_id, book_title) = (book.id, book.title.clone());
         // The library commands, while nothing else on the entry is saving.
         let library = entry.map(|entry| {
             let busy = self
@@ -424,6 +436,27 @@ impl BookDetailView {
                         ),
                         None => menu,
                     };
+                    let menu = match never {
+                        Some((vibe, can_write)) => {
+                            let (never_trigger, title) = (trigger.clone(), book_title.clone());
+                            menu.when(url.is_some(), |menu| menu.separator())
+                                .item(
+                                    PopupMenuItem::new("Never recommend…")
+                                        .icon(IconName::ThumbsDown)
+                                        .disabled(!can_write)
+                                        .on_click(move |_, window, cx| {
+                                            window.focus(&never_trigger, cx);
+                                            crate::vibes::confirm_never_recommend(
+                                                vibe, book_id, &title, window, cx,
+                                            );
+                                        }),
+                                )
+                                .when(!can_write, |menu| {
+                                    menu.item(reason_row(needs_permission(WRITE_VIBES)))
+                                })
+                        }
+                        None => menu,
+                    };
                     let Some((id, has_edition, busy, one_way_owned, owning)) = library else {
                         return menu;
                     };
@@ -431,7 +464,7 @@ impl BookDetailView {
                     // Each command focuses the trigger first, so the
                     // confirmation it opens gives focus back to it.
                     let (owned_trigger, remove_trigger) = (trigger.clone(), trigger.clone());
-                    let menu = if url.is_some() {
+                    let menu = if url.is_some() || never.is_some() {
                         menu.separator()
                     } else {
                         menu
@@ -572,7 +605,7 @@ fn contributor_name(c: &Contributor, kind: &'static str, byline: bool) -> AnyEle
 
 /// A menu row saying why the items above it are disabled: muted, and
 /// wrapped at [`size::MENU_REASON`], since the kit's menu labels don't wrap.
-fn reason_row(reason: impl Into<SharedString>) -> PopupMenuItem {
+pub(crate) fn reason_row(reason: impl Into<SharedString>) -> PopupMenuItem {
     let reason = reason.into();
     PopupMenuItem::element(move |_, _| div().w(size::MENU_REASON).child(reason.clone()))
         .disabled(true)

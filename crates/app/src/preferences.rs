@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, AppContext as _, Context, Entity, Global, Window, WindowAppearance};
-use hardcover_core::SeriesId;
-use hardcover_core::prefs::{Preferences, ThemePreference};
+use hardcover_core::prefs::{Preferences, ThemePreference, VibeExclusion};
+use hardcover_core::{SeriesId, Vibe};
 
 /// `HARDCOVER_THEME=light|dark` forces a theme (a development aid for
 /// screenshots). Settings shows the theme choice as unavailable while it is set.
@@ -86,6 +86,30 @@ impl PreferencesModel {
             } else {
                 p.hidden_series.remove(&id);
             }
+        });
+    }
+
+    /// The books left out of a vibe that Hardcover may still list
+    /// ([`VibeExclusion`]).
+    pub fn vibe_exclusions(&self) -> &[VibeExclusion] {
+        &self.preferences.vibe_exclusions
+    }
+
+    /// Records a book left out of a vibe, once the write landed.
+    pub fn add_vibe_exclusion(&mut self, exclusion: VibeExclusion, cx: &mut Context<Self>) {
+        self.update(cx, |p| {
+            p.vibe_exclusions
+                .retain(|e| !(e.book == exclusion.book && e.vibe == exclusion.vibe));
+            p.vibe_exclusions.push(exclusion);
+        });
+    }
+
+    /// Forgets the exclusions Hardcover has caught up with: their vibe, as
+    /// fetched in `vibes`, was built after them.
+    pub fn settle_vibe_exclusions(&mut self, vibes: &[Vibe], cx: &mut Context<Self>) {
+        self.update(cx, |p| {
+            p.vibe_exclusions
+                .retain(|e| !vibes.iter().any(|v| e.is_settled(v)));
         });
     }
 

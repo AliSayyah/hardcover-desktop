@@ -66,6 +66,8 @@ use crate::ui::{
 use crate::upcoming::model::UpcomingModel;
 use crate::upcoming::upcoming_view::UpcomingView;
 use crate::update::{UpdateEvent, UpdateModel, UpdateState, Updates};
+use crate::vibes::model::VibesModel;
+use crate::vibes::vibe_view::VibeView;
 use crate::{
     FocusSearch, GoBack, OpenSettings, Refresh, ShowAbout, ShowCurrentlyReading, ShowDidNotFinish,
     ShowDiscover, ShowHome, ShowIgnored, ShowPaused, ShowRead, ShowSeries, ShowStats,
@@ -163,6 +165,7 @@ impl Shell {
     ) {
         SessionScope::uninstall(cx);
         ListsModel::release(cx);
+        VibesModel::release(cx);
         Catalog::release(cx);
         let sign_in = cx.new(|cx| {
             if keyring_unavailable {
@@ -258,6 +261,8 @@ pub struct Workspace {
     list_page: Entity<ListView>,
     upcoming: Entity<UpcomingModel>,
     upcoming_page: Entity<UpcomingView>,
+    vibes: Entity<VibesModel>,
+    vibe_page: Entity<VibeView>,
     series: Entity<SeriesModel>,
     series_view: Entity<SeriesTrackerView>,
     signing_out: bool,
@@ -290,6 +295,8 @@ impl Workspace {
         // their globals.
         Catalog::init(&session, cx);
         let lists = ListsModel::init(session.clone(), &model, cx);
+        let vibes = VibesModel::init(session.clone(), &model, cx);
+        let vibe_page = cx.new(|cx| VibeView::new(model.clone(), window, cx));
         let list_page = cx.new(|cx| ListView::new(lists.clone(), model.clone(), window, cx));
         let library = cx.new(|cx| LibraryView::new(model.clone(), window, cx));
         let search = cx.new(|cx| SearchView::new(&model, window, cx));
@@ -318,6 +325,7 @@ impl Workspace {
             .new(|cx| SeriesTrackerView::new(series.clone(), model.clone(), &upcoming, window, cx));
         model.update(cx, LibraryModel::start);
         lists.update(cx, ListsModel::load);
+        vibes.update(cx, VibesModel::load);
         // Views read today as they render. The cached ones (the book view,
         // Home, Stats, Series) draw again only when they change, so a new
         // day refreshes the whole window, and every tick draws Home, whose
@@ -368,6 +376,8 @@ impl Workspace {
             list_page,
             upcoming,
             upcoming_page,
+            vibes,
+            vibe_page,
             series,
             series_view,
             signing_out: false,
@@ -532,6 +542,9 @@ impl Workspace {
                 .update(cx, |p, cx| p.revalidate(shown_again, cx)),
             // Follows the library and the upcoming books.
             Some(Page::Upcoming) => {}
+            Some(Page::Vibe(_)) => self
+                .vibe_page
+                .update(cx, |p, cx| p.revalidate(shown_again, cx)),
             None => match self.destination {
                 Destination::Search => self
                     .search
@@ -583,10 +596,20 @@ impl Workspace {
         match self.pages.current().cloned() {
             Some(Page::Series(id)) => self.series_page.update(cx, |p, cx| p.show(id, window, cx)),
             Some(Page::Author(id)) => self.author_page.update(cx, |p, cx| p.show(id, window, cx)),
-            Some(Page::Book(book)) => self.book_page.update(cx, |p, cx| {
-                p.set_subject(Some(Subject::Book(book)), window, cx);
-            }),
+            Some(Page::Book(book)) => {
+                // Opened from a vibe's page: its "more" menu offers "Never
+                // recommend…".
+                let from_vibe = match self.pages.previous() {
+                    Some(Page::Vibe(id)) => Some(*id),
+                    _ => None,
+                };
+                self.book_page.update(cx, |p, cx| {
+                    p.set_from_vibe(from_vibe, cx);
+                    p.set_subject(Some(Subject::Book(book)), window, cx);
+                });
+            }
             Some(Page::Upcoming) => {}
+            Some(Page::Vibe(id)) => self.vibe_page.update(cx, |p, cx| p.show(id, window, cx)),
             None => return,
         }
         self.revalidate_visible(true, cx);
@@ -607,6 +630,7 @@ impl Workspace {
                 self.author_page
                     .update(cx, |p, cx| p.focus(&fallback, window, cx));
             }
+            Some(Page::Vibe(_)) => self.vibe_page.update(cx, |p, cx| p.focus(window, cx)),
             Some(Page::Book(_) | Page::Upcoming) => window.focus(&self.page_focus, cx),
             None => {}
         }
@@ -625,6 +649,7 @@ impl Workspace {
             Page::Author(_) => self.author_page.clone().into_any_element(),
             Page::Book(_) => BookDetailView::embedded(&self.book_page),
             Page::Upcoming => self.upcoming_page.clone().into_any_element(),
+            Page::Vibe(_) => self.vibe_page.clone().into_any_element(),
         };
         let tools = match page {
             Page::Book(_) => tools_of(&self.book_page, window, cx),
@@ -661,6 +686,10 @@ impl Workspace {
                 |list| SharedString::from(list.name.clone()),
             ),
         };
+        let vibe_name = match self.pages.previous() {
+            Some(Page::Vibe(id)) => self.vibe_page.read(cx).name(*id, cx),
+            _ => None,
+        };
         let previous = self.pages.previous().map(|page| match page {
             Page::Book(book) => BackTo::Named(&book.title),
             Page::Upcoming => BackTo::Named("Coming soon"),
@@ -674,6 +703,7 @@ impl Workspace {
                 .read(cx)
                 .name(*id, cx)
                 .map_or(BackTo::Unnamed, BackTo::Named),
+            Page::Vibe(_) => vibe_name.as_deref().map_or(BackTo::Unnamed, BackTo::Named),
         });
         back_label(previous, &destination)
     }
@@ -689,6 +719,7 @@ impl Workspace {
         self.lists.update(cx, ListsModel::reload);
         self.upcoming.update(cx, UpcomingModel::load);
         self.series.update(cx, SeriesModel::load);
+        self.vibes.update(cx, VibesModel::load);
         cx.notify();
     }
 
@@ -700,6 +731,7 @@ impl Workspace {
         self.lists.update(cx, ListsModel::reload);
         self.upcoming.update(cx, UpcomingModel::load);
         self.series.update(cx, SeriesModel::load);
+        self.vibes.update(cx, VibesModel::load);
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {

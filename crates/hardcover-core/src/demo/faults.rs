@@ -17,6 +17,10 @@
 //!   `insufficient_scope` every request that needs it. `refuse=read:goals`
 //!   keeps the scope in the grant and only refuses the requests, as when
 //!   Hardcover is the one to say no. Both can be repeated.
+//! - `vibes=unbuilt`: the reader's Recommendations and Top Picks were never
+//!   built (no build time, no books), as for a reader who never opened
+//!   Discover on hardcover.app. `vibes=none`: the reader has no system
+//!   vibes yet, so the app's `ensure_system_vibes` makes them, unbuilt.
 //!
 //! The scope a request needs is the scope map's (`required_scopes`), so a
 //! scope that gates nothing there (`read:social`, which the app checks for
@@ -25,6 +29,7 @@
 use std::fmt;
 use std::time::Duration;
 
+use super::vibes::SystemVibes;
 use crate::auth::{DEFAULT_SCOPES, GrantedScopes};
 
 /// The variable that holds the faults.
@@ -64,6 +69,8 @@ pub struct Faults {
     missing: Vec<&'static str>,
     /// Granted, but refused.
     refused: Vec<&'static str>,
+    /// How the reader's own vibes start.
+    system_vibes: SystemVibes,
 }
 
 impl Faults {
@@ -110,6 +117,8 @@ impl Faults {
                 }
                 ("scope", Some(v)) => faults.missing.push(known_scope(v)?),
                 ("refuse", Some(v)) => faults.refused.push(known_scope(v)?),
+                ("vibes", Some("unbuilt")) => faults.system_vibes = SystemVibes::Unbuilt,
+                ("vibes", Some("none")) => faults.system_vibes = SystemVibes::Missing,
                 _ => return Err(format!("unknown fault {item:?}")),
             }
         }
@@ -136,6 +145,12 @@ impl Faults {
             .filter(|s| !self.missing.contains(s))
             .collect();
         GrantedScopes::parse(&granted.join(" "))
+    }
+
+    /// How the reader's own vibes start (`vibes=`).
+    #[must_use]
+    pub fn system_vibes(&self) -> SystemVibes {
+        self.system_vibes
     }
 
     pub(super) fn latency(&self) -> Duration {
@@ -198,6 +213,11 @@ impl fmt::Display for Faults {
         }
         parts.extend(self.missing.iter().map(|s| format!("scope={s}")));
         parts.extend(self.refused.iter().map(|s| format!("refuse={s}")));
+        match self.system_vibes {
+            SystemVibes::Built => {}
+            SystemVibes::Unbuilt => parts.push("vibes=unbuilt".to_owned()),
+            SystemVibes::Missing => parts.push("vibes=none".to_owned()),
+        }
         f.write_str(&parts.join(","))
     }
 }
@@ -233,8 +253,8 @@ fn known_scope(v: &str) -> Result<&'static str, String> {
 /// `schema/hardcover-capabilities.json`.
 pub(super) fn required_scopes(op: &str) -> &'static [&'static str] {
     use crate::auth::scopes::{
-        READ_CATALOG, READ_GOALS, READ_LIBRARY, READ_LISTS, READ_ME, WRITE_GOALS, WRITE_LIBRARY,
-        WRITE_LISTS, WRITE_REVIEWS,
+        READ_CATALOG, READ_GOALS, READ_LIBRARY, READ_LISTS, READ_ME, READ_VIBES, WRITE_GOALS,
+        WRITE_LIBRARY, WRITE_LISTS, WRITE_REVIEWS, WRITE_VIBES,
     };
     match op {
         "Me" => &[READ_ME],
@@ -256,6 +276,8 @@ pub(super) fn required_scopes(op: &str) -> &'static [&'static str] {
         "InsertList" | "UpdateList" | "DeleteList" | "InsertListBook" | "DeleteListBook" => {
             &[WRITE_LISTS]
         }
+        "SystemVibes" | "FeaturedVibes" | "VibeById" => &[READ_VIBES],
+        "EnsureSystemVibes" | "ExcludeFromVibe" => &[WRITE_VIBES],
         _ => &[],
     }
 }

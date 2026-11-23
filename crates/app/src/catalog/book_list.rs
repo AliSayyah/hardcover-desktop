@@ -191,6 +191,13 @@ impl ListPane {
         });
     }
 
+    /// The vibe the list is, for the pane's "more" menu ("Never
+    /// recommend…"); `None` for any other list.
+    pub fn set_from_vibe(&self, vibe: Option<hardcover_core::VibeId>, cx: &mut App) {
+        self.detail
+            .update(cx, |detail, cx| detail.set_from_vibe(vibe, cx));
+    }
+
     /// Fetches the pane's book again if it is stale (`resource`),
     /// when the pane is beside the list. `shown_again` allows changes that
     /// move what the reader is looking at (see [`BookDetailView::revalidate`]).

@@ -14,7 +14,9 @@
 //! library is refused; moving to Read with no open read adds a read finished
 //! today; a new read without an edition takes the entry's; a goal counts
 //! the reads finished within its dates, both included; a book put on a
-//! ranked list at a `position` takes it, and no other row moves.
+//! ranked list at a `position` takes it, and no other row moves; a book
+//! left out of a vibe ("Never recommend…") goes from its books at once,
+//! where Hardcover drops it only at the next build (see `vibes`).
 
 use chrono::NaiveDate;
 use serde_json::{Map, Value, json};
@@ -47,6 +49,8 @@ pub(super) fn is_write(op: &str) -> bool {
             | "DeleteList"
             | "InsertListBook"
             | "DeleteListBook"
+            | "EnsureSystemVibes"
+            | "ExcludeFromVibe"
     )
 }
 
@@ -75,20 +79,22 @@ pub(super) fn apply(state: &mut State, op: &str, vars: &Value) -> Result<Value, 
         "InsertGoal" => insert_goal(state, &vars["object"]),
         "UpdateGoal" => update_goal(state, int("id"), &vars["object"]),
         "DeleteGoal" => Ok(delete_goal(state, int("id"))),
+        "EnsureSystemVibes" => Ok(super::vibes::ensure_system_vibes(state)),
+        "ExcludeFromVibe" => super::vibes::update_vibe(state, int("id"), &vars["object"]),
         other => Err(format!("The demo has no answer for {other}.")),
     }
 }
 
 // ----- input helpers -----
 
-fn object(value: &Value) -> Result<&Map<String, Value>, String> {
+pub(super) fn object(value: &Value) -> Result<&Map<String, Value>, String> {
     value
         .as_object()
         .ok_or_else(|| "expected an input object".to_owned())
 }
 
 /// Refuses a field the demo doesn't write, so a new one isn't silently lost.
-fn only(object: &Map<String, Value>, known: &[&str]) -> Result<(), String> {
+pub(super) fn only(object: &Map<String, Value>, known: &[&str]) -> Result<(), String> {
     match object.keys().find(|k| !known.contains(&k.as_str())) {
         Some(k) => Err(format!("The demo doesn't write `{k}`.")),
         None => Ok(()),

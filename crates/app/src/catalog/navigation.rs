@@ -6,7 +6,7 @@
 //! `GoBack`.
 
 use gpui_kit::{App, AppContext as _, Entity, EventEmitter, Global};
-use hardcover_core::{AuthorId, BookSummary, SeriesId};
+use hardcover_core::{AuthorId, BookSummary, SeriesId, VibeId};
 
 use crate::ui::focus::FocusReturn;
 
@@ -20,6 +20,8 @@ pub enum Page {
     Book(BookSummary),
     /// Every book still to come in the reader's series, opened from Home.
     Upcoming,
+    /// A vibe's books ("For you", "Top picks"), opened from Discover.
+    Vibe(VibeId),
 }
 
 impl Page {

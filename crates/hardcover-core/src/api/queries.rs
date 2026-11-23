@@ -620,6 +620,73 @@ pub(crate) const BOOK_REVIEWS_COUNT: &str = concat!(
 "
 );
 
+/// A vibe: one of Hardcover's lists of recommended books.
+/// `cached_book_ids` holds its books' ids in Hardcover's ranked order.
+macro_rules! vibe_fields {
+    () => {
+        "fragment VibeFields on vibes {
+  id title description slug vibe_type books_generated_at cached_book_ids
+  featured privacy_setting_id user_id likes_count
+  user { username }
+}
+"
+    };
+}
+
+/// The user's system vibes: Recommendations (`vibe_type` 1) and Top Picks
+/// (3). Every user has them once Hardcover made them
+/// ([`ENSURE_SYSTEM_VIBES`]).
+pub(crate) const SYSTEM_VIBES: &str = concat!(
+    "query SystemVibes($userId: Int!) {
+  vibes(
+    where: {user_id: {_eq: $userId}, vibe_type: {_in: [1, 3]}}
+    order_by: [{vibe_type: asc}, {id: asc}]
+  ) { ...VibeFields }
+}
+",
+    vibe_fields!()
+);
+
+/// The vibes Hardcover features, the most recently featured first.
+pub(crate) const FEATURED_VIBES: &str = concat!(
+    "query FeaturedVibes($limit: Int!) {
+  vibes(
+    where: {featured: {_eq: true}}
+    order_by: [{featured_at: desc_nulls_last}, {id: desc}]
+    limit: $limit
+  ) { ...VibeFields }
+}
+",
+    vibe_fields!()
+);
+
+/// One vibe, for its page, and read just before a write to it.
+pub(crate) const VIBE_BY_ID: &str = concat!(
+    "query VibeById($id: Int!) {
+  vibes_by_pk(id: $id) { ...VibeFields }
+}
+",
+    vibe_fields!()
+);
+
+/// The user's system vibe ids, making the ones missing.
+pub(crate) const ENSURE_SYSTEM_VIBES: &str = "mutation EnsureSystemVibes {
+  ensure_system_vibes { ids }
+}
+";
+
+/// Leaves a book out of a vibe ("Never recommend…"). `object` resends the
+/// vibe's title, description and privacy as read just before, with the
+/// exclusion: fields left out may be cleared. No query reads exclusions
+/// back, so it can't be undone from the app.
+pub(crate) const EXCLUDE_FROM_VIBE: &str = concat!(
+    "mutation ExcludeFromVibe($id: Int!, $object: VibeInput!) {
+  update_vibe(id: $id, object: $object) { id errors vibe { ...VibeFields } }
+}
+",
+    vibe_fields!()
+);
+
 /// Every document the client sends, by name. Validated against
 /// `schema/hardcover.graphql` in the tests below and against the live schema by
 /// the `api_check` example.
@@ -668,6 +735,11 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("BOOK_REVIEWS_COUNT", BOOK_REVIEWS_COUNT),
     ("UPCOMING_IN_SERIES", UPCOMING_IN_SERIES),
     ("SERIES_OVERVIEW", SERIES_OVERVIEW),
+    ("SYSTEM_VIBES", SYSTEM_VIBES),
+    ("FEATURED_VIBES", FEATURED_VIBES),
+    ("VIBE_BY_ID", VIBE_BY_ID),
+    ("ENSURE_SYSTEM_VIBES", ENSURE_SYSTEM_VIBES),
+    ("EXCLUDE_FROM_VIBE", EXCLUDE_FROM_VIBE),
 ];
 
 #[cfg(test)]

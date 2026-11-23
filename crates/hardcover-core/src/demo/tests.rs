@@ -1160,3 +1160,119 @@ fn the_clock_gives_the_local_date() {
     assert_eq!(clock.today(), day("2026-12-31"));
     assert_eq!(clock.today().year(), 2026);
 }
+
+// ----- vibes -----
+
+#[test]
+fn the_reader_has_built_system_vibes_over_books_they_havent_read() {
+    let client = pinned();
+    let vibes = client.system_vibes().unwrap();
+    let kinds: Vec<crate::VibeKind> = vibes.iter().map(|v| v.kind).collect();
+    assert_eq!(
+        kinds,
+        [crate::VibeKind::Recommendations, crate::VibeKind::TopPicks]
+    );
+    // Built a day before the pinned "now", as Hardcover dates it (UTC).
+    let built = vibes[0].built_at.unwrap();
+    assert_eq!(built.to_rfc3339(), "2026-11-20T06:30:00+00:00");
+    // Recommendations leave out what the reader has read, and keep some
+    // of their Want to read.
+    let read: Vec<BookId> = library(&client)
+        .iter()
+        .filter(|e| e.status == ReadingStatus::Read)
+        .map(|e| e.book.id)
+        .collect();
+    let recommended = &vibes[0].book_ids;
+    assert!(recommended.len() >= 10);
+    assert!(recommended.iter().all(|b| !read.contains(b)));
+    let books = client.vibe_books(recommended, 0).unwrap();
+    assert_eq!(books.items.len(), recommended.len(), "all in the catalogue");
+    assert_eq!(
+        books.items.iter().map(|b| b.id).collect::<Vec<_>>(),
+        *recommended,
+        "in the vibe's order"
+    );
+}
+
+#[test]
+fn featured_vibes_come_newest_first_and_are_others() {
+    let client = pinned();
+    let me = client.me().unwrap().id;
+    let featured = client.featured_vibes().unwrap();
+    assert!(featured.len() >= 2);
+    assert!(featured.iter().all(|v| v.featured && v.user_id != Some(me)));
+    assert!(featured.iter().all(crate::Vibe::is_built));
+    assert_eq!(featured[0].title, "Worlds to get lost in");
+    // Someone else's vibe can't be changed.
+    let id = featured[0].id;
+    assert!(
+        client
+            .exclude_from_vibe(id, featured[0].book_ids[0])
+            .is_err()
+    );
+    assert_eq!(
+        client.vibe(id).unwrap().unwrap().book_ids,
+        featured[0].book_ids
+    );
+}
+
+#[test]
+fn never_recommend_takes_the_book_out_of_the_vibe() {
+    let client = pinned();
+    let vibe = client.system_vibes().unwrap().remove(0);
+    let book = vibe.book_ids[2];
+    let written = client.exclude_from_vibe(vibe.id, book).unwrap();
+    assert!(!written.book_ids.contains(&book));
+    assert_eq!(written.book_ids.len(), vibe.book_ids.len() - 1);
+    // The rest of the vibe is as it was: the write resent it.
+    assert_eq!(written.title, vibe.title);
+    assert_eq!(written.description, vibe.description);
+    assert_eq!(written.privacy_id, vibe.privacy_id);
+    assert_eq!(written.built_at, vibe.built_at, "no rebuild");
+    let read_back = client.vibe(vibe.id).unwrap().unwrap();
+    assert_eq!(read_back.book_ids, written.book_ids);
+}
+
+#[test]
+fn the_vibe_write_refuses_what_the_demo_doesnt_write() {
+    let mut state = State::new(&CATALOGUE, Clock::System);
+    let vars = json!({ "id": 501, "object": { "title": "Recs", "dynamic_signals": [] } });
+    let body = answer(&mut state, "ExcludeFromVibe", &vars);
+    assert!(
+        body["errors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("dynamic_signals")
+    );
+    let vars = json!({ "id": 501, "object": {
+        "vibe_exclusions_attributes": [{"excluded_type": "Book", "excluded_id": 1, "_destroy": true}]
+    }});
+    let body = answer(&mut state, "ExcludeFromVibe", &vars);
+    assert!(
+        body["errors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("_destroy")
+    );
+}
+
+#[test]
+fn unbuilt_and_missing_system_vibes() {
+    let faults = Faults::parse("vibes=unbuilt").unwrap();
+    assert_eq!(faults.to_string(), "vibes=unbuilt");
+    let client = client_with(&faults);
+    let vibes = client.system_vibes().unwrap();
+    assert_eq!(vibes.len(), 2);
+    assert!(vibes.iter().all(|v| !v.is_built() && v.built_at.is_none()));
+    assert!(!client.featured_vibes().unwrap().is_empty(), "others' stay");
+
+    let client = client_with(&Faults::parse("vibes=none").unwrap());
+    assert!(client.system_vibes().unwrap().is_empty());
+    let ids = client.ensure_system_vibes().unwrap();
+    assert_eq!(ids.len(), 2);
+    let vibes = client.system_vibes().unwrap();
+    assert_eq!(vibes.iter().map(|v| v.id).collect::<Vec<_>>(), ids);
+    assert!(vibes.iter().all(|v| !v.is_built()));
+    assert_eq!(client.ensure_system_vibes().unwrap(), ids, "made once");
+    assert!(Faults::parse("vibes=sometimes").is_err());
+}

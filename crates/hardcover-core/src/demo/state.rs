@@ -40,6 +40,7 @@ pub(super) struct State {
     pub(super) library: Vec<Entry>,
     pub(super) lists: Vec<List>,
     pub(super) goals: Vec<Goal>,
+    pub(super) vibes: Vec<super::vibes::Vibe>,
     next_id: i64,
 }
 
@@ -154,13 +155,33 @@ impl State {
             .iter()
             .map(|g| seed_goal(g, today.year()))
             .collect();
+        let vibes = super::vibes::seed(
+            &catalogue.vibes,
+            &catalogue.user,
+            now.with_timezone(&Utc),
+            super::vibes::SystemVibes::Built,
+        );
         Self {
             clock,
             library,
             lists,
             goals,
+            vibes,
             next_id: FIRST_NEW_ID,
         }
+    }
+
+    /// The reader's own vibes as `system` says they start.
+    pub(super) fn with_system_vibes(mut self, system: super::vibes::SystemVibes) -> Self {
+        if system != super::vibes::SystemVibes::Built {
+            self.vibes = super::vibes::seed(
+                &super::CATALOGUE.vibes,
+                &super::CATALOGUE.user,
+                self.clock.now().with_timezone(&Utc),
+                system,
+            );
+        }
+        self
     }
 
     pub(super) fn new_id(&mut self) -> i64 {

@@ -31,9 +31,9 @@ use wire::{
     ListDeletePayload, ListPayload, ProgressContext, RawAggregate, RawAuthorPage, RawBook,
     RawBookDetails, RawCommunityReview, RawEdition, RawGoal, RawList, RawListBook,
     RawListMembership, RawReview, RawSearch, RawSeriesPage, RawTrackedSeries, RawTrending,
-    RawUpcomingRow, RawUser, RawUserBook, ReadIdPayload, ReadRef, ReviewedUserBookPayload,
-    UserBookIdPayload, author_from_search_document, search_hits, search_page,
-    series_from_search_document, upcoming_books,
+    RawUpcomingRow, RawUser, RawUserBook, RawVibe, ReadIdPayload, ReadRef, ReviewedUserBookPayload,
+    SystemVibesPayload, UserBookIdPayload, VibePayload, author_from_search_document, search_hits,
+    search_page, series_from_search_document, upcoming_books,
 };
 
 /// GraphQL endpoint.
@@ -75,6 +75,11 @@ pub const REVIEWS_PER_PAGE: u32 = 10;
 /// Rows [`Client::upcoming_in_series`] asks for. A library of 210 series had
 /// 27 in 2026.
 const UPCOMING_ROWS_LIMIT: u32 = 200;
+/// Books per page of a vibe ([`Client::vibe_books`]): one
+/// [`Client::books_by_ids`] request each.
+pub const VIBE_BOOKS_PER_PAGE: usize = BOOKS_BY_IDS_LIMIT;
+/// Featured vibes [`Client::featured_vibes`] asks for at most.
+pub const FEATURED_VIBES_LIMIT: u32 = 12;
 /// Series per [`Client::tracked_series`] request: a reader with 200 started
 /// series costs 8 requests, within the rate limit's burst.
 pub const TRACKED_SERIES_BATCH: usize = 25;
@@ -91,7 +96,13 @@ const MAX_AUTO_RETRY_WAIT: Duration = Duration::from_secs(15);
 
 /// Reads that are a step of a write (the context it needs, a read-back of
 /// what it wrote, the row it edits): the user waits on them as on the write.
-const WRITE_STEP_READS: &[&str] = &["ProgressContext", "UserBookById", "GoalById", "ListById"];
+const WRITE_STEP_READS: &[&str] = &[
+    "ProgressContext",
+    "UserBookById",
+    "GoalById",
+    "ListById",
+    "VibeById",
+];
 
 /// Supplies bearer tokens to the [`Client`].
 pub trait TokenSource: Send + Sync {
@@ -1841,6 +1852,158 @@ impl Client {
             .user_books_aggregate
             .count()
             .map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX)))
+    }
+
+    // ----- vibes -----
+
+    /// The signed-in user's system vibes, Recommendations then Top Picks.
+    /// Empty until Hardcover made them ([`Client::ensure_system_vibes`]).
+    /// Needs `read:vibes`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
+    pub fn system_vibes(&self) -> Result<Vec<Vibe>> {
+        #[derive(Deserialize)]
+        struct Data {
+            vibes: Vec<RawVibe>,
+        }
+        let me = self.my_id()?;
+        let data: Data = self.query(
+            "SystemVibes",
+            queries::SYSTEM_VIBES,
+            json!({ "userId": me.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        Ok(data.vibes.into_iter().map(RawVibe::into_vibe).collect())
+    }
+
+    /// The vibes Hardcover features, the most recently featured first, at
+    /// most [`FEATURED_VIBES_LIMIT`]. Needs `read:vibes`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
+    pub fn featured_vibes(&self) -> Result<Vec<Vibe>> {
+        #[derive(Deserialize)]
+        struct Data {
+            vibes: Vec<RawVibe>,
+        }
+        let data: Data = self.query(
+            "FeaturedVibes",
+            queries::FEATURED_VIBES,
+            json!({ "limit": FEATURED_VIBES_LIMIT }),
+            QUERY_TIMEOUT,
+        )?;
+        Ok(data.vibes.into_iter().map(RawVibe::into_vibe).collect())
+    }
+
+    /// One vibe; `None` if Hardcover has none by that id (or doesn't let
+    /// this user see it).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
+    pub fn vibe(&self, id: VibeId) -> Result<Option<Vibe>> {
+        #[derive(Deserialize)]
+        struct Data {
+            vibes_by_pk: Option<RawVibe>,
+        }
+        let data: Data = self.query(
+            "VibeById",
+            queries::VIBE_BY_ID,
+            json!({ "id": id.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        Ok(data.vibes_by_pk.map(RawVibe::into_vibe))
+    }
+
+    /// Makes the user's system vibes if they have none, and returns their
+    /// ids. It builds nothing: a new vibe stays empty until the user opens
+    /// Discover on hardcover.app. Needs `write:vibes`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or its response cannot be decoded.
+    pub fn ensure_system_vibes(&self) -> Result<Vec<VibeId>> {
+        #[derive(Deserialize)]
+        struct Data {
+            ensure_system_vibes: Option<SystemVibesPayload>,
+        }
+        let data: Data = self.query(
+            "EnsureSystemVibes",
+            queries::ENSURE_SYSTEM_VIBES,
+            json!({}),
+            QUERY_TIMEOUT,
+        )?;
+        let payload = data
+            .ensure_system_vibes
+            .ok_or_else(|| Error::Api("`ensure_system_vibes` returned null".into()))?;
+        Ok(payload.ids.into_iter().map(VibeId::new).collect())
+    }
+
+    /// Leaves `book` out of vibe `id` ("Never recommend…"): reads the vibe
+    /// just before writing and sends its title, description and privacy
+    /// back unchanged with the exclusion, since fields left out may be
+    /// cleared. Hardcover drops the book at the vibe's next build; until
+    /// then it is still in [`Vibe::book_ids`]. No query reads exclusions
+    /// back, so this can't be undone from the app. Needs `write:vibes`.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Api` if the vibe is gone or the write reports an error.
+    pub fn exclude_from_vibe(&self, id: VibeId, book: BookId) -> Result<Vibe> {
+        #[derive(Deserialize)]
+        struct Data {
+            update_vibe: Option<VibePayload>,
+        }
+        let vibe = self
+            .vibe(id)?
+            .ok_or_else(|| Error::Api(format!("vibe {id} not found")))?;
+        let mut object = json!({
+            "title": vibe.title,
+            "description": vibe.description,
+            "vibe_exclusions_attributes": [
+                { "excluded_type": "Book", "excluded_id": book.get() }
+            ],
+        });
+        if let Some(privacy) = vibe.privacy_id {
+            object["privacy_setting_id"] = json!(privacy);
+        }
+        let data: Data = self.query(
+            "ExcludeFromVibe",
+            queries::EXCLUDE_FROM_VIBE,
+            json!({ "id": id.get(), "object": object }),
+            QUERY_TIMEOUT,
+        )?;
+        let payload = data
+            .update_vibe
+            .ok_or_else(|| Error::Api("`update_vibe` returned null".into()))?;
+        if let Some(e) = payload.error() {
+            return Err(Error::Api(e));
+        }
+        Ok(payload.vibe.map_or(vibe, RawVibe::into_vibe))
+    }
+
+    /// One page of a vibe's books: those of `ids` (the vibe's
+    /// [`Vibe::book_ids`]) from `offset`, [`VIBE_BOOKS_PER_PAGE`] ids at a
+    /// time, in the vibe's order. `next_offset` counts the ids asked about,
+    /// so a book Hardcover doesn't know neither ends the list nor shifts
+    /// the next page. Past the end, no request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the catalogue request fails or its response cannot be
+    /// decoded.
+    pub fn vibe_books(&self, ids: &[BookId], offset: u32) -> Result<OffsetPage<BookSummary>> {
+        let start = (offset as usize).min(ids.len());
+        let end = (start + VIBE_BOOKS_PER_PAGE).min(ids.len());
+        let items = self.books_by_ids(&ids[start..end])?;
+        Ok(OffsetPage {
+            items,
+            next_offset: u32::try_from(end).unwrap_or(u32::MAX),
+            has_more: end < ids.len(),
+        })
     }
 
     // ----- transport -----

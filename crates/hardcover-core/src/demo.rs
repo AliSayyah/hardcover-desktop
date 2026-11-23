@@ -63,11 +63,13 @@ mod reviews;
 mod state;
 #[cfg(test)]
 mod tests;
+mod vibes;
 mod writes;
 
 use faults::Failure;
 pub use faults::{ENV as FAULTS_ENV, Faults};
 use state::{Clock, Entry, Length, List, Read, State, read_length};
+pub use vibes::SystemVibes;
 
 /// A client for the demo library, with no faults. It never touches the network.
 #[must_use]
@@ -85,7 +87,9 @@ fn client_at(faults: &Faults, clock: Clock) -> Client {
     let client = Client::with_transport(
         Arc::new(DemoToken),
         Arc::new(ApiTransport {
-            state: Mutex::new(State::new(&CATALOGUE, clock)),
+            state: Mutex::new(
+                State::new(&CATALOGUE, clock).with_system_vibes(faults.system_vibes()),
+            ),
             faults: faults.clone(),
         }),
         // No rate limit to respect.
@@ -144,6 +148,9 @@ struct Catalogue {
     lists: Vec<SeedList>,
     #[serde(default)]
     upcoming: Vec<Upcoming>,
+    /// The reader's Recommendations and Top Picks, and the featured vibes.
+    #[serde(default)]
+    vibes: vibes::SeedVibes,
 }
 
 /// A book not yet released in one of the catalogue's series. Placeholder
@@ -1218,6 +1225,9 @@ fn answer(state: &mut State, op: &str, vars: &Value) -> Value {
         ),
         "BookReviews" => reviews::page(state, vars),
         "BookReviewsCount" => reviews::count(state, vars),
+        "SystemVibes" => vibes::system_vibes(state, int("userId")),
+        "FeaturedVibes" => vibes::featured_vibes(state, page_size("limit")),
+        "VibeById" => vibes::vibe_by_id(state, int("id")),
         other => return error(format!("The demo has no answer for {other}.")),
     };
     json!({ "data": data })

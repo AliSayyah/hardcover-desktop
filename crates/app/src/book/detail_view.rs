@@ -96,6 +96,8 @@ mod review_section;
 mod similar_books;
 mod your_book;
 
+pub(crate) use header::reason_row;
+
 /// What the pane shows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Subject {
@@ -271,6 +273,9 @@ pub struct BookDetailView {
     panel_focus: FocusHandle,
     /// The "more" menu's trigger, which its commands focus first.
     more_focus: FocusHandle,
+    /// The vibe the book was opened from (its page, or the pane beside
+    /// it): the "more" menu offers "Never recommend…" on the user's own.
+    from_vibe: Option<hardcover_core::VibeId>,
     /// "Add to library", where focus goes once a book shown is removed.
     add_focus: FocusHandle,
     /// "Add a past read…", where focus goes once a read is deleted.
@@ -351,6 +356,7 @@ impl BookDetailView {
             status_focus: cx.focus_handle(),
             panel_focus: cx.focus_handle(),
             more_focus: cx.focus_handle(),
+            from_vibe: None,
             add_focus: cx.focus_handle(),
             add_read_focus: cx.focus_handle(),
             read_focus: RefCell::default(),
@@ -512,6 +518,16 @@ impl BookDetailView {
     /// Otherwise it is the pane, which draws its own bar.
     pub fn set_tools_in_bar(&mut self, in_bar: bool) {
         self.tools_in_bar = in_bar;
+    }
+
+    /// The vibe the book is shown from, if any: on the user's own
+    /// Recommendations and Top Picks, the "more" menu offers "Never
+    /// recommend…", the keyboard's path to the vibe rows' context menu.
+    pub fn set_from_vibe(&mut self, vibe: Option<hardcover_core::VibeId>, cx: &mut Context<Self>) {
+        if self.from_vibe != vibe {
+            self.from_vibe = vibe;
+            cx.notify();
+        }
     }
 
     /// The library entry for the subject, if the book is in the library.
