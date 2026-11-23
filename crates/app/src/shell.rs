@@ -933,16 +933,23 @@ impl Workspace {
             .border_color(colors.border)
             .child(div().flex_none().px_2().pt_2().child(brand_row(cx)))
             .child(
-                self.sidebar_keys
-                    .read(cx)
-                    .wrap(div().id("sidebar-destinations"))
+                // The scrollbar overlays a wrapper: inside the scroller it
+                // would scroll away with the rows.
+                div()
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.sidebar_scroll)
-                    .child(destinations)
-                    .child(gutter_scrollbar("sidebar-scrollbar", &self.sidebar_scroll))
-                    .reveals_focus(&self.sidebar_scroll),
+                    .child(
+                        self.sidebar_keys
+                            .read(cx)
+                            .wrap(div().id("sidebar-destinations"))
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.sidebar_scroll)
+                            .child(destinations)
+                            .reveals_focus(&self.sidebar_scroll),
+                    )
+                    .child(gutter_scrollbar("sidebar-scrollbar", &self.sidebar_scroll)),
             )
             // When the destinations don't all fit (a short window), a
             // hairline over the account says the list goes on under it.
@@ -1070,23 +1077,22 @@ impl Workspace {
             )
         }
         .into();
-        let notes_view = move |notes: &SharedString| {
-            (!notes.is_empty()).then(|| {
-                div()
-                    .id("release-notes")
-                    .max_h(size::DIALOG_NOTES_MAX)
-                    .scroll_y_revealing_focus()
-                    .child(TextView::markdown("release-notes-text", notes.clone()))
-            })
+        let release_page = move |page_url: &SharedString| {
+            ExternalLink::new("release-page", "Open the release page", page_url.clone())
         };
         if installable {
             open_alert_dialog_on_result(window, cx, move |alert, _, _| {
                 let updates = updates.clone();
                 let notes = notes.clone();
+                let page_url = page_url.clone();
                 alert
                     .title(title.clone())
                     .description(description.clone())
-                    .content(move |content, _, _| content.children(notes_view(&notes)))
+                    .content(move |content, _, _| {
+                        content
+                            .children(release_notes_view(&notes))
+                            .child(release_page(&page_url))
+                    })
                     .confirm()
                     .cancel_text("Later")
                     .ok_text("Install")
@@ -1106,12 +1112,8 @@ impl Workspace {
                     .description(description.clone())
                     .content(move |content, _, _| {
                         content
-                            .child(ExternalLink::new(
-                                "release-page",
-                                "Open the release page",
-                                page_url.clone(),
-                            ))
-                            .children(notes_view(&notes))
+                            .children(release_notes_view(&notes))
+                            .child(release_page(&page_url))
                     })
                     .ok_text("Close")
             });
@@ -1198,6 +1200,19 @@ impl Workspace {
     }
 }
 
+/// An update's release notes ([`crate::update::release_notes`]) in its
+/// dialog: body text, scrolling past `size::DIALOG_NOTES_MAX`. `None` when
+/// there are none.
+pub(crate) fn release_notes_view(notes: &SharedString) -> Option<impl IntoElement + use<>> {
+    (!notes.is_empty()).then(|| {
+        div()
+            .id("release-notes")
+            .max_h(size::DIALOG_NOTES_MAX)
+            .body()
+            .scroll_y_revealing_focus()
+            .child(TextView::markdown("release-notes-text", notes.clone()))
+    })
+}
 fn sync_status_line(model: &LibraryModel, cx: &App) -> (gpui_kit::Div, Option<SharedString>) {
     let (status_icon, status_text): (Option<IconName>, SharedString) = match model.sync_status() {
         SyncStatus::Syncing => (

@@ -9,6 +9,12 @@
 //! - [`RevealScroll::reveals_focus`] on a container that already scrolls with
 //!   its own [`ScrollHandle`] (the sidebar).
 //!
+//! The first wraps the scroller in a box that takes its place in the layout
+//! and carries the scrollbar over it. A scrollbar must never be a child of
+//! the element that scrolls: GPUI moves every child with the content, an
+//! absolute one too, so the scrollbar would scroll away with the rows. A
+//! scroller with its own handle puts it on a `relative` parent the same way.
+//!
 //! When focus moves inside the region by keyboard, the region scrolls just
 //! enough to show the focused element with its ring, once: the reader's own
 //! scrolling afterwards is left alone, and content loading under a focus
@@ -33,7 +39,9 @@
 //! // A destination's root: was `root.overflow_y_scrollbar()`.
 //! root.scroll_y_revealing_focus().child(page)
 //! // A scroller with its own handle.
-//! div().id("sidebar").overflow_y_scroll().track_scroll(&scroll).reveals_focus(&scroll)
+//! div().relative().size_full()
+//!     .child(div().id("sidebar").size_full().overflow_y_scroll().track_scroll(&scroll).reveals_focus(&scroll))
+//!     .vertical_scrollbar(&scroll)
 //! // A kit control outside the shared parts.
 //! probe(Button::new("more").label("Show more reviews"))
 //! ```
@@ -46,8 +54,9 @@ use std::sync::Arc;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::{
     AnyElement, App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, InspectorElementId,
-    IntoElement, LayoutId, ParentElement, Pixels, RenderOnce, ScrollHandle,
-    StatefulInteractiveElement, StyleRefinement, Styled, Window, point, px,
+    InteractiveElement as _, IntoElement, LayoutId, Overflow, ParentElement, Pixels,
+    PointRefinement, Refineable as _, RenderOnce, ScrollHandle, StatefulInteractiveElement,
+    StyleRefinement, Styled, Window, div, point, px,
 };
 
 use crate::design::size;
@@ -75,6 +84,8 @@ fn report(bounds: Bounds<Pixels>) {
 pub trait RevealScroll: StatefulInteractiveElement + ScrollableElement + Sized + 'static {
     /// A vertical scroller with the kit's scrollbar, in place of
     /// `.overflow_y_scrollbar()`, that keeps the focused element in view.
+    /// The element is the scroller; a wrapper with its sizes and flex factors
+    /// holds it and the scrollbar.
     #[track_caller]
     fn scroll_y_revealing_focus(self) -> RevealingScroller<Self> {
         let id = Element::id(&self).unwrap_or_else(|| ElementId::CodeLocation(*Location::caller()));
@@ -110,16 +121,48 @@ impl<E: RevealScroll> RenderOnce for RevealingScroller<E> {
             .use_keyed_state(id.clone(), cx, |_, _| ScrollHandle::default())
             .read(cx)
             .clone();
-        RevealFocus {
-            id,
+        let mut element = self.element;
+        let outer = outer_style(element.style());
+        let scroller = RevealFocus {
+            id: id.clone(),
             scroll: scroll.clone(),
-            child: self
-                .element
+            child: element
                 .overflow_y_scroll()
                 .track_scroll(&scroll)
-                .vertical_scrollbar(&scroll)
                 .into_any_element(),
-        }
+        };
+        // The scrollbar overlays the wrapper, not the scroller: a scroller's
+        // children all move with its content, an absolute one too, so a
+        // scrollbar inside it would scroll away with the rows.
+        let mut wrapper = div()
+            .id(ElementId::NamedChild(Arc::new(id), "reveal-wrapper".into()))
+            .relative()
+            .flex()
+            .flex_col();
+        wrapper.style().refine(&outer);
+        wrapper.child(scroller).vertical_scrollbar(&scroll)
+    }
+}
+
+/// The scroller's place in its parent's layout, for the wrapper that holds it
+/// and its scrollbar: the wrapper takes the scroller's sizes and flex
+/// factors (the scroller keeps them too, resolved against the wrapper), and
+/// clips its height, as the kit's own scrollable does, so that as a flex item
+/// it shrinks to its place instead of growing to the scroller's content.
+fn outer_style(style: &StyleRefinement) -> StyleRefinement {
+    StyleRefinement {
+        size: style.size.clone(),
+        min_size: style.min_size.clone(),
+        max_size: style.max_size.clone(),
+        flex_grow: style.flex_grow,
+        flex_shrink: style.flex_shrink,
+        flex_basis: style.flex_basis,
+        align_self: style.align_self,
+        overflow: PointRefinement {
+            x: None,
+            y: Some(Overflow::Hidden),
+        },
+        ..StyleRefinement::default()
     }
 }
 
@@ -367,9 +410,8 @@ impl Element for FocusProbe {
 #[cfg(test)]
 mod tests {
     use gpui_kit::component::button::Button;
-    use gpui_kit::{
-        InteractiveElement as _, TestAppContext, VisualTestContext, div, size as gsize,
-    };
+    use gpui_kit::prelude::FluentBuilder as _;
+    use gpui_kit::{ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, size as gsize};
 
     use super::*;
     use crate::ui::Sequence;
@@ -463,6 +505,99 @@ mod tests {
             row.top() >= region.top() && row.bottom() <= region.bottom(),
             "the row {row:?} is inside the region {region:?}"
         );
+    }
+
+    #[gpui_kit::test]
+    fn the_scrollbar_stays_on_the_region_as_it_scrolls(cx: &mut TestAppContext) {
+        let cx = host(cx, |_, _| region().into_any_element());
+        let region = bounds_of(cx, "region");
+        assert_eq!(bounds_of(cx, "scrollbar-overlay"), region);
+
+        press(cx, "f13");
+        tab(cx);
+        redraw(cx);
+        assert!(bounds_of(cx, "row").top() < region.bottom(), "it scrolled");
+        assert_eq!(bounds_of(cx, "scrollbar-overlay"), region);
+    }
+
+    /// Rows of 40, `n` of them, in a scroller shaped by `shape`, in a column
+    /// 300 high.
+    fn shaped(
+        n: usize,
+        shape: impl Fn(gpui_kit::Stateful<gpui_kit::Div>) -> gpui_kit::Stateful<gpui_kit::Div>,
+    ) -> impl IntoElement {
+        div().h(px(300.)).flex().flex_col().child(
+            shape(div().id("shaped").debug_selector(|| "scroller".into()))
+                .scroll_y_revealing_focus()
+                .children((0..n).map(|i| {
+                    div()
+                        .flex_none()
+                        .h(px(40.))
+                        .when(i + 1 == n, |row| row.debug_selector(|| "last".into()))
+                })),
+        )
+    }
+
+    fn wheel(cx: &mut VisualTestContext, dy: f32) {
+        cx.simulate_event(ScrollEvent {
+            position: point(px(10.), px(10.)),
+            delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+            ..Default::default()
+        });
+        redraw(cx);
+    }
+
+    /// Scrolls the scroller `shape` makes, with `rows` rows, to its end, and
+    /// checks that it was `height` high, that the content moved, and that the
+    /// scrollbar didn't.
+    fn scrolls_under_a_scrollbar_that_stays(
+        cx: &mut TestAppContext,
+        rows: usize,
+        height: f32,
+        shape: fn(gpui_kit::Stateful<gpui_kit::Div>) -> gpui_kit::Stateful<gpui_kit::Div>,
+    ) {
+        let cx = host(cx, move |_, _| shaped(rows, shape).into_any_element());
+        let scroller = bounds_of(cx, "scroller");
+        assert_eq!(scroller.size.height, px(height));
+        assert_eq!(bounds_of(cx, "scrollbar-overlay"), scroller);
+        let last = bounds_of(cx, "last");
+
+        wheel(cx, -2000.);
+        assert_eq!(bounds_of(cx, "scroller"), scroller);
+        assert_eq!(bounds_of(cx, "scrollbar-overlay"), scroller);
+        let scrolled = bounds_of(cx, "last");
+        if last.bottom() > scroller.bottom() {
+            assert_eq!(
+                scrolled.bottom(),
+                scroller.bottom(),
+                "it scrolled to the end"
+            );
+        } else {
+            assert_eq!(scrolled, last, "nothing to scroll");
+        }
+    }
+
+    // The three shapes the app scrolls in.
+
+    #[gpui_kit::test]
+    fn a_scroller_filling_its_place(cx: &mut TestAppContext) {
+        scrolls_under_a_scrollbar_that_stays(cx, 20, 300., |d| d.size_full());
+    }
+
+    #[gpui_kit::test]
+    fn a_scroller_taking_the_rest_of_a_column(cx: &mut TestAppContext) {
+        scrolls_under_a_scrollbar_that_stays(cx, 20, 300., |d| d.flex_1().min_h_0());
+    }
+
+    /// A dialog's list: capped, else as high as its content.
+    #[gpui_kit::test]
+    fn a_capped_scroller(cx: &mut TestAppContext) {
+        scrolls_under_a_scrollbar_that_stays(cx, 20, 200., |d| d.max_h(px(200.)));
+    }
+
+    #[gpui_kit::test]
+    fn a_capped_scroller_with_little_in_it(cx: &mut TestAppContext) {
+        scrolls_under_a_scrollbar_that_stays(cx, 3, 120., |d| d.max_h(px(200.)));
     }
 
     #[gpui_kit::test]
