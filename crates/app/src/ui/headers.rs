@@ -5,7 +5,7 @@
 //! - [`PageHeader`]: a destination's or page's `page-title` ("Currently
 //!   reading"), with its count beside it in `fg-muted`, the page's tools on
 //!   its trailing edge, and lines under it, 4 apart: muted ones ("5 books
-//!   still to come in the series on your shelves"), facts, or anything else
+//!   still to come in the series you follow"), facts, or anything else
 //!   (a byline). A catalogue name wraps ([`PageHeader::wraps`]); a
 //!   destination's title is cut.
 //! - [`Greeting`]: Home's header: the date in `fg-muted` over the greeting
@@ -32,7 +32,7 @@ use crate::design::{TypeRole, TypeRoles as _, colors, size};
 /// ```ignore
 /// PageHeader::new("Currently reading").count(3)
 /// PageHeader::new("Want to read").count_of(2, 8) // filtered
-/// PageHeader::new("Coming soon").line("5 books still to come in the series on your shelves")
+/// PageHeader::new("Coming soon").line("5 books still to come in the series you follow")
 /// // A catalogue page: a name that may wrap, its tools, its facts.
 /// PageHeader::new(list.name.clone())
 ///     .wraps()
@@ -367,7 +367,7 @@ mod tests {
         let header = measure(cx, 800., || {
             PageHeader::new("Series")
                 .count(4_u32)
-                .line("The series you've started.")
+                .line("The series you follow.")
                 .facts("4 books · Ongoing")
         });
         assert_eq!(header.size.height, PageHeader::height(2, px(16.)));

@@ -480,7 +480,7 @@ mod tests {
             q["scope"],
             "read:me read:catalog read:library write:library write:reviews \
              read:goals write:goals read:lists write:lists read:journal read:social \
-             read:users read:notifications write:notifications read:vibes write:vibes"
+             write:social read:users read:notifications write:notifications read:vibes write:vibes"
         );
         assert_eq!(q["code_challenge_method"], "S256");
         assert_eq!(q["code_challenge"], pkce::challenge_s256(&pending.verifier));

@@ -62,6 +62,7 @@ use crate::ratelimit::TokenBucket;
 use crate::{Error, Result};
 
 mod faults;
+mod follows;
 mod reviews;
 mod state;
 mod tags;
@@ -155,6 +156,9 @@ struct Catalogue {
     /// The reader's Recommendations and Top Picks, and the featured vibes.
     #[serde(default)]
     vibes: vibes::SeedVibes,
+    /// The series the reader follows.
+    #[serde(default)]
+    follows: Vec<follows::SeedFollow>,
 }
 
 /// A book not yet released in one of the catalogue's series. Placeholder
@@ -1249,6 +1253,7 @@ fn answer(state: &mut State, op: &str, vars: &Value) -> Value {
         "SystemVibes" => vibes::system_vibes(state, int("userId")),
         "FeaturedVibes" => vibes::featured_vibes(state, page_size("limit")),
         "VibeById" => vibes::vibe_by_id(state, int("id")),
+        "FollowedSeries" => follows::page(state, mine(), int("afterId"), page_size("limit")),
         other => return error(format!("The demo has no answer for {other}.")),
     };
     json!({ "data": data })

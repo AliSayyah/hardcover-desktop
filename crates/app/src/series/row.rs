@@ -4,8 +4,8 @@
 //! - The series name in `display-24`, a text button that opens its page; a
 //!   right-to-left name is one truncated line, which GPUI lays out right.
 //!   On the line's trailing edge, a small "more" icon button whose menu
-//!   hides the series from the page ("Hide series"), or, under the Hidden
-//!   filter, shows it again ("Show series again").
+//!   unfollows the series ("Unfollow series") and adds the books out and
+//!   not in the library ("Add N books to Want to read…").
 //! - A muted line: the author, "#6 not out yet" when that applies, and what
 //!   last happened ("Last finished Sep 28").
 //! - The series' meter (read of what is out, at most `size::METER_MAX`) with
@@ -37,13 +37,14 @@ use gpui_kit::{
     Rems, RenderOnce, ScrollHandle, SharedString, Styled as _, Window, div,
     prelude::FluentBuilder as _, rems,
 };
-use hardcover_core::auth::scopes::WRITE_LIBRARY;
+use hardcover_core::auth::scopes::{WRITE_LIBRARY, WRITE_SOCIAL};
 use hardcover_core::{Date, ReadingStatus, SeriesId, UserBookId};
 
 use super::progress::{
     Group, Mark, NextKind, SeriesBook, SeriesSummary, key_text, lane_caption, reading_line,
 };
 use crate::bidi::is_rtl;
+use crate::book::detail_view::reason_row;
 use crate::book::progress_dialog::open_progress;
 use crate::catalog::navigation::Page;
 use crate::chip::{StatusChip, status_icon};
@@ -153,14 +154,20 @@ pub fn strip_lines(series: &SeriesSummary, capacity: usize, open: bool) -> usize
 /// What a strip's toggle does: opens or shuts the series' strip.
 pub type OnToggle = Rc<dyn Fn(SeriesId, &mut Window, &mut App)>;
 
-/// What the row's menu does: hides the series (`true`) or shows it again.
-pub type OnHide = Rc<dyn Fn(SeriesId, bool, &mut Window, &mut App)>;
+/// A command of the row's menu, on its series.
+pub type OnSeries = Rc<dyn Fn(SeriesId, &mut Window, &mut App)>;
 
-/// Whether a row's series is hidden, and what its menu does about it.
+/// What the row's menu offers, and what its commands do.
 #[derive(Clone)]
-pub struct RowHiding {
-    pub hidden: bool,
-    pub on_hide: OnHide,
+pub struct RowActions {
+    /// "Unfollow series", and why not (`write:social`).
+    pub on_unfollow: OnSeries,
+    pub can_unfollow: bool,
+    /// "Add N books to Want to read…" (asks first).
+    pub on_add: OnSeries,
+    pub can_add: bool,
+    /// The books are being added: the command waits.
+    pub adding: bool,
 }
 
 /// How a row draws its strip: the room on a line, whether it is opened to
@@ -181,7 +188,7 @@ pub struct SeriesRow {
     library: Entity<LibraryModel>,
     today: Date,
     strip: RowStrip,
-    hiding: RowHiding,
+    actions: RowActions,
     /// The list's scroller, to keep a row with keyboard focus in view.
     scroll: ScrollHandle,
 }
@@ -193,7 +200,7 @@ impl SeriesRow {
         library: Entity<LibraryModel>,
         today: Date,
         strip: RowStrip,
-        hiding: RowHiding,
+        actions: RowActions,
         scroll: ScrollHandle,
     ) -> Self {
         Self {
@@ -202,7 +209,7 @@ impl SeriesRow {
             library,
             today,
             strip,
-            hiding,
+            actions,
             scroll,
         }
     }
@@ -241,7 +248,7 @@ impl RenderOnce for SeriesRow {
                 &self.series,
                 self.today,
                 &self.strip,
-                Some(more_button(self.series.id, &self.hiding, window, cx)),
+                Some(more_button(&self.series, &self.actions, window, cx)),
                 cx,
             ))
             .child(next_lane(&self.series, &self.library, self.today, cx));
@@ -295,17 +302,21 @@ pub fn series_body(
         .child(div().pt(STRIP_ABOVE).child(strip(series, strip_of)))
 }
 
-/// The small "more" button on the name's line: "Hide series", or "Show
-/// series again" for a hidden one.
+/// The small "more" button on the name's line: "Unfollow series", and "Add
+/// N books to Want to read…" when some are out and not in the library. A
+/// command that can't run says why under it. Each focuses the trigger
+/// first, so a confirmation gives focus back to it.
 pub fn more_button(
-    id: SeriesId,
-    hiding: &RowHiding,
+    series: &SeriesSummary,
+    actions: &RowActions,
     window: &mut Window,
     cx: &mut App,
 ) -> gpui_kit::AnyElement {
+    let id = series.id;
     let trigger = keyed_focus(SharedString::from(format!("series-more-{id}")), window, cx);
-    let hide = !hiding.hidden;
-    let on_hide = hiding.on_hide.clone();
+    let to_add = series.books_to_add().len();
+    let actions = actions.clone();
+    let menu_trigger = trigger.clone();
     Button::new(SharedString::from(format!("series-more-button-{id}")))
         .ghost()
         .small_icon_button()
@@ -313,19 +324,44 @@ pub fn more_button(
         .tooltip("Series actions")
         .keyboard_ring(&trigger, window)
         .dropdown_menu(move |menu, _, _| {
-            let on_hide = on_hide.clone();
-            let (label, icon) = if hide {
-                ("Hide series", IconName::EyeOff)
-            } else {
-                ("Show series again", IconName::Eye)
-            };
+            let (on_unfollow, on_add) = (actions.on_unfollow.clone(), actions.on_add.clone());
+            let (unfollow_trigger, add_trigger) = (menu_trigger.clone(), menu_trigger.clone());
+            let menu = menu
+                .item(
+                    PopupMenuItem::new("Unfollow series")
+                        .icon(crate::icons::unfollow())
+                        .disabled(!actions.can_unfollow)
+                        .on_click(move |_, window, cx| {
+                            window.focus(&unfollow_trigger, cx);
+                            on_unfollow(id, window, cx);
+                        }),
+                )
+                .when(!actions.can_unfollow, |menu| {
+                    menu.item(reason_row(needs_permission(WRITE_SOCIAL)))
+                });
+            if to_add == 0 {
+                return menu;
+            }
             menu.item(
-                PopupMenuItem::new(label)
-                    .icon(icon)
-                    .on_click(move |_, window, cx| on_hide(id, hide, window, cx)),
+                PopupMenuItem::new(add_books_label(to_add))
+                    .icon(IconName::Plus)
+                    .disabled(!actions.can_add || actions.adding)
+                    .on_click(move |_, window, cx| {
+                        window.focus(&add_trigger, cx);
+                        on_add(id, window, cx);
+                    }),
             )
+            .when(!actions.can_add, |menu| {
+                menu.item(reason_row(needs_permission(WRITE_LIBRARY)))
+            })
         })
         .into_any_element()
+}
+
+/// "Add 5 books to Want to read…", "Add 1 book to Want to read…".
+pub fn add_books_label(n: usize) -> String {
+    let books = if n == 1 { "book" } else { "books" };
+    format!("Add {} {books} to Want to read…", count_text(n))
 }
 
 /// The series' meter and "2 of 6 read" beside it.
@@ -747,6 +783,7 @@ mod tests {
             &series,
             &LibraryIndex::new(&entries),
             &std::collections::HashMap::new(),
+            None,
             day("2026-11-20"),
         )
     }
@@ -781,9 +818,12 @@ mod tests {
                 open,
                 on_toggle: Rc::new(|_, _, _| {}),
             };
-            let hiding = RowHiding {
-                hidden: false,
-                on_hide: Rc::new(|_, _, _, _| {}),
+            let actions = RowActions {
+                on_unfollow: Rc::new(|_, _, _| {}),
+                can_unfollow: true,
+                on_add: Rc::new(|_, _, _| {}),
+                can_add: true,
+                adding: false,
             };
             let cx = host(cx, move |window, cx| {
                 window.set_rem_size(rem);
@@ -803,7 +843,7 @@ mod tests {
                                 &series,
                                 today,
                                 &strip_of,
-                                Some(more_button(series.id, &hiding, window, cx)),
+                                Some(more_button(&series, &actions, window, cx)),
                                 cx,
                             )),
                     )

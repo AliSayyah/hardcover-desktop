@@ -376,7 +376,7 @@ mod tests {
         }
     }
 
-    /// The mockup's shelf (shot 6): seven books and one with no votes.
+    /// A shelf of seven books and one with no votes.
     fn shelf() -> Vec<BookFacts> {
         use Mood::*;
         vec![

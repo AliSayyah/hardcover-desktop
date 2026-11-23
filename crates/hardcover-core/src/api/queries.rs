@@ -771,6 +771,43 @@ pub(crate) const EXCLUDE_FROM_VIBE: &str = concat!(
     vibe_fields!()
 );
 
+/// Keyset pagination over the series one user follows. Hardcover keeps
+/// follows of series and authors in one table, so the type is filtered.
+/// Reading needs `read:social`; the user's id is explicit, so the query
+/// never depends on what the scope lets the token see.
+pub(crate) const FOLLOWED_SERIES: &str =
+    "query FollowedSeries($userId: bigint!, $afterId: bigint!, $limit: Int!) {
+  follows(
+    where: {user_id: {_eq: $userId}, followable_type: {_eq: \"Series\"}, id: {_gt: $afterId}}
+    order_by: {id: asc}
+    limit: $limit
+  ) {
+    id
+    followable_id
+    created_at
+    series { id canonical_id }
+  }
+}
+";
+
+/// Follows a series (`write:social`). Following one already followed
+/// returns the existing follow; an unknown id is an `error`.
+pub(crate) const FOLLOW_SERIES: &str = "mutation FollowSeries($id: Int!) {
+  insert_follow(followable_id: $id, followable_type: \"Series\") {
+    id
+    error
+    follow { id followable_id created_at series { id canonical_id } }
+  }
+}
+";
+
+/// Unfollows a series (`write:social`). Unfollowing one not followed
+/// succeeds too.
+pub(crate) const UNFOLLOW_SERIES: &str = "mutation UnfollowSeries($id: Int!) {
+  delete_follow(followable_id: $id, followable_type: \"Series\") { success error }
+}
+";
+
 /// Every document the client sends, by name. Validated against
 /// `schema/hardcover.graphql` in the tests below and against the live schema by
 /// the `api_check` example.
@@ -828,6 +865,9 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("VIBE_BY_ID", VIBE_BY_ID),
     ("ENSURE_SYSTEM_VIBES", ENSURE_SYSTEM_VIBES),
     ("EXCLUDE_FROM_VIBE", EXCLUDE_FROM_VIBE),
+    ("FOLLOWED_SERIES", FOLLOWED_SERIES),
+    ("FOLLOW_SERIES", FOLLOW_SERIES),
+    ("UNFOLLOW_SERIES", UNFOLLOW_SERIES),
 ];
 
 #[cfg(test)]

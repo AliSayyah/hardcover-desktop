@@ -489,7 +489,9 @@ fn scope_feature(scope: &str) -> &'static str {
         scopes::WRITE_REVIEWS => "reviews",
         scopes::READ_LISTS | scopes::WRITE_LISTS => "lists",
         scopes::READ_JOURNAL => "your reading journal",
-        scopes::READ_SOCIAL | scopes::READ_USERS => "other readers' reviews",
+        scopes::READ_SOCIAL => "other readers' reviews and the series you follow",
+        scopes::READ_USERS => "other readers' reviews",
+        scopes::WRITE_SOCIAL => "following series",
         scopes::READ_NOTIFICATIONS | scopes::WRITE_NOTIFICATIONS => "notifications",
         scopes::READ_VIBES | scopes::WRITE_VIBES => "recommendations",
         _ => "your library",
@@ -530,14 +532,17 @@ fn join_and(items: &[&str]) -> String {
 
 /// The features that `missing` scopes cover, in a fixed order.
 pub fn missing_features(missing: &[&str]) -> Vec<&'static str> {
-    const ORDER: [&str; 7] = [
+    const ORDER: [&str; 10] = [
         "your library",
         "reading goals",
         "reviews",
         "lists",
         "your reading journal",
+        "other readers' reviews and the series you follow",
         "other readers' reviews",
+        "following series",
         "notifications",
+        "recommendations",
     ];
     ORDER
         .into_iter()
@@ -752,6 +757,18 @@ mod tests {
             missing_features(&[scopes::WRITE_LISTS, scopes::READ_LIBRARY]),
             ["your library", "lists"]
         );
+        assert_eq!(
+            missing_features(&[scopes::WRITE_VIBES, scopes::WRITE_SOCIAL]),
+            ["following series", "recommendations"]
+        );
+    }
+
+    /// Every scope the app asks for names a feature the notice lists.
+    #[test]
+    fn every_requested_scope_names_a_listed_feature() {
+        for scope in DEFAULT_SCOPES {
+            assert_eq!(missing_features(&[scope]).len(), 1, "{scope}");
+        }
     }
 
     fn goal(metric: GoalMetric, target: u32, progress: f64) -> Goal {

@@ -1529,3 +1529,31 @@ fn a_tag_page_ranks_the_catalogue_by_votes() {
             .is_empty()
     );
 }
+
+// ----- follows -----
+
+#[test]
+fn the_reader_follows_series_and_can_change_them() {
+    let client = pinned();
+    let followed = client.followed_series().unwrap();
+    let names: Vec<i64> = followed.iter().map(|s| s.id.get()).collect();
+    assert_eq!(names.len(), CATALOGUE.follows.len(), "every seeded follow");
+    assert!(followed.iter().all(|s| s.followed_at.is_some()));
+    let elfhame = crate::SeriesId::new(CATALOGUE.series_id("Elfhame"));
+    assert!(!names.contains(&elfhame.get()), "left for Add series");
+
+    let added = client.follow_series(elfhame).unwrap();
+    assert_eq!(added.id, elfhame);
+    let again = client.follow_series(elfhame).unwrap();
+    assert_eq!(again, added, "following again returns the same follow");
+    assert_eq!(client.followed_series().unwrap().len(), names.len() + 1);
+
+    client.unfollow_series(&added.followed_as).unwrap();
+    client.unfollow_series(&added.followed_as).unwrap();
+    assert_eq!(client.followed_series().unwrap().len(), names.len());
+
+    assert!(matches!(
+        client.follow_series(crate::SeriesId::new(999_999_999)),
+        Err(Error::Api(m)) if m.contains("does not exist")
+    ));
+}

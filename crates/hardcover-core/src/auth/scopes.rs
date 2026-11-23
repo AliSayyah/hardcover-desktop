@@ -30,8 +30,11 @@ pub const WRITE_LISTS: &str = "write:lists";
 /// The user's reading journal (notes, quotes, progress events). Writing it
 /// needs only [`WRITE_LIBRARY`].
 pub const READ_JOURNAL: &str = "read:journal";
-/// Other users' content: their library entries, reviews and activity.
+/// Other users' content (their library entries, reviews and activity), and
+/// the user's follows: the series they follow.
 pub const READ_SOCIAL: &str = "read:social";
+/// Following and unfollowing: the app follows series.
+pub const WRITE_SOCIAL: &str = "write:social";
 /// Other users' public profiles.
 pub const READ_USERS: &str = "read:users";
 /// The user's notifications.
@@ -241,6 +244,7 @@ mod tests {
                 WRITE_LISTS,
                 READ_JOURNAL,
                 READ_SOCIAL,
+                WRITE_SOCIAL,
                 READ_USERS,
                 READ_NOTIFICATIONS,
                 WRITE_NOTIFICATIONS,

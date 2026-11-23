@@ -45,7 +45,8 @@ pub use api::{
 pub use api::{BOOK_TAGS_BATCH, BookTags, BookTagsLoad, TAG_BOOKS_PER_PAGE, TagBook, TagId};
 pub use api::{CommunityReview, REVIEWS_PER_PAGE, Reviewer, ReviewsPage};
 pub use api::{
-    Coverage, LibrarySync, ListEdit, OffsetPage, Priority, ProgressChange, TrackedSeriesLoad,
+    Coverage, FollowedSeries, LibrarySync, ListEdit, OffsetPage, Priority, ProgressChange,
+    TrackedSeriesLoad,
 };
 pub use api::{FEATURED_VIBES_LIMIT, VIBE_BOOKS_PER_PAGE, Vibe, VibeId, VibeKind};
 pub use error::{Error, Result};

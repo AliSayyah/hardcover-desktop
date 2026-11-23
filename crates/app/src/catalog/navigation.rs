@@ -1,6 +1,6 @@
 //! Catalogue pages (a series, an author, a book, the books coming soon, a
-//! vibe, a tag, Trending) and the history of the ones opened since the last sidebar
-//! destination.
+//! vibe, a tag, Trending, Add series) and the history of the ones opened
+//! since the last sidebar destination.
 //!
 //! Any view can open a page through the [`Navigator`] global; the workspace
 //! owns the stack, shows its top page over the destination and handles
@@ -35,6 +35,8 @@ pub enum Page {
     /// "Trending this month"; the period is the page's segments' choice,
     /// kept with the page so Back finds it.
     Trending(TrendingPeriod),
+    /// The series of the library not followed yet, opened from Series.
+    AddSeries,
 }
 
 impl Page {
