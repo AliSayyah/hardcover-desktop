@@ -3,7 +3,8 @@
 //! `hardcover-design` skill (`.claude/skills/hardcover-design`); this module
 //! follows its "Tokens" and "Implementing in GPUI" sections.
 //!
-//! - [`color`]: the paper-and-ink palette for both themes, including the
+//! - [`color`]: the paper-and-ink palettes (three themes, Paper, Graphite
+//!   and Hardcover, each light and dark), including the
 //!   app-only roles the kit's theme has no field for (gold, star-empty,
 //!   fg-faint, track, surface, the overlays, the cloth colours, the cover's
 //!   edge, hinge and shadow). Read it with [`colors`].
@@ -13,7 +14,7 @@
 //! - [`type_roles`]: the type roles as style helpers (`.page_title()`,
 //!   `.body_strong()`, `.display_24()`, `.tabular()`, ...).
 //! - `contrast_audit` (tests only): the WCAG ratio of every token pair
-//!   that carries meaning, in both themes, so a token edit can't silently
+//!   that carries meaning, in every palette, so a token edit can't silently
 //!   break one.
 //! - [`motion`]: the motion tokens: the skeleton's pulse, a leaving row's
 //!   fade, a meter's spring.

@@ -2,8 +2,10 @@
 <html lang="en">
 <!--
   The reference mockup for the hardcover-design skill (.claude/skills/hardcover-design).
-  Open it in a browser. Every screen and both token sheets are built from the CSS variables
-  below, which carry the system's token values. When this file and the skill disagree, the
+  Open it in a browser. Every screen and the token sheets are built from the CSS variables
+  below, which carry the system's token values: three themes, each light and dark. "light"
+  and "dark" are Paper's (its dark palette is Lamplight), the default; "graphite-light",
+  "graphite", "hardcover-light" and "hardcover" are the others. When this file and the skill disagree, the
   skill wins; fix this file in the same change. The books come from the demo catalogue
   (plus one Persian title); the reader and their lists are invented. Covers are loaded from
   Hardcover at view time and are never committed. The console prints a contrast and layout audit.
@@ -51,7 +53,39 @@
   --frame-edge: rgba(0, 0, 0, .10);
   color-scheme: light;
 }
-.theme-dark {
+.theme-dark {  /* Lamplight: Paper's dark palette, the default */
+  --bg: #211912;
+  --sidebar: #1A120C;
+  --surface: #29211A;
+  --raised: #2E261E;
+  --hover: rgba(237, 227, 211, 0.05);
+  --selected: rgba(237, 227, 211, 0.1);
+  --border: #332B23;
+  --border-strong: #85786C;
+  --track: #3C332C;
+  --switch-thumb: #EDE3D3;
+  --chip: rgba(237, 227, 211, 0.08);
+  --skeleton: #332A23;
+  --fg: #EDE3D3;
+  --fg-muted: #C0B2A0;
+  --fg-faint: #A09384;
+  --accent: #8EB1E6;
+  --accent-fg: #0E1B2D;
+  --accent-soft: rgba(142, 177, 230, 0.14);
+  --ring: rgba(142, 177, 230, 0.5);
+  --gold: #ECB259;
+  --star-empty: rgba(237, 227, 211, 0.1);
+  --scrim: rgba(8, 5, 2, .52);
+  --danger: #F38B7E;
+  --warning: #EEA753;
+  --cover-edge: rgba(255, 255, 255, .10);
+  --cover-hinge: rgba(0, 0, 0, .28);
+  --shadow-cover: 0 1px 2px rgba(8, 5, 2, .55), 0 10px 24px rgba(8, 5, 2, .45);
+  --shadow-popover: 0 0 0 1px rgba(255, 255, 255, .07), 0 6px 16px rgba(8, 5, 2, .5);
+  --frame-edge: rgba(255, 255, 255, .08);
+  color-scheme: dark;
+}
+.theme-graphite {  /* Graphite's dark palette, the dark theme up to 0.5 */
   --bg: #171614;
   --sidebar: #100F0E;
   --surface: #1E1C1A;
@@ -82,6 +116,102 @@
   --shadow-popover: 0 0 0 1px rgba(255, 255, 255, .08), 0 4px 12px rgba(0, 0, 0, .5);
   --frame-edge: rgba(255, 255, 255, .08);
   color-scheme: dark;
+}
+.theme-hardcover {  /* Hardcover's dark palette, after hardcover.app's own dark theme */
+  --bg: #0F172A;
+  --sidebar: #1F2937;
+  --surface: #172033;
+  --raised: #1E2939;
+  --hover: rgba(243, 244, 246, .05);
+  --selected: rgba(243, 244, 246, .10);
+  --border: #253041;
+  --border-strong: #737C8C;
+  --track: #374151;
+  --switch-thumb: #F3F4F6;
+  --chip: rgba(243, 244, 246, .08);
+  --skeleton: #1E293B;
+  --fg: #F3F4F6;
+  --fg-muted: #A8AFBC;
+  --fg-faint: #868D99;
+  --accent: #9BA5FF;
+  --accent-fg: #0F172A;
+  --accent-soft: rgba(155, 165, 255, .14);
+  --ring: rgba(155, 165, 255, .5);
+  --gold: #FDC700;
+  --star-empty: rgba(243, 244, 246, .10);
+  --scrim: rgba(2, 6, 23, .6);
+  --danger: #FF8B8D;
+  --warning: #FFB900;
+  --cover-edge: rgba(255, 255, 255, .10);
+  --cover-hinge: rgba(0, 0, 0, .28);
+  --shadow-cover: 0 1px 2px rgba(2, 6, 23, .55), 0 10px 24px rgba(2, 6, 23, .45);
+  --shadow-popover: 0 0 0 1px rgba(255, 255, 255, .08), 0 6px 16px rgba(2, 6, 23, .5);
+  --frame-edge: rgba(255, 255, 255, .08);
+  color-scheme: dark;
+}
+.theme-graphite-light {  /* Graphite's light palette: Paper's roles in neutral greys */
+  --bg: #F8F8F7;
+  --sidebar: #EFEFED;
+  --surface: #F2F2F0;
+  --raised: #FFFFFF;
+  --hover: rgba(28, 28, 27, .05);
+  --selected: rgba(28, 28, 27, .10);
+  --border: #E3E3E0;
+  --border-strong: #8A8A86;
+  --track: #DEDEDB;
+  --switch-thumb: #FFFFFF;
+  --chip: rgba(28, 28, 27, .07);
+  --skeleton: #E8E8E5;
+  --fg: #1C1C1B;
+  --fg-muted: #585856;
+  --fg-faint: #747471;
+  --accent: #3F4DAD;
+  --accent-fg: #FFFFFF;
+  --accent-soft: rgba(63, 77, 173, .10);
+  --ring: rgba(63, 77, 173, .5);
+  --gold: #A16207;
+  --star-empty: rgba(28, 28, 27, .10);
+  --scrim: rgba(28, 28, 27, .16);
+  --danger: #B42318;
+  --warning: #B54708;
+  --cover-edge: rgba(20, 20, 20, .16);
+  --cover-hinge: rgba(20, 20, 20, .16);
+  --shadow-cover: 0 1px 2px rgba(28, 28, 27, .18), 0 8px 20px rgba(28, 28, 27, .14);
+  --shadow-popover: 0 0 0 1px rgba(20, 20, 20, .10), 0 4px 12px rgba(28, 28, 27, .12);
+  --frame-edge: rgba(0, 0, 0, .10);
+  color-scheme: light;
+}
+.theme-hardcover-light {  /* Hardcover's light palette, after hardcover.app in light mode */
+  --bg: #F3F4F6;
+  --sidebar: #FFFFFF;
+  --surface: #E9EBEF;
+  --raised: #FFFFFF;
+  --hover: rgba(30, 41, 57, .05);
+  --selected: rgba(30, 41, 57, .10);
+  --border: #DDDFE4;
+  --border-strong: #7F8693;
+  --track: #D1D5DB;
+  --switch-thumb: #FFFFFF;
+  --chip: rgba(30, 41, 57, .07);
+  --skeleton: #E0E3E8;
+  --fg: #1E2939;
+  --fg-muted: #475262;
+  --fg-faint: #656D7C;
+  --accent: #4840D8;
+  --accent-fg: #FFFFFF;
+  --accent-soft: rgba(72, 64, 216, .10);
+  --ring: rgba(72, 64, 216, .5);
+  --gold: #985B05;
+  --star-empty: rgba(30, 41, 57, .10);
+  --scrim: rgba(30, 41, 57, .18);
+  --danger: #C10007;
+  --warning: #B04700;
+  --cover-edge: rgba(15, 23, 42, .16);
+  --cover-hinge: rgba(15, 23, 42, .16);
+  --shadow-cover: 0 1px 2px rgba(30, 41, 57, .18), 0 8px 20px rgba(30, 41, 57, .14);
+  --shadow-popover: 0 0 0 1px rgba(15, 23, 42, .10), 0 4px 12px rgba(30, 41, 57, .12);
+  --frame-edge: rgba(0, 0, 0, .10);
+  color-scheme: light;
 }
 :root {
   /* Families. GPUI draws no variable axes, so each is a set of static faces.
@@ -993,7 +1123,7 @@ function discoverWide() {
 
 // ---------- Token sheets: built from the same variables the screens use ----------
 const probes = {};
-for (const t of ["light", "dark"]) { const p = document.createElement("div"); p.className = "theme-" + t; p.style.display = "none"; document.body.append(p); probes[t] = p; }
+for (const t of ["light", "dark", "graphite-light", "graphite", "hardcover-light", "hardcover"]) { const p = document.createElement("div"); p.className = "theme-" + t; p.style.display = "none"; document.body.append(p); probes[t] = p; }
 const tv = (theme, name) => getComputedStyle(probes[theme]).getPropertyValue(name).trim();
 const rv = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const lum = hex => { const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
@@ -1543,8 +1673,12 @@ const shots = [
   ["Without the permission", "light · following needs write:social; until Sign in again… grants it, Follow is disabled everywhere and Add series says why in one line · reading the follows needs read:social, so the Series page itself works", "light", 800, addSeries({ noScope: true })],
   ["A series page: Follow", "light · any series, also one not on your shelves (from search's Series tab, an author's Series tab, a book's series) · Follow, and Add 7 books to Want to read…", "light", 800, seriesPageF({ desc: CARL_DESC })],
   ["Followed, then adding the rest", "light · Following is pressed, with a check, and the facts say so; pressing it unfollows · Add 7 books… asks first, naming them; the one not out yet is left out", "light", 800, seriesPageF({ follows: true, confirm: true, desc: CARL_DESC })],
+  ["Library: Want to read, Graphite", "graphite · Graphite's dark palette, the dark theme up to 0.5, chosen in Settings (Theme); every rule is the same", "graphite", 800, library("wtr")],
+  ["Library: Want to read, Graphite light", "graphite-light · Paper's roles in neutral greys: a cool white, near-black ink, a deeper indigo", "graphite-light", 800, library("wtr")],
+  ["Library: Currently reading, Hardcover", "hardcover · Hardcover's dark palette, after hardcover.app's own: slate paper, gray-800 sidebar, its yellow on the rating; the accent a lighter indigo than the site's, so links and focus read", "hardcover", 980, library("cr")],
+  ["Library: Currently reading, Hardcover light", "hardcover-light · after hardcover.app in light mode: its gray-100 cards as paper, white chrome as the sidebar and controls; the indigo and the rating deepened to read on them", "hardcover-light", 980, library("cr")],
   ["Library: empty states", "light · a filter with no matches and no book selected, in the app's own copy", "light", 760, library("none")],
-  ["Tokens: colour, elevation and states", "both themes", null, 2344, tokensTheme("light", "Light") + tokensTheme("dark", "Dark")],
+  ["Tokens: colour, elevation and states", "every palette: Paper (the default; Lamplight is its dark), Graphite and Hardcover, each light and dark", null, 2344, tokensTheme("light", "Paper light") + tokensTheme("dark", "Paper dark (Lamplight)") + tokensTheme("graphite-light", "Graphite light") + tokensTheme("graphite", "Graphite dark") + tokensTheme("hardcover-light", "Hardcover light") + tokensTheme("hardcover", "Hardcover dark"), 3600],
   ["Tokens: type, space, shape and size", "the same in both themes", null, 1328, tokensScales()],
 ];
 const ONLY = null; // e.g. [4, 5] to render only some shots while checking
@@ -1568,7 +1702,7 @@ addEventListener("resize", fit);
 document.fonts.ready.then(() => {
   const ok = ["600 16px Literata", "16px Inter", "16px Vazirmatn"].map(f => `${f}: ${document.fonts.check(f)}`);
   console.log("fonts", ok.join(", "));
-  for (const t of ["light", "dark"]) {
+  for (const t of ["light", "dark", "graphite-light", "graphite", "hardcover-light", "hardcover"]) {
     const line = [["--fg"], ["--fg-muted", [...fills(t), over(t, "--chip", "--bg"), over(t, "--chip", "--sidebar")]], ["--fg-faint"], ["--accent", [...fills(t), ...chips(t)]], ["--danger", plain(t, "--bg", "--raised")], ["--warning", [over(t, "--chip", "--bg")]]]
       .map(([fg, on]) => `${fg.slice(2)} ${worst(t, fg, on).toFixed(2)}`).join(", ");
     console.log(`contrast ${t} (lowest over the fills each is used on): ${line}; accent-fg on accent ${contrast(tv(t, "--accent-fg"), tv(t, "--accent")).toFixed(2)}`);

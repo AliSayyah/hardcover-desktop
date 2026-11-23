@@ -35,11 +35,32 @@ pub enum ThemePreference {
     Dark,
 }
 
+/// The app's theme: a pair of palettes, one light and one dark, of which
+/// [`ThemePreference`] picks the one showing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeFamily {
+    /// Warm paper by day, warm brown-black (Lamplight) by night.
+    #[default]
+    Paper,
+    /// Neutral greys: a cool white, and the near-black dark theme up to 0.5.
+    Graphite,
+    /// After hardcover.app's own themes: white and grey, navy and slate.
+    Hardcover,
+}
+
+impl ThemeFamily {
+    /// Every theme, in Settings' order.
+    pub const ALL: [Self; 3] = [Self::Paper, Self::Graphite, Self::Hardcover];
+}
+
 /// Choices made in the app's Settings. Deserialized field by field (see the
 /// module doc): add a new field to `Deserialize` below too.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Preferences {
     pub theme: ThemePreference,
+    /// The pair of palettes `theme` chooses between.
+    pub theme_family: ThemeFamily,
     /// Check GitHub for new releases on start and every few hours.
     pub automatic_update_checks: bool,
     /// Books left out of a vibe, hidden until Hardcover rebuilds it.
@@ -91,6 +112,7 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             theme: ThemePreference::System,
+            theme_family: ThemeFamily::Paper,
             automatic_update_checks: true,
             vibe_exclusions: Vec::new(),
         }
@@ -103,6 +125,7 @@ impl<'de> Deserialize<'de> for Preferences {
         let defaults = Self::default();
         Ok(Self {
             theme: field(&map, "theme", defaults.theme),
+            theme_family: field(&map, "theme_family", defaults.theme_family),
             automatic_update_checks: field(
                 &map,
                 "automatic_update_checks",
@@ -272,6 +295,7 @@ mod tests {
         let path = dir.path().join("nested/dir/settings.json");
         let prefs = Preferences {
             theme: ThemePreference::Light,
+            theme_family: ThemeFamily::Graphite,
             automatic_update_checks: false,
             vibe_exclusions: vec![VibeExclusion {
                 book: BookId::new(12),
@@ -327,6 +351,29 @@ mod tests {
         assert!(!excluded.hides(&rebuilt));
         assert!(excluded.is_settled(&rebuilt));
         assert_eq!(ids(shown_books(&rebuilt, &exclusions)), [1, 3, 4]);
+    }
+
+    /// Files written before the theme families get Paper; one a newer
+    /// version wrote with a family this one doesn't know does too.
+    #[test]
+    fn the_theme_family_is_read_on_its_own() {
+        let dir = temp();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, br#"{"theme": "dark"}"#).unwrap();
+        assert_eq!(Preferences::load(&path).theme_family, ThemeFamily::Paper);
+        fs::write(&path, br#"{"theme": "dark", "theme_family": "graphite"}"#).unwrap();
+        let loaded = Preferences::load(&path);
+        assert_eq!(loaded.theme_family, ThemeFamily::Graphite);
+        assert_eq!(loaded.theme, ThemePreference::Dark);
+        fs::write(&path, br#"{"theme": "dark", "theme_family": "hardcover"}"#).unwrap();
+        assert_eq!(
+            Preferences::load(&path).theme_family,
+            ThemeFamily::Hardcover
+        );
+        fs::write(&path, br#"{"theme": "dark", "theme_family": "oled"}"#).unwrap();
+        let loaded = Preferences::load(&path);
+        assert_eq!(loaded.theme_family, ThemeFamily::Paper);
+        assert_eq!(loaded.theme, ThemePreference::Dark);
     }
 
     #[test]

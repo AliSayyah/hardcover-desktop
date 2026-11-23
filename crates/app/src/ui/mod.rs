@@ -42,6 +42,7 @@
 //! | [`Stars`] | A rating shown, not set: Hardcover's average, another reader's rating (muted, never gold) |
 //! | [`brand_row`], [`sidebar_label`], [`GoalRow`], [`AccountRow`] | The sidebar's other parts: the brand, a section label, the reading goal, the account menu's trigger |
 //! | [`Avatar`] | A person: their picture, else initials on their colour or `accent-soft` |
+//! | [`ThemeTiles`] | Settings' choice of theme: each theme a miniature of the app, light and dark split on a diagonal |
 //! | [`chip_keys`] | A row of pressed chips as one Tab stop, the arrows moving along it (a book's genres, a shelf's filter chips) |
 //! | [`focus`] | The focus ring, edge and row treatment, for a component that tracks its own focus; giving focus back after a page |
 //! | [`page_scroll`] | A page with no list scrolling from the keys: Page Up and Page Down, Home, End, the arrows |
@@ -81,6 +82,7 @@ mod surfaces;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod text_button;
+pub mod theme_tiles;
 
 pub(crate) use self::stars::{StarInk, StarSize, render_star};
 pub use self::{
@@ -105,6 +107,7 @@ pub use self::{
     stars::Stars,
     surfaces::{Block, Rail, RailSection, blocks, panel},
     text_button::TextButton,
+    theme_tiles::ThemeTiles,
 };
 /// Draws every view again on the next frame, cached ones too: what an
 /// element learns as it is drawn (its width, whether its text was cut, a

@@ -192,11 +192,12 @@ fn main() {
             if bundled_fonts {
                 fonts::prewarm(cx);
             }
-            design::theme::init(bundled_fonts, cx);
+            design::theme::init(bundled_fonts, preferences::theme_family_for(&prefs), cx);
             bind_keys(cx);
             ui::kit::bind_keys(cx);
             sidebar_keys::bind_keys(cx);
             ui::chip_keys::bind_keys(cx);
+            ui::theme_tiles::bind_keys(cx);
             // An AppImage's restart path replaces this once the first update
             // check has worked out how the app was installed (`update`).
             if let Some(path) = &exe {

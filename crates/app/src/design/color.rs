@@ -10,6 +10,11 @@
 //! div().bg(colors.surface).text_color(colors.fg_faint)
 //! ```
 //!
+//! There are three themes, chosen in Settings ([`ThemeFamily`]), each a
+//! light and a dark palette: Paper (Paper and Lamplight), the default,
+//! Graphite and Hardcover. Views never pick one: [`colors`] returns the
+//! palette the theme shows, as [`super::theme`] installed it.
+//!
 //! `hover`, `selected` and `chip` are ink overlays: translucent ink, so they
 //! step the same way on paper, the sidebar or a panel. GPUI replaces a
 //! background rather than layering one, so a control that paints its own
@@ -18,7 +23,8 @@
 use std::sync::LazyLock;
 
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::{App, BoxShadow, Hsla, Rgba, point, px};
+use gpui_kit::{App, BoxShadow, Global, Hsla, Rgba, point, px};
+pub use hardcover_core::prefs::ThemeFamily;
 
 /// Nearest byte for a normalized sRGB or alpha channel.
 pub(super) fn channel_byte(channel: f32) -> u8 {
@@ -144,6 +150,8 @@ struct Tokens {
     shadow_popover: [ShadowLayer; 2],
 }
 
+/// Paper: warm off-white, warm ink, ink blue. Paper's light palette, the
+/// default.
 const LIGHT: Tokens = Tokens {
     bg: hex(0xFA_F8_F4),
     sidebar: hex(0xF1_EE_E7),
@@ -182,7 +190,159 @@ const LIGHT: Tokens = Tokens {
     ],
 };
 
-const DARK: Tokens = Tokens {
+/// Lamplight: warm brown-black, cream ink, a steel ink-blue accent and
+/// honey gold, as if the page were lit by a reading lamp. Paper's dark
+/// palette, the default.
+const LAMPLIGHT: Tokens = Tokens {
+    bg: hex(0x21_19_12),
+    sidebar: hex(0x1A_12_0C),
+    surface: hex(0x29_21_1A),
+    raised: hex(0x2E_26_1E),
+    skeleton: hex(0x33_2A_23),
+    border: hex(0x33_2B_23),
+    border_strong: hex(0x85_78_6C),
+    track: hex(0x3C_33_2C),
+    // `fg`, as in Graphite.
+    switch_thumb: hex(0xED_E3_D3),
+    fg: hex(0xED_E3_D3),
+    fg_muted: hex(0xC0_B2_A0),
+    fg_faint: hex(0xA0_93_84),
+    accent: hex(0x8E_B1_E6),
+    accent_fg: hex(0x0E_1B_2D),
+    accent_soft: 0.14,
+    chip: 0.08,
+    // Honey: the rating without amber's glare.
+    gold: hex(0xEC_B2_59),
+    scrim: hexa(0x08_05_02, 0.52),
+    // At least 4.5:1 on a pressed danger button in a dialog.
+    danger: hex(0xF3_8B_7E),
+    warning: hex(0xEE_A7_53),
+    cover_edge: hexa(0xFF_FF_FF, 0.10),
+    cover_hinge: hexa(0x00_00_00, 0.28),
+    shadow_cover: [
+        ShadowLayer::new(1., 2., 0., hexa(0x08_05_02, 0.55)),
+        ShadowLayer::new(10., 24., 0., hexa(0x08_05_02, 0.45)),
+    ],
+    shadow_popover: [
+        ShadowLayer::new(0., 0., 1., hexa(0xFF_FF_FF, 0.07)),
+        ShadowLayer::new(6., 16., 0., hexa(0x08_05_02, 0.5)),
+    ],
+};
+
+/// Hardcover's dark palette: hardcover.app's own dark theme, read from the site: slate-900
+/// paper, the gray-800 of its page chrome on the sidebar, gray-700 tracks,
+/// its yellow for the rating. Its indigo-600 is 2.5:1 on the paper, too dark
+/// for links and focus, so the accent is a lighter indigo; the muted and
+/// faint inks are lifted to keep their contrast on the lighter sidebar.
+const HARDCOVER: Tokens = Tokens {
+    bg: hex(0x0F_17_2A),
+    sidebar: hex(0x1F_29_37),
+    surface: hex(0x17_20_33),
+    raised: hex(0x1E_29_39),
+    skeleton: hex(0x1E_29_3B),
+    border: hex(0x25_30_41),
+    border_strong: hex(0x73_7C_8C),
+    track: hex(0x37_41_51),
+    // `fg`, as in the other dark palettes.
+    switch_thumb: hex(0xF3_F4_F6),
+    fg: hex(0xF3_F4_F6),
+    fg_muted: hex(0xA8_AF_BC),
+    fg_faint: hex(0x86_8D_99),
+    accent: hex(0x9B_A5_FF),
+    accent_fg: hex(0x0F_17_2A),
+    accent_soft: 0.14,
+    chip: 0.08,
+    // hardcover.app's yellow.
+    gold: hex(0xFD_C7_00),
+    scrim: hexa(0x02_06_17, 0.6),
+    danger: hex(0xFF_8B_8D),
+    warning: hex(0xFF_B9_00),
+    cover_edge: hexa(0xFF_FF_FF, 0.10),
+    cover_hinge: hexa(0x00_00_00, 0.28),
+    shadow_cover: [
+        ShadowLayer::new(1., 2., 0., hexa(0x02_06_17, 0.55)),
+        ShadowLayer::new(10., 24., 0., hexa(0x02_06_17, 0.45)),
+    ],
+    shadow_popover: [
+        ShadowLayer::new(0., 0., 1., hexa(0xFF_FF_FF, 0.08)),
+        ShadowLayer::new(6., 16., 0., hexa(0x02_06_17, 0.5)),
+    ],
+};
+
+/// Graphite's light palette: Paper's roles in neutral greys, a cool white
+/// with near-black ink and a deeper indigo.
+const GRAPHITE_LIGHT: Tokens = Tokens {
+    bg: hex(0xF8_F8_F7),
+    sidebar: hex(0xEF_EF_ED),
+    surface: hex(0xF2_F2_F0),
+    raised: hex(0xFF_FF_FF),
+    skeleton: hex(0xE8_E8_E5),
+    border: hex(0xE3_E3_E0),
+    border_strong: hex(0x8A_8A_86),
+    track: hex(0xDE_DE_DB),
+    switch_thumb: hex(0xFF_FF_FF),
+    fg: hex(0x1C_1C_1B),
+    fg_muted: hex(0x58_58_56),
+    fg_faint: hex(0x74_74_71),
+    accent: hex(0x3F_4D_AD),
+    accent_fg: hex(0xFF_FF_FF),
+    accent_soft: 0.10,
+    chip: 0.07,
+    gold: hex(0xA1_62_07),
+    scrim: hexa(0x1C_1C_1B, 0.16),
+    danger: hex(0xB4_23_18),
+    warning: hex(0xB5_47_08),
+    cover_edge: hexa(0x14_14_14, 0.16),
+    cover_hinge: hexa(0x14_14_14, 0.16),
+    shadow_cover: [
+        ShadowLayer::new(1., 2., 0., hexa(0x1C_1C_1B, 0.18)),
+        ShadowLayer::new(8., 20., 0., hexa(0x1C_1C_1B, 0.14)),
+    ],
+    shadow_popover: [
+        ShadowLayer::new(0., 0., 1., hexa(0x14_14_14, 0.10)),
+        ShadowLayer::new(4., 12., 0., hexa(0x1C_1C_1B, 0.12)),
+    ],
+};
+
+/// Hardcover's light palette, read from hardcover.app in light mode: its
+/// gray-100 cards as paper, white page chrome as the sidebar and controls,
+/// gray-800 ink, gray-300 tracks. Its indigo-600 is 4.4:1 on the paper and
+/// its yellow too faint for a rating on white, so both are deepened.
+const HARDCOVER_LIGHT: Tokens = Tokens {
+    bg: hex(0xF3_F4_F6),
+    sidebar: hex(0xFF_FF_FF),
+    surface: hex(0xE9_EB_EF),
+    raised: hex(0xFF_FF_FF),
+    skeleton: hex(0xE0_E3_E8),
+    border: hex(0xDD_DF_E4),
+    border_strong: hex(0x7F_86_93),
+    track: hex(0xD1_D5_DB),
+    switch_thumb: hex(0xFF_FF_FF),
+    fg: hex(0x1E_29_39),
+    fg_muted: hex(0x47_52_62),
+    fg_faint: hex(0x65_6D_7C),
+    accent: hex(0x48_40_D8),
+    accent_fg: hex(0xFF_FF_FF),
+    accent_soft: 0.10,
+    chip: 0.07,
+    gold: hex(0x98_5B_05),
+    scrim: hexa(0x1E_29_39, 0.18),
+    danger: hex(0xC1_00_07),
+    warning: hex(0xB0_47_00),
+    cover_edge: hexa(0x0F_17_2A, 0.16),
+    cover_hinge: hexa(0x0F_17_2A, 0.16),
+    shadow_cover: [
+        ShadowLayer::new(1., 2., 0., hexa(0x1E_29_39, 0.18)),
+        ShadowLayer::new(8., 20., 0., hexa(0x1E_29_39, 0.14)),
+    ],
+    shadow_popover: [
+        ShadowLayer::new(0., 0., 1., hexa(0x0F_17_2A, 0.10)),
+        ShadowLayer::new(4., 12., 0., hexa(0x1E_29_39, 0.12)),
+    ],
+};
+
+/// Graphite's dark palette: neutral near-black, the dark theme up to 0.5.
+const GRAPHITE: Tokens = Tokens {
     bg: hex(0x17_16_14),
     sidebar: hex(0x10_0F_0E),
     surface: hex(0x1E_1C_1A),
@@ -327,16 +487,53 @@ impl Palette {
         }
     }
 
-    /// The light theme's palette.
-    pub fn light() -> &'static Self {
-        static PALETTE: LazyLock<Palette> = LazyLock::new(|| Palette::new(&LIGHT));
-        &PALETTE
+    /// `family`'s light palette.
+    pub fn light(family: ThemeFamily) -> &'static Self {
+        static PAPER: LazyLock<Palette> = LazyLock::new(|| Palette::new(&LIGHT));
+        static GRAPHITE_PALETTE: LazyLock<Palette> =
+            LazyLock::new(|| Palette::new(&GRAPHITE_LIGHT));
+        static HARDCOVER_PALETTE: LazyLock<Palette> =
+            LazyLock::new(|| Palette::new(&HARDCOVER_LIGHT));
+        match family {
+            ThemeFamily::Paper => &PAPER,
+            ThemeFamily::Graphite => &GRAPHITE_PALETTE,
+            ThemeFamily::Hardcover => &HARDCOVER_PALETTE,
+        }
     }
 
-    /// The dark theme's palette.
-    pub fn dark() -> &'static Self {
-        static PALETTE: LazyLock<Palette> = LazyLock::new(|| Palette::new(&DARK));
-        &PALETTE
+    /// `family`'s dark palette.
+    pub fn dark(family: ThemeFamily) -> &'static Self {
+        static LAMPLIGHT_PALETTE: LazyLock<Palette> = LazyLock::new(|| Palette::new(&LAMPLIGHT));
+        static GRAPHITE_PALETTE: LazyLock<Palette> = LazyLock::new(|| Palette::new(&GRAPHITE));
+        static HARDCOVER_PALETTE: LazyLock<Palette> = LazyLock::new(|| Palette::new(&HARDCOVER));
+        match family {
+            ThemeFamily::Paper => &LAMPLIGHT_PALETTE,
+            ThemeFamily::Graphite => &GRAPHITE_PALETTE,
+            ThemeFamily::Hardcover => &HARDCOVER_PALETTE,
+        }
+    }
+
+    /// `family`'s palette for the light or dark mode.
+    pub fn of(family: ThemeFamily, dark: bool) -> &'static Self {
+        if dark {
+            Self::dark(family)
+        } else {
+            Self::light(family)
+        }
+    }
+
+    /// Every palette, named, for the tests: each theme's light, then its dark.
+    #[cfg(test)]
+    pub fn all() -> Vec<(String, &'static Self)> {
+        ThemeFamily::ALL
+            .into_iter()
+            .flat_map(|family| {
+                [
+                    (format!("{family:?} light"), Self::light(family)),
+                    (format!("{family:?} dark"), Self::dark(family)),
+                ]
+            })
+            .collect()
     }
 
     /// `shadow-cover`: on a cover that leads its row or block.
@@ -356,13 +553,21 @@ impl Palette {
     }
 }
 
+/// The theme the kit's theme holds: set by [`super::theme`] whenever it
+/// installs one, so [`colors`] and the kit's theme always agree.
+pub(super) struct ActiveFamily(pub ThemeFamily);
+
+impl Global for ActiveFamily {}
+
+/// The theme in use (installed or not yet: the default).
+pub fn theme_family(cx: &App) -> ThemeFamily {
+    cx.try_global::<ActiveFamily>()
+        .map_or_else(ThemeFamily::default, |active| active.0)
+}
+
 /// The current theme's palette.
 pub fn colors(cx: &App) -> &'static Palette {
-    if cx.theme().is_dark() {
-        Palette::dark()
-    } else {
-        Palette::light()
-    }
+    Palette::of(theme_family(cx), cx.theme().is_dark())
 }
 
 /// A colour that comes as data, such as a reviewer's Hardcover colour
@@ -437,34 +642,45 @@ mod tests {
 
     #[test]
     fn the_palette_keeps_the_skill_values() {
-        assert_eq!(rgb(Palette::light().bg), [0xFA, 0xF8, 0xF4]);
-        assert_eq!(rgb(Palette::dark().bg), [0x17, 0x16, 0x14]);
-        assert_eq!(rgb(Palette::light().accent), [0x3B, 0x4A, 0x9C]);
-        assert_eq!(rgb(Palette::dark().gold), [0xFB, 0xBF, 0x24]);
-        assert!((Palette::light().hover.a - 0.05).abs() < 1e-6);
-        assert!((Palette::dark().chip.a - 0.08).abs() < 1e-6);
-        assert!((Palette::light().star_empty.a - 0.10).abs() < 1e-6);
+        use ThemeFamily::{Graphite, Hardcover, Paper};
+        assert_eq!(rgb(Palette::light(Paper).bg), [0xFA, 0xF8, 0xF4]);
+        assert_eq!(rgb(Palette::light(Graphite).bg), [0xF8, 0xF8, 0xF7]);
+        assert_eq!(rgb(Palette::light(Hardcover).bg), [0xF3, 0xF4, 0xF6]);
+        assert_eq!(rgb(Palette::dark(Graphite).bg), [0x17, 0x16, 0x14]);
+        assert_eq!(rgb(Palette::dark(Paper).bg), [0x21, 0x19, 0x12]);
+        assert_eq!(rgb(Palette::dark(Hardcover).bg), [0x0F, 0x17, 0x2A]);
+        assert_eq!(rgb(Palette::light(Paper).accent), [0x3B, 0x4A, 0x9C]);
+        assert_eq!(rgb(Palette::light(Hardcover).accent), [0x48, 0x40, 0xD8]);
+        assert_eq!(rgb(Palette::dark(Graphite).gold), [0xFB, 0xBF, 0x24]);
+        assert_eq!(rgb(Palette::dark(Paper).accent), [0x8E, 0xB1, 0xE6]);
+        for family in ThemeFamily::ALL {
+            let (light, dark) = (Palette::light(family), Palette::dark(family));
+            assert!((light.hover.a - 0.05).abs() < 1e-6);
+            assert!((light.chip.a - 0.07).abs() < 1e-6);
+            assert!((dark.chip.a - 0.08).abs() < 1e-6);
+            assert!((light.star_empty.a - 0.10).abs() < 1e-6);
+        }
     }
 
     /// The overlay composited by hand: 255 * 0.95 + 31 * 0.05 = 243.8, and
     /// so on per channel.
     #[test]
     fn an_overlay_blends_into_a_solid_colour() {
-        let light = Palette::light();
+        let light = Palette::light(ThemeFamily::Paper);
         let hovered = solid(light.raised, light.hover);
         assert_eq!(hovered.a, 1.);
         assert_eq!(rgb(hovered), [244, 244, 243]);
         let pressed = solid(light.raised, light.selected);
         assert_eq!(rgb(pressed), [233, 232, 232]);
         // Dark ink is light: the overlay lightens a dark control.
-        let dark = Palette::dark();
+        let dark = Palette::dark(ThemeFamily::Graphite);
         let hovered = solid(dark.raised, dark.hover);
         assert_eq!(rgb(hovered), [48, 45, 42]);
     }
 
     #[test]
     fn a_clear_overlay_leaves_the_base_and_an_opaque_one_replaces_it() {
-        let light = Palette::light();
+        let light = Palette::light(ThemeFamily::Paper);
         assert_eq!(rgb(solid(light.bg, light.fg.opacity(0.))), rgb(light.bg));
         assert_eq!(rgb(solid(light.bg, light.accent)), rgb(light.accent));
     }

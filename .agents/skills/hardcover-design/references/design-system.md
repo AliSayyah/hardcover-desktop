@@ -16,8 +16,10 @@ interface stays out of the way until it is needed.
    control, label, count and message is set in Inter. You can tell at a
    glance what is the book and what is the tool.
 2. **Paper and ink.**
-   - The surfaces are warm off-white, or warm near-black in dark mode, and
-     the text is warm ink.
+   - The surfaces are warm off-white, or in dark mode a warm brown-black
+     lit as by a reading lamp, and the text is warm ink: the Paper theme,
+     the default. Graphite (neutral greys) and Hardcover (hardcover.app's
+     own white and navy) are the other themes.
    - Colour is scarce, so it means something. Ink blue is the one accent.
      Gold appears only on your own rating.
    - The covers bring the rest of the colour.
@@ -60,35 +62,55 @@ over whatever surface they sit on. Because of that they step the same way on
 paper, the sidebar, a panel or a control. A chip stays visible on a hovered or
 selected row.
 
-| Role | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `bg` | `#FAF8F4` | `#171614` | Paper: the work area |
-| `sidebar` | `#F1EEE7` | `#100F0E` | The sidebar |
-| `surface` | `#F3F0E9` | `#1E1C1A` | The one inset panel in a pane (progress, Not started) |
-| `raised` | `#FFFFFF` | `#262320` | Controls, inputs, popovers, dialogs |
-| `hover` | ink 5% `rgba(31,28,23,.05)` | ink 5% `rgba(238,234,227,.05)` | Pointer over a row, nav item, menu item or ghost button |
-| `selected` | ink 10% | ink 10% | The current row or destination; a pressed control |
-| `chip` | ink 7% | ink 8% | Chip fill |
-| `skeleton` | `#E9E4DA` | `#2B2825` | Something still loading (about 1.2:1 on paper in both themes) |
-| `border` | `#E4DED3` | `#292623` | Hairlines between regions and sections |
-| `border-strong` | `#918879` | `#77706A` | Control outlines: at least 3:1 on `raised`, paper, `surface` and the sidebar, since a field's outline is all that marks it |
-| `track` | `#E0D9CC` | `#35312C` | The empty part of a meter; an off switch |
-| `switch-thumb` | `#FFFFFF` (`raised`) | `#EEEAE3` (`fg`) | A switch's thumb, on `track` and on `accent`. In dark mode a `raised` thumb on `track` is 1.2:1, and gone once a disabled switch fades its track |
-| `fg` | `#1F1C17` | `#EEEAE3` | Ink: text |
-| `fg-muted` | `#5F574B` | `#ABA498` | Secondary text that carries information: authors, facts, counts, labels |
-| `fg-faint` | `#7A7266` | `#8D877C` | Empty-state icons and other marks. Never text |
-| `accent` | `#3B4A9C` | `#98A5F4` | Ink blue (details below the table) |
-| `accent-fg` | `#FFFFFF` | `#12142A` | Text on accent |
-| `accent-soft` | accent 10% | accent 14% | The avatar's fill |
-| `ring` | accent 50% | accent 50% | The 2 px focus ring |
-| `gold` | `#A16207` (ochre) | `#FBBF24` (amber 400) | The user's own rating, nothing else. The hover preview draws it as an outline |
-| `star-empty` | ink 10% | ink 10% | An unfilled star |
-| `danger` | `#B42318` | `#FB8178` | Destructive commands and errors |
-| `warning` | `#B54708` | `#FDB022` | A content warning's icon; warnings |
-| `cover-edge` | `rgba(30,20,10,.16)` | `rgba(255,255,255,.12)` | The cover's 1 px edge |
-| `cover-hinge` | `rgba(30,20,10,.16)` | `rgba(0,0,0,.28)` | The hinge gradient's dark stop |
-| `cloth-ink` | `#F4ECDD` | `#F4ECDD` | Type and stamp on a cloth cover |
-| `scrim` | ink 16% | black 48% | The backdrop behind a dialog |
+There are three **themes**, each a light palette and a dark one. Settings
+chooses the theme (its tiles) and the mode (System, Light or Dark), which
+picks the half.
+- **Paper**, the default: warm off-white paper with warm ink and ink blue;
+  dark, **Lamplight**: warm brown-black paper, cream ink, a steel ink-blue
+  accent and honey gold.
+- **Graphite**: Paper's roles in neutral greys, a cool white with a deeper
+  indigo; dark, a neutral near-black with a periwinkle accent (the dark
+  theme up to 0.5).
+- **Hardcover**, after hardcover.app: light, its gray-100 cards as paper and
+  its white page chrome as the sidebar and controls, gray-800 ink, gray-300
+  tracks; dark, slate-900 paper, its gray-800 chrome as the sidebar,
+  gray-700 tracks and its yellow for the rating. The site's indigo-600 is
+  4.4:1 on the light paper and 2.5:1 on the navy, so the accent is a deeper
+  indigo in light and a lighter one in dark; its yellow is too faint for a
+  rating on white, so the light rating is a deep amber.
+
+Every palette has every role, with the same rules; a new role needs a value
+in every column.
+
+| Role | Paper light | Paper dark (Lamplight) | Graphite light | Graphite dark | Hardcover light | Hardcover dark | Use |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `bg` | `#FAF8F4` | `#211912` | `#F8F8F7` | `#171614` | `#F3F4F6` | `#0F172A` | Paper: the work area |
+| `sidebar` | `#F1EEE7` | `#1A120C` | `#EFEFED` | `#100F0E` | `#FFFFFF` | `#1F2937` | The sidebar |
+| `surface` | `#F3F0E9` | `#29211A` | `#F2F2F0` | `#1E1C1A` | `#E9EBEF` | `#172033` | The one inset panel in a pane (progress, Not started) |
+| `raised` | `#FFFFFF` | `#2E261E` | `#FFFFFF` | `#262320` | `#FFFFFF` | `#1E2939` | Controls, inputs, popovers, dialogs |
+| `hover` | ink 5% `rgba(31,28,23,.05)` | ink 5% `rgba(237,227,211,.05)` | ink 5% `rgba(28,28,27,.05)` | ink 5% `rgba(238,234,227,.05)` | ink 5% `rgba(30,41,57,.05)` | ink 5% `rgba(243,244,246,.05)` | Pointer over a row, nav item, menu item or ghost button |
+| `selected` | ink 10% | ink 10% | ink 10% | ink 10% | ink 10% | ink 10% | The current row or destination; a pressed control |
+| `chip` | ink 7% | ink 8% | ink 7% | ink 8% | ink 7% | ink 8% | Chip fill |
+| `skeleton` | `#E9E4DA` | `#332A23` | `#E8E8E5` | `#2B2825` | `#E0E3E8` | `#1E293B` | Something still loading (about 1.2:1 on paper in every theme) |
+| `border` | `#E4DED3` | `#332B23` | `#E3E3E0` | `#292623` | `#DDDFE4` | `#253041` | Hairlines between regions and sections |
+| `border-strong` | `#918879` | `#85786C` | `#8A8A86` | `#77706A` | `#7F8693` | `#737C8C` | Control outlines: at least 3:1 on `raised`, paper, `surface` and the sidebar, since a field's outline is all that marks it |
+| `track` | `#E0D9CC` | `#3C332C` | `#DEDEDB` | `#35312C` | `#D1D5DB` | `#374151` | The empty part of a meter; an off switch |
+| `switch-thumb` | `#FFFFFF` (`raised`) | `#EDE3D3` (`fg`) | `#FFFFFF` (`raised`) | `#EEEAE3` (`fg`) | `#FFFFFF` (`raised`) | `#F3F4F6` (`fg`) | A switch's thumb, on `track` and on `accent`. In dark mode a `raised` thumb on `track` is 1.2:1, and gone once a disabled switch fades its track |
+| `fg` | `#1F1C17` | `#EDE3D3` | `#1C1C1B` | `#EEEAE3` | `#1E2939` | `#F3F4F6` | Ink: text |
+| `fg-muted` | `#5F574B` | `#C0B2A0` | `#585856` | `#ABA498` | `#475262` | `#A8AFBC` | Secondary text that carries information: authors, facts, counts, labels |
+| `fg-faint` | `#7A7266` | `#A09384` | `#747471` | `#8D877C` | `#656D7C` | `#868D99` | Empty-state icons and other marks. Never text |
+| `accent` | `#3B4A9C` | `#8EB1E6` | `#3F4DAD` | `#98A5F4` | `#4840D8` | `#9BA5FF` | Ink blue (details below the table) |
+| `accent-fg` | `#FFFFFF` | `#0E1B2D` | `#FFFFFF` | `#12142A` | `#FFFFFF` | `#0F172A` | Text on accent |
+| `accent-soft` | accent 10% | accent 14% | accent 10% | accent 14% | accent 10% | accent 14% | The avatar's fill |
+| `ring` | accent 50% | accent 50% | accent 50% | accent 50% | accent 50% | accent 50% | The 2 px focus ring |
+| `gold` | `#A16207` (ochre) | `#ECB259` (honey) | `#A16207` (ochre) | `#FBBF24` (amber 400) | `#985B05` (deep amber) | `#FDC700` (Hardcover's yellow) | The user's own rating, nothing else. The hover preview draws it as an outline |
+| `star-empty` | ink 10% | ink 10% | ink 10% | ink 10% | ink 10% | ink 10% | An unfilled star |
+| `danger` | `#B42318` | `#F38B7E` | `#B42318` | `#FB8178` | `#C10007` | `#FF8B8D` | Destructive commands and errors |
+| `warning` | `#B54708` | `#EEA753` | `#B54708` | `#FDB022` | `#B04700` | `#FFB900` | A content warning's icon; warnings |
+| `cover-edge` | `rgba(30,20,10,.16)` | `rgba(255,255,255,.10)` | `rgba(20,20,20,.16)` | `rgba(255,255,255,.12)` | `rgba(15,23,42,.16)` | `rgba(255,255,255,.10)` | The cover's 1 px edge |
+| `cover-hinge` | `rgba(30,20,10,.16)` | `rgba(0,0,0,.28)` | `rgba(20,20,20,.16)` | `rgba(0,0,0,.28)` | `rgba(15,23,42,.16)` | `rgba(0,0,0,.28)` | The hinge gradient's dark stop |
+| `cloth-ink` | `#F4ECDD` | `#F4ECDD` | `#F4ECDD` | `#F4ECDD` | `#F4ECDD` | `#F4ECDD` | Type and stamp on a cloth cover |
+| `scrim` | ink 16% | `rgba(8,5,2,.52)` | ink 16% | black 48% | ink 18% | `rgba(2,6,23,.6)` | The backdrop behind a dialog |
 
 Accent is used on progress, the primary commit, the focus ring, the selected
 sidebar icon, links that open the browser, the brand icon, a genre chip's
@@ -98,22 +120,24 @@ else.
 Contrast, checked over every surface alone, hovered and selected
 (`design::contrast_audit` fails the build when a token breaks one):
 - **Text that carries information is at least 4.5:1** (WCAG 1.4.3):
-  `fg-muted` at least 4.7:1 in both themes, so it may carry information;
+  `fg-muted` at least 4.7:1 in every palette (4.8:1 in Graphite's dark,
+  5.5:1 in Hardcover's light), so it may carry information;
   accent on paper at least 5:1 and on a chip at least 4.8:1; danger on
   paper and in a dialog, pressed too.
 - **Marks that carry meaning without words are at least 3:1** (WCAG
   1.4.11): `border-strong` on `raised`, paper, `surface` and the sidebar
-  (3:1 to 3.9:1); `gold` against an empty star on paper, hovered or
-  selected (3.1:1 light, 6.4:1 dark); the catalogue's `fg-muted` stars
+  (3:1 to 4.3:1); `gold` against an empty star on paper, hovered or
+  selected (3.1:1 in Paper's and Graphite's light, 3.4:1 in Hardcover's,
+  5.4:1 to 6.5:1 dark); the catalogue's `fg-muted` stars
   against an empty one; the warning icon on a chip.
-- **`fg-faint` is 3.3:1 to 5.4:1**: enough for an icon, never enough for
+- **`fg-faint` is 3.3:1 to 6.2:1**: enough for an icon, never enough for
   text. Placeholders are `fg-muted`.
 
 A new colour role needs the same check: add its pairs to
 `design::contrast_audit` (the mockup's console audit shows the same
 numbers).
 
-**Cloth colours** are eight book-cloth tones, the same in both themes.
+**Cloth colours** are eight book-cloth tones, the same in every theme.
 cloth-ink on each is at least 5:1.
 
 `#6A4A39` `#3A574B` `#414C6B` `#743838` `#7A5D30` `#39596A` `#594567` `#4E5356`
@@ -124,7 +148,7 @@ Rules:
   data, not UI colour.
 - Never use a status colour as decoration, and never encode meaning by colour
   alone.
-- Check every new surface in both themes.
+- Check every new surface in every palette: each theme, light and dark.
 
 ### Type
 
@@ -132,7 +156,7 @@ Two families with fixed roles, and seven sizes: 12, 14, 16, 18, 20, 24, 30.
 Every size has a fixed line height.
 
 | Role | Family, weight | Size / line | In code | Use |
-| --- | --- | --- | --- | --- |
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | `page-title` | Inter 600 | 20 / 28 | `.page_title()` | A destination's or page's title: "Currently reading" (always through `ui::PageHeader`; a catalogue name wraps, a destination's is cut) |
 | `section` | Inter 600 | 16 / 24 | `.section()` | A section on a page: "Continue reading" |
 | `byline` | Inter 500 | 16 / 24 | `.byline()` | A book's author and series under its title in the header |
@@ -259,11 +283,19 @@ There are three levels and no others:
 1. **Flat.** Every region, panel, row and card. Use a hairline or a fill,
    never a shadow.
 2. **Cover.** `shadow-cover` on a cover that leads its row or block.
-   - Light: `0 1px 2px rgba(40,28,16,.18), 0 8px 20px rgba(40,28,16,.14)`
-   - Dark: `0 1px 2px rgba(0,0,0,.55), 0 10px 24px rgba(0,0,0,.45)`
+   - Paper light: `0 1px 2px rgba(40,28,16,.18), 0 8px 20px rgba(40,28,16,.14)`
+   - Lamplight: `0 1px 2px rgba(8,5,2,.55), 0 10px 24px rgba(8,5,2,.45)`
+   - Graphite light: `0 1px 2px rgba(28,28,27,.18), 0 8px 20px rgba(28,28,27,.14)`
+   - Graphite dark: `0 1px 2px rgba(0,0,0,.55), 0 10px 24px rgba(0,0,0,.45)`
+   - Hardcover light: `0 1px 2px rgba(30,41,57,.18), 0 8px 20px rgba(30,41,57,.14)`
+   - Hardcover dark: `0 1px 2px rgba(2,6,23,.55), 0 10px 24px rgba(2,6,23,.45)`
 3. **Popover.** Menus, popovers and dialogs: `raised` with `shadow-popover`.
-   - Light: `0 0 0 1px rgba(30,20,10,.10), 0 4px 12px rgba(40,28,16,.12)`
-   - Dark: `0 0 0 1px rgba(255,255,255,.08), 0 4px 12px rgba(0,0,0,.5)`
+   - Paper light: `0 0 0 1px rgba(30,20,10,.10), 0 4px 12px rgba(40,28,16,.12)`
+   - Lamplight: `0 0 0 1px rgba(255,255,255,.07), 0 6px 16px rgba(8,5,2,.5)`
+   - Graphite light: `0 0 0 1px rgba(20,20,20,.10), 0 4px 12px rgba(28,28,27,.12)`
+   - Graphite dark: `0 0 0 1px rgba(255,255,255,.08), 0 4px 12px rgba(0,0,0,.5)`
+   - Hardcover light: `0 0 0 1px rgba(15,23,42,.10), 0 4px 12px rgba(30,41,57,.12)`
+   - Hardcover dark: `0 0 0 1px rgba(255,255,255,.08), 0 6px 16px rgba(2,6,23,.5)`
 
 ### Motion
 
@@ -650,6 +682,34 @@ Never colour-code chips, and never use a badge for ordinary metadata.
     primary). A confirmation's result that destroys nothing ("Add",
     "Install", "Never recommend") is primary; Cancel has the focus when it
     opens.
+
+### Theme tiles (Settings)
+
+Settings chooses the theme with one tile per theme (`ui::ThemeTiles`), side
+by side across the dialog, 8 apart, each taking an equal share.
+- **The miniature** (84 high, `r-control`, a 1 px grey edge at 25% that
+  holds on any fill): the app in small, drawn from the theme's own
+  palettes, never from the palette showing. The sidebar (30% of the width)
+  with its rows and the selected one, a title and byline, a meter with its
+  accent fill, a rating and the inset panel. The light palette fills it and
+  the dark one covers the part right of a diagonal, from 64% of the width
+  at the top to 36% at the bottom, so every tile shows both halves in
+  either mode. No cover: a red cloth reads as a mark of its own at that
+  size.
+- **The name** under it, 6 below, `body`, padded 2.
+- **States:** the tile pads 6 with `r-box`. Chosen: the `selected` fill, a
+  14 px check before the name and the name in `body-strong`. Hover (not
+  chosen): the `hover` fill. Focus: the ring, after keyboard input.
+- **Keys:** a radio group, one Tab stop: Tab lands on the chosen tile;
+  Left and Right choose the tile beside it, Home and End the first and the
+  last, stopping at the ends; Enter and Space choose the focused one.
+  Choosing applies at once and redraws the app in it.
+
+Under the tiles the **Mode** row (System, Light, Dark) is a small segmented
+control on the row's trailing edge, its caption saying what the mode does
+("Light or dark as your desktop is.", "Always light.", "Always dark."). A
+theme or mode forced by `HARDCOVER_THEME` shows as a setting row with its
+value as text and "Set by HARDCOVER_THEME." as the caption.
 
 ### Reviews (other readers')
 
@@ -1486,8 +1546,8 @@ commit that fixes it.
 - A small segment pads its label 10, not 8.
 - A disabled switch fades its track, not its thumb.
 - A radio's circle takes no style from outside: unchecked and disabled, it
-  is faint, most in dark mode. Settings shows a fixed theme as text rather
-  than disabled radios; a form's radios are disabled only while it saves.
+  is faint, most in dark mode. Settings shows a theme or mode fixed by
+  `HARDCOVER_THEME` as text rather than disabled controls; a form's radios are disabled only while it saves.
 - The `DatePicker`'s field stays paper.
 - A dialog keeps the kit's shadow.
 - A notification's action button ("Undo" after a book comes off a list)

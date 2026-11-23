@@ -42,7 +42,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 - **Offline access:** your library and covers are cached on your computer, so they open instantly and stay readable without a connection.
 - **Secure sign-in:** you sign in through Hardcover in your browser (OAuth with PKCE). The app never sees your password, and the session is stored in your system keyring.
 - **Self-updating:** the app tells you about each new release and installs it in one click, after verifying its signature, whether you installed it with the installer or run the AppImage.
-- **Settings:** choose a light or dark theme or follow the system, and turn automatic update checks on or off.
+- **Settings:** choose a theme (Paper, warm; Graphite, neutral; or Hardcover, the website's own colours), each with a light and a dark side, light or dark or follow the system, and turn automatic update checks on or off.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/library-dark.png">

@@ -59,8 +59,8 @@
 //! - **Radios** draw their outline in `border-strong` and halve it when
 //!   disabled; a style reaches the radio's row, not its circle. An
 //!   unchecked disabled radio is faint, most in dark mode, so the app avoids
-//!   one where it can (Settings shows a theme fixed by `HARDCOVER_THEME` as
-//!   a value); a form's radios are disabled only while it saves.
+//!   one where it can (Settings shows a theme or mode fixed by
+//!   `HARDCOVER_THEME` as a value); a form's radios are disabled only while it saves.
 //! - **`DatePicker`** paints its field on an inner element the style doesn't
 //!   reach, so it stays paper.
 //! - **A dialog's shadow** is set after its style is applied, so it keeps

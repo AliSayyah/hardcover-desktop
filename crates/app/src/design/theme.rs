@@ -6,7 +6,9 @@
 //! `dark_theme`. `Theme::change` loads the config of the mode it switches
 //! to, so the palette holds through every mode change: the Settings choice,
 //! the desktop's appearance and `HARDCOVER_THEME` all go through
-//! `preferences::apply_theme`, which calls `Theme::change`.
+//! `preferences::apply_theme`, which calls `Theme::change`. Both configs are
+//! the chosen theme's ([`ThemeFamily`]); [`set_theme_family`] swaps them,
+//! and records the choice for [`super::color::colors`].
 //!
 //! **Why a config, not overriding fields after `Theme::change`:** the kit
 //! derives dozens of fields from the ones a config names (button and list
@@ -57,7 +59,7 @@ use std::rc::Rc;
 use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
 use gpui_kit::{App, Hsla, Rgba, SharedString, Window};
 
-use super::color::{Palette, channel_byte, solid};
+use super::color::{ActiveFamily, Palette, ThemeFamily, channel_byte, solid};
 use crate::fonts;
 
 /// The radius of controls (`r-control`).
@@ -65,12 +67,22 @@ const RADIUS: u8 = 6;
 /// The radius of rows, panels, popovers and dialogs (`r-box`).
 const RADIUS_LG: u8 = 8;
 
-/// Installs the app's light and dark themes and applies the current mode's.
-/// Runs after `gpui_kit::init` and `fonts::init`. `bundled_fonts` says
-/// whether the fonts loaded; without them the theme keeps the system font.
-pub fn init(bundled_fonts: bool, cx: &mut App) {
-    let light = Rc::new(config(ThemeMode::Light, bundled_fonts));
-    let dark = Rc::new(config(ThemeMode::Dark, bundled_fonts));
+/// Installs `family`'s light and dark configs, and applies the current
+/// mode's. Runs after `gpui_kit::init` and `fonts::init`. `bundled_fonts`
+/// says whether the fonts loaded; without them the theme keeps the system
+/// font.
+pub fn init(bundled_fonts: bool, family: ThemeFamily, cx: &mut App) {
+    cx.set_global(ActiveFamily(family));
+    let light = Rc::new(config(
+        Palette::light(family),
+        ThemeMode::Light,
+        bundled_fonts,
+    ));
+    let dark = Rc::new(config(
+        Palette::dark(family),
+        ThemeMode::Dark,
+        bundled_fonts,
+    ));
     let mode = Theme::update(cx, |theme| {
         theme.light_theme = light;
         theme.dark_theme = dark;
@@ -80,6 +92,39 @@ pub fn init(bundled_fonts: bool, cx: &mut App) {
     // `Theme::update` doesn't reload a swapped config; `change` does, even
     // for the mode already showing.
     Theme::change(mode, None, cx);
+}
+
+/// Makes `family` the theme. The new configs keep the installed ones' font,
+/// rem and radii (`set_ui_scale`), and the window is redrawn in it at once.
+pub fn set_theme_family(family: ThemeFamily, window: Option<&mut Window>, cx: &mut App) {
+    if cx.try_global::<ActiveFamily>().map(|active| active.0) == Some(family) {
+        return;
+    }
+    cx.set_global(ActiveFamily(family));
+    let mode = Theme::update(cx, |theme| {
+        theme.light_theme = Rc::new(swapped(
+            &theme.light_theme,
+            Palette::light(family),
+            ThemeMode::Light,
+        ));
+        theme.dark_theme = Rc::new(swapped(
+            &theme.dark_theme,
+            Palette::dark(family),
+            ThemeMode::Dark,
+        ));
+        theme.mode
+    });
+    Theme::change(mode, window, cx);
+}
+
+/// `p`'s config with `installed`'s font, rem and radii.
+fn swapped(installed: &ThemeConfig, p: &Palette, mode: ThemeMode) -> ThemeConfig {
+    let mut config = config(p, mode, false);
+    config.font_family.clone_from(&installed.font_family);
+    config.font_size = installed.font_size;
+    config.radius = installed.radius;
+    config.radius_lg = installed.radius_lg;
+    config
 }
 
 /// Draws the interface `k` times larger than the design (`ui_scale`): the rem
@@ -119,13 +164,8 @@ fn css_color(color: Hsla) -> SharedString {
     .into()
 }
 
-/// The theme config for `mode`.
-pub fn config(mode: ThemeMode, bundled_fonts: bool) -> ThemeConfig {
-    let p = if mode.is_dark() {
-        Palette::dark()
-    } else {
-        Palette::light()
-    };
+/// The theme config for `mode`, in the palette `p`.
+pub fn config(p: &Palette, mode: ThemeMode, bundled_fonts: bool) -> ThemeConfig {
     let clear = p.fg.opacity(0.);
     // The kit's hover fill for menu items and ghost buttons; see the module
     // doc for why dark mode doubles it.
@@ -299,13 +339,14 @@ mod tests {
     #[test]
     fn the_configs_resolve_to_the_tokens_through_mode_changes() {
         let mut theme = Theme::default();
-        for mode in [ThemeMode::Light, ThemeMode::Dark, ThemeMode::Light] {
-            theme.apply_config(&Rc::new(config(mode, true)));
-            let p = if mode.is_dark() {
-                Palette::dark()
-            } else {
-                Palette::light()
-            };
+        let modes = ThemeFamily::ALL.into_iter().flat_map(|family| {
+            [
+                (ThemeMode::Light, Palette::light(family)),
+                (ThemeMode::Dark, Palette::dark(family)),
+            ]
+        });
+        for (mode, p) in modes {
+            theme.apply_config(&Rc::new(config(p, mode, true)));
             assert_eq!(theme.mode, mode);
             for (field, got, want) in [
                 ("background", theme.background, p.bg),
@@ -368,20 +409,74 @@ mod tests {
     #[test]
     fn the_ui_scale_sets_the_rem_and_the_radii() {
         let mut theme = Theme::default();
-        theme.apply_config(&Rc::new(scaled(&config(ThemeMode::Light, true), 1.25)));
+        theme.apply_config(&Rc::new(scaled(
+            &config(Palette::light(ThemeFamily::Paper), ThemeMode::Light, true),
+            1.25,
+        )));
         assert_eq!(theme.font_size, gpui_kit::px(20.));
         assert_eq!(theme.radius, gpui_kit::px(8.));
         assert_eq!(theme.radius_lg, gpui_kit::px(10.));
         // The palette is untouched.
-        assert!(close(theme.background, Palette::light().bg));
-        theme.apply_config(&Rc::new(scaled(&config(ThemeMode::Dark, true), 1.)));
+        assert!(close(
+            theme.background,
+            Palette::light(ThemeFamily::Paper).bg
+        ));
+        theme.apply_config(&Rc::new(scaled(
+            &config(Palette::dark(ThemeFamily::Paper), ThemeMode::Dark, true),
+            1.,
+        )));
         assert_eq!(theme.font_size, gpui_kit::px(16.));
         assert_eq!(theme.radius, gpui_kit::px(f32::from(RADIUS)));
     }
 
+    /// Settings switches the theme while the app runs: the kit's theme and
+    /// `colors` move together, in the mode showing, at the interface scale
+    /// already set, and the other mode follows when it is shown.
+    #[gpui_kit::test]
+    fn switching_the_theme_keeps_the_scale(cx: &mut gpui_kit::TestAppContext) {
+        use ThemeFamily::{Graphite, Hardcover, Paper};
+        use gpui_kit::component::ActiveTheme as _;
+
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            init(true, Graphite, cx);
+            Theme::change(ThemeMode::Dark, None, cx);
+            assert!(close(cx.theme().background, Palette::dark(Graphite).bg));
+            assert!(close(
+                super::super::colors(cx).bg,
+                Palette::dark(Graphite).bg
+            ));
+
+            // As `set_ui_scale` leaves it.
+            Theme::update(cx, |theme| {
+                theme.light_theme = Rc::new(scaled(&theme.light_theme, 1.25));
+                theme.dark_theme = Rc::new(scaled(&theme.dark_theme, 1.25));
+            });
+            set_theme_family(Paper, None, cx);
+            assert!(close(cx.theme().background, Palette::dark(Paper).bg));
+            assert!(close(super::super::colors(cx).bg, Palette::dark(Paper).bg));
+            assert_eq!(cx.theme().font_size, gpui_kit::px(20.));
+            assert_eq!(cx.theme().radius, gpui_kit::px(8.));
+            assert_eq!(cx.theme().font_family.as_ref(), fonts::INTER);
+
+            Theme::change(ThemeMode::Light, None, cx);
+            assert!(close(cx.theme().background, Palette::light(Paper).bg));
+            set_theme_family(Hardcover, None, cx);
+            assert!(close(cx.theme().background, Palette::light(Hardcover).bg));
+            assert!(close(
+                super::super::colors(cx).bg,
+                Palette::light(Hardcover).bg
+            ));
+            assert_eq!(cx.theme().font_size, gpui_kit::px(20.));
+            Theme::change(ThemeMode::Dark, None, cx);
+            assert!(close(cx.theme().background, Palette::dark(Hardcover).bg));
+            assert_eq!(cx.theme().font_size, gpui_kit::px(20.));
+        });
+    }
+
     #[test]
     fn a_colour_is_written_with_its_alpha() {
-        let p = Palette::light();
+        let p = Palette::light(ThemeFamily::Paper);
         assert_eq!(css_color(p.bg).as_ref(), "#FAF8F4FF");
         assert_eq!(css_color(p.hover).as_ref(), "#1F1C170D");
     }

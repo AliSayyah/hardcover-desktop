@@ -1,4 +1,5 @@
-//! The contrast every meaningful token pair must keep, in both themes
+//! The contrast every meaningful token pair must keep, in every palette (each
+//! theme's light and dark)
 //! (`hardcover-design`, Tokens → Colour → Contrast). A token edit that
 //! breaks one fails here, with the pair and its ratio.
 //!
@@ -14,7 +15,7 @@
 
 use gpui_kit::Hsla;
 
-use super::color::{Palette, contrast, solid};
+use super::color::{Palette, ThemeFamily, contrast, solid};
 
 /// A surface alone, hovered and selected.
 fn states(p: &Palette, host: Hsla) -> [Hsla; 3] {
@@ -43,8 +44,8 @@ fn chips(p: &Palette) -> Vec<Hsla> {
     .collect()
 }
 
-fn themes() -> [(&'static str, &'static Palette); 2] {
-    [("light", Palette::light()), ("dark", Palette::dark())]
+fn themes() -> Vec<(String, &'static Palette)> {
+    Palette::all()
 }
 
 /// Fails with every pair under `min`, not just the first.
@@ -69,7 +70,7 @@ fn over(theme: &str, name: &str, fg: Hsla, hosts: Vec<Hsla>) -> Vec<(String, Hsl
 
 #[test]
 fn text_that_carries_information_reads_at_aa() {
-    for (theme, p) in themes() {
+    for (theme, p) in &themes() {
         check(
             4.5,
             [
@@ -98,7 +99,7 @@ fn text_that_carries_information_reads_at_aa() {
 
 #[test]
 fn marks_that_carry_meaning_read_at_three_to_one() {
-    for (theme, p) in themes() {
+    for (theme, p) in &themes() {
         // Stars sit on paper: the book header, Home's rows and the library
         // rows, which can be hovered or selected.
         let star_hosts = states(p, p.bg);
@@ -139,7 +140,7 @@ fn marks_that_carry_meaning_read_at_three_to_one() {
 
 #[test]
 fn cloth_ink_reads_on_every_cloth() {
-    let p = Palette::light();
+    let p = Palette::light(ThemeFamily::Paper);
     check(
         4.5,
         p.cloth
@@ -153,7 +154,7 @@ fn cloth_ink_reads_on_every_cloth() {
 /// colour (`border-strong`) is as dark as `fg-faint`.
 #[test]
 fn the_scrollbar_thumb_steps_on_hover() {
-    for (theme, p) in themes() {
+    for (theme, p) in &themes() {
         let ratio = contrast(p.fg_muted, p.border_strong);
         assert!(ratio >= 1.5, "{theme}: thumb hover {ratio:.2}:1 from rest");
     }

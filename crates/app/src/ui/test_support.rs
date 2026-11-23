@@ -30,6 +30,7 @@ pub fn host(
         gpui_kit::init(cx);
         crate::ui::kit::bind_keys(cx);
         crate::ui::chip_keys::bind_keys(cx);
+        crate::ui::theme_tiles::bind_keys(cx);
     });
     let (_, cx) = cx.add_window_view(|_, _| Host(Box::new(build)));
     redraw(cx);
