@@ -161,6 +161,35 @@ fn the_line_needs_fifty_mood_votes() {
 }
 
 #[test]
+fn rarely_needs_a_hundred_votes_and_names_only_the_ten_most_used_moods() {
+    // Every vote on Relaxing: the ten most used moods have none.
+    let only = |n| votes(&[(Mood::Relaxing.id(), n)]);
+    assert!(rarely(&only(99)).is_empty());
+    assert!(mood_line(&only(99)).is_some(), "a line from 50");
+    assert_eq!(
+        rarely(&only(100)),
+        [Mood::Adventurous, Mood::Emotional, Mood::Dark]
+    );
+    // The ten most used each well voted, the four least used none: those
+    // four are never Rarely.
+    let ten = votes(
+        &Mood::ALL[..RARELY_MOODS]
+            .iter()
+            .map(|m| (m.id(), 50))
+            .collect::<Vec<_>>(),
+    );
+    assert!(rarely(&ten).is_empty());
+    for (_, title, v) in fixture_books().iter().map(|b| (b.id, &b.title, &b.votes)) {
+        for mood in rarely(v) {
+            assert!(
+                Mood::ALL[..RARELY_MOODS].contains(&mood),
+                "{title}: {mood:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_standout_needs_both_the_share_and_the_lift() {
     // 9 of 100 votes for Relaxing: a lift of about 9, but under 10%.
     let mut pairs = vec![(Mood::Relaxing.id(), 9), (Mood::Adventurous.id(), 91)];
@@ -446,12 +475,10 @@ fn the_name_is_the_most_voted_spelling() {
 #[test]
 fn browse_genres_find_their_spellings() {
     let ids: Vec<i64> = BROWSE_GENRES.iter().map(|g| g.id.get()).collect();
-    assert_eq!(
-        ids,
-        [2, 6, 3, 11, 7, 18, 52, 28, 26, 1, 16, 4, 38, 14, 8, 29]
-    );
+    assert_eq!(ids, [2, 6, 3, 11, 7, 18, 52, 26, 1, 16, 4, 21]);
     assert_eq!(browse_genre("Sci-fi").map(|g| g.id.get()), Some(6));
-    assert_eq!(browse_genre("Non-Fiction").map(|g| g.id.get()), Some(14));
+    assert_eq!(browse_genre("Young-Adult").map(|g| g.id.get()), Some(3));
+    assert_eq!(browse_genre("Nonfiction"), None, "not on the list");
     assert_eq!(browse_genre("fantasy").map(|g| g.name), Some("Fantasy"));
     assert_eq!(browse_genre("Science Fiction & Fantasy"), None);
 }

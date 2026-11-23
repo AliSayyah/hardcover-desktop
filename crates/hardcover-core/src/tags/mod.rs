@@ -35,8 +35,7 @@ pub use genre::{
 
 // ----- thresholds -----
 
-/// A book needs this many votes over the 14 moods for a mood line (and a
-/// Rarely list) at all.
+/// A book needs this many votes over the 14 moods for a mood line at all.
 pub const LINE_MIN_MOOD_VOTES: u32 = 50;
 /// A mood stands out with at least this share of the book's mood votes, in
 /// percent...
@@ -49,6 +48,13 @@ pub const LINE_MAX_MOODS: usize = 3;
 /// A pace is named, and the pace and drive splits are shown, only with at
 /// least this many votes in the group.
 pub const GROUP_MIN_VOTES: u32 = 20;
+/// A book needs this many mood votes for a Rarely list.
+pub const RARELY_MIN_MOOD_VOTES: u32 = 100;
+/// Only the this many most used moods can be Rarely ([`Mood::ALL`]'s first
+/// ten, Adventurous to Hopeful): the four least used (Challenging,
+/// Inspiring, Informative, Relaxing) are rare on most books, so naming
+/// them says nothing.
+pub const RARELY_MOODS: usize = 10;
 /// A mood is Rarely with a lift of at most this many tenths (0.2).
 pub const RARELY_MAX_LIFT_TENTHS: u32 = 2;
 /// Most moods the Rarely list names.
@@ -534,17 +540,19 @@ pub fn has_mood(votes: &BookVotes, mood: Mood) -> bool {
     mood_line(votes).is_some_and(|line| line.moods.contains(&mood))
 }
 
-/// The moods readers rarely pick for a book: a lift of at most 0.2, the
-/// most used on the site first, at most [`RARELY_MAX`]. Empty with fewer
-/// than [`LINE_MIN_MOOD_VOTES`] mood votes. A mood with no votes counts.
+/// The moods readers rarely pick for a book: among the [`RARELY_MOODS`]
+/// most used, those with a lift of at most 0.2, the most used on the site
+/// first, at most [`RARELY_MAX`]. Empty with fewer than
+/// [`RARELY_MIN_MOOD_VOTES`] mood votes. A mood with no votes counts.
 #[must_use]
 pub fn rarely(votes: &BookVotes) -> Vec<Mood> {
     let total = votes.mood_votes();
-    if total < LINE_MIN_MOOD_VOTES {
+    if total < RARELY_MIN_MOOD_VOTES {
         return Vec::new();
     }
-    Mood::ALL
-        .into_iter()
+    Mood::ALL[..RARELY_MOODS]
+        .iter()
+        .copied()
         .filter(|m| {
             // count / total <= 0.2 * site / sum
             u128::from(votes.mood(*m)) * u128::from(SITE_MOOD_VOTES) * 10

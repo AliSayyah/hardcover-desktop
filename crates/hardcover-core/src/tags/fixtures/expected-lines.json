@@ -1,5 +1,5 @@
 {
- "rule": "standout: share>=0.10 of the 14 moods' votes and lift>=1.5 (share / site share), by lift desc, at most 3; fallback top 3 by votes when none; no line under 50 mood votes. pace: fast or slow leads with >=20 pace votes and count*2>=pace total; medium never. rarely: lift<=0.2, by site total desc, at most 3. Ties: break by votes desc then tag id asc.",
+ "rule": "standout: share>=0.10 of the 14 moods' votes and lift>=1.5 (share / site share), by lift desc, at most 3; fallback top 3 by votes when none; no line under 50 mood votes. pace: fast or slow leads with >=20 pace votes and count*2>=pace total; medium never. rarely: only among the ten most used moods (adventurous, emotional, dark, mysterious, tense, funny, reflective, lighthearted, sad, hopeful), lift<=0.2, by site total desc, at most 3, and only when the book has >=100 mood votes. Ties: break by votes desc then tag id asc.",
  "expected": [
   {
    "id": 44186,
@@ -29,11 +29,7 @@
    ],
    "fallback": false,
    "pace": null,
-   "rarely": [
-    "adventurous",
-    "mysterious",
-    "lighthearted"
-   ]
+   "rarely": []
   },
   {
    "id": 98065,
@@ -46,10 +42,7 @@
    ],
    "fallback": false,
    "pace": null,
-   "rarely": [
-    "informative",
-    "relaxing"
-   ]
+   "rarely": []
   },
   {
    "id": 139773,
@@ -61,9 +54,7 @@
    ],
    "fallback": false,
    "pace": "slow",
-   "rarely": [
-    "informative"
-   ]
+   "rarely": []
   },
   {
    "id": 143200,
@@ -92,9 +83,7 @@
    ],
    "fallback": false,
    "pace": null,
-   "rarely": [
-    "informative"
-   ]
+   "rarely": []
   },
   {
    "id": 179241,
@@ -126,8 +115,7 @@
    "pace": null,
    "rarely": [
     "adventurous",
-    "funny",
-    "informative"
+    "funny"
    ]
   },
   {
@@ -159,8 +147,7 @@
    "pace": null,
    "rarely": [
     "funny",
-    "lighthearted",
-    "informative"
+    "lighthearted"
    ]
   },
   {
@@ -174,9 +161,7 @@
    ],
    "fallback": false,
    "pace": null,
-   "rarely": [
-    "informative"
-   ]
+   "rarely": []
   },
   {
    "id": 369692,
@@ -188,9 +173,7 @@
    ],
    "fallback": false,
    "pace": null,
-   "rarely": [
-    "informative"
-   ]
+   "rarely": []
   },
   {
    "id": 373525,
@@ -203,9 +186,7 @@
    "fallback": false,
    "pace": "slow",
    "rarely": [
-    "lighthearted",
-    "informative",
-    "relaxing"
+    "lighthearted"
    ]
   },
   {
@@ -233,9 +214,7 @@
    ],
    "fallback": false,
    "pace": null,
-   "rarely": [
-    "informative"
-   ]
+   "rarely": []
   },
   {
    "id": 379647,
@@ -328,10 +307,7 @@
    ],
    "fallback": false,
    "pace": "slow",
-   "rarely": [
-    "lighthearted",
-    "relaxing"
-   ]
+   "rarely": []
   },
   {
    "id": 427393,
@@ -361,9 +337,7 @@
    "fallback": false,
    "pace": null,
    "rarely": [
-    "lighthearted",
-    "informative",
-    "relaxing"
+    "lighthearted"
    ]
   },
   {
@@ -386,9 +360,7 @@
    ],
    "fallback": false,
    "pace": "fast",
-   "rarely": [
-    "challenging"
-   ]
+   "rarely": []
   },
   {
    "id": 427578,
@@ -417,8 +389,7 @@
    "fallback": false,
    "pace": null,
    "rarely": [
-    "tense",
-    "informative"
+    "tense"
    ]
   },
   {
@@ -514,9 +485,7 @@
    "fallback": false,
    "pace": null,
    "rarely": [
-    "reflective",
-    "informative",
-    "relaxing"
+    "reflective"
    ]
   },
   {
@@ -547,11 +516,7 @@
    ],
    "fallback": false,
    "pace": null,
-   "rarely": [
-    "emotional",
-    "mysterious",
-    "lighthearted"
-   ]
+   "rarely": []
   },
   {
    "id": 2459845,
@@ -566,8 +531,7 @@
    "pace": null,
    "rarely": [
     "dark",
-    "sad",
-    "informative"
+    "sad"
    ]
   }
  ]

@@ -178,7 +178,7 @@ const fn browse(id: i64, name: &'static str) -> BrowseGenre {
 
 /// Discover's Browse list, in its order: Hardcover's genre tags (ids
 /// checked live, 2026-11-23).
-pub const BROWSE_GENRES: [BrowseGenre; 16] = [
+pub const BROWSE_GENRES: [BrowseGenre; 12] = [
     browse(2, "Fantasy"),
     browse(6, "Science Fiction"),
     browse(3, "Young Adult"),
@@ -186,15 +186,11 @@ pub const BROWSE_GENRES: [BrowseGenre; 16] = [
     browse(7, "Mystery"),
     browse(18, "Thriller"),
     browse(52, "Horror"),
-    browse(28, "Historical Fiction"),
     browse(26, "History"),
     browse(1, "Classics"),
     browse(16, "Biography"),
     browse(4, "Adventure"),
-    browse(38, "Humor"),
-    browse(14, "Nonfiction"),
-    browse(8, "Philosophy"),
-    browse(29, "Poetry"),
+    browse(21, "War"),
 ];
 
 /// The Browse genre a genre name is a spelling of, if any: how a genre on a
