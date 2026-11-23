@@ -189,6 +189,9 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             let bundled_fonts = fonts::init(cx);
+            if bundled_fonts {
+                fonts::prewarm(cx);
+            }
             design::theme::init(bundled_fonts, cx);
             bind_keys(cx);
             ui::kit::bind_keys(cx);

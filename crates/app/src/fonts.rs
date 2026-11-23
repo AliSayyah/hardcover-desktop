@@ -37,9 +37,10 @@
 //! `packaging/linux/package.sh`.
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
-use gpui_kit::App;
 use gpui_kit::component::Theme;
+use gpui_kit::{App, FontFallbacks, FontStyle, FontWeight, TextSystem, font};
 
 /// The interface family.
 pub const INTER: &str = "Inter";
@@ -86,6 +87,47 @@ pub fn init(cx: &mut App) -> bool {
     // change keeps it.
     Theme::update(cx, |theme| theme.font_family = INTER.into());
     true
+}
+
+/// Warms the text system's font caches on a thread of its own, while the
+/// window opens (GPUI sets up the GPU there, for a few hundred ms).
+///
+/// The first time a family is shaped at a weight and style, cosmic-text
+/// ranks every installed font against it (`get_font_matches`), opening the
+/// file of each whose weight differs to look for a variable `wght` axis. With
+/// hundreds of system fonts that took a noticeable part of the first frame,
+/// which uses several combinations. Done here, it finds them ranked. Each
+/// font takes the text system's lock on its own, so a frame that needs it
+/// waits for one at most. The most used come first.
+pub fn prewarm(cx: &App) {
+    let text_system: Arc<TextSystem> = cx.text_system().clone();
+    let spawned = std::thread::Builder::new()
+        .name("font-prewarm".into())
+        .spawn(move || {
+            let fallbacks = FontFallbacks::from_fonts(vec![VAZIRMATN.to_owned()]);
+            let normal = FontStyle::Normal;
+            let italic = FontStyle::Italic;
+            let faces = [
+                (INTER, FontWeight::NORMAL, normal),
+                (INTER, FontWeight::MEDIUM, normal),
+                (INTER, FontWeight::SEMIBOLD, normal),
+                (LITERATA_DISPLAY, FontWeight::SEMIBOLD, normal),
+                (LITERATA_TEXT, FontWeight::SEMIBOLD, normal),
+                (LITERATA_TEXT, FontWeight::NORMAL, normal),
+                (INTER, FontWeight::NORMAL, italic),
+                (LITERATA_TEXT, FontWeight::NORMAL, italic),
+            ];
+            for (family, weight, style) in faces {
+                let mut face = font(family);
+                face.weight = weight;
+                face.style = style;
+                face.fallbacks = Some(fallbacks.clone());
+                text_system.prewarm_fonts(&[face]);
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("hardcover: couldn't start warming the fonts: {error}");
+    }
 }
 
 #[cfg(test)]
