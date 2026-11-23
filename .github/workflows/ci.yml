@@ -24,10 +24,15 @@ env:
   # slows compiling and linking and bloats the cache.
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
+# Every job has a time limit, a few times its usual length (more for a cold
+# cache): a network wait that hangs would otherwise hold it for GitHub's six
+# hours, and `just release`, which waits for CI, with it. apt's own waits are
+# bounded in ci/apt-get.sh.
 jobs:
   fmt:
     name: Format
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,6 +45,7 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     # The oldest Ubuntu the release supports, so CI builds what the release builds.
     container: ubuntu:22.04
     steps:
@@ -52,6 +58,7 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     container: ubuntu:22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,6 +71,7 @@ jobs:
   deny:
     name: Dependencies (${{ matrix.checks }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -94,11 +102,12 @@ jobs:
   packaging:
     name: Desktop entry and metainfo
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends desktop-file-utils appstream
+      - run: ci/apt-get.sh install desktop-file-utils appstream
       - run: desktop-file-validate packaging/linux/*.desktop
       - run: appstreamcli validate --no-net packaging/linux/*.metainfo.xml
       - name: Cargo and metainfo versions agree
@@ -107,6 +116,7 @@ jobs:
   installer:
     name: Installer and shell scripts
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -116,12 +126,14 @@ jobs:
       - run: shellcheck install.sh packaging/linux/*.sh ci/*.sh scripts/*.sh
       - name: Test the release script's handling of a flaky network
         run: scripts/release-test.sh
+      - name: Test the bounded apt-get
+        run: ci/apt-get-test.sh
       # The release workflow tests the installer on the tarball it just
       # signed; this tests the download path, against the latest release.
       - name: Install the latest release
         run: |
           # The one library the binary links that the runner image lacks.
-          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-0
+          ci/apt-get.sh install libxkbcommon-x11-0
           home="$RUNNER_TEMP/home"
           # This checkout's installer, through a pipe, as the README's
           # one-liner runs the copy published with the latest release.
@@ -151,6 +163,7 @@ jobs:
   actionlint:
     name: Workflows
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     env:
       ACTIONLINT_VERSION: "1.7.12"
       # From the release's checksums.txt. Update both together.

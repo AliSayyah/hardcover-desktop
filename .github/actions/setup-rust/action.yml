@@ -70,7 +70,7 @@ runs:
           echo "::warning::A build dependency installed zstd, so the package cache is saved with zstd but restored without it, and never hits. See the Install zstd step."
         fi
         # zstd is installed after the package cache is saved; see below.
-        $sudo apt-get install -y -qq --no-install-recommends --download-only zstd
+        ci/apt-get.sh install --download-only zstd
         # Drop packages the archive has replaced, so the cache doesn't grow.
         $sudo apt-get autoclean -qq
         rm -rf "$CACHE"
@@ -93,10 +93,7 @@ runs:
     # so must stay gzip: a cache saved with zstd isn't found without it.
     - name: Install zstd
       shell: bash
-      run: |
-        sudo=
-        if [[ $(id -u) != 0 ]]; then sudo=sudo; fi
-        DEBIAN_FRONTEND=noninteractive $sudo apt-get install -y -qq --no-install-recommends zstd
+      run: ci/apt-get.sh install zstd
 
     - name: Install rustup
       shell: bash
