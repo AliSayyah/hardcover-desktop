@@ -168,6 +168,16 @@ pub const DIALOG_CONFIRM: Rems = rems(24.);
 /// A dialog with a form (30 rem).
 pub const DIALOG_FORM: Rems = rems(30.);
 
+/// The Votes popover's width (`hardcover-design`, Frames and sizes).
+pub const VOTES_POPOVER: Rems = rems(22.5);
+/// A mood's name in the Votes popover, before its meter.
+pub const VOTES_NAME: Rems = rems(6.);
+/// A mood's votes in the Votes popover, after its meter.
+pub const VOTES_COUNT: Rems = rems(3.);
+/// Room the Votes popover leaves the window when it is too short for it,
+/// so it scrolls inside.
+pub const POPOVER_MARGIN: Rems = rems(4.);
+
 /// The 1 px hairline.
 pub const HAIRLINE: Pixels = px(1.);
 /// The focus ring drawn outside a focused row, text or component of the
