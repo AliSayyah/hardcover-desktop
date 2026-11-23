@@ -4,17 +4,23 @@
 //! button to their page), the facts and how many of the books the reader has
 //! read, the description in `prose`, and "Open on Hardcover". The books
 //! follow as catalogue rows.
+//!
+//! On the header's trailing edge: Follow (a pressed "Following" once
+//! followed, which unfollows), and "Add N books to Want to read…" while
+//! whole-numbered books that are out aren't in the library; it asks first.
 
 use std::sync::Arc;
 
 use gpui_kit::ScrollHandle;
+use gpui_kit::component::button::Button;
 use gpui_kit::component::list::ListState;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, IconName, Selectable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, Context, Entity, FocusHandle, IntoElement, ParentElement as _, Render,
     Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
 };
-use hardcover_core::{SeriesDetails, SeriesId};
+use hardcover_core::auth::scopes::{READ_SOCIAL, WRITE_LIBRARY, WRITE_SOCIAL};
+use hardcover_core::{BookId, Date, SeriesDetails, SeriesId};
 
 use super::book_list::{
     CatalogBooks, CatalogRow, ListPane, PageRows, demand, focus_list_if_fallback_is_focused,
@@ -24,13 +30,19 @@ use super::book_list::{
 use super::navigation::Page;
 use crate::bidi::WrappingText;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
-use crate::format::series_position_text;
+use crate::format::{needs_permission, series_position_text};
 use crate::library::model::LibraryModel;
 use crate::resource::{Catalog, Demand, SharedChanged};
+use crate::series::follows::{self, FollowsModel};
+use crate::series::progress::{AddCandidate, books_to_add, is_out};
+use crate::session;
 use crate::ui::{ExternalLink, LoadFailed, PageHeader, Skeleton, TextButton};
+use crate::upcoming::model::UpcomingModel;
 
 pub struct SeriesView {
     model: Entity<LibraryModel>,
+    follows: Entity<FollowsModel>,
+    upcoming: Entity<UpcomingModel>,
     /// The session's catalogue, which holds the pages; `None` once signed
     /// out.
     catalog: Option<Catalog>,
@@ -48,7 +60,13 @@ pub struct SeriesView {
 }
 
 impl SeriesView {
-    pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        model: Entity<LibraryModel>,
+        follows: Entity<FollowsModel>,
+        upcoming: Entity<UpcomingModel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let pane = ListPane::new(model.clone(), window, cx);
         let list = new_list(
             model.clone(),
@@ -58,6 +76,13 @@ impl SeriesView {
             cx,
         );
         let mut subscriptions = follow_list(&list, &model, &pane, window, cx);
+        // Follow and "Add N books…" follow the follows, the books being
+        // added, the books still to come and the grant.
+        subscriptions.extend([
+            cx.observe(&follows, |_, _, cx| cx.notify()),
+            cx.observe(&upcoming, |_, _, cx| cx.notify()),
+            session::observe_grant(cx, |_, cx| cx.notify()),
+        ]);
         let catalog = Catalog::global(cx);
         if let Some(catalog) = &catalog {
             subscriptions.push(cx.subscribe_in(
@@ -72,6 +97,8 @@ impl SeriesView {
         }
         Self {
             model,
+            follows,
+            upcoming,
             catalog,
             current: None,
             focus_when_ready: None,
@@ -194,8 +221,14 @@ impl SeriesView {
                 .iter()
                 .map(|b| model.entry_for_book(b.book.id).map(|e| e.status)),
         );
+        let following = self.follows.read(cx).is_followed(series.id);
+        if following {
+            facts.push("Following".into());
+        }
         let muted = colors(cx).fg_muted;
-        let mut header = PageHeader::new(series.name.clone()).wraps();
+        let mut header = PageHeader::new(series.name.clone())
+            .wraps()
+            .actions(self.render_tools(series, following, cx));
         if let Some(author) = series.author.clone() {
             header = header.under(
                 h_flex()
@@ -236,7 +269,111 @@ impl SeriesView {
     }
 }
 
+/// The books "Add N books to Want to read…" adds, with their titles, and
+/// whether whole-numbered books not out yet are left out.
+fn books_to_add_of(
+    series: &SeriesDetails,
+    library: &LibraryModel,
+    upcoming: &UpcomingModel,
+    today: Date,
+) -> (Vec<(BookId, String)>, bool) {
+    let out = |b: &hardcover_core::BookSummary| {
+        let date = upcoming
+            .books()
+            .iter()
+            .find(|u| u.book.id == b.id)
+            .map(|u| u.release_date);
+        is_out(b.release_year, date, today)
+    };
+    let candidates = || {
+        series.books.iter().map(|b| AddCandidate {
+            book: b.book.id,
+            position: b.position,
+            out: out(&b.book),
+            in_library: library.entry_for_book(b.book.id).is_some(),
+        })
+    };
+    let ids = books_to_add(candidates());
+    let later = candidates()
+        .any(|c| !c.out && !c.in_library && c.position.is_some_and(|p| p.fract() == 0.0));
+    let books = ids
+        .into_iter()
+        .filter_map(|id| {
+            let book = series.books.iter().find(|b| b.book.id == id)?;
+            Some((id, book.book.title.clone()))
+        })
+        .collect();
+    (books, later)
+}
+
 impl SeriesView {
+    /// Follow or Following, and "Add N books to Want to read…".
+    fn render_tools(
+        &self,
+        series: &SeriesDetails,
+        following: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = series.id;
+        let follows = self.follows.read(cx);
+        let known = follows.followed().is_some() && session::has_scope(cx, READ_SOCIAL);
+        let writing = follows.is_writing(id);
+        let adding = follows.is_adding(id);
+        let can_follow = session::has_scope(cx, WRITE_SOCIAL);
+        let can_add = session::has_scope(cx, WRITE_LIBRARY);
+        let today = crate::dates::today();
+        let (books, later) =
+            books_to_add_of(series, self.model.read(cx), self.upcoming.read(cx), today);
+        let name = series.name.clone();
+        let follow = known.then(|| {
+            if following {
+                let name = name.clone();
+                Button::new("series-following")
+                    .selected(true)
+                    .icon(crate::icons::following())
+                    .label("Following")
+                    .loading(writing)
+                    .disabled(writing || !can_follow)
+                    .on_click(move |_, window, cx| follows::unfollow(id, &name, window, cx))
+            } else {
+                Button::new("series-follow")
+                    .icon(crate::icons::follow())
+                    .label("Follow")
+                    .loading(writing)
+                    .disabled(writing || !can_follow)
+                    .when(!can_follow, |this| {
+                        this.tooltip(needs_permission(WRITE_SOCIAL))
+                    })
+                    .on_click(move |_, window, cx| follows::follow(id, window, cx))
+            }
+        });
+        let add = (!books.is_empty() || adding).then(|| {
+            // The last book added leaves nothing to count while it saves.
+            let label = if books.is_empty() {
+                "Adding to Want to read…".to_owned()
+            } else {
+                crate::series::row::add_books_label(books.len())
+            };
+            Button::new("series-add-books")
+                .icon(IconName::Plus)
+                .label(label)
+                .loading(adding)
+                .disabled(adding || !can_add)
+                .when(!can_add, |this| {
+                    this.tooltip(needs_permission(WRITE_LIBRARY))
+                })
+                .on_click(move |_, window, cx| {
+                    follows::confirm_add_books(id, &name, books.clone(), later, window, cx);
+                })
+        });
+        h_flex()
+            .gap_2()
+            .flex_wrap()
+            .children(follow)
+            .children(add)
+            .into_any_element()
+    }
+
     /// The name of a page already loaded this session, for Back's label.
     pub fn name<'a>(&self, id: SeriesId, cx: &'a App) -> Option<&'a str> {
         let series = self
@@ -348,8 +485,10 @@ mod tests {
             session.install(cx);
             Catalog::init(&session, cx);
         });
-        let model = cx.new(|_| LibraryModel::new(session));
-        cx.add_window_view(|window, cx| SeriesView::new(model, window, cx))
+        let model = cx.new(|_| LibraryModel::new(session.clone()));
+        let follows = cx.update(|cx| FollowsModel::init(session.clone(), &model, cx));
+        let upcoming = cx.new(|cx| UpcomingModel::new(session, model.clone(), follows.clone(), cx));
+        cx.add_window_view(|window, cx| SeriesView::new(model, follows, upcoming, window, cx))
     }
 
     fn select(view: &Entity<SeriesView>, row: usize, cx: &mut VisualTestContext) {

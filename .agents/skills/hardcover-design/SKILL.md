@@ -29,10 +29,6 @@ components; this skill tells you *what* to build and how it must look.
   from the same CSS variables as this system. Open it in a browser when you
   need to see a layout. When the mockup and the reference disagree, the
   reference wins; fix the mockup in the same change.
-- [docs/design/tags-discovery-mockup.html](../../../docs/design/tags-discovery-mockup.html):
-  the approved mockup for moods and genres (the mood line, the Votes
-  popover, tag pages, the shelf filter bar), the Discover hub and vibes.
-  It extends the reference mockup; the reference wins here too.
 
 ## The app follows this system
 

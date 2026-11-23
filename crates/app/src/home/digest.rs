@@ -81,7 +81,12 @@ pub struct SeriesNext {
 
 /// `unreleased` holds the books not out yet (see [`is_released`]): "Up next"
 /// suggests only books the reader can start.
-pub fn compute(entries: &[LibraryEntry], today: Date, unreleased: &HashSet<BookId>) -> Digest {
+pub fn compute(
+    entries: &[LibraryEntry],
+    today: Date,
+    unreleased: &HashSet<BookId>,
+    followed: &HashSet<SeriesId>,
+) -> Digest {
     let shelf = |status: ReadingStatus| entries.iter().filter(move |e| e.status == status);
     let released = |e: &LibraryEntry| is_released(e, today, unreleased);
 
@@ -104,7 +109,7 @@ pub fn compute(entries: &[LibraryEntry], today: Date, unreleased: &HashSet<BookI
         })
         .map(|e| e.user_book_id);
 
-    let series_next = series_next(entries, &released);
+    let series_next = series_next(entries, &released, followed);
     let mut want: Vec<&LibraryEntry> = shelf(ReadingStatus::WantToRead).collect();
     want.sort_by(|a, b| {
         b.date_added
@@ -208,6 +213,7 @@ fn idle_days(entry: &LibraryEntry, today: Date) -> Option<i64> {
 fn series_next(
     entries: &[LibraryEntry],
     released: &dyn Fn(&LibraryEntry) -> bool,
+    followed: &HashSet<SeriesId>,
 ) -> Option<SeriesNext> {
     let in_series = |e: &LibraryEntry, series: SeriesId| {
         e.series
@@ -224,6 +230,10 @@ fn series_next(
             let (Some(id), Some(position)) = (series.id, series.position) else {
                 continue;
             };
+            // Only the series the reader follows.
+            if !followed.contains(&id) {
+                continue;
+            }
             let after = entries
                 .iter()
                 .filter(|e| e.status == ReadingStatus::Read)
@@ -352,6 +362,15 @@ mod tests {
     use hardcover_core::{
         BookId, BookSummary, GoalId, ReadId, ReadSession, SeriesRef, Timestamp, UserId,
     };
+
+    /// The digest with every series of `entries` followed.
+    fn compute(entries: &[LibraryEntry], today: Date, unreleased: &HashSet<BookId>) -> Digest {
+        let followed = entries
+            .iter()
+            .flat_map(|e| e.series.iter().filter_map(|s| s.id))
+            .collect();
+        super::compute(entries, today, unreleased, &followed)
+    }
 
     fn day(s: &str) -> Date {
         s.parse().unwrap()
@@ -490,6 +509,26 @@ mod tests {
         assert_eq!(d.reading[0].idle_days, None);
         assert_eq!(d.reading[1].idle_days, Some(8));
         assert_eq!(d.reading[2].idle_days, None, "never updated says nothing");
+    }
+
+    #[test]
+    fn only_followed_series_have_a_next_book() {
+        let one = finished(
+            in_series(entry(1, ReadingStatus::Read, Some(400)), 7, Some(1.0)),
+            "2026-10-12",
+        );
+        let two = in_series(entry(2, ReadingStatus::WantToRead, Some(300)), 7, Some(2.0));
+        let today = day("2026-11-20");
+        let none = super::compute(
+            &[one.clone(), two.clone()],
+            today,
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+        assert_eq!(none.series_next, None);
+        let followed = [SeriesId::new(7)].into();
+        let d = super::compute(&[one, two], today, &HashSet::new(), &followed);
+        assert_eq!(d.series_next.map(|n| n.id.get()), Some(2));
     }
 
     #[test]

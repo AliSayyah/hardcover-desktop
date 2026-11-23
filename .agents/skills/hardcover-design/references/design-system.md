@@ -3,10 +3,8 @@
 The reference for every visible part of the app. The words **must** and
 **never** mark rules. **Should** is the default; a concrete reason is needed
 to depart from it, and the reason belongs in the code comment or the commit.
-The mockup at `docs/design/mockup.html` shows every rule here applied;
-`docs/design/tags-discovery-mockup.html` shows the mood line, the votes, a
-tag's page, the shelf filter bar, Discover and a vibe's page. Where a mockup
-and this file differ, this file wins.
+The mockup at `docs/design/mockup.html` shows every rule here applied. Where
+the mockup and this file differ, this file wins.
 
 ## Thesis
 

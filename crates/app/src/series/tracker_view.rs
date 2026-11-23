@@ -1,6 +1,6 @@
 //! The Series destination (`hardcover-design`, Screens → Series): every
-//! series the reader has started, under its group, each with its books and
-//! the one next step.
+//! series the reader follows, under its group, each with its books and the
+//! one next step.
 //!
 //! - **Column:** inset 32, filling the region. The strip takes the width
 //!   (as many books as fit on a line, `row::strip_capacity`), and the 240
@@ -9,8 +9,10 @@
 //!   opened are kept for the session.
 //! - **Header:** the `page-title` "Series" with
 //!   the shown count, the line under it, and on the trailing edge the text
-//!   filter, the filter select and the sort select (168 each), which wrap
-//!   under the title, and onto a second line, in a narrow window. It sits
+//!   filter, the filter select and the sort select (168 each) and "Add
+//!   series…", which wrap under the title, and onto a second line, in a
+//!   narrow window. Under it, the nudge: the series read lately and not
+//!   followed, with "Add series…" (`progress::nudge`). It sits
 //!   above the list, not in it: it stays put while the list scrolls under
 //!   it, so the filters are always at hand, and scrolling never takes the
 //!   focused filter away. The filter and the sort are kept for the session.
@@ -19,25 +21,23 @@
 //!   item is a row and Tab moves from one to the next (`row::SeriesRow`);
 //!   the other sorts are one list with no labels. A failed reload's line
 //!   sits under the header, above the list, over the series still shown.
-//! - **Hiding:** a row's "more" menu hides its series (kept in the
-//!   preferences, so for good), and a notification says so with Undo; it
-//!   then shows only under the "Hidden" filter, whose rows' menus show it
-//!   again. A row hidden here keeps its place and fades out (`ui::leaving`):
-//!   the list stays as it was while it fades, then closes the gap at once.
+//! - **Unfollowing:** a row's "more" menu unfollows its series, and a
+//!   notification says so with Undo. The row keeps its place and fades out
+//!   (`ui::leaving`): the list stays as it was while it fades, then closes
+//!   the gap at once. The menu also adds the books out and not in the
+//!   library to Want to read, after asking.
 //! - **Foot:** with "Not finished", "1 finished series isn't shown." and a
 //!   small ghost "Show finished", which switches the select to "All series".
 //! - **States:** skeleton rows while the first load runs; a failed load is
 //!   one muted sentence with "Try again" (`ui::LoadFailed`), and the
 //!   library's own failure fills the page when it has never loaded; with no
-//!   series started, the empty state.
+//!   series followed, the empty state with "Add series…".
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{
@@ -49,18 +49,23 @@ use gpui_kit::{
     Size, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, px, rems,
     size as pt_size,
 };
+use hardcover_core::auth::scopes::{WRITE_LIBRARY, WRITE_SOCIAL};
 use hardcover_core::{Date, SeriesId};
 
+use super::follows::{self, FollowsModel};
 use super::model::SeriesModel;
-use super::progress::{Counts, Filter, SeriesSummary, Shown, Sort, counts, hidden_line, sections};
+use super::progress::{
+    Counts, Filter, SeriesSummary, Shown, Sort, counts, hidden_line, nudge, sections, unfollowed,
+};
 use super::row::{
-    OnHide, OnToggle, RowHiding, RowStrip, RowTop, SeriesRow, row_height, skeleton_row,
+    OnSeries, OnToggle, RowActions, RowStrip, RowTop, SeriesRow, row_height, skeleton_row,
     strip_capacity, strip_lines,
 };
+use crate::catalog::navigation::{self, Page};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
-use crate::preferences::AppPreferences;
 use crate::resource::LoadStatus;
+use crate::session;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::leaving::{Leaving, ROW_LEAVE};
@@ -162,7 +167,6 @@ struct ListKey {
     summaries: Rc<Vec<SeriesSummary>>,
     filter: Filter,
     sort: Sort,
-    hidden: BTreeSet<SeriesId>,
     query: String,
     rem: Pixels,
     /// Books a strip's line has room for, and which strips are opened: the
@@ -172,11 +176,11 @@ struct ListKey {
 }
 
 impl ListKey {
-    /// Whether `other` differs only in the series hidden: the same rows,
-    /// some of them hidden or shown again, so a row that leaves fades.
-    fn same_rows_as(&self, other: &Self) -> bool {
+    /// Whether `other` shows the same choices of the same page: only the
+    /// summaries differ (a series unfollowed), so a row that leaves fades.
+    fn same_view_as(&self, other: &Self) -> bool {
         Self {
-            hidden: other.hidden.clone(),
+            summaries: other.summaries.clone(),
             ..self.clone()
         } == *other
     }
@@ -198,7 +202,6 @@ impl PartialEq for ListKey {
         Rc::ptr_eq(&self.summaries, &other.summaries)
             && self.filter == other.filter
             && self.sort == other.sort
-            && self.hidden == other.hidden
             && self.query == other.query
             && self.rem == other.rem
             && self.capacity == other.capacity
@@ -210,6 +213,7 @@ pub struct SeriesTrackerView {
     focus_handle: FocusHandle,
     model: Entity<SeriesModel>,
     library: Entity<LibraryModel>,
+    follows: Entity<FollowsModel>,
     filter_input: Entity<InputState>,
     select: Entity<SelectState<Vec<FilterOption>>>,
     sort_select: Entity<SelectState<Vec<SortOption>>>,
@@ -223,9 +227,14 @@ pub struct SeriesTrackerView {
     counts: Counts,
     scroll: VirtualListScrollHandle,
     list: Option<(ListKey, Rc<Vec<Item>>, ItemSizes)>,
-    /// Rows fading out as they are hidden (`ui::leaving`): while they fade
-    /// the list stays as it was, then it closes the gap at once.
+    /// Rows fading out as they are unfollowed (`ui::leaving`): while they
+    /// fade the list stays as it was, then it closes the gap at once.
     leaving: Leaving<SeriesId>,
+    /// The series unfollowed from here, whose row fades when it leaves.
+    fading: Option<SeriesId>,
+    /// The nudge's line, and what it was worked out from (the library's
+    /// and the follows' revisions, the day).
+    nudge: Option<((u64, u64, Date), Option<SharedString>)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -243,6 +252,7 @@ impl SeriesTrackerView {
         model: Entity<SeriesModel>,
         library: Entity<LibraryModel>,
         upcoming: &Entity<UpcomingModel>,
+        follows: Entity<FollowsModel>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -263,7 +273,6 @@ impl SeriesTrackerView {
                 cx,
             )
         });
-        let preferences = AppPreferences::global(cx).clone();
         let subscriptions = vec![
             cx.observe_in(&model, window, |this, _, window, cx| {
                 this.changed(window, cx);
@@ -274,8 +283,8 @@ impl SeriesTrackerView {
             cx.observe_in(upcoming, window, |this, _, window, cx| {
                 this.changed(window, cx);
             }),
-            // Hiding a series, or showing it again, here or in another window.
-            cx.observe_in(&preferences, window, |this, _, window, cx| {
+            // The follows, and the books being added.
+            cx.observe_in(&follows, window, |this, _, window, cx| {
                 this.changed(window, cx);
             }),
             cx.subscribe_in(
@@ -289,7 +298,8 @@ impl SeriesTrackerView {
                     }
                 },
             ),
-            // The rows' commands follow the grant (`write:library`).
+            // The rows' commands follow the grant (`write:library`,
+            // `write:social`).
             crate::session::observe_grant(cx, |_, cx| cx.notify()),
             cx.subscribe_in(
                 &filter_input,
@@ -317,6 +327,7 @@ impl SeriesTrackerView {
             focus_handle: cx.focus_handle(),
             model,
             library,
+            follows,
             filter_input,
             select,
             sort_select,
@@ -327,6 +338,8 @@ impl SeriesTrackerView {
             scroll: VirtualListScrollHandle::new(),
             list: None,
             leaving: Leaving::default(),
+            fading: None,
+            nudge: None,
             _subscriptions: subscriptions,
         }
     }
@@ -348,16 +361,11 @@ impl SeriesTrackerView {
         self.filter_input.read(cx).value().to_string()
     }
 
-    /// The series the reader hid.
-    fn hidden(cx: &App) -> BTreeSet<SeriesId> {
-        AppPreferences::global(cx).read(cx).hidden_series().clone()
-    }
-
-    /// The data, the text filter or the hidden series changed: the counts in
-    /// the select follow.
+    /// The data or the text filter changed: the counts in the select
+    /// follow.
     fn changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let summaries = self.summaries(cx);
-        let counts = counts(summaries.iter(), &self.query(cx), &Self::hidden(cx));
+        let counts = counts(summaries.iter(), &self.query(cx));
         if counts != self.counts {
             self.counts = counts;
             self.select
@@ -384,43 +392,38 @@ impl SeriesTrackerView {
         cx.notify();
     }
 
-    /// "Hide series" or "Show series again" from a row's menu. The row
-    /// leaves the list, so focus goes to the page; hiding says so with Undo,
-    /// since the series is then out of sight.
-    fn set_hidden(
-        &mut self,
-        id: SeriesId,
-        hide: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let name = self
+    /// "Unfollow series" from a row's menu: the row fades out when the
+    /// follows change, and focus goes to the page.
+    fn unfollow(&mut self, id: SeriesId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(name) = self
             .summaries(cx)
             .iter()
             .find(|s| s.id == id)
-            .map(|s| s.name.clone());
-        let preferences = AppPreferences::global(cx).clone();
-        preferences.update(cx, |p, cx| p.set_series_hidden(id, hide, cx));
-        window.focus(&self.focus_handle, cx);
-        if !hide {
+            .map(|s| s.name.clone())
+        else {
             return;
-        }
-        let note = Notification::new()
-            // One at a time: hiding another series replaces it.
-            .id::<SeriesHidden>()
-            .message(hidden_text(name.as_deref()))
-            .action(move |_, _, cx| {
-                let preferences = preferences.clone();
-                let note = cx.entity().downgrade();
-                Button::new("undo-hide-series")
-                    .label("Undo")
-                    .on_click(move |_, window, cx| {
-                        preferences.update(cx, |p, cx| p.set_series_hidden(id, false, cx));
-                        let _ = note.update(cx, |note, cx| note.dismiss(window, cx));
-                    })
+        };
+        self.fading = Some(id);
+        window.focus(&self.focus_handle, cx);
+        follows::unfollow(id, &name, window, cx);
+    }
+
+    /// "Add N books to Want to read…" from a row's menu: asks first.
+    fn add_books(&mut self, id: SeriesId, window: &mut Window, cx: &mut Context<Self>) {
+        let summaries = self.summaries(cx);
+        let Some(series) = summaries.iter().find(|s| s.id == id) else {
+            return;
+        };
+        let books: Vec<_> = series
+            .books_to_add()
+            .into_iter()
+            .filter_map(|book| {
+                let b = series.books.iter().find(|b| b.book.id == book)?;
+                Some((book, b.book.title.clone()))
             })
-            .autohide(true);
-        window.push_notification(note, cx);
+            .collect();
+        let later = series.books.iter().any(|b| !b.out && b.entry.is_none());
+        follows::confirm_add_books(id, &series.name, books, later, window, cx);
     }
 
     fn retry(&mut self, cx: &mut Context<Self>) {
@@ -441,18 +444,23 @@ impl SeriesTrackerView {
             return (items.clone(), sizes.clone());
         }
         let (items, sizes) = self.build_list(&key);
-        // A row hidden here keeps its place and fades: the list stays as it
-        // was until the fade ends, then closes the gap at once.
+        // A row unfollowed here keeps its place and fades: the list stays as
+        // it was until the fade ends, then closes the gap at once.
         let previous = self.list.take();
-        let animate = !cx.reduce_motion()
-            && previous
-                .as_ref()
-                .is_some_and(|(k, _, _)| k.same_rows_as(&key));
         let old = previous
             .as_ref()
             .map(|(_, items, _)| row_ids(items))
             .unwrap_or_default();
         let new = row_ids(&items);
+        let left = self
+            .fading
+            .filter(|id| old.contains(id) && !new.contains(id))
+            .inspect(|_| self.fading = None);
+        let animate = !cx.reduce_motion()
+            && left.is_some()
+            && previous
+                .as_ref()
+                .is_some_and(|(k, _, _)| k.same_view_as(&key));
         let now = cx.background_executor().now();
         let shown = self.leaving.rows(&old, new.clone(), animate, now);
         if shown.rows != new
@@ -479,14 +487,13 @@ impl SeriesTrackerView {
 
     /// The list's items and their heights for `key`.
     fn build_list(&self, key: &ListKey) -> (Rc<Vec<Item>>, ItemSizes) {
-        let (summaries, query, hidden) = (&key.summaries, key.query.as_str(), &key.hidden);
+        let (summaries, query) = (&key.summaries, key.query.as_str());
         let (rem, capacity) = (key.rem, key.capacity);
         let mut items = Vec::new();
         let shown = Shown {
             filter: self.filter,
             sort: self.sort,
             query,
-            hidden,
         };
         let sections = sections(summaries, shown);
         if sections.is_empty() {
@@ -506,7 +513,7 @@ impl SeriesTrackerView {
             }
         }
         let finished_left_out = if self.filter == Filter::NotFinished {
-            counts(summaries.iter(), query, hidden).finished
+            counts(summaries.iter(), query).finished
         } else {
             0
         };
@@ -541,12 +548,23 @@ impl SeriesTrackerView {
         region_width(window, size::PAGE_INSET)
     }
 
-    fn header(&self, shown: Option<usize>, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The header: the title and its line, then the filters (left out when
+    /// there is nothing to filter) and "Add series…".
+    fn header(
+        &self,
+        shown: Option<usize>,
+        filters: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let muted = colors(cx).fg_muted;
         let title = match shown {
             Some(n) => PageHeader::new("Series").count(n),
             None => PageHeader::new("Series"),
         };
+        let add = Button::new("series-add")
+            .icon(IconName::Plus)
+            .label("Add series…")
+            .on_click(|_, _, cx| navigation::open(Page::AddSeries, cx));
         column()
             .id("series-header")
             .flex_none()
@@ -557,32 +575,36 @@ impl SeriesTrackerView {
                     .items_center()
                     .gap(FILTERS_GAP)
                     .child(
-                        div().flex_1().min_w(TITLE_MIN).child(
-                            title.line("The series you've started, and what's next in each."),
-                        ),
+                        div()
+                            .flex_1()
+                            .min_w(TITLE_MIN)
+                            .child(title.line("The series you follow, and what's next in each.")),
                     )
                     .child(
                         h_flex()
                             .flex_wrap()
                             .gap(BETWEEN_FILTERS)
-                            .child(
-                                div().w(size::SELECT).child(
-                                    Input::new(&self.filter_input)
-                                        .raised_field(false, cx)
-                                        .cleanable(true)
-                                        .prefix(Icon::new(IconName::Search).text_color(muted)),
-                                ),
-                            )
-                            .child(
-                                div()
-                                    .w(size::SELECT)
-                                    .child(Select::new(&self.select).raised_field(false, cx)),
-                            )
-                            .child(
-                                div()
-                                    .w(size::SELECT)
-                                    .child(Select::new(&self.sort_select).raised_field(false, cx)),
-                            ),
+                            .when(filters, |this| {
+                                this.child(
+                                    div().w(size::SELECT).child(
+                                        Input::new(&self.filter_input)
+                                            .raised_field(false, cx)
+                                            .cleanable(true)
+                                            .prefix(Icon::new(IconName::Search).text_color(muted)),
+                                    ),
+                                )
+                                .child(
+                                    div()
+                                        .w(size::SELECT)
+                                        .child(Select::new(&self.select).raised_field(false, cx)),
+                                )
+                                .child(
+                                    div().w(size::SELECT).child(
+                                        Select::new(&self.sort_select).raised_field(false, cx),
+                                    ),
+                                )
+                            })
+                            .child(add),
                     ),
             )
     }
@@ -592,6 +614,47 @@ impl SeriesTrackerView {
         column().pt(FAILED_ABOVE).child(
             LoadFailed::new("series-retry", message)
                 .on_retry(cx.listener(|this, _, _, cx| this.retry(cx))),
+        )
+    }
+
+    /// The nudge under the header: the series read lately and not followed,
+    /// once the follows are known.
+    fn nudge(&mut self, today: Date, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let library = self.library.read(cx);
+        let follows = self.follows.read(cx);
+        follows.followed()?;
+        let key = (library.revision(), follows.revision(), today);
+        let text = match &self.nudge {
+            Some((k, text)) if *k == key => text.clone(),
+            _ => {
+                let text = nudge(&unfollowed(library.entries(), &follows.id_set()), today)
+                    .map(SharedString::from);
+                self.nudge = Some((key, text.clone()));
+                text
+            }
+        }?;
+        Some(
+            column()
+                .pt(FAILED_ABOVE)
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .body()
+                                .text_color(colors(cx).fg_muted)
+                                .child(text),
+                        )
+                        .child(
+                            Button::new("series-nudge-add")
+                                .ghost()
+                                .small_control()
+                                .label("Add series…")
+                                .on_click(|_, _, cx| navigation::open(Page::AddSeries, cx)),
+                        ),
+                )
+                .into_any_element(),
         )
     }
 
@@ -641,25 +704,13 @@ fn nothing_text(filter: Filter, query: &str, counts: Counts) -> String {
         return format!("No series match “{}”.", query.trim());
     }
     match filter {
-        Filter::Hidden => "You haven't hidden a series. Hide one from its menu.".to_owned(),
-        Filter::Finished if counts.hidden > 0 => "No finished series to show.".to_owned(),
-        Filter::Finished => "You haven't finished a series yet.".to_owned(),
-        Filter::All => "Every series you've started is hidden.".to_owned(),
-        Filter::NotFinished if counts.hidden > 0 => {
-            "Every series you've started is finished or hidden.".to_owned()
+        Filter::Finished => "You haven't finished a series you follow yet.".to_owned(),
+        Filter::NotFinished if counts.finished > 0 => {
+            "Every series you follow is finished.".to_owned()
         }
-        Filter::NotFinished => "Every series you've started is finished.".to_owned(),
+        Filter::NotFinished | Filter::All => "You don't follow any series yet.".to_owned(),
     }
 }
-
-/// "“Mistborn” is hidden. It's under Hidden in the filter."
-fn hidden_text(name: Option<&str>) -> String {
-    let what = name.map_or_else(|| "The series".to_owned(), |n| format!("“{n}”"));
-    format!("{what} is hidden. It's under Hidden in the filter.")
-}
-
-/// The notification id of "… is hidden".
-struct SeriesHidden;
 
 /// The page's column: inset on the sides, filling the page.
 fn column() -> gpui_kit::Div {
@@ -671,7 +722,7 @@ impl Render for SeriesTrackerView {
         let today = Self::today();
         let summaries = self.summaries(cx);
         let model = self.model.read(cx);
-        let status = model.status();
+        let status = model.status(cx);
         let loaded = model.is_loaded();
         let query = self.query(cx);
         let root = div()
@@ -685,7 +736,7 @@ impl Render for SeriesTrackerView {
 
         if let Some(message) = self.library.read(cx).load_failure().cloned() {
             return root
-                .child(self.header(None, cx))
+                .child(self.header(None, false, cx))
                 .child(div().flex_1().min_h_0().child(crate::library::load_failed(
                     "series-library-retry",
                     &self.library,
@@ -702,14 +753,20 @@ impl Render for SeriesTrackerView {
                     .pt_6()
                     .children((0..SKELETON_ROWS).map(|_| skeleton_row()))
                     .into_any_element(),
-                _ => EmptyState::new(crate::icons::library(), "No series yet")
-                    .description(
-                        "When you read a book that belongs to a series, the series shows here with what comes next.",
+                _ => EmptyState::new(crate::icons::library(), "You don't follow any series")
+                    .description("Follow a series to see where you are in it and what comes next.")
+                    .action(
+                        Button::new("series-empty-add")
+                            .icon(IconName::Plus)
+                            .label("Add series…")
+                            .on_click(|_, _, cx| navigation::open(Page::AddSeries, cx)),
                     )
                     .into_any_element(),
             };
+            let nudge = if loaded { self.nudge(today, cx) } else { None };
             return root
-                .child(self.header(None, cx))
+                .child(self.header(None, false, cx))
+                .children(nudge)
                 .child(div().flex_1().min_h_0().flex().flex_col().child(body))
                 .into_any_element();
         }
@@ -719,12 +776,10 @@ impl Render for SeriesTrackerView {
             _ => None,
         };
         let capacity = strip_capacity(column_width, rem);
-        let hidden = Self::hidden(cx);
         let key = ListKey {
             summaries: summaries.clone(),
             filter: self.filter,
             sort: self.sort,
-            hidden: hidden.clone(),
             query: query.clone(),
             rem,
             capacity,
@@ -741,10 +796,22 @@ impl Render for SeriesTrackerView {
                 view.update(cx, |this, cx| this.toggle(id, cx)).ok();
             }
         });
-        let on_hide: OnHide = Rc::new(move |id, hide, window, cx| {
-            view.update(cx, |this, cx| this.set_hidden(id, hide, window, cx))
+        let on_unfollow: OnSeries = Rc::new({
+            let view = view.clone();
+            move |id, window, cx| {
+                view.update(cx, |this, cx| this.unfollow(id, window, cx))
+                    .ok();
+            }
+        });
+        let on_add: OnSeries = Rc::new(move |id, window, cx| {
+            view.update(cx, |this, cx| this.add_books(id, window, cx))
                 .ok();
         });
+        let (can_unfollow, can_add) = (
+            session::has_scope(cx, WRITE_SOCIAL),
+            session::has_scope(cx, WRITE_LIBRARY),
+        );
+        let follows = self.follows.clone();
         let scroll = self.scroll.base_handle().clone();
         let list = v_virtual_list(
             cx.entity(),
@@ -772,9 +839,12 @@ impl Render for SeriesTrackerView {
                                     open: opened.contains(&series.id),
                                     on_toggle: on_toggle.clone(),
                                 },
-                                RowHiding {
-                                    hidden: hidden.contains(&series.id),
-                                    on_hide: on_hide.clone(),
+                                RowActions {
+                                    on_unfollow: on_unfollow.clone(),
+                                    can_unfollow,
+                                    on_add: on_add.clone(),
+                                    can_add,
+                                    adding: follows.read(cx).is_adding(series.id),
                                 },
                                 scroll.clone(),
                             ))
@@ -787,8 +857,10 @@ impl Render for SeriesTrackerView {
         .track_scroll(&self.scroll)
         .size_full();
 
-        root.child(self.header(Some(shown), cx))
+        let nudge = self.nudge(today, cx);
+        root.child(self.header(Some(shown), true, cx))
             .children(failed.map(|message| Self::failed(message, cx)))
+            .children(nudge)
             .child(
                 div()
                     .flex_1()
@@ -810,7 +882,6 @@ mod tests {
             summaries: summaries.clone(),
             filter: Filter::default(),
             sort: Sort::default(),
-            hidden: BTreeSet::new(),
             query: String::new(),
             rem: px(16.),
             capacity: 12,
@@ -826,53 +897,36 @@ mod tests {
         // Worked out afresh (a sync, a day): built again, wherever the new
         // summaries were allocated.
         assert!(key(&first) != key(&again));
-        // Another sort, or a series hidden: built again.
+        // Another sort: built again.
         let sorted = ListKey {
             sort: Sort::Name,
             ..key(&first)
         };
         assert!(sorted != key(&first));
-        let hid = ListKey {
-            hidden: [SeriesId::new(1)].into(),
-            ..key(&first)
-        };
-        assert!(hid != key(&first));
-        // Only hiding keeps the rows (so a hidden row fades); a sort doesn't.
-        assert!(key(&first).same_rows_as(&hid));
-        assert!(!key(&first).same_rows_as(&sorted));
-        assert!(!key(&first).same_rows_as(&key(&again)));
+        // Only new summaries keep the view (so an unfollowed row fades); a
+        // sort doesn't.
+        assert!(key(&first).same_view_as(&key(&again)));
+        assert!(!key(&first).same_view_as(&sorted));
     }
 
     #[test]
     fn the_empty_line_says_why() {
         let none = Counts::default();
-        let some_hidden = Counts {
-            hidden: 2,
+        let finished = Counts {
+            finished: 2,
             ..Counts::default()
         };
         assert_eq!(
-            nothing_text(Filter::NotFinished, "", some_hidden),
-            "Every series you've started is finished or hidden."
+            nothing_text(Filter::NotFinished, "", finished),
+            "Every series you follow is finished."
         );
         assert_eq!(
-            nothing_text(Filter::NotFinished, "", none),
-            "Every series you've started is finished."
-        );
-        assert_eq!(
-            nothing_text(Filter::Hidden, " ", none),
-            "You haven't hidden a series. Hide one from its menu."
-        );
-        assert_eq!(
-            nothing_text(Filter::All, "", some_hidden),
-            "Every series you've started is hidden."
+            nothing_text(Filter::Finished, " ", none),
+            "You haven't finished a series you follow yet."
         );
         assert_eq!(
             nothing_text(Filter::All, "dune", none),
             "No series match “dune”."
-        );
-        assert_eq!(
-            hidden_text(Some("Mistborn")),
-            "“Mistborn” is hidden. It's under Hidden in the filter."
         );
     }
 }
