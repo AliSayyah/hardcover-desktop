@@ -9,13 +9,21 @@
 //!   opened are kept for the session.
 //! - **Header:** the `page-title` "Series" with
 //!   the shown count, the line under it, and on the trailing edge the text
-//!   filter and the filter select (168 each). It sits above the list, not
-//!   in it: it stays put while the list scrolls under it, so the filters are
-//!   always at hand, and scrolling never takes the focused filter away.
-//! - **List:** a virtual list (about 200 series in a large library): each
-//!   group's label rides on its first row, so every item is a row and Tab
-//!   moves from one to the next (`row::SeriesRow`). A failed reload's line
+//!   filter, the filter select and the sort select (168 each), which wrap
+//!   under the title, and onto a second line, in a narrow window. It sits
+//!   above the list, not in it: it stays put while the list scrolls under
+//!   it, so the filters are always at hand, and scrolling never takes the
+//!   focused filter away. The filter and the sort are kept for the session.
+//! - **List:** a virtual list (about 200 series in a large library): with
+//!   the "Status" sort each group's label rides on its first row, so every
+//!   item is a row and Tab moves from one to the next (`row::SeriesRow`);
+//!   the other sorts are one list with no labels. A failed reload's line
 //!   sits under the header, above the list, over the series still shown.
+//! - **Hiding:** a row's "more" menu hides its series (kept in the
+//!   preferences, so for good), and a notification says so with Undo; it
+//!   then shows only under the "Hidden" filter, whose rows' menus show it
+//!   again. A row hidden here keeps its place and fades out (`ui::leaving`):
+//!   the list stays as it was while it fades, then closes the gap at once.
 //! - **Foot:** with "Not finished", "1 finished series isn't shown." and a
 //!   small ghost "Show finished", which switches the select to "All series".
 //! - **States:** skeleton rows while the first load runs; a failed load is
@@ -23,11 +31,13 @@
 //!   library's own failure fills the page when it has never loaded; with no
 //!   series started, the empty state.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::rc::Rc;
 
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{
@@ -36,20 +46,24 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Rems, Render, SharedString,
-    Size, Styled as _, Subscription, Window, div, px, rems, size as pt_size,
+    Size, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, px, rems,
+    size as pt_size,
 };
 use hardcover_core::{Date, SeriesId};
 
 use super::model::SeriesModel;
-use super::progress::{Counts, Filter, Group, SeriesSummary, counts, grouped, hidden_line};
+use super::progress::{Counts, Filter, SeriesSummary, Shown, Sort, counts, hidden_line, sections};
 use super::row::{
-    OnToggle, RowStrip, SeriesRow, row_height, skeleton_row, strip_capacity, strip_lines,
+    OnHide, OnToggle, RowHiding, RowStrip, RowTop, SeriesRow, row_height, skeleton_row,
+    strip_capacity, strip_lines,
 };
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
+use crate::preferences::AppPreferences;
 use crate::resource::LoadStatus;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
+use crate::ui::leaving::{Leaving, ROW_LEAVE};
 use crate::ui::{EmptyState, LoadFailed, PageHeader, region_width};
 use crate::upcoming::model::UpcomingModel;
 
@@ -102,6 +116,22 @@ impl SelectItem for FilterOption {
     }
 }
 
+/// One choice of the sort select.
+#[derive(Clone)]
+struct SortOption(Sort);
+
+impl SelectItem for SortOption {
+    type Value = Sort;
+
+    fn title(&self) -> SharedString {
+        self.0.label().into()
+    }
+
+    fn value(&self) -> &Sort {
+        &self.0
+    }
+}
+
 fn options(counts: Counts) -> Vec<FilterOption> {
     Filter::ALL
         .into_iter()
@@ -117,8 +147,9 @@ fn options(counts: Counts) -> Vec<FilterOption> {
 enum Item {
     /// The filters leave no series.
     Nothing,
-    /// A series, with its group's label and count when it is the first.
-    Row(SeriesSummary, Option<(Group, usize)>),
+    /// A series, with what sits over it: its group's label and count when
+    /// it is the first of a group.
+    Row(SeriesSummary, RowTop),
     /// The foot: the finished series left out, or just the page's bottom
     /// inset.
     Foot { hidden: usize },
@@ -130,6 +161,8 @@ enum Item {
 struct ListKey {
     summaries: Rc<Vec<SeriesSummary>>,
     filter: Filter,
+    sort: Sort,
+    hidden: BTreeSet<SeriesId>,
     query: String,
     rem: Pixels,
     /// Books a strip's line has room for, and which strips are opened: the
@@ -138,10 +171,34 @@ struct ListKey {
     opened: Rc<HashSet<SeriesId>>,
 }
 
+impl ListKey {
+    /// Whether `other` differs only in the series hidden: the same rows,
+    /// some of them hidden or shown again, so a row that leaves fades.
+    fn same_rows_as(&self, other: &Self) -> bool {
+        Self {
+            hidden: other.hidden.clone(),
+            ..self.clone()
+        } == *other
+    }
+}
+
+/// The series rows among a list's items, in order.
+fn row_ids(items: &[Item]) -> Vec<SeriesId> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Row(series, _) => Some(series.id),
+            _ => None,
+        })
+        .collect()
+}
+
 impl PartialEq for ListKey {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.summaries, &other.summaries)
             && self.filter == other.filter
+            && self.sort == other.sort
+            && self.hidden == other.hidden
             && self.query == other.query
             && self.rem == other.rem
             && self.capacity == other.capacity
@@ -155,14 +212,20 @@ pub struct SeriesTrackerView {
     library: Entity<LibraryModel>,
     filter_input: Entity<InputState>,
     select: Entity<SelectState<Vec<FilterOption>>>,
+    sort_select: Entity<SelectState<Vec<SortOption>>>,
     /// The select's choice, kept for the session.
     filter: Filter,
+    /// The sort select's choice, kept for the session.
+    sort: Sort,
     /// The series whose strips show every book, kept for the session. A new
     /// set on every change.
     opened: Rc<HashSet<SeriesId>>,
     counts: Counts,
     scroll: VirtualListScrollHandle,
     list: Option<(ListKey, Rc<Vec<Item>>, ItemSizes)>,
+    /// Rows fading out as they are hidden (`ui::leaving`): while they fade
+    /// the list stays as it was, then it closes the gap at once.
+    leaving: Leaving<SeriesId>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -192,6 +255,15 @@ impl SeriesTrackerView {
                 cx,
             )
         });
+        let sort_select = cx.new(|cx| {
+            SelectState::new(
+                Sort::ALL.map(SortOption).to_vec(),
+                Some(IndexPath::new(0)),
+                window,
+                cx,
+            )
+        });
+        let preferences = AppPreferences::global(cx).clone();
         let subscriptions = vec![
             cx.observe_in(&model, window, |this, _, window, cx| {
                 this.changed(window, cx);
@@ -202,6 +274,21 @@ impl SeriesTrackerView {
             cx.observe_in(upcoming, window, |this, _, window, cx| {
                 this.changed(window, cx);
             }),
+            // Hiding a series, or showing it again, here or in another window.
+            cx.observe_in(&preferences, window, |this, _, window, cx| {
+                this.changed(window, cx);
+            }),
+            cx.subscribe_in(
+                &sort_select,
+                window,
+                |this, _, event: &SelectEvent<Vec<SortOption>>, _, cx| {
+                    if let SelectEvent::Confirm(Some(sort)) = event {
+                        this.sort = *sort;
+                        this.scroll.set_offset(gpui_kit::point(px(0.), px(0.)));
+                        cx.notify();
+                    }
+                },
+            ),
             // The rows' commands follow the grant (`write:library`).
             crate::session::observe_grant(cx, |_, cx| cx.notify()),
             cx.subscribe_in(
@@ -232,11 +319,14 @@ impl SeriesTrackerView {
             library,
             filter_input,
             select,
+            sort_select,
             filter: Filter::default(),
+            sort: Sort::default(),
             opened: Rc::default(),
             counts: Counts::default(),
             scroll: VirtualListScrollHandle::new(),
             list: None,
+            leaving: Leaving::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -258,10 +348,16 @@ impl SeriesTrackerView {
         self.filter_input.read(cx).value().to_string()
     }
 
-    /// The data or the text filter changed: the counts in the select follow.
+    /// The series the reader hid.
+    fn hidden(cx: &App) -> BTreeSet<SeriesId> {
+        AppPreferences::global(cx).read(cx).hidden_series().clone()
+    }
+
+    /// The data, the text filter or the hidden series changed: the counts in
+    /// the select follow.
     fn changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let summaries = self.summaries(cx);
-        let counts = counts(summaries.iter(), &self.query(cx));
+        let counts = counts(summaries.iter(), &self.query(cx), &Self::hidden(cx));
         if counts != self.counts {
             self.counts = counts;
             self.select
@@ -288,6 +384,45 @@ impl SeriesTrackerView {
         cx.notify();
     }
 
+    /// "Hide series" or "Show series again" from a row's menu. The row
+    /// leaves the list, so focus goes to the page; hiding says so with Undo,
+    /// since the series is then out of sight.
+    fn set_hidden(
+        &mut self,
+        id: SeriesId,
+        hide: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let name = self
+            .summaries(cx)
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.name.clone());
+        let preferences = AppPreferences::global(cx).clone();
+        preferences.update(cx, |p, cx| p.set_series_hidden(id, hide, cx));
+        window.focus(&self.focus_handle, cx);
+        if !hide {
+            return;
+        }
+        let note = Notification::new()
+            // One at a time: hiding another series replaces it.
+            .id::<SeriesHidden>()
+            .message(hidden_text(name.as_deref()))
+            .action(move |_, _, cx| {
+                let preferences = preferences.clone();
+                let note = cx.entity().downgrade();
+                Button::new("undo-hide-series")
+                    .label("Undo")
+                    .on_click(move |_, window, cx| {
+                        preferences.update(cx, |p, cx| p.set_series_hidden(id, false, cx));
+                        let _ = note.update(cx, |note, cx| note.dismiss(window, cx));
+                    })
+            })
+            .autohide(true);
+        window.push_notification(note, cx);
+    }
+
     fn retry(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, SeriesModel::load);
     }
@@ -296,51 +431,95 @@ impl SeriesTrackerView {
     /// changes.
     fn list(
         &mut self,
-        summaries: &Rc<Vec<SeriesSummary>>,
-        query: &str,
-        rem: Pixels,
-        capacity: usize,
+        key: ListKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> (Rc<Vec<Item>>, Rc<Vec<Size<Pixels>>>) {
-        let key = ListKey {
-            summaries: summaries.clone(),
-            filter: self.filter,
-            query: query.to_owned(),
-            rem,
-            capacity,
-            opened: self.opened.clone(),
-        };
         if let Some((k, items, sizes)) = &self.list
             && *k == key
         {
             return (items.clone(), sizes.clone());
         }
+        let (items, sizes) = self.build_list(&key);
+        // A row hidden here keeps its place and fades: the list stays as it
+        // was until the fade ends, then closes the gap at once.
+        let previous = self.list.take();
+        let animate = !cx.reduce_motion()
+            && previous
+                .as_ref()
+                .is_some_and(|(k, _, _)| k.same_rows_as(&key));
+        let old = previous
+            .as_ref()
+            .map(|(_, items, _)| row_ids(items))
+            .unwrap_or_default();
+        let new = row_ids(&items);
+        let now = cx.background_executor().now();
+        let shown = self.leaving.rows(&old, new.clone(), animate, now);
+        if shown.rows != new
+            && let Some((_, old_items, old_sizes)) = previous
+        {
+            if shown.started {
+                cx.spawn_in(window, async move |this, cx| {
+                    cx.background_executor().timer(ROW_LEAVE).await;
+                    this.update(cx, |this, cx| {
+                        // Built again, without the rows that faded.
+                        this.list = None;
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            self.list = Some((key, old_items.clone(), old_sizes.clone()));
+            return (old_items, old_sizes);
+        }
+        self.list = Some((key, items.clone(), sizes.clone()));
+        (items, sizes)
+    }
+
+    /// The list's items and their heights for `key`.
+    fn build_list(&self, key: &ListKey) -> (Rc<Vec<Item>>, ItemSizes) {
+        let (summaries, query, hidden) = (&key.summaries, key.query.as_str(), &key.hidden);
+        let (rem, capacity) = (key.rem, key.capacity);
         let mut items = Vec::new();
-        let groups = grouped(summaries, self.filter, query);
-        if groups.is_empty() {
+        let shown = Shown {
+            filter: self.filter,
+            sort: self.sort,
+            query,
+            hidden,
+        };
+        let sections = sections(summaries, shown);
+        if sections.is_empty() {
             items.push(Item::Nothing);
         }
-        for (group, rows) in groups {
+        for (group, rows) in sections {
             let count = rows.len();
             for (ix, series) in rows.into_iter().enumerate() {
-                items.push(Item::Row(
-                    series.clone(),
-                    (ix == 0).then_some((group, count)),
-                ));
+                let top = match group {
+                    Some(group) if ix == 0 => RowTop::Label(group, count),
+                    // The first row of a list without groups sits right
+                    // under the header.
+                    None if ix == 0 => RowTop::Bare,
+                    _ => RowTop::Hairline,
+                };
+                items.push(Item::Row(series.clone(), top));
             }
         }
-        let hidden = if self.filter == Filter::NotFinished {
-            counts(summaries.iter(), query).finished
+        let finished_left_out = if self.filter == Filter::NotFinished {
+            counts(summaries.iter(), query, hidden).finished
         } else {
             0
         };
-        items.push(Item::Foot { hidden });
+        items.push(Item::Foot {
+            hidden: finished_left_out,
+        });
         let sizes: Vec<Size<Pixels>> = items
             .iter()
             .map(|item| {
                 let height = match item {
                     Item::Nothing => (LINE_ABOVE + TypeRole::Body.line_height()).to_pixels(rem),
-                    Item::Row(series, label) => row_height(
-                        label.is_some(),
+                    Item::Row(series, top) => row_height(
+                        *top,
                         strip_lines(series, capacity, self.opened.contains(&series.id)),
                         rem,
                     ),
@@ -353,9 +532,7 @@ impl SeriesTrackerView {
                 pt_size(px(0.), height)
             })
             .collect();
-        let (items, sizes) = (Rc::new(items), Rc::new(sizes));
-        self.list = Some((key, items.clone(), sizes.clone()));
-        (items, sizes)
+        (Rc::new(items), Rc::new(sizes))
     }
 
     /// The width the column gets: the window less the sidebar and the
@@ -386,7 +563,7 @@ impl SeriesTrackerView {
                     )
                     .child(
                         h_flex()
-                            .flex_none()
+                            .flex_wrap()
                             .gap(BETWEEN_FILTERS)
                             .child(
                                 div().w(size::SELECT).child(
@@ -400,6 +577,11 @@ impl SeriesTrackerView {
                                 div()
                                     .w(size::SELECT)
                                     .child(Select::new(&self.select).raised_field(false, cx)),
+                            )
+                            .child(
+                                div()
+                                    .w(size::SELECT)
+                                    .child(Select::new(&self.sort_select).raised_field(false, cx)),
                             ),
                     ),
             )
@@ -443,13 +625,7 @@ impl SeriesTrackerView {
 
     /// One muted line where the rows would be, when the filters leave none.
     fn nothing_shown(&self, query: &str, cx: &App) -> impl IntoElement {
-        let text = if !query.trim().is_empty() {
-            format!("No series match “{}”.", query.trim())
-        } else if self.filter == Filter::Finished {
-            "You haven't finished a series yet.".to_owned()
-        } else {
-            "Every series you've started is finished.".to_owned()
-        };
+        let text = nothing_text(self.filter, query, self.counts);
         div()
             .pt(LINE_ABOVE)
             .body()
@@ -457,6 +633,33 @@ impl SeriesTrackerView {
             .child(text)
     }
 }
+
+/// The line where the rows would be, when the filters leave none. `counts`
+/// are the select's (the same text filter).
+fn nothing_text(filter: Filter, query: &str, counts: Counts) -> String {
+    if !query.trim().is_empty() {
+        return format!("No series match “{}”.", query.trim());
+    }
+    match filter {
+        Filter::Hidden => "You haven't hidden a series. Hide one from its menu.".to_owned(),
+        Filter::Finished if counts.hidden > 0 => "No finished series to show.".to_owned(),
+        Filter::Finished => "You haven't finished a series yet.".to_owned(),
+        Filter::All => "Every series you've started is hidden.".to_owned(),
+        Filter::NotFinished if counts.hidden > 0 => {
+            "Every series you've started is finished or hidden.".to_owned()
+        }
+        Filter::NotFinished => "Every series you've started is finished.".to_owned(),
+    }
+}
+
+/// "“Mistborn” is hidden. It's under Hidden in the filter."
+fn hidden_text(name: Option<&str>) -> String {
+    let what = name.map_or_else(|| "The series".to_owned(), |n| format!("“{n}”"));
+    format!("{what} is hidden. It's under Hidden in the filter.")
+}
+
+/// The notification id of "… is hidden".
+struct SeriesHidden;
 
 /// The page's column: inset on the sides, filling the page.
 fn column() -> gpui_kit::Div {
@@ -516,35 +719,62 @@ impl Render for SeriesTrackerView {
             _ => None,
         };
         let capacity = strip_capacity(column_width, rem);
-        let (items, sizes) = self.list(&summaries, &query, rem, capacity);
+        let hidden = Self::hidden(cx);
+        let key = ListKey {
+            summaries: summaries.clone(),
+            filter: self.filter,
+            sort: self.sort,
+            hidden: hidden.clone(),
+            query: query.clone(),
+            rem,
+            capacity,
+            opened: self.opened.clone(),
+        };
+        let (items, sizes) = self.list(key, window, cx);
         let shown = items.iter().filter(|i| matches!(i, Item::Row(..))).count();
         let library = self.library.clone();
         let opened = self.opened.clone();
         let view = cx.entity().downgrade();
-        let on_toggle: OnToggle = Rc::new(move |id, _, cx| {
-            view.update(cx, |this, cx| this.toggle(id, cx)).ok();
+        let on_toggle: OnToggle = Rc::new({
+            let view = view.clone();
+            move |id, _, cx| {
+                view.update(cx, |this, cx| this.toggle(id, cx)).ok();
+            }
+        });
+        let on_hide: OnHide = Rc::new(move |id, hide, window, cx| {
+            view.update(cx, |this, cx| this.set_hidden(id, hide, window, cx))
+                .ok();
         });
         let scroll = self.scroll.base_handle().clone();
         let list = v_virtual_list(
             cx.entity(),
             "series-list",
             sizes,
-            move |this, range, _, cx| {
+            move |this, range, window, cx| {
+                let now = cx.background_executor().now();
                 range
                     .map(|ix| match &items[ix] {
                         Item::Nothing => column()
                             .child(this.nothing_shown(&query, cx))
                             .into_any_element(),
-                        Item::Row(series, label) => column()
+                        Item::Row(series, top) => column()
+                            .when_some(this.leaving.opacity(&series.id, now), |row, opacity| {
+                                window.request_animation_frame();
+                                row.opacity(opacity)
+                            })
                             .child(SeriesRow::new(
                                 series.clone(),
-                                *label,
+                                *top,
                                 library.clone(),
                                 today,
                                 RowStrip {
                                     capacity,
                                     open: opened.contains(&series.id),
                                     on_toggle: on_toggle.clone(),
+                                },
+                                RowHiding {
+                                    hidden: hidden.contains(&series.id),
+                                    on_hide: on_hide.clone(),
                                 },
                                 scroll.clone(),
                             ))
@@ -579,6 +809,8 @@ mod tests {
         ListKey {
             summaries: summaries.clone(),
             filter: Filter::default(),
+            sort: Sort::default(),
+            hidden: BTreeSet::new(),
             query: String::new(),
             rem: px(16.),
             capacity: 12,
@@ -594,5 +826,53 @@ mod tests {
         // Worked out afresh (a sync, a day): built again, wherever the new
         // summaries were allocated.
         assert!(key(&first) != key(&again));
+        // Another sort, or a series hidden: built again.
+        let sorted = ListKey {
+            sort: Sort::Name,
+            ..key(&first)
+        };
+        assert!(sorted != key(&first));
+        let hid = ListKey {
+            hidden: [SeriesId::new(1)].into(),
+            ..key(&first)
+        };
+        assert!(hid != key(&first));
+        // Only hiding keeps the rows (so a hidden row fades); a sort doesn't.
+        assert!(key(&first).same_rows_as(&hid));
+        assert!(!key(&first).same_rows_as(&sorted));
+        assert!(!key(&first).same_rows_as(&key(&again)));
+    }
+
+    #[test]
+    fn the_empty_line_says_why() {
+        let none = Counts::default();
+        let some_hidden = Counts {
+            hidden: 2,
+            ..Counts::default()
+        };
+        assert_eq!(
+            nothing_text(Filter::NotFinished, "", some_hidden),
+            "Every series you've started is finished or hidden."
+        );
+        assert_eq!(
+            nothing_text(Filter::NotFinished, "", none),
+            "Every series you've started is finished."
+        );
+        assert_eq!(
+            nothing_text(Filter::Hidden, " ", none),
+            "You haven't hidden a series. Hide one from its menu."
+        );
+        assert_eq!(
+            nothing_text(Filter::All, "", some_hidden),
+            "Every series you've started is hidden."
+        );
+        assert_eq!(
+            nothing_text(Filter::All, "dune", none),
+            "No series match “dune”."
+        );
+        assert_eq!(
+            hidden_text(Some("Mistborn")),
+            "“Mistborn” is hidden. It's under Hidden in the filter."
+        );
     }
 }

@@ -1,5 +1,7 @@
 //! The user's preferences, a small JSON file at
 //! `$XDG_CONFIG_HOME/hardcover-desktop/settings.json` that survives signing out.
+//! Besides the Settings dialog's choices it keeps the series hidden from the
+//! Series page: Hardcover has no such thing, so this file is their only copy.
 //!
 //! Reading never fails: a missing, unreadable or garbled file gives the
 //! defaults. Each field is read on its own: one the file lacks (an older
@@ -8,6 +10,7 @@
 //! temporary file that is renamed into place, so a crash never leaves half a
 //! file.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -17,7 +20,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
-use crate::Result;
+use crate::{Result, SeriesId};
 
 const PREFERENCES_FILE: &str = "settings.json";
 
@@ -39,6 +42,8 @@ pub struct Preferences {
     pub theme: ThemePreference,
     /// Check GitHub for new releases on start and every few hours.
     pub automatic_update_checks: bool,
+    /// The series hidden from the Series page ("Hide series"), kept sorted.
+    pub hidden_series: BTreeSet<SeriesId>,
 }
 
 impl Default for Preferences {
@@ -46,6 +51,7 @@ impl Default for Preferences {
         Self {
             theme: ThemePreference::System,
             automatic_update_checks: true,
+            hidden_series: BTreeSet::new(),
         }
     }
 }
@@ -61,6 +67,7 @@ impl<'de> Deserialize<'de> for Preferences {
                 "automatic_update_checks",
                 defaults.automatic_update_checks,
             ),
+            hidden_series: field(&map, "hidden_series", defaults.hidden_series),
         })
     }
 }
@@ -185,6 +192,7 @@ mod tests {
             Preferences {
                 theme: ThemePreference::System,
                 automatic_update_checks: false,
+                ..Preferences::default()
             }
         );
         fs::write(
@@ -197,6 +205,7 @@ mod tests {
             Preferences {
                 theme: ThemePreference::Dark,
                 automatic_update_checks: true,
+                ..Preferences::default()
             }
         );
     }
@@ -211,6 +220,7 @@ mod tests {
             Preferences {
                 theme: ThemePreference::Dark,
                 automatic_update_checks: true,
+                ..Preferences::default()
             }
         );
     }
@@ -222,6 +232,7 @@ mod tests {
         let prefs = Preferences {
             theme: ThemePreference::Light,
             automatic_update_checks: false,
+            hidden_series: [SeriesId::new(7), SeriesId::new(3)].into(),
         };
         prefs.save(&path).unwrap();
         assert_eq!(Preferences::load(&path), prefs);
@@ -230,5 +241,24 @@ mod tests {
         assert_eq!(Preferences::load(&path), Preferences::default());
         let entries = fs::read_dir(path.parent().unwrap()).unwrap().count();
         assert_eq!(entries, 1);
+    }
+
+    /// The hidden series survive a save, and a garbled list resets only
+    /// itself.
+    #[test]
+    fn hidden_series_are_kept_and_a_bad_list_resets_only_itself() {
+        let dir = temp();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, br#"{"theme": "dark", "hidden_series": [12, 4, 12]}"#).unwrap();
+        let loaded = Preferences::load(&path);
+        assert_eq!(loaded.theme, ThemePreference::Dark);
+        assert_eq!(
+            loaded.hidden_series.into_iter().collect::<Vec<_>>(),
+            [SeriesId::new(4), SeriesId::new(12)]
+        );
+        fs::write(&path, br#"{"theme": "dark", "hidden_series": "all"}"#).unwrap();
+        let loaded = Preferences::load(&path);
+        assert_eq!(loaded.theme, ThemePreference::Dark);
+        assert!(loaded.hidden_series.is_empty());
     }
 }

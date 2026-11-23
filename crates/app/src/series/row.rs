@@ -3,6 +3,9 @@
 //!
 //! - The series name in `display-24`, a text button that opens its page; a
 //!   right-to-left name is one truncated line, which GPUI lays out right.
+//!   On the line's trailing edge, a small "more" icon button whose menu
+//!   hides the series from the page ("Hide series"), or, under the Hidden
+//!   filter, shows it again ("Show series again").
 //! - A muted line: the author, "#6 not out yet" when that applies, and what
 //!   last happened ("Last finished Sep 28").
 //! - The series' meter (read of what is out, at most `size::METER_MAX`) with
@@ -24,6 +27,7 @@
 //! the strip's lines are worked out from the width ([`strip_lines`]).
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{Disableable as _, IconName, h_flex};
 use std::rc::Rc;
 
@@ -50,8 +54,10 @@ use crate::library::model::{LibraryModel, WriteKind};
 use crate::library::writes;
 use crate::session;
 use crate::ui::focus::{keyed_focus, reveal_when};
+use crate::ui::kit::KeyboardRing as _;
 use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::SmallControl as _;
+use crate::ui::kit::SmallIconButton as _;
 use crate::ui::{MISSING_OPACITY, Meter, SeriesStrip, StripItem, TextButton, Toggle, strip_layout};
 use crate::upcoming::row::add_to_want_to_read;
 use crate::upcoming::schedule::{release_text, soon_text};
@@ -79,10 +85,20 @@ const LABEL_ABOVE: Rems = rems(1.5);
 /// Between a group's label and its first row (4).
 const LABEL_BELOW: Rems = rems(0.25);
 
-/// How tall a row is, its group's label included when it's the first: the
-/// name, the facts, the meter, the key and a strip of `lines` lines
-/// ([`strip_lines`]), inside the row's padding.
-pub fn row_height(first_in_group: bool, lines: usize, rem: Pixels) -> Pixels {
+/// What sits over a row: its group's label (the first of a group), the
+/// hairline between rows, or nothing (the first row of a list without
+/// groups, right under the header).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowTop {
+    Label(Group, usize),
+    Hairline,
+    Bare,
+}
+
+/// How tall a row is, with what sits over it ([`RowTop`]): the name, the
+/// facts, the meter, the key and a strip of `lines` lines ([`strip_lines`]),
+/// inside the row's padding.
+pub fn row_height(top: RowTop, lines: usize, rem: Pixels) -> Pixels {
     let body = (ROW_PADDING * 2.
         + TypeRole::Display24.line_height()
         + TypeRole::Body.line_height()
@@ -93,11 +109,10 @@ pub fn row_height(first_in_group: bool, lines: usize, rem: Pixels) -> Pixels {
         + STRIP_ABOVE)
         .to_pixels(rem)
         + SeriesStrip::height(lines, rem);
-    if first_in_group {
-        body + group_label_height(rem)
-    } else {
-        // The hairline above.
-        body + size::HAIRLINE
+    match top {
+        RowTop::Label(..) => body + group_label_height(rem),
+        RowTop::Hairline => body + size::HAIRLINE,
+        RowTop::Bare => body,
     }
 }
 
@@ -138,6 +153,16 @@ pub fn strip_lines(series: &SeriesSummary, capacity: usize, open: bool) -> usize
 /// What a strip's toggle does: opens or shuts the series' strip.
 pub type OnToggle = Rc<dyn Fn(SeriesId, &mut Window, &mut App)>;
 
+/// What the row's menu does: hides the series (`true`) or shows it again.
+pub type OnHide = Rc<dyn Fn(SeriesId, bool, &mut Window, &mut App)>;
+
+/// Whether a row's series is hidden, and what its menu does about it.
+#[derive(Clone)]
+pub struct RowHiding {
+    pub hidden: bool,
+    pub on_hide: OnHide,
+}
+
 /// How a row draws its strip: the room on a line, whether it is opened to
 /// every book, and what its toggle does.
 #[derive(Clone)]
@@ -150,11 +175,13 @@ pub struct RowStrip {
 #[derive(IntoElement)]
 pub struct SeriesRow {
     series: SeriesSummary,
-    /// The group's label and count, over its first row.
-    label: Option<(Group, usize)>,
+    /// The group's label and count over a group's first row, else the
+    /// hairline or nothing.
+    top: RowTop,
     library: Entity<LibraryModel>,
     today: Date,
     strip: RowStrip,
+    hiding: RowHiding,
     /// The list's scroller, to keep a row with keyboard focus in view.
     scroll: ScrollHandle,
 }
@@ -162,18 +189,20 @@ pub struct SeriesRow {
 impl SeriesRow {
     pub fn new(
         series: SeriesSummary,
-        label: Option<(Group, usize)>,
+        top: RowTop,
         library: Entity<LibraryModel>,
         today: Date,
         strip: RowStrip,
+        hiding: RowHiding,
         scroll: ScrollHandle,
     ) -> Self {
         Self {
             series,
-            label,
+            top,
             library,
             today,
             strip,
+            hiding,
             scroll,
         }
     }
@@ -195,21 +224,26 @@ impl RenderOnce for SeriesRow {
             window,
             cx,
         );
-        let first = self.label.is_some();
-
-        let label = self
-            .label
-            .map(|(group, count)| group_label(group, count, cx));
+        let label = match self.top {
+            RowTop::Label(group, count) => Some(group_label(group, count, cx)),
+            RowTop::Hairline | RowTop::Bare => None,
+        };
 
         let row = h_flex()
             .w_full()
             .items_start()
             .gap(size::NEXT_LANE_GAP)
             .py(ROW_PADDING)
-            .when(!first, |this| {
+            .when(self.top == RowTop::Hairline, |this| {
                 this.border_t(size::HAIRLINE).border_color(colors.border)
             })
-            .child(series_body(&self.series, self.today, &self.strip, cx))
+            .child(series_body(
+                &self.series,
+                self.today,
+                &self.strip,
+                Some(more_button(self.series.id, &self.hiding, window, cx)),
+                cx,
+            ))
             .child(next_lane(&self.series, &self.library, self.today, cx));
 
         // The label rides along, so revealing a group's first row shows its
@@ -225,12 +259,13 @@ impl RenderOnce for SeriesRow {
     }
 }
 
-/// The row's main column: the name, the facts, the meter, the key and the
-/// strip.
+/// The row's main column: the name with the "more" button, the facts, the
+/// meter, the key and the strip.
 pub fn series_body(
     series: &SeriesSummary,
     today: Date,
     strip_of: &RowStrip,
+    more: Option<gpui_kit::AnyElement>,
     cx: &App,
 ) -> impl IntoElement {
     div()
@@ -239,19 +274,58 @@ pub fn series_body(
         .flex_1()
         .min_w_0()
         .child(
-            h_flex().h(TypeRole::Display24.line_height()).child(
-                TextButton::new(
-                    SharedString::from(format!("series-name-{}", series.id)),
-                    series.name.clone(),
+            h_flex()
+                .h(TypeRole::Display24.line_height())
+                .gap_2()
+                .child(
+                    div().flex_1().min_w_0().child(
+                        TextButton::new(
+                            SharedString::from(format!("series-name-{}", series.id)),
+                            series.name.clone(),
+                        )
+                        .display_24()
+                        .opens(Page::Series(series.id)),
+                    ),
                 )
-                .display_24()
-                .opens(Page::Series(series.id)),
-            ),
+                .children(more.map(|more| div().flex_none().child(more))),
         )
         .child(facts_line(series, today, cx))
         .child(meter_line(series, cx))
         .child(key_line(series, cx))
         .child(div().pt(STRIP_ABOVE).child(strip(series, strip_of)))
+}
+
+/// The small "more" button on the name's line: "Hide series", or "Show
+/// series again" for a hidden one.
+pub fn more_button(
+    id: SeriesId,
+    hiding: &RowHiding,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui_kit::AnyElement {
+    let trigger = keyed_focus(SharedString::from(format!("series-more-{id}")), window, cx);
+    let hide = !hiding.hidden;
+    let on_hide = hiding.on_hide.clone();
+    Button::new(SharedString::from(format!("series-more-button-{id}")))
+        .ghost()
+        .small_icon_button()
+        .icon(IconName::Ellipsis)
+        .tooltip("Series actions")
+        .keyboard_ring(&trigger, window)
+        .dropdown_menu(move |menu, _, _| {
+            let on_hide = on_hide.clone();
+            let (label, icon) = if hide {
+                ("Hide series", IconName::EyeOff)
+            } else {
+                ("Show series again", IconName::Eye)
+            };
+            menu.item(
+                PopupMenuItem::new(label)
+                    .icon(icon)
+                    .on_click(move |_, window, cx| on_hide(id, hide, window, cx)),
+            )
+        })
+        .into_any_element()
 }
 
 /// The series' meter and "2 of 6 read" beside it.
@@ -707,6 +781,10 @@ mod tests {
                 open,
                 on_toggle: Rc::new(|_, _, _| {}),
             };
+            let hiding = RowHiding {
+                hidden: false,
+                on_hide: Rc::new(|_, _, _, _| {}),
+            };
             let cx = host(cx, move |window, cx| {
                 window.set_rem_size(rem);
                 let today: Date = "2026-11-20".parse().unwrap();
@@ -721,7 +799,13 @@ mod tests {
                             .py(ROW_PADDING)
                             .items_start()
                             .debug_selector(|| "row".into())
-                            .child(series_body(&series, today, &strip_of, cx)),
+                            .child(series_body(
+                                &series,
+                                today,
+                                &strip_of,
+                                Some(more_button(series.id, &hiding, window, cx)),
+                                cx,
+                            )),
                     )
                     .into_any_element()
             });
@@ -733,13 +817,18 @@ mod tests {
                 "{name} at {rem:?}"
             );
             assert_eq!(
+                row.size.height,
+                row_height(RowTop::Bare, lines, rem),
+                "{name} at {rem:?}"
+            );
+            assert_eq!(
                 row.size.height + size::HAIRLINE,
-                row_height(false, lines, rem),
+                row_height(RowTop::Hairline, lines, rem),
                 "{name} at {rem:?}"
             );
             assert_eq!(
                 label.size.height + row.size.height,
-                row_height(true, lines, rem),
+                row_height(RowTop::Label(Group::InProgress, 3), lines, rem),
                 "{name} at {rem:?}"
             );
         }

@@ -476,7 +476,9 @@ fn series_strips(cx: &App) -> AnyElement {
                 div()
                     .id(("g-series", usize::from(open)))
                     .max_w(rems(30.))
-                    .child(crate::series::row::series_body(&persian, today, &strip, cx))
+                    .child(crate::series::row::series_body(
+                        &persian, today, &strip, None, cx,
+                    ))
             })),
     )
 }

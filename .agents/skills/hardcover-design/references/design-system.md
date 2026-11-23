@@ -272,7 +272,7 @@ the motions there are; a new one is added here first (`design::motion`).
 | Motion | Where | How |
 | --- | --- | --- |
 | Pulse | A skeleton while its content really loads | Opacity 100% to 50% and back over 2 s, every skeleton in step |
-| Row leaving | A row taken out of the collection on screen: the selected book moved to another shelf or out of the library, a book taken off a list | It keeps its place and fades out over 150 ms, ease-out, without its focus ring; then the rows below close the gap at once |
+| Row leaving | A row taken out of the collection on screen: the selected book moved to another shelf or out of the library, a book taken off a list, a series hidden from the Series page | It keeps its place and fades out over 150 ms, ease-out, without its focus ring; then the rows below close the gap at once |
 | Meter | A meter's value changing: progress saved, the goal after a sync | The fill moves on a critically damped spring (90% of the way in about 150 ms, settled in about 350 ms, no overshoot); a change mid-way carries on from where the fill is. The words beside it change at once |
 | Kit overlays | Dialogs, menus, popovers, tooltips, notifications | The kit's own short fades and slides, unchanged |
 
@@ -900,17 +900,31 @@ every width below (the tiers' thresholds included) is in design px too.
 ### Series (a destination)
 
 - **Sidebar:** "Series" after Discover, with the `library` icon and the
-  count of series not finished. It hides, with the page, without
-  `read:catalog`.
+  count of series not finished and not hidden. It hides, with the page,
+  without `read:catalog`.
 - **Content:** inset 32, filling the region (see "Wide windows").
 - **Header:** the `page-title` "Series" with the count shown beside it,
   then the muted line "The series you've started, and what's next in each."
   On the trailing edge, 8 apart: the filter input (168, "Filter series":
-  every word must begin a word of the name or the author) and the select
-  (168): Not finished (the default), Finished and All series, each with its
-  count. The choice is kept for the session. In a narrow window the
-  controls wrap under the title. The header stays put while the series
-  scroll under it, so the filters are always at hand.
+  every word must begin a word of the name or the author), the filter
+  select (168): Not finished (the default), Finished, All series and
+  Hidden, each with its count, and the sort select (168): Status (the
+  default: the groups below), Recently active, Name (a leading article left
+  out), Author (by last name), Most read (the meter's share) and Fewest left
+  to read (books out and still to read; a series with none left last).
+  Every sort but Status is one list without group labels, its first row
+  with no hairline over it. Both choices are kept for the session. In a
+  narrow window the controls wrap under the title, and onto a second line.
+  The header stays put while the series scroll under it, so the filters are
+  always at hand.
+- **Hiding:** each row's name line ends in a small "more" icon button
+  ("Series actions") whose menu has "Hide series" (the `eye-off` icon), for
+  a series the reader dropped. A hidden series leaves the list as a row
+  leaving does (Motion), counts only under Hidden, and a
+  notification says so with Undo ("“Mistborn” is hidden. It's under Hidden
+  in the filter."). Under Hidden its menu has "Show series again" (`eye`).
+  The hidden series are kept in the preferences, on this computer, so they
+  survive signing out; Hardcover has no such thing.
 - **Which series:** those in which the reader has read, is reading, paused
   or gave up on a book. A series shows its whole-numbered books, and a
   fractional one (a novella) only when it is in the library or not out yet.
@@ -926,7 +940,9 @@ every width below (the tiers' thresholds included) is in design px too.
   muted sentence with "Try again"; with nothing started, the empty state
   (the `library` icon, "No series yet", "When you read a book that belongs
   to a series, the series shows here with what comes next."). A filter with
-  no match says so in one muted line under the header.
+  no match says so in one muted line under the header ("Every series you've
+  started is finished or hidden.", "Every series you've started is
+  hidden.", "You haven't hidden a series. Hide one from its menu.").
 
 ### Screens not in the mockup
 

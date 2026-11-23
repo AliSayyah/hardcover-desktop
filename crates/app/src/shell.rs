@@ -388,6 +388,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let updates = Updates::global(cx).clone();
+        let preferences = crate::preferences::AppPreferences::global(cx).clone();
         let mut syncing = false;
         self.subscriptions = vec![
             cx.observe(&self.model, move |this, model, cx| {
@@ -410,8 +411,9 @@ impl Workspace {
             cx.observe(&updates, |_, _, cx| cx.notify()),
             cx.observe(&self.reauthorize, |_, _, cx| cx.notify()),
             cx.observe(&self.goals, |_, _, cx| cx.notify()),
-            // The sidebar counts the series not finished.
+            // The sidebar counts the series not finished and not hidden.
             cx.observe(&self.series, |_, _, cx| cx.notify()),
+            cx.observe(&preferences, |_, _, cx| cx.notify()),
             // A list shown that is gone after a reload, or no longer
             // readable, hands over to a shelf.
             cx.observe_in(&self.lists, window, |this, lists, window, cx| {
@@ -863,11 +865,14 @@ impl Workspace {
         let series_row = session::has_scope(cx, READ_CATALOG).then(|| {
             let today = crate::dates::today();
             let series = self.series.read(cx);
+            let hidden = crate::preferences::AppPreferences::global(cx)
+                .read(cx)
+                .hidden_series();
             let count = series.is_loaded().then(|| {
                 series
                     .summaries(today, cx)
                     .iter()
-                    .filter(|s| !s.group.is_finished())
+                    .filter(|s| !s.group.is_finished() && !hidden.contains(&s.id))
                     .count()
             });
             nav_row(

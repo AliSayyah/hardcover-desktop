@@ -67,7 +67,7 @@ pub fn matches_filter(entry: &LibraryEntry, query: &str) -> bool {
 }
 
 /// Title without a leading English article, for sorting.
-fn sort_title(title: &str) -> String {
+pub fn sort_title(title: &str) -> String {
     let lower = title.trim().to_lowercase();
     for article in ["the ", "a ", "an "] {
         if let Some(rest) = lower.strip_prefix(article) {
@@ -83,7 +83,13 @@ fn sort_author(entry: &LibraryEntry) -> String {
         .book
         .authors
         .first()
-        .and_then(|a| a.split_whitespace().last())
+        .map_or_default(|a| author_sort_key(a))
+}
+
+/// An author's name for sorting: the last word, lowercased.
+pub fn author_sort_key(name: &str) -> String {
+    name.split_whitespace()
+        .last()
         .map_or_default(str::to_lowercase)
 }
 
