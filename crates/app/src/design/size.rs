@@ -63,8 +63,16 @@ pub const ACTION_LANE: Rems = rems(8.5);
 pub const NEXT_LANE: Rems = rems(15.);
 /// Between a series row's body and its next-step lane (24).
 pub const NEXT_LANE_GAP: Rems = rems(1.5);
-/// One book in a series strip: an sm cover with its marks under it (40).
-pub const STRIP_ITEM: Rems = rems(2.5);
+/// Between the books of a series strip (8).
+pub const STRIP_GAP: Rems = rems(0.5);
+/// Between the lines of a series strip opened in full (16).
+pub const STRIP_LINE_GAP: Rems = rems(1.);
+/// Between a strip book's cover and the ring that marks the series' next
+/// book; every cover keeps the room, ringed or not (2).
+pub const STRIP_RING_INSET: Rems = rems(0.125);
+/// The ring round the series' next book in a strip (2, `accent`). Like a
+/// focus ring, it stays 1:1 with the device's pixels.
+pub const STRIP_RING: Pixels = px(2.);
 
 /// A meter with words beside it (6).
 pub const METER: Rems = rems(0.375);

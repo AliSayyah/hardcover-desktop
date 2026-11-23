@@ -69,6 +69,11 @@ fn non_empty(s: Option<String>) -> Option<String> {
     s.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
 }
 
+/// A description or bio, as plain text: Hardcover sends some as HTML.
+fn catalogue_text(s: Option<String>) -> Option<String> {
+    non_empty(s.map(|s| super::markup::plain_text(&s)))
+}
+
 pub(crate) fn parse_date(s: &str) -> Option<Date> {
     let s = s.trim();
     NaiveDate::parse_from_str(s.get(..10)?, "%Y-%m-%d").ok()
@@ -348,7 +353,7 @@ impl RawBookDetails {
         d.ratings_distribution = ratings_distribution(&self.ratings_distribution);
         d.alternative_titles = alternative_titles(&self.alternative_titles, &d.summary.title);
         d.similar_book_ids = book_ids(&self.cached_similar_book_ids);
-        d.description = non_empty(self.description);
+        d.description = catalogue_text(self.description);
         d.release_date = self.release_date.as_deref().and_then(parse_date);
         d.genres = tags_in(tags, "Genre");
         d.moods = tags_in(tags, "Mood");
@@ -428,7 +433,7 @@ impl RawSeriesPage {
             non_empty(self.name).unwrap_or_else(|| "Untitled series".to_owned()),
         );
         d.slug = non_empty(self.slug);
-        d.description = non_empty(self.description);
+        d.description = catalogue_text(self.description);
         d.primary_books_count = opt_u32(self.primary_books_count);
         d.is_completed = self.is_completed;
         d.author = self
@@ -522,7 +527,7 @@ impl RawAuthorPage {
             non_empty(self.name).unwrap_or_else(|| "Unknown author".to_owned()),
         );
         d.slug = non_empty(self.slug);
-        d.bio = non_empty(self.bio);
+        d.bio = catalogue_text(self.bio);
         d.photo = cover_from_value(&self.cached_image);
         d.born_year = year(self.born_year);
         d.death_year = year(self.death_year);

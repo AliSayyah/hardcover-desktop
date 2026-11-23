@@ -72,9 +72,9 @@ jobs:
     # pull requests; it fails the push and weekly runs instead.
     continue-on-error: ${{ matrix.checks == 'advisories' && github.event_name == 'pull_request' }}
     env:
-      CARGO_DENY_VERSION: "0.21.0"
+      CARGO_DENY_VERSION: "0.22.0"
       # From the release's own .sha256 file. Update both together.
-      CARGO_DENY_SHA256: a2170b854ff697e79e39c4c538981c9c1bdd803addbae6719a4cb66b4585a903
+      CARGO_DENY_SHA256: 98c56e6a408bfa5c3c60744b6015aaa6aa08f743fdeb88386d06fca035bb1786
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -14,10 +14,11 @@ demo = []
 [dependencies]
 base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 directories = "6"
 flate2 = "1"
 getrandom = "0.4"
-keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+keyring-core = "1"
 minisign-verify = "0.3"
 rusqlite = { version = "0.43", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

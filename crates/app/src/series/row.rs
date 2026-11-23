@@ -1,38 +1,48 @@
 //! A series row (`hardcover-design`, Screens → Series): a sequence row (no
 //! fill, a hairline between rows, 16 above and below), top-aligned.
 //!
-//! - The series name in `title-18`, a text button that opens its page; a
+//! - The series name in `display-24`, a text button that opens its page; a
 //!   right-to-left name is one truncated line, which GPUI lays out right.
-//! - A muted line: the author, "2 of 6 read", "#6 not out yet" when that
-//!   applies, and what last happened ("Last finished Sep 28").
-//! - The strip of its books, 12 below ([`crate::ui::SeriesStrip`]), as many
-//!   as fit, the next one kept in view.
+//! - A muted line: the author, "#6 not out yet" when that applies, and what
+//!   last happened ("Last finished Sep 28").
+//! - The series' meter (read of what is out, at most `size::METER_MAX`) with
+//!   "2 of 6 read" beside it, 8 below.
+//! - The key, a caption line 4 below: each mark the strip shows, with how
+//!   many books carry it ("6 read", "11 not in your library").
+//! - The strip of its books, 24 below, room for the next book's "Next"
+//!   ([`crate::ui::SeriesStrip`]): one line, from the book before the next
+//!   one, with "Show the other N books" when they don't all fit; opened,
+//!   every book. Which series are opened is the tracker's, for the session.
 //! - The next-step lane on the trailing edge, 240 wide on every row so the
-//!   lanes line up: the next book's sm cover, a caption ("Reading · #1",
+//!   lanes line up: the next book's md cover, a caption ("Reading · #1",
 //!   "Next · #3"), its title as a text button, a line (progress, where it
 //!   paused, or its release date) and one small command. A finished series
 //!   keeps the lane, empty.
 //!
-//! Every row of a group is the same height ([`row_height`]), so the list can
-//! be virtual: the name and every line are single, truncated lines.
+//! A row's height is known before it is drawn ([`row_height`]), so the list
+//! can be virtual: the name and every line are single, truncated lines, and
+//! the strip's lines are worked out from the width ([`strip_lines`]).
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Disableable as _, IconName, h_flex};
+use std::rc::Rc;
+
+use gpui_kit::component::Icon;
 use gpui_kit::{
     App, Entity, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
     Rems, RenderOnce, ScrollHandle, SharedString, Styled as _, Window, div,
     prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::auth::scopes::WRITE_LIBRARY;
-use hardcover_core::{Date, ReadingStatus, UserBookId};
+use hardcover_core::{Date, ReadingStatus, SeriesId, UserBookId};
 
 use super::progress::{
-    Group, Mark, NextKind, SeriesBook, SeriesSummary, lane_caption, reading_line,
+    Group, Mark, NextKind, SeriesBook, SeriesSummary, key_text, lane_caption, reading_line,
 };
 use crate::bidi::is_rtl;
 use crate::book::progress_dialog::open_progress;
 use crate::catalog::navigation::Page;
-use crate::chip::StatusChip;
+use crate::chip::{StatusChip, status_icon};
 use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{count_text, needs_permission, progress_summary};
@@ -42,7 +52,7 @@ use crate::session;
 use crate::ui::focus::{keyed_focus, reveal_when};
 use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::SmallControl as _;
-use crate::ui::{SeriesStrip, StripItem, TextButton};
+use crate::ui::{MISSING_OPACITY, Meter, SeriesStrip, StripItem, TextButton, Toggle, strip_layout};
 use crate::upcoming::row::add_to_want_to_read;
 use crate::upcoming::schedule::{release_text, soon_text};
 
@@ -52,22 +62,37 @@ use crate::upcoming::schedule::{release_text, soon_text};
 
 /// Above and below a row (16).
 const ROW_PADDING: Rems = rems(1.);
-/// Between the facts and the strip (12).
-const STRIP_ABOVE: Rems = rems(0.75);
+/// Between the facts and the meter's line (8).
+const METER_ABOVE: Rems = rems(0.5);
+/// Between the meter's line and the key (4).
+const KEY_ABOVE: Rems = rems(0.25);
+/// Between the key and the strip, where the next book's "Next" sits (24).
+const STRIP_ABOVE: Rems = rems(1.5);
+/// Between the key's entries (16).
+const KEY_GAP: Rems = rems(1.);
+/// The key's mark for a book not in the library: a small faded cover
+/// (8 × 12).
+const KEY_COVER_WIDTH: Rems = rems(0.5);
+const KEY_COVER_HEIGHT: Rems = rems(0.75);
 /// Above a group's label (24).
 const LABEL_ABOVE: Rems = rems(1.5);
 /// Between a group's label and its first row (4).
 const LABEL_BELOW: Rems = rems(0.25);
 
 /// How tall a row is, its group's label included when it's the first: the
-/// name, the facts and the strip, inside the row's padding.
-pub fn row_height(first_in_group: bool, rem: Pixels) -> Pixels {
+/// name, the facts, the meter, the key and a strip of `lines` lines
+/// ([`strip_lines`]), inside the row's padding.
+pub fn row_height(first_in_group: bool, lines: usize, rem: Pixels) -> Pixels {
     let body = (ROW_PADDING * 2.
-        + STRIP_ABOVE
-        + TypeRole::Title18.line_height()
-        + TypeRole::Body.line_height())
-    .to_pixels(rem)
-        + SeriesStrip::height(rem);
+        + TypeRole::Display24.line_height()
+        + TypeRole::Body.line_height()
+        + METER_ABOVE
+        + TypeRole::Body.line_height()
+        + KEY_ABOVE
+        + TypeRole::Caption.line_height()
+        + STRIP_ABOVE)
+        .to_pixels(rem)
+        + SeriesStrip::height(lines, rem);
     if first_in_group {
         body + group_label_height(rem)
     } else {
@@ -98,11 +123,28 @@ pub fn strip_width(column: Pixels, rem: Pixels) -> Pixels {
     column - (size::NEXT_LANE + size::NEXT_LANE_GAP).to_pixels(rem)
 }
 
-/// How many books a row's strip shows in a column `column` wide: as many as
-/// fit beside the lane, before [`super::progress::strip_window`] picks
-/// which.
+/// How many books fit on a line of a row's strip in a column `column` wide:
+/// as many as fit beside the lane.
 pub fn strip_capacity(column: Pixels, rem: Pixels) -> usize {
     SeriesStrip::capacity(strip_width(column, rem), rem)
+}
+
+/// How many lines a series' strip takes, with room for `capacity` books on
+/// a line, shut or `open`.
+pub fn strip_lines(series: &SeriesSummary, capacity: usize, open: bool) -> usize {
+    strip_layout(series.books.len(), series.next, capacity, open).lines
+}
+
+/// What a strip's toggle does: opens or shuts the series' strip.
+pub type OnToggle = Rc<dyn Fn(SeriesId, &mut Window, &mut App)>;
+
+/// How a row draws its strip: the room on a line, whether it is opened to
+/// every book, and what its toggle does.
+#[derive(Clone)]
+pub struct RowStrip {
+    pub capacity: usize,
+    pub open: bool,
+    pub on_toggle: OnToggle,
 }
 
 #[derive(IntoElement)]
@@ -112,8 +154,7 @@ pub struct SeriesRow {
     label: Option<(Group, usize)>,
     library: Entity<LibraryModel>,
     today: Date,
-    /// Books the strip has room for.
-    capacity: usize,
+    strip: RowStrip,
     /// The list's scroller, to keep a row with keyboard focus in view.
     scroll: ScrollHandle,
 }
@@ -124,7 +165,7 @@ impl SeriesRow {
         label: Option<(Group, usize)>,
         library: Entity<LibraryModel>,
         today: Date,
-        capacity: usize,
+        strip: RowStrip,
         scroll: ScrollHandle,
     ) -> Self {
         Self {
@@ -132,7 +173,7 @@ impl SeriesRow {
             label,
             library,
             today,
-            capacity,
+            strip,
             scroll,
         }
     }
@@ -168,7 +209,7 @@ impl RenderOnce for SeriesRow {
             .when(!first, |this| {
                 this.border_t(size::HAIRLINE).border_color(colors.border)
             })
-            .child(series_body(&self.series, self.today, self.capacity, cx))
+            .child(series_body(&self.series, self.today, &self.strip, cx))
             .child(next_lane(&self.series, &self.library, self.today, cx));
 
         // The label rides along, so revealing a group's first row shows its
@@ -184,11 +225,12 @@ impl RenderOnce for SeriesRow {
     }
 }
 
-/// The row's main column: the name, the facts and the strip.
+/// The row's main column: the name, the facts, the meter, the key and the
+/// strip.
 pub fn series_body(
     series: &SeriesSummary,
     today: Date,
-    capacity: usize,
+    strip_of: &RowStrip,
     cx: &App,
 ) -> impl IntoElement {
     div()
@@ -197,25 +239,102 @@ pub fn series_body(
         .flex_1()
         .min_w_0()
         .child(
-            TextButton::new(
-                SharedString::from(format!("series-name-{}", series.id)),
-                series.name.clone(),
-            )
-            .title_18()
-            .opens(Page::Series(series.id)),
+            h_flex().h(TypeRole::Display24.line_height()).child(
+                TextButton::new(
+                    SharedString::from(format!("series-name-{}", series.id)),
+                    series.name.clone(),
+                )
+                .display_24()
+                .opens(Page::Series(series.id)),
+            ),
         )
         .child(facts_line(series, today, cx))
-        .child(div().pt(STRIP_ABOVE).child(strip(series, capacity)))
+        .child(meter_line(series, cx))
+        .child(key_line(series, cx))
+        .child(div().pt(STRIP_ABOVE).child(strip(series, strip_of)))
 }
 
-/// "Brandon Sanderson · 2 of 6 read · #6 not out yet · Reading now". A
-/// right-to-left author is its own run, so the line keeps its order.
+/// The series' meter and "2 of 6 read" beside it.
+fn meter_line(series: &SeriesSummary, cx: &App) -> impl IntoElement {
+    h_flex()
+        .pt(METER_ABOVE)
+        .h(METER_ABOVE + TypeRole::Body.line_height())
+        .gap_3()
+        .child(div().flex_1().max_w(size::METER_MAX).child(Meter::new(
+            SharedString::from(format!("series-meter-{}", series.id)),
+            series.read_percent(),
+            "Series read",
+        )))
+        .child(
+            div()
+                .flex_none()
+                .body_strong()
+                .tabular()
+                .text_color(colors(cx).fg)
+                .child(series.read_text()),
+        )
+}
+
+/// What the strip's marks stand for: "✓ 6 read · ▯ 11 not in your
+/// library", each with the mark the strip draws.
+fn key_line(series: &SeriesSummary, cx: &App) -> impl IntoElement {
+    let colors = colors(cx);
+    h_flex()
+        .pt(KEY_ABOVE)
+        .h(KEY_ABOVE + TypeRole::Caption.line_height())
+        .min_w_0()
+        .overflow_hidden()
+        .gap(KEY_GAP)
+        .caption(cx)
+        .tabular()
+        .whitespace_nowrap()
+        .children(series.key().into_iter().map(|(mark, count)| {
+            let symbol = match mark {
+                Mark::Shelved(status) => Icon::new(status_icon(status))
+                    .size_3()
+                    .flex_none()
+                    .into_any_element(),
+                Mark::Missing => div()
+                    .flex_none()
+                    .w(KEY_COVER_WIDTH)
+                    .h(KEY_COVER_HEIGHT)
+                    .rounded(rems(0.125))
+                    .bg(colors.fg_muted)
+                    .opacity(MISSING_OPACITY)
+                    .into_any_element(),
+                Mark::Unreleased => Icon::from(crate::icons::clock())
+                    .size_3()
+                    .flex_none()
+                    .into_any_element(),
+            };
+            h_flex()
+                .flex_none()
+                .gap_1()
+                .child(symbol)
+                .child(key_text(mark, count))
+        }))
+}
+
+/// "Brandon Sanderson · #6 not out yet · Reading now". A right-to-left
+/// author is its own run, so the line keeps its order.
 fn facts_line(series: &SeriesSummary, today: Date, cx: &App) -> impl IntoElement {
     let muted = colors(cx).fg_muted;
     let facts = series.facts(today);
-    let line = h_flex().min_w_0().body().tabular().text_color(muted);
+    let line = h_flex()
+        .min_w_0()
+        .h(TypeRole::Body.line_height())
+        .body()
+        .tabular()
+        .text_color(muted);
+    let joined = |author: &str| {
+        if facts.is_empty() {
+            author.to_owned()
+        } else {
+            format!("{author} · {facts}")
+        }
+    };
     match &series.author {
-        Some(author) if is_rtl(author) => line
+        Some(author) if is_rtl(author) && !facts.is_empty() => line
             .child(
                 div()
                     .min_w_0()
@@ -230,35 +349,52 @@ fn facts_line(series: &SeriesSummary, today: Date, cx: &App) -> impl IntoElement
                     .truncate()
                     .child(format!("\u{a0}· {facts}")),
             ),
-        Some(author) => line.child(
-            div()
-                .min_w_0()
-                .truncate()
-                .child(format!("{author} · {facts}")),
-        ),
+        Some(author) => line.child(div().min_w_0().truncate().child(joined(author))),
         None => line.child(div().min_w_0().truncate().child(facts)),
     }
 }
 
-/// The books that fit, the next one kept in view.
-fn strip(series: &SeriesSummary, capacity: usize) -> SeriesStrip {
-    let (range, more) = super::progress::strip_window(series.books.len(), series.next, capacity);
-    let items = series.books[range.clone()]
+/// One line of books from the one before the next, and the toggle; opened,
+/// every book.
+fn strip(series: &SeriesSummary, row: &RowStrip) -> SeriesStrip {
+    let layout = strip_layout(series.books.len(), series.next, row.capacity, row.open);
+    let start = layout.range.start;
+    let items = series.books[layout.range]
         .iter()
         .enumerate()
-        .map(|(offset, book)| strip_item(series, book, range.start + offset));
-    SeriesStrip::new().items(items).more(more)
+        .map(|(offset, book)| strip_item(series, book, start + offset));
+    let strip = SeriesStrip::new().items(items);
+    match layout.toggle {
+        Some(toggle) => strip.toggle(
+            toggle.slots(),
+            toggle_button(series.id, toggle, &row.on_toggle),
+        ),
+        None => strip,
+    }
+}
+
+/// "Show the other 15 books" or "Show fewer": a small ghost button.
+fn toggle_button(id: SeriesId, toggle: Toggle, on_toggle: &OnToggle) -> Button {
+    let label = match toggle {
+        Toggle::More(1) => "Show the other book".to_owned(),
+        Toggle::More(n) => format!("Show the other {} books", count_text(n)),
+        Toggle::Fewer => "Show fewer".to_owned(),
+    };
+    let on_toggle = on_toggle.clone();
+    Button::new(SharedString::from(format!("series-strip-toggle-{id}")))
+        .ghost()
+        .small_control()
+        .label(label)
+        .on_click(move |_, window, cx| on_toggle(id, window, cx))
 }
 
 fn strip_item(series: &SeriesSummary, book: &SeriesBook, ix: usize) -> StripItem {
     let id = SharedString::from(format!("series-{}-book-{}", series.id, book.book.id));
-    let position = crate::format::series_position_text(book.position)
-        .trim_start_matches('#')
-        .to_owned();
+    let position = crate::format::series_position_text(book.position);
     let item = match book.mark() {
         Mark::Shelved(status) => StripItem::cover(
             id.clone(),
-            Cover::new(CoverSize::Sm, book.book.title.clone())
+            Cover::new(CoverSize::Md, book.book.title.clone())
                 .thumbnail(book.book.cover.as_ref().map(|c| c.url.clone()))
                 .opens(
                     SharedString::from(format!("{id}-cover")),
@@ -266,8 +402,17 @@ fn strip_item(series: &SeriesSummary, book: &SeriesBook, ix: usize) -> StripItem
                 ),
         )
         .shelf(status),
-        Mark::Missing => StripItem::missing(id.clone(), book.book.title.clone()),
-        Mark::Unreleased => StripItem::unreleased(id.clone(), book.book.title.clone()),
+        Mark::Missing => StripItem::missing(
+            id.clone(),
+            Cover::new(CoverSize::Md, book.book.title.clone())
+                .thumbnail(book.book.cover.as_ref().map(|c| c.url.clone()))
+                .opens(
+                    SharedString::from(format!("{id}-cover")),
+                    Page::Book(book.book.clone()),
+                ),
+        ),
+        Mark::Unreleased => StripItem::unreleased(id.clone(), book.book.title.clone())
+            .opens(Page::Book(book.book.clone())),
     };
     item.position(position)
         .progress(
@@ -364,7 +509,7 @@ fn next_lane(
     };
 
     lane.child(
-        Cover::new(CoverSize::Sm, book.book.title.clone())
+        Cover::new(CoverSize::Md, book.book.title.clone())
             .thumbnail(book.book.cover.as_ref().map(|c| c.url.clone()))
             .opens(
                 SharedString::from(format!("series-next-cover-{id}")),
@@ -428,7 +573,7 @@ fn start_reading(library: Entity<LibraryModel>, id: UserBookId, window: &mut Win
 }
 
 /// A row while the series load: a skeleton name line and a strip of
-/// skeleton covers.
+/// skeleton md covers.
 pub fn skeleton_row() -> impl IntoElement {
     use crate::ui::Skeleton;
     h_flex()
@@ -445,13 +590,13 @@ pub fn skeleton_row() -> impl IntoElement {
                 .gap_2()
                 .child(Skeleton::line().w_1_3().h_4())
                 .child(Skeleton::line().w_1_2())
-                .child(h_flex().pt_2().gap_1().children((0..5).map(|_| {
-                    div()
-                        .flex()
-                        .justify_center()
-                        .w(size::STRIP_ITEM)
-                        .child(Skeleton::cover(CoverSize::Sm))
-                }))),
+                .child(Skeleton::line().w_1_2())
+                .child(
+                    h_flex()
+                        .pt_4()
+                        .gap(size::STRIP_GAP)
+                        .children((0..5).map(|_| Skeleton::cover(CoverSize::Md))),
+                ),
         )
         .child(div().flex_none().w(size::NEXT_LANE))
 }
@@ -471,16 +616,16 @@ mod tests {
 
     #[test]
     fn the_strip_shows_as_many_books_as_fit_beside_the_lane() {
-        // The minimum window: 496 − 264 = 232, five books (5 × 44 − 4).
-        assert_eq!(strip_capacity(column(800.), REM), 5);
-        // The default window: 896 − 264 = 632, fourteen, as before.
-        assert_eq!(strip_capacity(column(1200.), REM), 14);
+        // The minimum window: 496 − 264 = 232, three books (3 × 80 − 8).
+        assert_eq!(strip_capacity(column(800.), REM), 3);
+        // The default window: 896 − 264 = 632, eight.
+        assert_eq!(strip_capacity(column(1200.), REM), 8);
         // Wider, the strip takes the width: 1032 at 1600, 1992 at 2560.
-        assert_eq!(strip_capacity(column(1600.), REM), 23);
-        assert_eq!(strip_capacity(column(2560.), REM), 45);
-        // At the edge: n books need n × 44 − 4.
-        assert_eq!(strip_capacity(px(20. * 44. - 4. + 264.), REM), 20);
-        assert_eq!(strip_capacity(px(20. * 44. - 5. + 264.), REM), 19);
+        assert_eq!(strip_capacity(column(1600.), REM), 13);
+        assert_eq!(strip_capacity(column(2560.), REM), 25);
+        // At the edge: n books need n × 80 − 8.
+        assert_eq!(strip_capacity(px(12. * 80. - 8. + 264.), REM), 12);
+        assert_eq!(strip_capacity(px(12. * 80. - 9. + 264.), REM), 11);
     }
 
     /// A started series of three books: the first read, the second being
@@ -551,6 +696,17 @@ mod tests {
                 series.books.iter().any(|b| b.progress.is_some()),
                 "the strip draws a meter"
             );
+            // Room for two books on a line: shut, one book and the toggle on
+            // a line of its own; opened (the Persian name), the three on two
+            // lines and "Show fewer" on a third.
+            let open = name.starts_with('ک');
+            let lines = strip_lines(&series, 2, open);
+            assert_eq!(lines, if open { 3 } else { 2 }, "{name}");
+            let strip_of = RowStrip {
+                capacity: 2,
+                open,
+                on_toggle: Rc::new(|_, _, _| {}),
+            };
             let cx = host(cx, move |window, cx| {
                 window.set_rem_size(rem);
                 let today: Date = "2026-11-20".parse().unwrap();
@@ -558,11 +714,14 @@ mod tests {
                     .w(px(1000.))
                     .child(group_label(Group::InProgress, 3, cx).debug_selector(|| "label".into()))
                     .child(
+                        // As wide as two books, so the strip wraps where the
+                        // tracker's width would make it.
                         h_flex()
+                            .w(SeriesStrip::item_width(rem) * 2. + size::STRIP_GAP.to_pixels(rem))
                             .py(ROW_PADDING)
                             .items_start()
                             .debug_selector(|| "row".into())
-                            .child(series_body(&series, today, 14, cx)),
+                            .child(series_body(&series, today, &strip_of, cx)),
                     )
                     .into_any_element()
             });
@@ -575,12 +734,12 @@ mod tests {
             );
             assert_eq!(
                 row.size.height + size::HAIRLINE,
-                row_height(false, rem),
+                row_height(false, lines, rem),
                 "{name} at {rem:?}"
             );
             assert_eq!(
                 label.size.height + row.size.height,
-                row_height(true, rem),
+                row_height(true, lines, rem),
                 "{name} at {rem:?}"
             );
         }
