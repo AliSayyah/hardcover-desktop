@@ -3,7 +3,10 @@
 The reference for every visible part of the app. The words **must** and
 **never** mark rules. **Should** is the default; a concrete reason is needed
 to depart from it, and the reason belongs in the code comment or the commit.
-The mockup at `docs/design/mockup.html` shows every rule here applied.
+The mockup at `docs/design/mockup.html` shows every rule here applied;
+`docs/design/tags-discovery-mockup.html` shows the mood line, the votes, a
+tag's page, the shelf filter bar, Discover and a vibe's page. Where a mockup
+and this file differ, this file wins.
 
 ## Thesis
 
@@ -240,7 +243,7 @@ selection fill or a nested surface its own radius.
 | App icon (About) | 64 | `size::APP_ICON` |
 | Meter | 6 high beside words, 2 high inside a row; 400 wide max (160 in a row) | |
 | Prose | 640 wide max | `size::PROSE` |
-| Page content (Discover, Coming soon, Stats, Series, list, series and author pages) | fills the region inside the 32 inset; only reading text keeps the prose measure | `size::PAGE_INSET` |
+| Page content (Discover, Coming soon, Stats, Series, and tag, vibe, Trending, list, series and author pages) | fills the region inside the 32 inset; only reading text keeps the prose measure | `size::PAGE_INSET` |
 | A catalogue page's list beside the book pane | 704: the prose measure and the inset; the pane takes the rest | `size::PAGE_BESIDE_PANE` |
 | Book pane and full book page | fill their region | |
 | Side column beside a book's text | at least 320 wide; the text keeps 640, 32 apart | `size::SIDE_MIN`, `size::PROSE` |
@@ -248,6 +251,7 @@ selection fill or a nested surface its own radius.
 | Content column beside another (Home, wide) | at least 448 wide; the two share the width beside the rail | `size::WIDE_COLUMN_MIN` |
 | Stats, two columns | each column at least 544, filling its half | `size::CHART_COLUMN_MIN` |
 | Chart | bars at most 48 wide; a year in Finished per year at least 64 | `size::CHART_BAR_MAX`, `CHART_YEAR_MIN` |
+| Votes popover | 360 wide, padding 16; its mood names 96, its counts 48 | |
 | Empty-state text | 288 wide max | `w_72` |
 | Window | 1200 × 800 by default, 800 × 560 minimum | |
 
@@ -272,7 +276,7 @@ the motions there are; a new one is added here first (`design::motion`).
 | Motion | Where | How |
 | --- | --- | --- |
 | Pulse | A skeleton while its content really loads | Opacity 100% to 50% and back over 2 s, every skeleton in step |
-| Row leaving | A row taken out of the collection on screen: the selected book moved to another shelf or out of the library, a book taken off a list, a series hidden from the Series page | It keeps its place and fades out over 150 ms, ease-out, without its focus ring; then the rows below close the gap at once |
+| Row leaving | A row taken out of the collection on screen: the selected book moved to another shelf or out of the library, a book taken off a list, a series hidden from the Series page, a book the reader said never to recommend (a vibe's page) | It keeps its place and fades out over 150 ms, ease-out, without its focus ring; then the rows below close the gap at once |
 | Meter | A meter's value changing: progress saved, the goal after a sync | The fill moves on a critically damped spring (90% of the way in about 150 ms, settled in about 350 ms, no overshoot); a change mid-way carries on from where the fill is. The words beside it change at once |
 | Kit overlays | Dialogs, menus, popovers, tooltips, notifications | The kit's own short fades and slides, unchanged |
 
@@ -281,7 +285,7 @@ the motions there are; a new one is added here first (`design::motion`).
   moved) and at most three rows leave together; a leaving row can't be
   acted on. A meter moves only when the same thing's value changes: one shown
   for the first time, or for another book, starts at its value. Hardcover's
-  figures (the muted ratings breakdown) never move.
+  figures (the muted ratings breakdown, the votes' meters) never move.
 - **Instant everywhere else:** pages, Back, destinations, the pane following
   the selection, rows arriving or moving, a filter or sort, expanding text,
   covers landing, hover and focus.
@@ -316,9 +320,9 @@ Rules:
 | Size | Width × height | GPUI | Use |
 | --- | --- | --- | --- |
 | xs | 20 × 30 | `w_5` × `h(rems(1.875))` | Compact rows, menus |
-| sm | 32 × 48 | `w_8 h_12` | List rows (shelves, search, Discover, lists, series and author pages) |
-| md | 64 × 96 | `w_16 h_24` | Home rows, Up next, a rail's shelf |
-| lg | 80 × 120 | `w_20` × `h(rems(7.5))` | Similar books |
+| sm | 32 × 48 | `w_8 h_12` | List rows (shelves, search, lists, and tag, vibe, Trending, series and author pages) |
+| md | 64 × 96 | `w_16 h_24` | Home rows, Up next, a rail's shelf, Discover's shelves |
+| lg | 80 × 120 | `w_20` × `h(rems(7.5))` | Similar books; Discover's lead shelf |
 | xl | 128 × 192 | `w_32 h_48` | The book pane's header; the Home lead |
 | xxl | 160 × 240 | `w_40` × `h(rems(15.))` | The full book page's header |
 
@@ -356,8 +360,8 @@ dust jacket.
 | Primary | `accent` fill, `accent-fg` | The default commit of a dialog or form (the Enter action): "Save", "Create". Never "the important one" on a page |
 | Danger | Danger text, no fill | Destructive commands; the confirm button of a destructive dialog |
 | Icon | 32 square, ghost | Familiar symbols only ("more"), with an accessible name and a tooltip |
-| Text button | Ink text, underline on hover only | In-app navigation inside content: an author, a series, a book title |
-| Link | Accent, underlined, a 12 px external-link icon | Only for things that open the browser: "Open on Hardcover" on a series, author or list page (a book's is in its "more" menu) |
+| Text button | Ink text, underline on hover only | In-app navigation inside content: an author, a series, a book title, a mood on a book's mood line |
+| Link | Accent, underlined, a 12 px external-link icon | Only for things that open the browser: "Open on Hardcover" on a series, author or list page (a book's is in its "more" menu), and on a vibe's page once its list is over 7 days old |
 | Byline link | Ink, 14/500, underline on hover, pointing hand | A reviewer's name, which opens their Hardcover profile in the browser. It repeats on every review, so it stays quiet; a right-to-left name goes without the underline, which GPUI on Linux draws beside it |
 
 - **Sizes:** default 32 (padding 12, icon 16, gap 8); small 24 (padding 8,
@@ -420,6 +424,29 @@ The two kinds:
 - **Wrapped chips** (`TagRow`): chips that wrap across a width sit 6 apart
   both ways (`s-6`), in the header and in the Tags block alike.
 
+Most chips only say something. Two kinds are pressed:
+- **Page chip:** a TagChip that opens a page: a genre in a book's header or
+  Tags block (the genre's page), and Discover's Browse chips (a mood's or a
+  genre's page, a featured vibe's page). The same pill, with the `hover`
+  fill over its own on hover and the pointing hand; nothing else changes,
+  so it still reads as a tag. Content warnings and other tags stay plain.
+- **Filter chip** (a shelf's filter bar): a genre (with its icon) or a mood,
+  then how many books a press would leave, tabular at weight 400 ("Fantasy
+  5").
+  - **Selected:** the `selected` fill over its own, the text in `fg`, and a
+    12 px check, in `fg` too, in the icon's place (before a mood's name),
+    so the state never rests on the fill alone. A press clears it.
+  - **Disabled:** a chip whose press would leave no books: 50% opacity, no
+    response, and the arrows skip it. A selected chip is never disabled.
+  - It is a toggle to a screen reader, named with its count ("Fantasy, 5
+    books", pressed or not).
+- **Keys:** a row of pressed chips is one stop in the Tab order, as the
+  sidebar's destinations are. Tab enters on the chip the row was left from
+  (the first until then); Left and Right move along it (onto its "More"
+  too), Home and End go to the ends, Enter and Space press, and Tab or
+  Shift+Tab leaves. A chip with focus shows the ring outside the pill and
+  the 1 px accent edge inside it.
+
 Never colour-code chips, and never use a badge for ordinary metadata.
 
 ### Stars (`star.rs`)
@@ -460,6 +487,10 @@ Never colour-code chips, and never use a badge for ordinary metadata.
 - Every meter has an accessible name, what it measures ("Reading
   progress", "Progress toward the goal", "5 stars"): `Meter::new` takes
   it.
+- **Hardcover's figures** (the ratings breakdown, the votes in the Votes
+  popover) are muted meters: the fill is `fg-muted` on `track`, never
+  `accent`, which is the reader's own progress. They never move. Each is
+  named with its figure ("Adventurous: 422 votes", "Medium pace: 58%").
 
 ### Panels, rails and hairlines
 
@@ -486,7 +517,8 @@ Never colour-code chips, and never use a badge for ordinary metadata.
     2 px meter under a percentage.
   - The lane is kept even when a row has nothing to put in it, so columns
     stay aligned.
-- **Catalogue row** (search, Discover, series, author and list pages): the
+- **Catalogue row** (search, and tag, vibe, Trending, series, author and
+  list pages): the
   same, with the StatusChip trailing. In a list narrower than 360 the chip
   shrinks to its icon (`StatusIconChip`, the status in its tooltip and
   accessible name), so the title keeps its room.
@@ -601,14 +633,25 @@ Never colour-code chips, and never use a badge for ordinary metadata.
 - **Popover and menu:** `raised`, `r-box`, `shadow-popover`, padding 4.
   - Menu items are 32 high, padding 8, `r-control`, with a 16 px icon in a
     fixed slot. They use the same hover and selected fills as rows.
-  - The app has no popover of its own; its menus are the kit's, which keep
-    their own radius, shadow, item height and icon size (Kit limits).
+  - The app's menus are the kit's, which keep their own radius, shadow,
+    item height and icon size (Kit limits).
+  - A popover that holds content, not commands (the Votes popover, the
+    only one), has a 16 inset and a fixed width. It opens 4 under its
+    menu button, on the button's leading edge, and scrolls inside when
+    the window is too short for it. The button stays pressed while it is
+    open; Escape or a press outside closes it and gives focus back to the
+    button.
+  - A row's context menu (a vibe's rows, the only one) repeats commands
+    that have another path, never the only one: the keyboard reaches them
+    through the book's own menus.
 - **Dialogs:**
   - **Width:** confirmations 24 rem; forms 30 rem.
   - **Title:** the decision ("Delete “Book club picks”?").
   - **Body:** only new information.
   - **Buttons:** Cancel, then the result ("Delete" in danger; "Save" in
-    primary).
+    primary). A confirmation's result that destroys nothing ("Add",
+    "Install", "Never recommend") is primary; Cancel has the focus when it
+    opens.
 
 ### Reviews (other readers')
 
@@ -638,7 +681,8 @@ An empty state is centred in the region it explains:
 - a 24 px icon in `fg-faint` (stroke 1.5);
 - a `body-strong` title;
 - one `fg-muted` sentence, at most 288 wide;
-- optionally one button.
+- optionally one button, or one link when what helps is in the browser
+  ("Open on Hardcover").
 
 Use the app's own words: "No matches" / "No books in Did not finish match
 “dune”." and "Select a book to see its details". An empty state is never an
@@ -672,11 +716,15 @@ Every screen starts from its task:
 | Book | Know the book and update it | Cover, title, status, progress |
 | Coming soon | See what's next in your series, and want it | The dates |
 | Series | See where you are in each series and what's next | The next step in each series |
+| Discover | Find a book you don't know | The first shelf: "For you" |
+| A tag's page | See the books readers file under a mood or a genre | The list |
+| A vibe's page | Go through one of Hardcover's lists for you | The list |
 
 ### Window shell
 
 - The sidebar (240) sits beside the destination.
-- Book, series and author pages open over the destination with a Back bar.
+- Book, series, author, tag, vibe and Trending pages open over the
+  destination with a Back bar.
   A sidebar destination clears them.
 - **Wide window:** see "Wide windows" below. A book pane's tools sit at its
   trailing edge, over its content.
@@ -739,10 +787,14 @@ every width below (the tiers' thresholds included) is in design px too.
     window), the blocks under the panel split: About this book, Your
     review and Reviews at 640; tags, other titles and Similar books in the
     side column, filling the rest, in whole rows.
-  - **Discover, list, series and author pages:** the list fills the region,
-    and the page's intro line and any description keep the 640 measure.
-    When the region also fits a book pane of 392 beside a 704 list (a 1337
-    window), the selected book shows in the pane, which takes the rest.
+  - **Tag, vibe, Trending, list, series and author pages:** the list fills
+    the region, and the page's intro line and any description keep the 640
+    measure. When the region also fits a book pane of 392 beside a 704
+    list (a 1337 window), the selected book shows in the pane, which takes
+    the rest.
+  - **Discover:** fills the region. Each cover shelf is one row with as
+    many covers as fit, never a second row; the Browse chips wrap across
+    the width.
   - **Coming soon** fills the region; its date and action lanes keep the
     trailing edge. **Search** is a shelf: its list keeps its resizable
     width and the pane takes the rest.
@@ -754,7 +806,7 @@ every width below (the tiers' thresholds included) is in design px too.
     count beside it in `fg-muted`; under that, the filter input ("Filter",
     filling the width) and the sort select (168), 8 apart. As the list
     narrows, the select gives way first, down to the small 128; the filter
-    keeps at least 104.
+    keeps at least 104. Under them, the filter bar (below).
   - **Rows:** list rows, inset 8.
 - **Book pane:**
   - **Object bar:** 56 high, no hairline. "Lists" (a ghost menu button with
@@ -774,7 +826,9 @@ every width below (the tiers' thresholds included) is in design px too.
   - the facts: muted and tabular ("2021 · 476 pages");
   - Hardcover's average: a 12 px muted star and "4.51 average · 9,223
     ratings";
-  - the genres: genre TagChips (with their icons), wrapped 6 apart;
+  - the mood line (below), when the book has one;
+  - the genres: genre TagChips (with their icons), wrapped 6 apart. Each
+    is a page chip: it opens the genre's page;
   - at the foot of the cover, the action row: the status menu button, then
     the rating control (20 px stars and "Rate"), 16 apart.
 - **Then one panel, 24 below:**
@@ -789,11 +843,130 @@ every width below (the tiers' thresholds included) is in design px too.
   (a property list: Edition, Owned, Privacy, Added). The other existing
   blocks (your review, reads, lists, series, other readers' reviews,
   similar books) follow the same pattern.
-- **Tags:** the genres past the header's first six, then moods, content
+- **Tags:** the genres past the header's first six, then content
   warnings and other tags, each a group, 16 apart: the group's name
   ("Content warnings") in `label`, and 6 below it its chips, wrapped 6 apart
   across the block's width. Each group shows six until the block's small
-  ghost "Show N more" (then "Show fewer").
+  ghost "Show N more" (then "Show fewer"). Moods are never chips here: they
+  are the header's mood line and its votes. A block left with one group
+  takes the group's name as its `heading` ("Content warnings") and drops
+  the label.
+
+### The mood line (a book's header)
+
+What Hardcover's readers say the book is like, in one line of the header
+and no block: "Hopeful · Funny · Adventurous", then "Votes".
+- **Where:** in the info column of every book header (the pane and the full
+  page), after the facts and Hardcover's average, before the genres. It
+  comes with the book's details, as the genres do, with no skeleton of its
+  own.
+- **The line:** `body`. Up to three moods, each a text button that opens
+  the mood's page, with " · " in `fg-muted` between them; then, for a slow
+  or fast book, " · " and the pace in plain ink ("Slow pace", "Fast pace");
+  then, 4 after, "Votes": a small ghost menu button. The moods wrap; the
+  pace and "Votes" stay together.
+- **Which moods.** From Hardcover's exact votes for its 14 moods on the
+  book (`taggable_counts`); a mood's share is its votes over the book's
+  votes for all 14, and its usual share is the same across Hardcover.
+  - Under 50 mood votes: **no line and no "Votes"**.
+  - A mood stands out with at least 10% of the book's mood votes and at
+    least 1.5 times its usual share. The line shows those, the furthest
+    above usual first, at most three.
+  - When none stands out, the line shows the three moods with the most
+    votes.
+- **Pace** is named only when Slow or Fast leads, with at least 20 pace
+  votes and at least half of them. Medium is never named: nearly every
+  book is.
+- The numbers above are the rule; they are kept in one place in code, with
+  a test over real books.
+- **Keys:** each mood and "Votes" is a Tab stop. To a screen reader the
+  line is a group named "Moods from Hardcover readers".
+
+### The Votes popover
+
+Every figure behind the line, on demand: a content popover (Popovers) 360
+wide, opened by "Votes".
+- **Top:** "Votes from Hardcover readers" in `caption`, muted, 12 above the
+  groups. Then groups 16 apart, each under a `label`, 6 below it.
+- **Moods:** the moods with at least 5 votes, the most votes first (ties in
+  Hardcover's order). Rows 4 apart: the mood (a text button that opens its
+  page, in a 96 lane), a 6 px muted meter filling the row, its length
+  against the first mood's, and the votes in a 48 lane (`caption`, tabular,
+  muted, right-aligned). "Votes" in `caption`, muted, names that lane on
+  the label's line.
+- **Pace** (Slow, Medium, Fast) and **Driven by** (Plot, A mix,
+  Character), each shown from 20 votes: three equal cells 12 apart, in
+  that order. A cell has the answer, its share on the trailing edge
+  (`caption`, tabular) and a 6 px muted meter under them; all muted, but
+  the leading answer's name is ink at weight 500. The three shares add up
+  to 100%.
+- **Characters:** one muted line of the traits readers agree on: of
+  Loveable or Unloveable, Strong development or Weak development, Diverse
+  or Not diverse, the side with at least two thirds of the pair's votes,
+  when the pair has at least 20. The trait in ink, its share after it
+  ("Loveable 92% · Strong development 68%"). A pair nearer even says
+  nothing and is left out; with none, no group.
+- **Rarely:** under a hairline (12 above and below), one `caption` line,
+  muted: of the ten most used moods on Hardcover (Adventurous to Hopeful),
+  those with at most a fifth of their usual share (no votes included), the
+  most used first, at most three, and only when the book has at least 100
+  mood votes: "Rarely dark.", "Rarely dark, mysterious or sad." The four
+  least used moods are rare on most books, so their absence says nothing.
+  With none, no hairline.
+- The meters are Hardcover's figures: muted, and they never move (Meters).
+- **Keys:** Enter or Space on "Votes" opens it and moves focus to the first
+  mood; Tab goes through the moods; Escape closes it. Choosing a mood
+  closes it and opens the mood's page.
+
+### The filter bar (a shelf's list)
+
+Narrowing the reader's own shelf by genre and mood: for choosing the next
+book, not for discovery. Each of the six status shelves has it (not
+Search, and not a list's page), in the list's header, 12 under the filter
+and the sort.
+- **Two rows,** 6 apart, each 24 high: genres, then moods. Each row holds
+  filter chips (Chips), 6 apart, for the genres or moods the shelf's books
+  have: the most books first (ties by name for genres, in Hardcover's
+  order for moods), as many as fit on one line, then a small ghost menu
+  button "More" with the rest, named "More genres" or "More moods" for a
+  screen reader. A row never wraps. A row with nothing to offer hides, and
+  so does "More" with nothing left.
+  - **"More":** each item is the name with its count on the trailing edge;
+    the selected one is checked, and one that would leave no books is
+    disabled. A choice made there takes the first place in its row for as
+    long as it is selected, so it can always be seen and cleared.
+  - **Narrow list:** fewer chips fit; a row keeps its selected chip, else
+    its first, and a chip too long for the row is cut with an ellipsis.
+- **What a book has.** Its genres are Hardcover's, with duplicates merged
+  under one name ("Sci-fi", "Science Fiction" and "Science-Fiction" are
+  one). It has a mood when the mood is on its mood line, so the bar and
+  the pane always agree.
+- **One genre and one mood at most,** and they combine: a book must have
+  both. Pressing another chip of the same row replaces the choice;
+  pressing the selected one clears it. The choices are kept per shelf for
+  the session.
+- **Counts** say what a press would leave: with a mood selected, each
+  genre's count is among that mood's books, and the other way round. They
+  don't follow the text filter.
+- **Title row:** while a chip or the text filter is set, the count reads
+  "2 of 8" and a small ghost "Clear filters" sits on the trailing edge; it
+  clears both chips and the text.
+- **Foot:** while a chip is selected and some of the shelf's books have no
+  genre or mood votes, one `caption` line, muted, under the rows (inset
+  8/16): "1 book on this shelf has no genre or mood votes yet, so no chip
+  finds it." ("3 books on this shelf have…").
+- **No matches:** the empty state in the list's place: "No matches", one
+  sentence, and a default "Clear filters". The sentence is one of: "No
+  books in Want to read are both Mystery and Adventurous.", "No books in
+  Want to read match Mystery." (one chip), "No books in Want to read match
+  “dune” with these filters." (the text filter as well). A disabled chip
+  can't be pressed, so this shows only when the shelf changes under the
+  chips, or with the text filter. The selected chips stay pressable.
+- **States:** the genres and moods come from one cached fetch of the
+  library's tags. Until it first lands, skeleton chips keep the two rows'
+  place; if it fails, one muted line with a small "Try again" takes it.
+- **Keys:** each row is one Tab stop (Chips); a press keeps focus on the
+  chip.
 
 ### Full book page (over Discover, search, a series or an author)
 
@@ -944,9 +1117,138 @@ every width below (the tiers' thresholds included) is in design px too.
   started is finished or hidden.", "Every series you've started is
   hidden.", "You haven't hidden a series. Hide one from its menu.").
 
+### Discover (a destination)
+
+All discovery lives here: books the reader doesn't know. Nothing of
+Hardcover's recommendations shows on a shelf or on Home.
+- **Content:** inset 32, filling the region. The `page-title` "Discover",
+  then sections: the first 24 below it, the others 32 apart. A section has
+  its `section` title, with a small ghost "See all" on the trailing edge
+  where there is more, and its content 12 below.
+- **Cover shelf:** one row of covers 16 apart, as many as fit; under each,
+  its title at 12/500 in at most two lines, as for Similar books. The
+  cover and the title open the book page.
+- **Sections, in order:**
+  1. **"For you":** Hardcover's Recommendations vibe, in its order. The
+     muted line "Hardcover's recommendations from your library." sits
+     between the title and the shelf. "See all 250" opens the vibe's page.
+  2. **"Browse":** three groups, 16 apart, each a `label` and 6 below it a
+     row of page chips (Chips), wrapped 6 apart: "By mood" (the 14 moods,
+     in Hardcover's order), "By genre" (Fantasy, Science Fiction, Young
+     Adult, Romance, Mystery, Thriller, Horror, History, Classics,
+     Biography, Adventure, War, with their icons) and "Featured on
+     Hardcover" (the vibes Hardcover features, by name). A mood or genre
+     opens its tag page; a vibe opens its vibe page.
+  3. **"Top picks":** Hardcover's Top Picks vibe. "See all 35" opens its
+     page.
+  4. **"Because you loved <title>":** the similar books of the reader's
+     latest 5-star read, less the books in the library and those Top
+     picks shows. No "See all": the shelf is all there is. A title too
+     long for the line is cut with an ellipsis.
+  5. **"Trending this month":** one book per series. "See all" opens
+     Trending.
+- **One lead.** The first shelf on the page is the lead: lg covers with
+  the cover shadow. Every other shelf has md covers, flat. "Browse" always
+  comes second, after the lead.
+- **Without `read:vibes`:** "For you", "Top picks" and "Featured on
+  Hardcover" hide, and "Because you loved" leads, as far as "Sign in
+  again…". With no 5-star read, or no similar books for it, that section
+  hides too and "Trending this month" leads.
+- **A vibe not built yet:** "For you" (or "Top picks") keeps its title and
+  its place, and shows, where the shelf would be, one muted sentence and
+  the link: "Hardcover builds this list when you open it on
+  hardcover.app." and "Open on Hardcover". The lead is then the first
+  section that has covers.
+- A book the reader said never to recommend (a vibe's page) is left out of
+  "For you" and "Top picks" at once.
+- **States:** a shelf loading is a row of skeleton covers; one that failed
+  is one muted sentence with "Try again" in its place, and the other
+  sections stay. A section with nothing to show hides without leaving a
+  gap.
+- **Trending** (over Discover, from "See all"): the `page-title`
+  "Trending", the period segments (Week, Month, 3 months, Year, All time)
+  and the list of catalogue rows, with the pane beside it in a wide window.
+
+### A tag's page (a mood or a genre)
+
+One page for both, over the page it was opened from (a book's mood line,
+its Votes popover, a genre chip, Discover's Browse), with Back.
+- **Header:** inset 32. The `page-title` is the tag ("Relaxing", "Science
+  Fiction"). Under it a muted intro, at the prose measure:
+  - a mood: "Books Hardcover readers call relaxing, the most votes first.";
+  - a mood and a genre: "Mystery books Hardcover readers call relaxing,
+    the most votes first.";
+  - a genre: "Books Hardcover readers file under Science Fiction, the most
+    votes first."
+- **One select** (168) on the title's line, at the trailing edge, for the
+  other kind: on a mood's page "Any genre" and Browse's genres, each with
+  its icon; on a genre's page "Any mood" and the 14 moods. The choice is
+  kept with the page, so Back finds it.
+- **Order:** always by votes: for the mood, or for the genre while no mood
+  is chosen. There is no sort control.
+- **Rows:** catalogue rows, 16 below the header: an sm cover, the title,
+  a muted tabular line with the author, the year and the votes the order
+  goes by ("Travis Baldree · 2022 · 1,204 votes", "1 vote"), and the
+  StatusChip of a book in the library. Enter or a double click opens the
+  book page; in a wide window the selected book shows in the pane beside
+  the list (Wide windows).
+- **States:** skeleton rows while loading; a failed load is one muted
+  sentence with "Try again"; a choice with no books is the empty state
+  ("No matches", "Hardcover has no Mystery books readers call relaxing.").
+
+### A vibe's page
+
+One of Hardcover's lists for the reader ("For you", "Top picks") or one it
+features ("Hidden Gem Fantasy"), over Discover, with Back.
+- **Header:** inset 32. The `page-title` is the vibe's name; "For you" for
+  Hardcover's Recommendations. Under it a muted intro, at the prose
+  measure: "Hardcover's recommendations from your library." for For you,
+  "Popular books Hardcover picked for your taste." for Top picks, and a
+  featured vibe's own description. Then one muted, tabular line: the count
+  and the list's age, "250 books · Updated today".
+- **Age.** Hardcover rebuilds a vibe only when its reader opens its page
+  on hardcover.app, at most once a day; the app can't ask for it. The age
+  is in whole local days (`dates`): "Updated today", "Updated yesterday",
+  "Updated 3 days ago".
+  - **Up to 7 days:** only the age.
+  - **From the eighth day:** the line goes on, "250 books · Updated 9 days
+    ago. Hardcover updates this list when you open it on hardcover.app.",
+    and "Open on Hardcover" (an `ExternalLink` to the vibe's page) shows
+    on the title's line, at the trailing edge. Never sooner: a fresh list
+    has nothing to gain from the website.
+- **Rows:** catalogue rows in Hardcover's order, 16 below the header: an
+  sm cover, the title, the author muted, and the StatusChip of a book
+  already in the library; nothing else marks it. Enter or a double click
+  opens the book page; in a wide window the selected book shows in the
+  pane (Wide windows).
+- **"Never recommend…"** on For you and Top picks: in a row's context menu
+  ("Open", "Want to read" for a book not in the library, a separator, then
+  "Never recommend…" with the thumbs-down icon), and in the book's "more"
+  menu while the book is open from a vibe, which is the keyboard's path.
+  The book only, not its author. Without `write:vibes` it is disabled,
+  with the reason (`format::needs_permission`).
+  - It asks first, since it can't be undone from the app: "Never recommend
+    “The Lady of the Lake”?" / "Hardcover will leave it out of your
+    recommendations. You can't undo this from this app." / Cancel (with
+    the focus), then "Never recommend" (primary: nothing is destroyed).
+  - Once Hardcover has accepted it, the row leaves (Motion), and the app
+    hides the book from every vibe's page and from Discover's shelves at
+    once: Hardcover's own list drops it only at its next rebuild. The app
+    remembers the book until a rebuilt list comes without it. There is no
+    Undo. A failure is a notification, titled "Couldn't update your
+    recommendations".
+- **Not built yet:** the empty state under the title: the sparkles icon,
+  "Your recommendations aren't ready" (For you; "This list isn't ready"
+  for any other), "Hardcover builds this list when you open it on
+  hardcover.app. It shows here after that.", and the link "Open on
+  Hardcover".
+- **States:** skeleton rows while loading; a failed load is one muted
+  sentence with "Try again". Without `read:vibes` no vibe's page can be
+  reached: Discover hides what opens them.
+
 ### Screens not in the mockup
 
-Search, Discover, Stats, list pages, series and author pages, Settings,
+Search, Stats, list pages, series and author pages, Settings,
 About, sign-in and the dialogs use the same parts:
 - a page title;
 - catalogue rows with sm covers and StatusChips;
@@ -1144,7 +1446,7 @@ commit that fixes it.
 - Some of the kit's own measures are px, so they don't follow the
   interface scale (`ui_scale`) and look a little small at 1.25: a chart's
   labels (Stats, the goal's months) are a fixed 10 px; a segmented tab
-  bar's height and padding (Search's tabs, Discover's periods, the progress
+  bar's height and padding (Search's tabs, Trending's periods, the progress
   dialog's units); a dialog's margins.
 - The kit's buttons and switches show their ring whenever they hold focus,
   not only after keyboard input. A press never focuses one, so this shows

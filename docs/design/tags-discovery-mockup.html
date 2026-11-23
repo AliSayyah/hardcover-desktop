@@ -1,0 +1,1792 @@
+<!doctype html>
+<html lang="en">
+<!--
+  A proposal for tags, moods and discovery (2026-11-22), not the design reference. The tokens and
+  shared parts are copied unchanged from docs/design/mockup.html, which stays the reference; the
+  proposal's screens are at the end of the script. Which figures are real and which illustrative is
+  listed in the comment above the screens. Covers load from Hardcover at view time and are never
+  committed. The reader and their lists are invented.
+-->
+<head>
+<meta charset="utf-8">
+<title>Hardcover Desktop: tags, moods and discovery (proposal)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400&family=Vazirmatn:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   Tokens. Every rule below uses these; the token sheet reads them back
+   with getComputedStyle, so the sheet cannot drift from the screens.
+   ===================================================================== */
+.theme-light {
+  --bg: #FAF8F4;            /* paper: the work area */
+  --sidebar: #F1EEE7;       /* the sidebar */
+  --surface: #F3F0E9;       /* the one inset panel: your progress */
+  --raised: #FFFFFF;        /* controls, popovers */
+  --hover: rgba(31, 28, 23, .05);     /* ink overlays: they step the same way on every host surface */
+  --selected: rgba(31, 28, 23, .10);  /* the current row; a pressed control */
+  --border: #E4DED3;
+  --border-strong: #918879; /* control outlines: 3:1 on raised, paper, surface, the sidebar */
+  --track: #E0D9CC;         /* empty part of a progress bar */
+  --switch-thumb: #FFFFFF;  /* raised */
+  --chip: rgba(31, 28, 23, .07);
+  --skeleton: #E9E4DA;      /* something still loading */
+  --fg: #1F1C17;            /* ink */
+  --fg-muted: #5F574B;      /* secondary text that carries information: AA on every surface */
+  --fg-faint: #7A7266;      /* empty-state icons and other marks; never text */
+  --accent: #3B4A9C;        /* ink blue: progress, primary commit, focus, the selected icon, external links */
+  --accent-fg: #FFFFFF;
+  --accent-soft: rgba(59, 74, 156, .10);
+  --ring: rgba(59, 74, 156, .5);
+  --gold: #A16207;          /* the user's own rating, nothing else: 3:1 against an empty star */
+  --star-empty: rgba(31, 28, 23, .10);
+  --scrim: rgba(31, 28, 23, .16); /* the dialog backdrop */
+  --danger: #B42318;
+  --warning: #B54708;
+  --cover-edge: rgba(30, 20, 10, .16);
+  --cover-hinge: rgba(30, 20, 10, .16);
+  --shadow-cover: 0 1px 2px rgba(40, 28, 16, .18), 0 8px 20px rgba(40, 28, 16, .14);
+  --shadow-popover: 0 0 0 1px rgba(30, 20, 10, .10), 0 4px 12px rgba(40, 28, 16, .12);
+  --frame-edge: rgba(0, 0, 0, .10);
+  color-scheme: light;
+}
+.theme-dark {
+  --bg: #171614;
+  --sidebar: #100F0E;
+  --surface: #1E1C1A;
+  --raised: #262320;
+  --hover: rgba(238, 234, 227, .05);
+  --selected: rgba(238, 234, 227, .10);
+  --border: #292623;
+  --border-strong: #77706A;
+  --track: #35312C;
+  --switch-thumb: #EEEAE3;  /* fg: a raised thumb on track is 1.2:1 here */
+  --chip: rgba(238, 234, 227, .08);
+  --skeleton: #2B2825;
+  --fg: #EEEAE3;
+  --fg-muted: #ABA498;
+  --fg-faint: #8D877C;
+  --accent: #98A5F4;
+  --accent-fg: #12142A;
+  --accent-soft: rgba(152, 165, 244, .14);
+  --ring: rgba(152, 165, 244, .5);
+  --gold: #FBBF24;
+  --star-empty: rgba(238, 234, 227, .10);
+  --scrim: rgba(0, 0, 0, .48);
+  --danger: #FB8178;
+  --warning: #FDB022;
+  --cover-edge: rgba(255, 255, 255, .12);
+  --cover-hinge: rgba(0, 0, 0, .28);
+  --shadow-cover: 0 1px 2px rgba(0, 0, 0, .55), 0 10px 24px rgba(0, 0, 0, .45);
+  --shadow-popover: 0 0 0 1px rgba(255, 255, 255, .08), 0 4px 12px rgba(0, 0, 0, .5);
+  --frame-edge: rgba(255, 255, 255, .08);
+  color-scheme: dark;
+}
+:root {
+  /* Families. GPUI draws no variable axes, so each is a set of static faces.
+     Literata is used at two fixed optical sizes, as two families: Text (12pt)
+     up to 18 px and Display (36pt) from 24 px. Nothing depends on letter-spacing. */
+  --sans: "Inter", "Vazirmatn", system-ui, sans-serif;
+  --serif: "Literata", "Vazirmatn", Georgia, serif;
+
+  /* Type sizes (rem steps: xs, sm, base, lg, xl, 2xl, 3xl) and their line heights */
+  --t-12: 12px; --l-12: 16px;
+  --t-14: 14px; --l-14: 20px;
+  --t-16: 16px; --l-16: 24px;
+  --t-18: 18px; --l-18: 24px;
+  --t-20: 20px; --l-20: 28px;
+  --t-24: 24px; --l-24: 30px;
+  --t-30: 30px; --l-30: 36px;
+  --l-prose: 26px;          /* serif 16 prose */
+
+  /* Spacing: one scale, named by relationship */
+  --s-2: 2px;   /* optical */
+  --s-4: 4px;   /* parts of one control */
+  --s-6: 6px;   /* chips in a wrapped group; a tag group's label to its chips */
+  --s-8: 8px;   /* closely related */
+  --s-12: 12px; /* one group */
+  --s-16: 16px; /* groups in a section; panel inset */
+  --s-24: 24px; /* sections; pane inset */
+  --s-32: 32px; /* regions; page inset */
+
+  /* Radius */
+  --r-cover-s: 2px;  /* covers xs, sm */
+  --r-cover: 3px;    /* covers md and up */
+  --r-control: 6px;  /* buttons, inputs, nav rows */
+  --r-box: 8px;      /* list rows, panels, popovers */
+  --r-pill: 999px;   /* chips, progress bars, the avatar */
+
+  /* Frames */
+  --h-control: 32px; --h-control-s: 24px; --h-chip: 20px; --h-row-l: 40px; --h-bar: 56px;
+  --w-sidebar: 240px; --w-list: 384px; --w-rail: 272px; --w-key: 96px; --w-key-s: 72px;
+  --w-select: 168px; --w-select-s: 128px; --w-meter: 400px; --w-meter-s: 160px; --w-empty: 288px; --w-prose: 640px;
+  --icon: 16px; --icon-s: 12px; --icon-l: 24px;
+  --meter: 6px; --meter-thin: 2px;   /* progress bars: 6 with words beside them, 2 inside a row */
+
+  /* Covers: always 2:3 */
+  --cv-xs: 20px; --cv-sm: 32px; --cv-md: 64px; --cv-lg: 80px; --cv-xl: 128px; --cv-xxl: 160px;
+  --cloth-ink: #F4ECDD;
+}
+
+/* ---------- Page (outside the mock windows) ---------- */
+body { margin: 0; }
+.sheet { display: flex; flex-direction: column; gap: 28px; padding: 4px 0 24px; }
+.cap { font: 600 13px/1.4 var(--sans); margin: 0 0 8px; }
+.cap span { font-weight: 400; opacity: .7; }
+.frame { position: relative; overflow: visible; }
+.win {
+  position: absolute; top: 0; left: 0;
+  width: 1200px; display: flex; overflow: hidden;
+  background: var(--bg); color: var(--fg);
+  font: var(--t-14)/var(--l-14) var(--sans);
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--frame-edge), 0 18px 40px rgba(0,0,0,.18);
+  transform-origin: top left;
+  -webkit-font-smoothing: antialiased;
+}
+.win * { box-sizing: border-box; }
+
+/* ---------- Type roles ---------- */
+.serif { font-family: var(--serif); font-optical-sizing: none; font-variation-settings: "opsz" 12; }
+.display { font-family: var(--serif); font-optical-sizing: none; font-variation-settings: "opsz" 36; font-weight: 600; font-variant-numeric: lining-nums; }
+.d-30 { font-size: var(--t-30); line-height: var(--l-30); }
+.d-24 { font-size: var(--t-24); line-height: var(--l-24); }
+.title-18 { font: 600 var(--t-18)/var(--l-18) var(--serif); font-optical-sizing: none; font-variation-settings: "opsz" 12; }
+.prose { font: 400 var(--t-16)/var(--l-prose) var(--serif); font-optical-sizing: none; font-variation-settings: "opsz" 12; max-width: var(--w-prose); }
+.page-title { font-size: var(--t-20); line-height: var(--l-20); font-weight: 600; }
+.section { font-size: var(--t-16); line-height: var(--l-16); font-weight: 600; }
+.heading { font-size: var(--t-14); line-height: var(--l-14); font-weight: 600; }
+.label { font-size: var(--t-12); line-height: var(--l-12); font-weight: 500; color: var(--fg-muted); }
+.small { font-size: var(--t-12); line-height: var(--l-12); }
+.strong { font-weight: 500; }
+.muted { color: var(--fg-muted); }
+.ink { color: var(--fg); }
+.faint { color: var(--fg-faint); }
+.num { font-variant-numeric: tabular-nums; }
+/* Right-to-left text: the block sits on the interface's leading edge, the line runs in its own
+   direction. A title that wraps fills its column, so its lines pack to the right (WrappingText). */
+.rtl { direction: rtl; text-align: start; align-self: flex-start; max-width: 100%; }
+.display.rtl { line-height: 1.5; }
+.one-line.rtl { align-self: auto; text-align: left; }
+.one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+svg.i { width: var(--icon); height: var(--icon); flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
+
+/* ---------- Layout helpers ---------- */
+.row-c { display: flex; align-items: center; }
+.row-b { display: flex; align-items: baseline; }
+.col { display: flex; flex-direction: column; }
+.fill { flex: 1; min-width: 0; }
+.push { margin-left: auto; }
+.g-4 { gap: var(--s-4); } .g-8 { gap: var(--s-8); } .g-12 { gap: var(--s-12); } .g-16 { gap: var(--s-16); } .g-24 { gap: var(--s-24); }
+.mt-4 { margin-top: var(--s-4); } .mt-8 { margin-top: var(--s-8); } .mt-12 { margin-top: var(--s-12); } .mt-16 { margin-top: var(--s-16); } .mt-24 { margin-top: var(--s-24); }
+.start { align-self: flex-start; }
+.hair { height: 1px; background: var(--border); flex: none; }
+
+/* ---------- Sidebar: icons on x=16, labels on x=40, counts on the trailing lane ---------- */
+.sb { width: var(--w-sidebar); flex: none; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: var(--s-8); }
+.brand { display: flex; align-items: center; gap: var(--s-8); height: var(--h-row-l); padding: 0 var(--s-8); margin-bottom: var(--s-8); font-size: var(--t-16); font-weight: 600; }
+.brand svg { color: var(--accent); }
+.nav { display: flex; align-items: center; gap: var(--s-8); height: var(--h-control); padding: 0 var(--s-8); border-radius: var(--r-control); white-space: nowrap; flex: none; }
+.nav svg { color: var(--fg-muted); }
+.nav .lab { overflow: hidden; text-overflow: ellipsis; }
+.nav .n { margin-left: auto; padding-left: var(--s-8); font-size: var(--t-12); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.nav.hover, .row.hover, .btn.hover, .menu-item.hover { background-image: linear-gradient(var(--hover), var(--hover)); }
+.nav.sel, .row.sel, .btn.pressed { background-image: linear-gradient(var(--selected), var(--selected)); }
+.nav.sel { font-weight: 500; }
+.nav.sel svg { color: var(--accent); }
+.nav.sel .n { color: var(--fg); }
+.nav.focus { box-shadow: 0 0 0 2px var(--ring), inset 0 0 0 1px var(--accent); }
+.sb .label { padding: var(--s-16) var(--s-8) var(--s-4); }
+/* The goal is a row like the others; its bar runs under the label, from the label spine to the count lane. */
+.goal-row { display: flex; flex-direction: column; justify-content: center; gap: var(--s-4); height: var(--h-row-l); padding: 0 var(--s-8); border-radius: var(--r-control); }
+.goal-row .top { display: flex; align-items: center; gap: var(--s-8); }
+.goal-row svg { color: var(--fg-muted); }
+.goal-row .n { margin-left: auto; font-size: var(--t-12); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.goal-row .bar { margin-left: calc(var(--icon) + var(--s-8)); }
+.acct { margin-top: auto; display: flex; align-items: center; gap: var(--s-8); padding: var(--s-8); border-radius: var(--r-control); }
+.avatar { width: var(--h-control); height: var(--h-control); border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: var(--t-12); font-weight: 600; flex: none; }
+.acct svg { margin-left: auto; color: var(--fg-muted); }
+
+/* ---------- Controls ---------- */
+.btn { height: var(--h-control); padding: 0 var(--s-12); border-radius: var(--r-control); border: 1px solid var(--border-strong); background: var(--raised); color: var(--fg); font: 500 var(--t-14)/1 var(--sans); display: inline-flex; align-items: center; gap: var(--s-8); white-space: nowrap; flex: none; }
+.btn svg { color: var(--fg-muted); }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-fg); }
+.btn.primary svg { color: inherit; }
+.btn.danger { background: transparent; color: var(--danger); }
+.btn.danger svg { color: inherit; }
+.btn.sm { height: var(--h-control-s); padding: 0 var(--s-8); font-size: var(--t-12); gap: var(--s-4); }
+.btn.icon { width: var(--h-control); padding: 0; justify-content: center; }
+.btn.focus, .input.focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
+.dis { opacity: .5; }
+.input { height: var(--h-control); border: 1px solid var(--border-strong); background: var(--raised); border-radius: var(--r-control); display: flex; align-items: center; gap: var(--s-8); padding: 0 var(--s-8); color: var(--fg-muted); }
+.input svg { color: var(--fg-muted); }
+.input .val { color: var(--fg); }
+.select { height: var(--h-control); border: 1px solid var(--border-strong); background: var(--raised); border-radius: var(--r-control); display: inline-flex; align-items: center; gap: var(--s-8); padding: 0 var(--s-8) 0 var(--s-12); flex: none; }
+.select svg { margin-left: auto; color: var(--fg-muted); }
+.select.sm { height: var(--h-control-s); padding: 0 var(--s-4) 0 var(--s-8); font-size: var(--t-12); width: var(--w-select-s); }
+.switch { width: 28px; height: 16px; border-radius: var(--r-pill); background: var(--track); position: relative; flex: none; }
+.switch i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: var(--r-pill); background: var(--switch-thumb); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.switch.on { background: var(--accent); }
+.switch.on i { left: 14px; }
+.link { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.textbtn { border-bottom: 1px solid transparent; }
+.textbtn.hover { border-bottom-color: currentColor; }
+
+.bar { height: var(--meter); border-radius: var(--r-pill); background: var(--track); position: relative; }
+.bar > i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: inherit; background: var(--accent); }
+.bar > b { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--fg); } /* where the pace says you should be */
+.bar.thin { height: var(--meter-thin); }
+
+.chip { display: inline-flex; align-items: center; gap: var(--s-4); height: var(--h-chip); padding: 0 var(--s-8); border-radius: var(--r-pill); background: var(--chip); color: var(--fg-muted); font-size: var(--t-12); font-weight: 500; white-space: nowrap; flex: none; }
+.chip svg.warn { color: var(--warning); }
+.chip svg.genre { color: var(--accent); }
+/* Wrapped chips sit 6 apart both ways; the Tags block's groups 16 apart,
+   each label 6 above its chips. */
+.tag-row { display: flex; flex-wrap: wrap; gap: var(--s-6); }
+.tag-groups { display: flex; flex-direction: column; gap: var(--s-16); }
+.tag-groups .label { margin-bottom: var(--s-6); }
+
+.stars { display: inline-flex; gap: var(--s-2); align-items: center; flex: none; }
+.star { position: relative; width: 16px; height: 16px; }
+.star svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.star .sfill { position: absolute; inset: 0; overflow: hidden; }
+.stars.lg .star { width: 20px; height: 20px; }
+.stars.xs .star { width: 12px; height: 12px; }
+
+.panel { background: var(--surface); border-radius: var(--r-box); padding: var(--s-16); }
+.popover { background: var(--raised); border-radius: var(--r-box); box-shadow: var(--shadow-popover); padding: var(--s-4); }
+.menu-item { display: flex; align-items: center; gap: var(--s-8); height: var(--h-control); padding: 0 var(--s-8); border-radius: var(--r-control); }
+.menu-item svg { color: var(--fg-muted); }
+
+/* ---------- Covers ----------
+   2:3 always. A hairline edge at every size. From md up: a hinge (one 2-stop gradient strip on the
+   spine side) and, where the cover is the subject of its row, the cover shadow. */
+.cover { position: relative; flex: none; width: var(--w); height: calc(var(--w) * 1.5); border-radius: var(--r-cover); overflow: hidden; background: var(--cloth, var(--skeleton)); color: var(--cloth-ink); }
+.cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cover .edge { position: absolute; inset: 0; border: 1px solid var(--cover-edge); border-radius: inherit; }
+.cover .hinge { position: absolute; top: 0; bottom: 0; left: 0; width: 6%; background: linear-gradient(90deg, var(--cover-hinge), transparent); }
+.cover.lift { box-shadow: var(--shadow-cover); }
+.cv-xs { --w: var(--cv-xs); --ph: 10px; border-radius: var(--r-cover-s); }
+.cv-sm { --w: var(--cv-sm); --ph: 16px; border-radius: var(--r-cover-s); }
+.cv-md { --w: var(--cv-md); --ph: 9px; }
+.cv-lg { --w: var(--cv-lg); --ph: 11px; }
+.cv-xl { --w: var(--cv-xl); --ph: 18px; }
+.cv-xxl { --w: var(--cv-xxl); --ph: 22px; }
+/* The cloth cover: a blind-stamped frame, the title, a short rule, the author. Its type scales with
+   the cover (it stands in for an image), so it is the one place off the type scale. */
+.ph { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 16% 13% 13%; font-family: var(--serif); font-optical-sizing: none; font-variation-settings: "opsz" 12; font-size: var(--ph); }
+.ph .stamp { position: absolute; inset: 5%; border: 1px solid currentColor; border-radius: 1px; opacity: .28; }
+.ph .pt { font-weight: 600; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.ph .rule { width: 24%; height: 1px; background: currentColor; opacity: .6; margin-top: 10%; flex: none; }
+.ph .pa { margin-top: auto; opacity: .85; line-height: 1.2; font-size: .8em; }
+.ph[dir="rtl"] .pt { line-height: 1.5; }
+.ph.initial { justify-content: center; padding: 0; font-weight: 600; line-height: 1; gap: 3px; }
+.ph.initial .rule { margin: 0; width: 8px; }
+.cv-xs .ph.initial .rule { width: 6px; }
+.cover.loading { background: var(--skeleton); }
+.sk { background: var(--skeleton); border-radius: var(--r-control); height: 12px; }
+
+/* ---------- Shared regions ---------- */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.scroll { flex: 1; min-height: 0; overflow: hidden; }
+.objbar { height: var(--h-bar); flex: none; display: flex; align-items: center; gap: var(--s-4); padding: 0 var(--s-16); }
+.objbar.line { border-bottom: 1px solid var(--border); padding: 0 var(--s-24) 0 var(--s-32); }
+.objbar .back { margin-left: calc(-1 * var(--s-12)); }
+.rail { width: var(--w-rail); flex: none; display: flex; flex-direction: column; padding-left: var(--s-24); border-left: 1px solid var(--border); }
+.rail .hair { margin: var(--s-24) 0; }
+.figure { display: flex; align-items: baseline; gap: var(--s-8); margin-top: var(--s-4); }
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: var(--s-4); padding: var(--s-32); }
+.empty svg { width: var(--icon-l); height: var(--icon-l); color: var(--fg-faint); margin-bottom: var(--s-8); stroke-width: 1.5; }
+.empty .d { color: var(--fg-muted); max-width: var(--w-empty); }
+.empty .btn { margin-top: var(--s-12); }
+
+/* ---------- Home ---------- */
+.home { padding: var(--s-32); }
+.cols { display: flex; gap: var(--s-32); align-items: stretch; }
+.hero { display: flex; gap: var(--s-24); padding: var(--s-4) 0 var(--s-24); }
+.hero-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hero .prog { margin-top: auto; display: flex; flex-direction: column; gap: var(--s-8); max-width: var(--w-meter); }
+.cr { display: flex; align-items: center; gap: var(--s-16); padding: var(--s-16) 0; border-top: 1px solid var(--border); }
+.cr .progline { display: flex; align-items: center; gap: var(--s-8); margin-top: var(--s-8); }
+.cr .progline .bar { width: var(--w-meter-s); }
+.cr .acts { display: flex; flex-direction: column; align-items: flex-end; gap: var(--s-4); }
+.shelf { display: flex; gap: var(--s-16); }
+.shelf .it { width: var(--cv-md); }
+.shelf.lg .it { width: var(--cv-lg); }
+.shelf .tt { font-size: var(--t-12); line-height: var(--l-12); margin-top: var(--s-8); }
+/* A read-only sequence (Coming soon, reviews): rows separated by hairlines, no hover fill. */
+.seq-row { display: flex; align-items: center; gap: var(--s-12); padding: var(--s-12) 0; border-top: 1px solid var(--border); }
+.seq-row:first-child { border-top: 0; }
+.seq-row .when { flex: none; display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
+.seq-row .lane { width: 136px; flex: none; display: flex; justify-content: flex-end; }
+.group-label { padding-top: var(--s-24); padding-bottom: var(--s-4); }
+/* Catalogue pages fill their region; only the intro line keeps the prose measure. */
+.list-page > .muted { max-width: var(--w-prose); }
+/* Readers' words: Inter, a little more leading than body, never the book's serif. */
+.reader { font-size: var(--t-14); line-height: 22px; max-width: var(--w-prose); }
+.reader p { margin: 0 0 var(--s-8); }
+.reader.clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.review { display: flex; gap: var(--s-12); align-items: flex-start; padding: var(--s-16) 0; border-top: 1px solid var(--border); }
+.review:first-child { border-top: 0; padding-top: 0; }
+.byline { font-weight: 500; }
+.byline.hover { text-decoration: underline; text-underline-offset: 3px; }
+.avatar.data { color: #FFFFFF; }
+
+/* ---------- Library: list content on x=16, pane content on x=24 ---------- */
+.list { width: var(--w-list); flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.list-head { padding: var(--s-12) var(--s-16); display: flex; flex-direction: column; gap: var(--s-12); border-bottom: 1px solid var(--border); }
+.list-head .h { height: var(--h-control); display: flex; align-items: baseline; gap: var(--s-8); line-height: var(--h-control); }
+.list-tools { display: flex; gap: var(--s-8); }
+.list-tools .select { width: var(--w-select); }
+.rows { padding: var(--s-8); display: flex; flex-direction: column; gap: var(--s-2); }
+.row { display: flex; align-items: center; gap: var(--s-12); padding: var(--s-8); border-radius: var(--r-box); }
+.row.focus { box-shadow: 0 0 0 2px var(--ring), inset 0 0 0 1px var(--accent); }
+.row .t { font-weight: 500; }
+.row .trail { width: 48px; flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: var(--s-4); font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.row .trail .bar { width: 100%; }
+.row.sel .trail { color: var(--fg); }
+
+.detail { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pane { padding: 0 var(--s-24) var(--s-24); }
+.bh { display: flex; gap: var(--s-24); align-items: stretch; }
+.bh-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s-4); }
+.bh-by { font-size: var(--t-16); line-height: var(--l-16); margin-bottom: var(--s-4); }
+.bh-fact { color: var(--fg-muted); display: flex; gap: var(--s-4); align-items: center; }
+.bh-tags { display: flex; gap: var(--s-6); flex-wrap: wrap; margin-top: var(--s-8); }
+.actbar { display: flex; align-items: center; gap: var(--s-16); margin-top: auto; padding-top: var(--s-16); }
+.bh + .panel { margin-top: var(--s-24); }
+.start-panel { display: flex; align-items: center; gap: var(--s-12); }
+.rate { display: flex; align-items: center; gap: var(--s-8); color: var(--fg-muted); }
+.prog-panel { display: flex; flex-direction: column; gap: var(--s-12); }
+.block { margin-top: var(--s-24); }
+.block-h { display: flex; align-items: center; min-height: var(--h-control-s); margin-bottom: var(--s-8); }
+.reads .r { display: flex; align-items: flex-start; gap: var(--s-8); }
+.reads .r svg { color: var(--fg-muted); margin-top: var(--s-2); }
+.props { display: flex; flex-direction: column; gap: var(--s-8); }
+.props .p { display: flex; align-items: center; min-height: var(--h-control-s); }
+.props .k { width: var(--w-key); flex: none; color: var(--fg-muted); }
+.props .v { display: flex; align-items: center; gap: var(--s-8); min-width: 0; }
+.rail .props .k { width: var(--w-key-s); }
+
+/* ---------- Wide windows: rows and panels fill the width; reading text keeps its measure ---------- */
+.cols3 { display: flex; gap: var(--s-32); align-items: stretch; }
+.cols3 > .fill { flex: 1 1 0; }
+.pane.wide { max-width: 1112px; }
+.pane.wide .cols { gap: var(--s-24); }
+/* Fluid: rows and panels fill the window; only reading text keeps its measure (640).
+   What is left beside the text holds the secondary blocks, and cover shelves add covers. */
+.home.fluid { max-width: none; }
+.pane.fluid { max-width: none; }
+.split { display: flex; gap: var(--s-32); align-items: flex-start; }
+.split > .text { width: var(--w-prose); flex: none; }
+.split > .side { flex: 1 1 0; min-width: 0; }
+.shelf.wrap { flex-wrap: wrap; row-gap: var(--s-24); }
+/* Stats: one column filling the region; on a wide region two (each at least 544, filling its half), the figures one row across both, 32 apart. */
+.figs { display: flex; flex-wrap: wrap; gap: var(--s-24); }
+.stats.wide .figs { gap: var(--s-24) var(--s-32); }
+.figs > div { flex: 1 1 160px; min-width: 0; }
+.cols2 { display: flex; gap: var(--s-32); align-items: flex-start; }
+.cols2 > .fill { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: var(--s-32); }
+.chart { height: 192px; display: flex; gap: var(--s-8); align-items: stretch; background: repeating-linear-gradient(to top, var(--track) 0 1px, transparent 1px 48px); }
+.chart.short { height: 160px; }
+.chart .b { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: var(--s-2); font-size: var(--t-12); line-height: var(--l-12); }
+.chart .b i { width: 60%; max-width: 48px; background: var(--accent); border-radius: 2px 2px 0 0; display: block; }
+.chart-x { display: flex; gap: var(--s-8); margin-top: var(--s-4); }
+.chart-x span { flex: 1; text-align: center; font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); }
+.shelfrow { display: flex; align-items: center; gap: var(--s-8); height: var(--h-control); max-width: var(--w-list); }
+.shelfrow svg { color: var(--fg-muted); }
+.shelfrow .n { width: 48px; text-align: right; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.wide-note { position: absolute; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-muted); font-size: var(--t-12); }
+/* ---------- Full book page ---------- */
+.page { padding: var(--s-32); }
+.page .cols { gap: var(--s-24); }
+
+/* ---------- Token sheets ---------- */
+.tok { flex: 1; min-width: 0; padding: var(--s-32); display: flex; flex-direction: column; gap: var(--s-24); background: var(--bg); color: var(--fg); }
+.tok + .tok { border-left: 1px solid var(--border); }
+.tok h4 { margin: 0 0 var(--s-12); font-size: var(--t-12); line-height: var(--l-12); font-weight: 600; color: var(--fg-muted); }
+.tok .note { font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); margin-top: var(--s-8); }
+.sw { display: flex; flex-wrap: wrap; gap: var(--s-12) var(--s-8); }
+.sw > div { width: 126px; font-size: var(--t-12); line-height: var(--l-12); }
+.sw i { display: flex; align-items: center; justify-content: center; height: 32px; border-radius: var(--r-control); box-shadow: inset 0 0 0 1px var(--border); margin-bottom: var(--s-4); font-style: normal; font-weight: 600; }
+.sw code, .tok code { font: 11px/16px ui-monospace, "JetBrains Mono", monospace; color: var(--fg-muted); display: block; }
+.wrap { display: flex; gap: var(--s-12); flex-wrap: wrap; align-items: flex-end; }
+.wrap.c { align-items: center; }
+.ts { display: flex; flex-direction: column; gap: var(--s-8); }
+.ts .l { display: flex; align-items: baseline; gap: var(--s-16); }
+.ts .l code { width: 216px; flex: none; }
+.scale { display: flex; align-items: flex-end; gap: var(--s-16); }
+.scale > div { display: flex; flex-direction: column; align-items: center; gap: var(--s-4); }
+.scale .sq { background: var(--accent-soft); border: 1px solid var(--accent); }
+.state { display: flex; flex-direction: column; gap: var(--s-4); align-items: flex-start; }
+.demo-list { width: 232px; background: var(--sidebar); border-radius: var(--r-box); padding: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2); }
+.demo-list .nav.focus { margin: 3px 0; }
+.boxed { border: 1px solid var(--border); border-radius: var(--r-box); }
+/* ---------- Series ---------- */
+.series-page .group-label { padding-top: var(--s-24); padding-bottom: var(--s-4); }
+/* A series row is a sequence row: no fill, a hairline between rows, 16 above and below. */
+.sr { display: flex; gap: var(--s-24); align-items: flex-start; padding: var(--s-16) 0; border-top: 1px solid var(--border); }
+.sr:first-child { border-top: 0; }
+/* The next lane: 240 wide on every row, so the lanes line up down the page. */
+.nx { width: 240px; flex: none; display: flex; gap: var(--s-12); align-items: flex-start; }
+.nx-ghost { margin-left: calc(-1 * var(--s-8)); }
+/* The strip: the series as a row of sm covers. */
+.strip { display: flex; gap: var(--s-4); }
+.sb-it { width: 40px; flex: none; display: flex; flex-direction: column; align-items: center; gap: var(--s-4); }
+.sb-it .mslot { width: var(--cv-sm); background: transparent; }
+.sb-it .mslot:has(i) { background: var(--track); }
+.pos { display: flex; align-items: center; gap: var(--s-2); font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); white-space: nowrap; }
+.sb-it.next .pos { color: var(--fg); font-weight: 600; }
+.slot { width: var(--cv-sm); height: calc(var(--cv-sm) * 1.5); flex: none; border: 1px dashed var(--border-strong); border-radius: var(--r-cover-s); display: flex; align-items: center; justify-content: center; color: var(--fg-muted); }
+.fwrap { position: relative; }
+.fmenu { position: absolute; top: calc(100% + var(--s-4)); right: 0; width: 200px; z-index: 2; }
+.fmenu .ck { width: var(--icon); height: var(--icon); flex: none; display: flex; }
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet"></div>
+
+<script>
+// ---------- Data: the demo catalogue, plus one Persian book added for the mockup ----------
+const C = id => `https://assets.hardcover.app/${id}`;
+const B = {
+  phm:  { t: "Project Hail Mary", a: "Andy Weir", p: 476, y: 2021, r: 4.51, rc: 9223, g: ["Science Fiction", "Space", "Adventure"], c: C("editions/3274049/8741341047797682-91mYu67RfUL._SL1500_.jpg") },
+  wok:  { t: "The Way of Kings", a: "Brandon Sanderson", p: 1007, y: 2010, r: 4.63, rc: 4280, g: ["Fantasy", "High Fantasy"], s: "The Stormlight Archive #1", c: C("edition/3134360/a18d937805a28e3214a556442c8d33f41c02f2cb.jpeg") },
+  ah:   { t: "Atomic Habits", a: "James Clear", p: 305, y: 2018, c: C("edition/12605395/629717fe-df46-40b8-8529-dca0323bf699.jpg") },
+  dm:   { t: "Dune Messiah", a: "Frank Herbert", p: 304, y: 1969, c: C("edition/24211570/08ad8362f4da9c08a76f6d08aeab822336b97c35.jpeg") },
+  fw:   { t: "Fourth Wing", a: "Rebecca Yarros", p: 517, y: 2023, c: C("editions/30707731/3559167047761380.jpeg") },
+  tat:  { t: "Tomorrow, and Tomorrow, and Tomorrow", a: "Gabrielle Zevin", p: 496, y: 2022, c: C("edition/30535150/2efdfd508a803c89913fd6e987f69048a17c89c6.jpeg") },
+  ml:   { t: "The Midnight Library", a: "Matt Haig", p: 304, y: 2020, c: C("external_data/30206313/f95c74793bcdd7925758f16a6f6f5f423a2ec81d.jpeg") },
+  kts:  { t: "Klara and the Sun", a: "Kazuo Ishiguro", p: 320, y: 2021, c: C("edition/30399733/66fac4de-272a-40e1-a4e6-32693d78f936.jpg") },
+  circe:{ t: "Circe", a: "Madeline Miller", p: 400, y: 2018, c: C("editions/187333/9694237244087422-circe.jpg") },
+  lic:  { t: "Lessons in Chemistry", a: "Bonnie Garmus", p: 400, y: 2021, c: C("edition/30618050/eeb1fc88-ea92-4854-a37c-e7fdcebc6254.jpg") },
+  dune: { t: "Dune", a: "Frank Herbert", c: C("edition/6216483/16b2e7f2-d173-46d4-932c-8c5158ea5eff.jpg") },
+  hob:  { t: "The Hobbit", a: "J.R.R. Tolkien", c: C("edition/17456445/d34448a9-bf3f-441d-93f2-1cd32dd3867c.jpg") },
+  mist: { t: "Mistborn: The Final Empire", a: "Brandon Sanderson", c: C("edition/5195452/8c6af4492dd7ef9eed7c1e40abefc79f23df2d2f.jpeg") },
+  ij:   { t: "Infinite Jest", a: "David Foster Wallace", p: 1104, c: C("edition/32718880/2682231d-f875-4902-90f5-02f443b32150.jpg") },
+  owl:  { t: "بوف کور", a: "صادق هدایت", p: 128, y: 1937, rtl: true, g: ["Literary Fiction", "Classics"] },
+  moby: { t: "Moby Dick", a: "Herman Melville" },
+};
+
+const UP = [
+  { t: "Untitled Reidverse Novel", s: "Reidverse", d: "Nov 21", soon: "Tomorrow", g: "November" },
+  { t: "Untitled Empyrean #4", s: "The Empyrean #4", d: "Nov 26", soon: "In 6 days", g: "November", status: true },
+  { t: "Untitled Mistborn Novella", s: "The Mistborn Saga: The Original Trilogy #3.5", d: "Feb 3, 2027", g: "February 2027" },
+  { t: "Untitled Empyrean #5", s: "The Empyrean #5", d: "2028", g: "2028" },
+  { t: "Untitled Stormlight Archive #6", s: "The Stormlight Archive #6", d: "2032", g: "2032" },
+];
+// Other readers' reviews of Project Hail Mary: the demo's invented reviewers and texts.
+const REVIEWS = [
+  { name: "Marigold Ashby", ini: "MA", color: "#3f6e8c", r: 5, d: "Mar 14, 2026", likes: 48, long: true,
+    text: ["I went in knowing almost nothing and that was the right call. The science is dense but never dull, and the friendship at the centre of it carried me through every chapter.", "The pacing is what impressed me most. Every time a problem is solved, a bigger one is waiting behind it, and the flashbacks arrive exactly when you need them to make sense of the present.", "I also liked that the narrator is competent without being a superhero. He gets things wrong, he panics, he talks himself down, and then he does the maths."] },
+  { name: "@orbitalnoodle", ini: "O", color: "#8c5a3f", r: 4.5, d: "May 2, 2026", likes: 31,
+    text: ["Funny, warm and very nerdy. Some of the jokes land better than others, but the heart of it is solid."] },
+  { name: "Fen Okafor", ini: "FO", color: "#5b7d3a", r: 4, d: "Jun 19, 2026", likes: 22, spoiler: true },
+  { name: "شیرین", ini: "ش", color: "#7a4b8f", r: 5, d: "Jul 8, 2026", likes: 17, rtl: true,
+    text: ["کتابی پرکشش و پر از امید. دوستی دو شخصیت اصلی را خیلی دوست داشتم و تا صفحهٔ آخر نتوانستم کتاب را زمین بگذارم."] },
+];
+
+// ---------- Icons (Lucide paths, the app's own set; the star is the app's own) ----------
+// home is layout-dashboard, target is calendar (the reading goal), list and layers are
+// gallery-vertical-end (a list, and the Lists menu): the icons the app uses.
+const P = {
+  book: '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+  home: '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  pie: '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>',
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  check: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
+  ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  eyeoff: '<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  list: '<path d="M7 2h10"/><path d="M5 6h14"/><rect width="18" height="12" x="3" y="10" rx="2"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  updown: '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>',
+  target: '<path d="M8 2v3"/><path d="M16 2v3"/><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/>',
+  sort: '<path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/>',
+  pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
+  left: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  ext: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
+  layers: '<path d="M7 2h10"/><path d="M5 6h14"/><rect width="18" height="12" x="3" y="10" rx="2"/>',
+  rocket: '<path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09"/><path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05"/>',
+  orbit: '<path d="M20.341 6.484A10 10 0 0 1 10.266 21.85"/><path d="M3.659 17.516A10 10 0 0 1 13.74 2.152"/><circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>',
+  compass: '<circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/>',
+  wand: '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>',
+  bookmarked: '<path d="M10 2v8l3-3 3 3V2"/><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/>',
+  landmark: '<path d="M10 18v-7"/><path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M3 22h18"/><path d="M6 18v-7"/>',
+  sparkles: '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/>',
+  warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+};
+const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</svg>`;
+// A genre's chip carries the icon its name maps to (chip::genre in the app),
+// in accent; a genre that maps to none has no icon. Only the genres the
+// mockup shows are listed.
+const GENRE_ICON = { "Science Fiction": "rocket", "Space": "orbit", "Adventure": "compass", "Fantasy": "wand", "High Fantasy": "wand", "Epic Fantasy": "wand", "Literary Fiction": "bookmarked", "Classics": "landmark", "Mystery": "search", "Magical Realism": "sparkles" };
+const genreChip = g => `<span class="chip">${GENRE_ICON[g] ? ic(GENRE_ICON[g], "xs genre") : ""}${g}</span>`;
+const tagChip = t => `<span class="chip">${t}</span>`;
+const warnChip = t => `<span class="chip">${ic("warn", "xs warn")}${t}</span>`;
+// The Tags block: each group's label above its chips, which wrap across the
+// block. Genres show here only past the header's first six.
+const tagsBlock = (groups, more) => `<div class="block">${blockH("Tags", more ? `<span class="btn sm ghost">Show ${more} more</span>` : "")}<div class="tag-groups">${groups.map(([label, chips]) => `<div><div class="label">${label}</div><div class="tag-row">${chips.join("")}</div></div>`).join("")}</div></div>`;
+const STAR = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><polygon points="12 2.6 14.85 8.55 21.4 9.35 16.6 13.85 17.85 20.35 12 17.15 6.15 20.35 7.4 13.85 2.6 9.35 9.15 8.55"/></svg>';
+// The hover preview: the same star as a ring, in gold over the empty star, so it differs from a saved rating by shape.
+const STAR_OUTLINE = STAR.replace('fill="currentColor"', 'fill="none"');
+// own: gold; cat: the muted text colour (catalogue figures); preview: gold outlines (the pointer over the rating control)
+function stars(v, kind = "own", size = "") {
+  const col = kind === "cat" ? "var(--fg-muted)" : "var(--gold)";
+  const glyph = kind === "preview" ? STAR_OUTLINE : STAR;
+  const px = size === "lg" ? 20 : size === "xs" ? 12 : 16;
+  let h = `<span class="stars ${size}">`;
+  for (let i = 0; i < 5; i++) {
+    const f = Math.max(0, Math.min(1, v - i));
+    h += `<span class="star"><span style="color:var(--star-empty)">${STAR}</span>` +
+      (f > 0 ? `<span class="sfill" style="width:${f * 100}%;color:${col}"><span style="display:block;width:${px}px;height:100%;position:relative">${glyph}</span></span>` : "") + `</span>`;
+  }
+  return h + "</span>";
+}
+const star1 = (kind = "cat") => `<span class="stars xs"><span class="star" style="color:${kind === "own" ? "var(--gold)" : "var(--fg-muted)"}">${STAR}</span></span>`;
+
+// ---------- Covers: the image when it loads, a cloth cover when the book has none ----------
+// Eight book-cloth colours, the same in both themes; the title picks one.
+const CLOTH = ["#6A4A39", "#3A574B", "#414C6B", "#743838", "#7A5D30", "#39596A", "#594567", "#4E5356"];
+const hash = s => [...s].reduce((h, ch) => (h * 31 + ch.codePointAt(0)) >>> 0, 7);
+function cover(b, size, lift = false, state = "") {
+  const small = size === "xs" || size === "sm";
+  const over = `${small ? "" : '<div class="hinge"></div>'}<div class="edge"></div>`;
+  if (state === "loading") return `<div class="cover cv-${size} loading"><div class="edge"></div></div>`;
+  const cloth = CLOTH[hash(b.t) % CLOTH.length];
+  const dir = b.rtl ? ' dir="rtl"' : "";
+  const ph = small
+    ? `<div class="ph initial"${dir}><span>${[...b.t.replace(/^(The|Untitled) /, "")][0]}</span>${size === "sm" ? '<div class="rule"></div>' : ""}</div>`
+    : `<div class="ph"${dir}><div class="stamp"></div><div class="pt">${b.t}</div><div class="rule"></div>${size === "md" ? "" : `<div class="pa">${b.a}</div>`}</div>`;
+  return `<div class="cover cv-${size}${lift ? " lift" : ""}" style="--cloth:${cloth}">${ph}${b.c ? `<img src="${b.c}" alt="" onerror="this.remove()">` : ""}${over}</div>`;
+}
+
+// ---------- Sidebar ----------
+function sidebar(active, series = 5) {
+  const item = (icon, label, n, key) => `<div class="nav${active === key ? " sel" : ""}">${ic(icon)}<span class="lab">${label}</span>${n != null ? `<span class="n">${n}</span>` : ""}</div>`;
+  return `<aside class="sb">
+    <div class="brand">${ic("book")}Hardcover</div>
+    ${item("home", "Home", null, "home")}${item("search", "Search", null, "search")}${item("globe", "Discover", null, "discover")}${item("library", "Series", series, "series")}${item("pie", "Stats", null, "stats")}
+    <div class="label">Library</div>
+    ${item("book", "Currently reading", 3, "cr")}${item("inbox", "Want to read", 8, "wtr")}${item("check", "Read", 9, "read")}${item("pause", "Paused", 1, "paused")}${item("ban", "Did not finish", 2, "dnf")}${item("eyeoff", "Ignored", 1, "ign")}
+    <div class="label">Reading goal</div>
+    <div class="goal-row"><div class="top">${ic("target")}<span>2026</span><span class="n">9 of 12 books</span></div><div class="bar thin"><i style="width:75%"></i></div></div>
+    <div class="label">Lists</div>
+    ${item("folder", "Owned", 5, "owned")}${item("list", "Best science fiction so far", 6, "l1")}${item("list", "Book club picks", 4, "l2")}${item("list", "Classics to finish", 4, "l3")}
+    <div class="nav muted">${ic("plus")}<span>New list…</span></div>
+    <div class="acct"><div class="avatar">DR</div><div class="fill"><div class="strong one-line">demo_reader</div><div class="small muted">Updated just now</div></div>${ic("updown")}</div>
+  </aside>`;
+}
+
+// ---------- Screen: Home ----------
+function home() {
+  const row = (b, pct, meta) => `<div class="cr">${cover(b, "md", true)}<div class="fill">
+      <div class="title-18 one-line">${b.t}</div><div class="muted one-line">${b.a}</div>
+      <div class="progline"><div class="bar"><i style="width:${pct}%"></i></div><span class="small muted num">${pct}%</span></div>
+      <div class="small muted num mt-4">${meta}</div>
+    </div><div class="acts"><span class="btn sm">Update progress…</span><span class="btn sm ghost">Mark as read…</span></div></div>`;
+  return sidebar("home") + `<div class="main"><div class="scroll home">
+    <div class="muted">Friday, November 20</div>
+    <div class="display d-30">Good evening</div>
+    <div class="cols mt-24">
+      <div class="fill">
+        <div class="section">Continue reading</div>
+        <div class="hero mt-12">${cover(B.phm, "xl", true)}<div class="hero-body">
+          <div class="display d-24">${B.phm.t}</div>
+          <div class="muted mt-4">${B.phm.a}</div>
+          <div class="prog">
+            <div class="row-b"><span class="strong num">Page 312 of 476</span><span class="muted num push">66%</span></div>
+            <div class="bar"><i style="width:66%"></i></div>
+            <div class="muted num">16 pages a day · done around Dec 1</div>
+          </div>
+          <div class="row-c g-8 mt-16"><span class="btn">Update progress…</span><span class="btn ghost">Mark as read…</span></div>
+        </div></div>
+        ${row(B.wok, 42, "Page 418 of 1,007 · 13 pages a day · done around Jan 4")}
+        ${row(B.ah, 40, "Page 121 of 305 · Last updated 8 days ago")}
+        <div class="cr">${cover(B.ij, "sm")}
+          <div class="fill"><div class="strong one-line">${B.ij.t}</div><div class="small muted num">Paused at page 230 of 1,104 · since Oct 1</div></div>
+          <span class="chip">${ic("pause", "xs")}Paused</span>
+        </div>
+        <div class="row-c mt-24"><span class="section">Coming soon</span><span class="btn sm ghost push">See all 5</span></div>
+        <div class="col mt-8">${UP.slice(0, 3).map(upRow).join("")}</div>
+      </div>
+      <div class="rail">
+        <div class="label">2026 reading goal</div>
+        <div class="figure"><span class="display d-30">9</span><span class="muted">of 12 books</span></div>
+        <div class="bar mt-12"><i style="width:75%"></i><b style="left:88.8%"></b></div>
+        <div class="muted mt-12">2 behind pace, 3 to go in 41 days. <span class="strong ink">Project Hail Mary</span> should finish in time.</div>
+        <div class="hair"></div>
+        <div class="label">Up next</div>
+        <div class="row-c g-16 mt-12">${cover(B.dm, "md", true)}
+          <div class="col fill">
+            <div class="small muted">Next in Dune · #2</div>
+            <div class="title-18">${B.dm.t}</div>
+            <div class="muted">${B.dm.a}</div>
+            <span class="btn sm start mt-8">Start reading</span>
+          </div>
+        </div>
+        <div class="hair"></div>
+        <div class="label">Newest on Want to read</div>
+        <div class="shelf mt-12">${[B.fw, B.tat, B.ml].map(b => `<div class="it">${cover(b, "md")}<div class="tt clamp-2">${b.t}</div></div>`).join("")}</div>
+      </div>
+    </div>
+  </div></div>`;
+}
+
+// ---------- The book: header, tools bar, action row ----------
+function bookHeader(b, size, opts = {}) {
+  const facts = [b.y, b.p && `${b.p.toLocaleString("en")} pages`].filter(Boolean).join(" · ");
+  const rtl = b.rtl ? " rtl" : "", dir = b.rtl ? ' dir="rtl"' : "";
+  return `<div class="bh">${cover(b, size, true)}<div class="bh-info">
+      <div class="display ${opts.title || "d-24"}${rtl}"${dir}>${b.t}</div>
+      <div class="bh-by${rtl}"${dir}><span class="textbtn${opts.hover ? " hover" : ""}">${b.a}</span></div>
+      ${b.s ? `<div><span class="textbtn">${b.s}</span></div>` : ""}
+      <div class="bh-fact num">${facts}</div>
+      ${b.r && !opts.noAverage ? `<div class="bh-fact num">${star1()}${b.r} average · ${b.rc.toLocaleString("en")} ratings</div>` : ""}
+      ${b.g ? `<div class="bh-tags">${b.g.map(genreChip).join("")}</div>` : ""}
+      <div class="actbar">${opts.actions || ""}</div>
+    </div></div>`;
+}
+// The book's own tools live in a bar above it, the same bar that holds Back on a page.
+const bookTools = `<span class="btn ghost">${ic("layers")}Lists${ic("down", "xs")}</span><span class="btn ghost icon">${ic("more")}</span>`;
+const statusBtn = (icon, label) => `<span class="btn">${ic(icon)}${label}${ic("down", "xs")}</span>`;
+const rate = `<div class="rate">${stars(0, "own", "lg")}<span>Rate</span></div>`;
+const blockH = (title, action = "") => `<div class="block-h"><span class="heading">${title}</span>${action ? `<span class="push"></span>${action}` : ""}</div>`;
+const progress = (page, pct, meta) => `<div class="panel prog-panel">
+    <div class="row-b"><span class="strong num">${page}</span><span class="muted num push">${pct}%</span></div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="row-c g-12"><span class="muted num fill">${meta}</span><span class="btn sm">Update progress…</span></div>
+  </div>`;
+const details = (added) => `<div class="props">
+    <div class="p"><div class="k">Edition</div><div class="v"><span class="muted">Not chosen</span><span class="btn sm">Choose…</span></div></div>
+    <div class="p"><div class="k">Owned</div><div class="v"><span class="switch dis"><i></i></span><span class="small muted">Choose an edition first</span></div></div>
+    <div class="p"><div class="k">Privacy</div><div class="v"><span class="select sm">Private${ic("down", "xs")}</span></div></div>
+    ${added ? `<div class="p"><div class="k">Added</div><div class="v num">${added}</div></div>` : ""}
+  </div>`;
+const upRow = (u) => `<div class="seq-row">${cover(u, "sm")}<div class="fill"><div class="strong one-line"><span class="textbtn">${u.t}</span></div><div class="muted one-line">${u.s}</div></div>
+    <div class="when"><span class="strong">${u.d}</span>${u.soon ? `<span class="small muted">${u.soon}</span>` : ""}</div>
+    <div class="lane">${u.status ? `<span class="chip">${ic("inbox", "xs")}Want to read</span>` : `<span class="btn sm ghost">${ic("plus", "xs")}Want to read</span>`}</div></div>`;
+const review = (v, hover) => `<div class="review"><div class="avatar data" style="background:${v.color}">${v.ini}</div><div class="fill col g-4">
+    <div class="row-c g-8"><span class="byline${hover ? " hover" : ""}${v.rtl ? " rtl" : ""}"${v.rtl ? ' dir="rtl"' : ""}>${v.name}</span>${stars(v.r, "cat", "xs")}</div>
+    <div class="small muted num">${v.d} · ${v.likes} likes</div>
+    ${v.spoiler ? `<div class="row-c g-8 mt-4"><span class="muted">Contains spoilers</span><span class="btn sm">Show</span></div>`
+      : `<div class="reader mt-4${v.long ? " clamp" : ""}${v.rtl ? " rtl" : ""}"${v.rtl ? ' dir="rtl"' : ""}>${v.text.map(t => `<p>${t}</p>`).join("")}</div>${v.long ? `<span class="btn sm ghost start" style="margin-left:calc(-1 * var(--s-8))">Read more</span>` : ""}`}
+  </div></div>`;
+const emptyState = (icon, title, desc = "", action = "") => `<div class="empty">${ic(icon)}<div class="strong">${title}</div>${desc ? `<div class="d">${desc}</div>` : ""}${action}</div>`;
+
+// ---------- Screen: Library (shelf + detail pane) ----------
+function shelf(head, n, rows, filter = "") {
+  return `<div class="list"><div class="list-head"><div class="h"><span class="page-title">${head}</span><span class="muted num">${n}</span></div>
+      <div class="list-tools"><div class="input fill">${ic("search")}${filter ? `<span class="val">${filter}</span>` : "Filter"}</div><span class="select">Recently updated${ic("down", "xs")}</span></div></div>
+      ${rows}</div>`;
+}
+function library(kind) {
+  if (kind === "cr") {
+    const r = (b, pct, sel) => `<div class="row${sel ? " sel" : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line">${b.a}</div></div><div class="trail">${pct}%<div class="bar thin"><i style="width:${pct}%"></i></div></div></div>`;
+    return sidebar(kind) + shelf("Currently reading", 3, `<div class="rows">${r(B.phm, 66, true) + r(B.wok, 42) + r(B.ah, 40)}</div>`) + `<div class="detail">
+      <div class="objbar"><span class="push"></span>${bookTools}</div>
+      <div class="pane">
+        ${bookHeader(B.phm, "xl", { actions: statusBtn("book", "Currently reading") + rate })}
+        ${progress("Page 312 of 476", 66, "Started Nov 1 · 16 pages a day · done around Dec 1")}
+        <div class="block">${blockH("Notes", `<span class="btn sm ghost">${ic("pencil", "xs")}Edit</span>`)}<div>Borrowed from the library, due back on the 30th.</div></div>
+        <div class="block">${blockH("About this book")}<div class="prose">A schoolteacher wakes up alone on a spaceship light-years from home, with no memory of how he got there, and slowly realises he may be Earth's last chance against a microbe that is dimming the sun.</div></div>
+        ${tagsBlock([["Moods", ["adventurous", "funny", "hopeful", "inspiring"].map(tagChip)], ["Content warnings", ["Death", "Grief"].map(warnChip)], ["Other tags", ["Strong Character Development", "Plot driven", "Loveable Characters"].map(tagChip)]])}
+        <div class="block">${blockH("Details")}${details()}</div>
+      </div>
+    </div>`;
+  }
+  if (kind === "wtr") {
+    const r = (b, state) => `<div class="row${state ? " " + state : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line${b.rtl ? " rtl" : ""}"${b.rtl ? ' dir="rtl"' : ""}>${b.t}</div><div class="muted one-line${b.rtl ? " rtl" : ""}"${b.rtl ? ' dir="rtl"' : ""}>${b.a}</div></div><div class="trail">${b.y || ""}</div></div>`;
+    return sidebar(kind) + shelf("Want to read", 8, `<div class="rows">${r(B.owl, "sel") + r(B.dm, "hover") + r(B.fw) + r(B.tat) + r(B.ml) + r(B.kts) + r(B.circe) + r(B.lic)}</div>`) + `<div class="detail">
+      <div class="objbar"><span class="push"></span>${bookTools}</div>
+      <div class="pane">
+        ${bookHeader(B.owl, "xl", { actions: statusBtn("inbox", "Want to read") + rate })}
+        <div class="panel start-panel"><div class="fill"><div class="strong">Not started</div><div class="muted">Starting moves it to Currently reading.</div></div><span class="btn">Start reading</span></div>
+        <div class="block">${blockH("About this book")}<div class="prose">A painter of pen-case covers, shut in his room, writes down the visions that have haunted him since he glimpsed a girl through a gap in the wall. Hedayat's short novel is the best-known work of modern Persian fiction.</div></div>
+        <div class="block">${blockH("Details")}${details("Nov 19, 2026")}</div>
+      </div>
+    </div>`;
+  }
+  // A filter with no matches, and nothing selected: the app's own copy.
+  return sidebar("dnf") + shelf("Did not finish", 2, emptyState("search", "No matches", "No books in Did not finish match “dune”."), "dune") +
+    `<div class="detail">${emptyState("book", "Select a book to see its details")}</div>`;
+}
+
+// ---------- Screen: full book page, over Discover ----------
+// ---------- Screen: Coming soon, the full list, over Home ----------
+function upcomingPage() {
+  const groups = [...new Set(UP.map(u => u.g))];
+  return sidebar("home") + `<div class="main">
+    <div class="objbar line"><span class="btn ghost back">${ic("left")}Home</span></div>
+    <div class="scroll page"><div class="list-page">
+      <div class="page-title">Coming soon</div>
+      <div class="muted mt-4">5 books still to come in the series on your shelves</div>
+      ${groups.map(g => `<div class="label group-label">${g}</div><div class="col">${UP.filter(u => u.g === g).map(upRow).join("")}</div>`).join("")}
+    </div></div></div>`;
+}
+
+// ---------- Screen: the book page scrolled to other readers' reviews ----------
+function reviewsPage() {
+  return sidebar("cr") + `<div class="main">
+    <div class="objbar line"><span class="btn ghost back">${ic("left")}Currently reading</span><span class="push"></span>${bookTools}</div>
+    <div class="scroll page"><div class="cols"><div class="fill">
+      <div class="block" style="margin-top:0">${blockH("Your review", `<span class="btn sm">${ic("pencil", "xs")}Write a review…</span>`)}<div class="muted">No review yet.</div></div>
+      <div class="block">${blockH("Reviews", `<span class="small muted num">12 reviews</span>`)}
+        <div class="col">${REVIEWS.map((v, i) => review(v, i === 1)).join("")}</div>
+        <span class="btn sm mt-8">Show more reviews</span></div>
+    </div>
+    <div class="rail">
+      <div class="label">On Hardcover</div>
+      <div class="figure"><span class="display d-30 num">4.51</span>${stars(4.51, "cat")}</div>
+      <div class="muted num mt-4">9,223 ratings · 19,561 readers</div>
+    </div></div></div></div>`;
+}
+
+function bookPage() {
+  return sidebar("discover") + `<div class="main">
+    <div class="objbar line"><span class="btn ghost back">${ic("left")}Discover</span><span class="push"></span>${bookTools}</div>
+    <div class="scroll page"><div class="cols">
+      <div class="fill">
+        ${bookHeader(B.wok, "xxl", { title: "d-30", noAverage: true, actions: statusBtn("book", "Currently reading") + rate })}
+        ${progress("Page 418 of 1,007", 42, "Started Oct 20 · 13 pages a day · done around Jan 4")}
+        <div class="block">${blockH("About this book")}<div class="prose">On a storm-scoured world, a slave soldier, a scholar with a secret and a highprince haunted by visions are drawn toward a war older than any of them know. The first book of the Stormlight Archive.</div></div>
+        ${tagsBlock([["Moods", ["adventurous", "emotional", "tense", "dark", "hopeful", "reflective"].map(tagChip)], ["Content warnings", ["Violence", "Slavery", "Death", "Suicidal thoughts", "War"].map(warnChip)], ["Other tags", ["Strong Character Development", "Complex World", "Character driven", "Diverse Characters"].map(tagChip)]], 9)}
+        <div class="block">${blockH("Your review", `<span class="btn sm">${ic("pencil", "xs")}Write a review…</span>`)}<div class="muted">No review yet.</div></div>
+        <div class="block">${blockH("Similar books")}<div class="shelf lg">${[B.mist, B.dune, B.hob, B.circe, B.moby, B.fw].map(b => `<div class="it">${cover(b, "lg", true)}<div class="tt strong clamp-2">${b.t}</div></div>`).join("")}</div></div>
+      </div>
+      <div class="rail">
+        <div class="label">On Hardcover</div>
+        <div class="figure"><span class="display d-30 num">4.63</span>${stars(4.63, "cat")}</div>
+        <div class="muted num mt-4">4,280 ratings · 10,144 readers</div>
+        <div class="hair"></div>
+        <div class="label">Details</div>
+        <div class="mt-12">${details("Oct 10, 2026")}</div>
+        <div class="hair"></div>
+        <div class="row-c"><span class="label">Reads</span><span class="btn sm ghost push">${ic("plus", "xs")}Add a past read…</span></div>
+        <div class="reads mt-8"><div class="r">${ic("book")}<div class="col"><span>Current read</span><span class="small muted num">Oct 20, 2026 – now · page 418</span></div></div></div>
+        <div class="hair"></div>
+        <div class="label">Notes</div>
+        <div class="muted mt-8">No notes.</div>
+        <span class="btn sm start mt-12">${ic("pencil", "xs")}Add a note…</span>
+      </div>
+    </div></div></div>`;
+}
+
+// Series, wide: the column fills the region; the strip shows as many books as fit (45 at 2560), and
+// the lanes stay 240 and lined up on the trailing edge.
+function seriesWide() {
+  const dresden = ["Storm Front", "Fool Moon", "Grave Peril", "Summer Knight", "Death Masks", "Blood Rites", "Dead Beat", "Proven Guilty", "White Night", "Small Favor", "Turn Coat", "Changes", "Ghost Story", "Cold Days", "Skin Game", "Peace Talks", "Battle Ground"]
+    .map(t => ({ t, a: "Jim Butcher" }));
+  const long = { name: "The Dresden Files", a: "Jim Butcher", g: "progress", when: "Last finished Oct 30",
+    books: dresden.map((b, i) => [b, i + 1, i < 5 ? "read" : i === 5 ? "wtr" : "none"]),
+    next: { kind: "start", b: dresden[5], pos: 6 } };
+  const rows = [long, ...SERIES.filter(x => x.g === "progress")];
+  return sidebar("series", 6) + `<div class="main"><div class="scroll page"><div class="series-page">
+    ${pageHead().replace('<span class="muted num">5</span>', '<span class="muted num">6</span>')}
+    <div class="row-b g-8 group-label"><span class="label">In progress</span><span class="small muted num">3</span></div>
+    <div class="col">${rows.map(rowB).join("")}</div>
+  </div></div></div>`;
+}
+function statsWide(wide = true) {
+  const fig = (v, l) => `<div><div class="display d-30 num">${v}</div><div class="muted">${l}</div></div>`;
+  const bars = (data, cls = "") => {
+    const max = Math.max(...data.map(([, n]) => n));
+    return `<div class="chart ${cls}">${data.map(([, n]) => `<div class="b">${n ? `<span class="num">${n.toLocaleString("en")}</span><i style="height:${Math.round(n / max * 80)}%"></i>` : ""}</div>`).join("")}</div>
+      <div class="chart-x">${data.map(([k]) => `<span>${k}</span>`).join("")}</div>`;
+  };
+  const years = [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026];
+  const books = [3, 7, 11, 9, 14, 12, 16, 9], pages = [960, 2410, 3880, 3020, 4870, 4150, 5390, 3511];
+  const ratings = ["½", "1", "1½", "2", "2½", "3", "3½", "4", "4½", "5"].map((k, i) => [k, [0, 0, 0, 1, 2, 4, 9, 14, 11, 6][i]]);
+  const shelves = [["book", "Currently reading", 3], ["inbox", "Want to read", 8], ["check", "Read", 81], ["pause", "Paused", 1], ["ban", "Did not finish", 2], ["eyeoff", "Ignored", 1]];
+  const perYear = `<div class="col g-12"><div class="section">Finished per year</div>
+      <div class="label">Books</div>${bars(years.map((y, i) => [y, books[i]]))}
+      <div class="label mt-12">Pages</div>${bars(years.map((y, i) => [y, pages[i]]))}
+      <div class="muted">Plus 2 books finished before 2019.</div></div>`;
+  const yours = `<div class="col g-12"><div class="section">Your ratings</div>
+      <div class="muted">4.1 on average from 47 ratings</div>${bars(ratings, "short")}</div>`;
+  const shelf = `<div class="col g-12"><div class="section">Shelves</div>
+      <div class="col">${shelves.map(([i, l, n]) => `<div class="shelfrow">${ic(i)}<span class="fill">${l}</span><span class="n">${n}</span></div>`).join("")}</div></div>`;
+  const body = wide ? `<div class="cols2"><div class="fill">${perYear}</div><div class="fill">${yours}${shelf}</div></div>` : `${perYear}${yours}${shelf}`;
+  return sidebar("stats") + `<div class="main"><div class="scroll page"><div class="stats${wide ? " wide" : ""} col" style="gap:var(--s-32)">
+    <div><div class="page-title">Stats</div><div class="muted mt-4">From your library on this computer.</div></div>
+    <div class="figs">${fig("9", "books finished in 2026")}${fig("3,511", "pages read in 2026")}${fig("16", "days to finish, on average")}${fig("4.1", "average rating")}</div>
+    ${body}
+  </div></div></div>`;
+}
+
+// ---------- Wide windows: Home and the book pane fill a 2560 window ----------
+// Extra cloth-covered books, so the shelves show what a full Want to read holds.
+const MORE = ["The Name of the Wind", "Piranesi", "The Left Hand of Darkness", "Babel", "Station Eleven", "The Fifth Season", "Hyperion", "Shōgun", "A Memory Called Empire", "The Goldfinch", "Educated", "Sapiens"].map(t => ({ t, a: "" }));
+function homeFluid() {
+  const row = (b, pct, meta) => `<div class="cr">${cover(b, "md", true)}<div class="fill">
+      <div class="title-18 one-line">${b.t}</div><div class="muted one-line">${b.a}</div>
+      <div class="progline"><div class="bar"><i style="width:${pct}%"></i></div><span class="small muted num">${pct}%</span></div>
+      <div class="small muted num mt-4">${meta}</div>
+    </div><div class="acts"><span class="btn sm">Update progress…</span><span class="btn sm ghost">Mark as read…</span></div></div>`;
+  const rateRow = (b, when) => `<div class="seq-row">${cover(b, "sm")}<div class="fill"><div class="strong one-line"><span class="textbtn">${b.t}</span></div><div class="muted one-line num">${b.a} · finished ${when}</div></div>${stars(0, "own")}</div>`;
+  const wtr = [B.fw, B.tat, B.ml, B.lic, B.circe, B.dune, B.hob, B.mist, B.moby, ...MORE];
+  return sidebar("home") + `<div class="main"><div class="scroll home fluid">
+    <div class="muted">Saturday, November 21</div>
+    <div class="display d-30">Good afternoon</div>
+    <div class="cols3 fluid mt-24">
+      <div class="fill col">
+        <div class="cols3 fluid">
+          <div class="fill">
+            <div class="section">Continue reading</div>
+            <div class="hero mt-12">${cover(B.phm, "xl", true)}<div class="hero-body">
+              <div class="display d-24">${B.phm.t}</div>
+              <div class="muted mt-4">${B.phm.a}</div>
+              <div class="prog">
+                <div class="row-b"><span class="strong num">Page 312 of 476</span><span class="muted num push">66%</span></div>
+                <div class="bar"><i style="width:66%"></i></div>
+                <div class="muted num">15 pages a day · done around Dec 3</div>
+              </div>
+              <div class="row-c g-8 mt-16"><span class="btn">Update progress…</span><span class="btn ghost">Mark as read…</span></div>
+            </div></div>
+            ${row(B.wok, 42, "Page 418 of 1,007 · 13 pages a day · done around Jan 7, 2027")}
+            ${row(B.ah, 40, "Page 121 of 305 · Last updated 9 days ago")}
+            <div class="cr">${cover(B.ij, "sm")}
+              <div class="fill"><div class="strong one-line">${B.ij.t}</div><div class="small muted num">Paused at page 230 of 1,104 · since Oct 1</div></div>
+              <span class="chip">${ic("pause", "xs")}Paused</span>
+            </div>
+          </div>
+          <div class="fill">
+            <div class="row-c"><span class="section">Coming soon</span><span class="btn sm ghost push">See all 5</span></div>
+            <div class="col mt-8">${UP.map(upRow).join("")}</div>
+            <div class="row-c mt-24"><span class="section">Rate what you finished</span></div>
+            <div class="col mt-8">${rateRow(B.kts, "Nov 2")}${rateRow(B.circe, "Oct 18")}</div>
+            <div class="row-c mt-24"><span class="section">Newest on Want to read</span><span class="btn sm ghost push">See all 471</span></div>
+            <div class="shelf mt-12">${wtr.slice(0, 12).map(b => `<div class="it">${cover(b, "md")}<div class="tt clamp-2">${b.t}</div></div>`).join("")}</div>
+          </div>
+        </div>
+      </div>
+      <div class="rail">
+        <div class="label">2026 reading goal</div>
+        <div class="figure"><span class="display d-30">9</span><span class="muted">of 12 books</span></div>
+        <div class="bar mt-12"><i style="width:75%"></i><b style="left:88.8%"></b></div>
+        <div class="muted mt-12">2 behind pace, 3 to go in 40 days. <span class="strong ink">Project Hail Mary</span> should finish in time.</div>
+        <div class="hair"></div>
+        <div class="label">Up next</div>
+        <div class="row-c g-16 mt-12">${cover(B.dm, "md", true)}
+          <div class="col fill">
+            <div class="small muted">Next in Dune · #2</div>
+            <div class="title-18">${B.dm.t}</div>
+            <div class="muted">${B.dm.a}</div>
+            <span class="btn sm start mt-8">Start reading</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div></div>`;
+}
+function libraryFluid() {
+  const r = (b, pct, sel) => `<div class="row${sel ? " sel" : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line">${b.a}</div></div><div class="trail">${pct}%<div class="bar thin"><i style="width:${pct}%"></i></div></div></div>`;
+  const similar = [B.mist, B.dune, B.hob, B.circe, B.fw, B.ml, B.tat, B.kts, B.lic, B.wok, ...MORE.slice(0, 6)];
+  return sidebar("cr") + shelf("Currently reading", 3, `<div class="rows">${r(B.phm, 66, true) + r(B.wok, 42) + r(B.ah, 40)}</div>`) + `<div class="detail">
+    <div class="objbar"><span class="push"></span>${bookTools}</div>
+    <div class="pane fluid"><div class="cols">
+      <div class="fill">
+        ${bookHeader(B.phm, "xl", { actions: statusBtn("book", "Currently reading") + rate })}
+        ${progress("Page 312 of 476", 66, "Started Nov 1 · 15 pages a day · done around Dec 3")}
+        <div class="split">
+          <div class="text">
+            <div class="block">${blockH("About this book")}<div class="prose">A schoolteacher wakes up alone on a spaceship light-years from home, with no memory of how he got there, and slowly realises he may be Earth's last chance against a microbe that is dimming the sun.</div></div>
+            <div class="block">${blockH("Your review", `<span class="btn sm">${ic("pencil", "xs")}Write a review…</span>`)}<div class="muted">No review yet.</div></div>
+            <div class="block">${blockH("Reviews", `<span class="small muted num">12 reviews</span>`)}<div class="col">${REVIEWS.slice(0, 4).map(v => review(v)).join("")}</div></div>
+          </div>
+          <div class="side">
+            ${tagsBlock([["Moods", ["adventurous", "funny", "hopeful", "inspiring", "lighthearted", "mysterious"].map(tagChip)], ["Content warnings", ["Death", "Grief", "Pandemic"].map(warnChip)], ["Other tags", ["Strong Character Development", "Plot driven", "Loveable Characters", "Hard science fiction", "First contact"].map(tagChip)]])}
+            <div class="block">${blockH("Similar books")}<div class="shelf lg wrap">${similar.map(b => `<div class="it">${cover(b, "lg", true)}<div class="tt strong clamp-2">${b.t}</div></div>`).join("")}</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="rail">
+        <div class="label">On Hardcover</div>
+        <div class="figure"><span class="display d-30 num">4.51</span>${stars(4.51, "cat")}</div>
+        <div class="muted num mt-4">9,223 ratings · 19,561 readers</div>
+        <div class="hair"></div>
+        <div class="label">Details</div>
+        <div class="mt-12">${details("Sep 2, 2026")}</div>
+        <div class="hair"></div>
+        <div class="row-c"><span class="label">Reads</span><span class="btn sm ghost push">${ic("plus", "xs")}Add a past read…</span></div>
+        <div class="reads mt-8"><div class="r">${ic("book")}<div class="col"><span>Current read</span><span class="small muted num">Nov 1, 2026 – now · page 312</span></div></div></div>
+        <div class="hair"></div>
+        <div class="row-c"><span class="label">Notes</span><span class="btn sm ghost push">${ic("pencil", "xs")}Edit</span></div>
+        <div class="mt-8">Borrowed from the library, due back on the 30th.</div>
+      </div>
+    </div></div>
+  </div>`;
+}
+
+// A catalogue page (Discover, a series, an author, a list) on a wide window: the list is 704 (the
+// prose measure inside the 32 inset) and the selected book shows in the pane beside it, which takes
+// the rest, and its rail once it is wide enough. A click selects; Enter or a double click opens the full page.
+function discoverWide() {
+  const r = (b, meta, chip, sel) => `<div class="row${sel ? " sel focus" : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line num">${meta}</div></div>${chip ? `<span class="chip">${ic(chip[0], "xs")}${chip[1]}</span>` : ""}</div>`;
+  const rows = [
+    r(B.wok, "Brandon Sanderson · 2010 · 4.63 average", ["book", "Currently reading"]),
+    r(B.phm, "Andy Weir · 2021 · 4.51 average", ["book", "Currently reading"]),
+    r(B.mist, "Brandon Sanderson · 2006 · 4.46 average", ["check", "Read"], true),
+    r(B.dune, "Frank Herbert · 1965 · 4.34 average", ["check", "Read"]),
+    r(B.hob, "J.R.R. Tolkien · 1937 · 4.31 average", ["check", "Read"]),
+    r(B.circe, "Madeline Miller · 2018 · 4.21 average", ["inbox", "Want to read"]),
+    r(B.fw, "Rebecca Yarros · 2023 · 4.02 average", ["inbox", "Want to read"]),
+    r(B.moby, "Herman Melville · 1851 · 3.62 average"),
+  ].join("");
+  const mist = { ...B.mist, p: 541, y: 2006, r: 4.46, rc: 5802, g: ["Fantasy", "Adventure"], s: "The Mistborn Saga #1" };
+  return sidebar("discover") + `<div class="main" style="flex-direction:row">
+    <div class="scroll page" style="width:704px;flex:none"><div class="list-page">
+      <div class="page-title">Discover</div>
+      <div class="muted mt-4">The books the most readers finished on Hardcover in the last month.</div>
+      <div class="col mt-16" style="gap:var(--s-2);margin-left:calc(-1 * var(--s-8))">${rows}</div>
+    </div></div>
+    <div class="detail" style="border-left:1px solid var(--border)">
+      <div class="objbar" style="max-width:1112px"><span class="push"></span>${bookTools}</div>
+      <div class="pane wide"><div class="cols">
+        <div class="fill">
+          ${bookHeader(mist, "xl", { noAverage: true, actions: statusBtn("check", "Read") + rate })}
+          <div class="block">${blockH("About this book")}<div class="prose">In a world of ash and mist ruled by an immortal emperor, a street thief discovers she can burn metals for power and joins a crew planning an impossible heist.</div></div>
+          <div class="block">${blockH("Your review", `<span class="btn sm">${ic("pencil", "xs")}Write a review…</span>`)}<div class="muted">No review yet.</div></div>
+          <div class="block">${blockH("Similar books")}<div class="shelf lg">${[B.wok, B.dune, B.hob, B.circe].map(b => `<div class="it">${cover(b, "lg", true)}<div class="tt strong clamp-2">${b.t}</div></div>`).join("")}</div></div>
+        </div>
+        <div class="rail">
+          <div class="label">On Hardcover</div>
+          <div class="figure"><span class="display d-30 num">4.46</span>${stars(4.46, "cat")}</div>
+          <div class="muted num mt-4">5,802 ratings · 12,691 readers</div>
+          <div class="hair"></div>
+          <div class="label">Details</div>
+          <div class="mt-12">${details("Mar 2, 2026")}</div>
+          <div class="hair"></div>
+          <div class="row-c"><span class="label">Reads</span><span class="btn sm ghost push">${ic("plus", "xs")}Add a past read…</span></div>
+          <div class="reads mt-8"><div class="r">${ic("check")}<div class="col"><span>Read</span><span class="small muted num">Jul 8 – Jul 25, 2026</span></div></div></div>
+        </div>
+      </div></div>
+    </div>
+  </div>`;
+}
+
+// ---------- Token sheets: built from the same variables the screens use ----------
+const probes = {};
+for (const t of ["light", "dark"]) { const p = document.createElement("div"); p.className = "theme-" + t; p.style.display = "none"; document.body.append(p); probes[t] = p; }
+const tv = (theme, name) => getComputedStyle(probes[theme]).getPropertyValue(name).trim();
+const rv = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const lum = hex => { const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
+const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + .05) / (y + .05); };
+const HOSTS = ["--bg", "--sidebar", "--surface", "--raised"];
+const hex2 = n => Math.round(n).toString(16).padStart(2, "0");
+// An overlay token (rgba) laid on a host surface, as a hex colour.
+function over(theme, top, host) {
+  const m = tv(theme, top).match(/[\d.]+/g).map(Number), b = tv(theme, host);
+  return "#" + [0, 1, 2].map(i => hex2(m[i] * m[3] + parseInt(b.slice(1 + 2 * i, 3 + 2 * i), 16) * (1 - m[3]))).join("");
+}
+// Every fill text can sit on: each host, alone and under hover and selected.
+const fills = theme => HOSTS.flatMap(h => [tv(theme, h), over(theme, "--hover", h), over(theme, "--selected", h)]);
+// A chip on each host: accent carries a genre's icon there.
+const chips = theme => HOSTS.map(h => over(theme, "--chip", h));
+const worst = (theme, fg, on) => Math.min(...(on || fills(theme)).map(s => contrast(tv(theme, fg), s)));
+const plain = (theme, ...names) => names.map(n => tv(theme, n));
+
+function tokensTheme(theme, themeName) {
+  const sw = (name, v, use, text) => `<div><i style="background:var(${v});${text ? `color:var(${text})` : ""}">${text ? "Aa" : ""}</i><b class="strong">${name}</b><code>${tv(theme, v)}</code><span class="muted">${use}</span></div>`;
+  const ink = (name, v, use, on) => `<div><i style="color:var(${v})">Aa 123</i><b class="strong">${name}</b><code>${tv(theme, v)}</code><code>${worst(theme, v, on).toFixed(1)}:1 lowest</code><span class="muted">${use}</span></div>`;
+  const statuses = [["book", "Currently reading"], ["inbox", "Want to read"], ["check", "Read"], ["pause", "Paused"], ["ban", "Did not finish"], ["eyeoff", "Ignored"]];
+  const st = (label, html) => `<div class="state">${html}<span class="small muted">${label}</span></div>`;
+  return `<div class="tok theme-${theme}">
+    <div class="section">${themeName}</div>
+    <div><h4>Surfaces</h4><div class="sw">
+      ${sw("bg", "--bg", "paper: the work area")}${sw("sidebar", "--sidebar", "the sidebar")}${sw("surface", "--surface", "the progress panel")}${sw("raised", "--raised", "controls, popovers")}
+      ${sw("hover", "--hover", "ink overlay: pointer over")}${sw("selected", "--selected", "ink overlay: current, pressed")}${sw("chip", "--chip", "ink overlay: chips")}${sw("skeleton", "--skeleton", "still loading")}
+      ${sw("border", "--border", "hairlines")}${sw("border-strong", "--border-strong", "control outlines")}${sw("track", "--track", "empty progress")}${sw("star-empty", "--star-empty", "an unfilled star")}
+    </div></div>
+    <div><h4>Ink: contrast is the lowest over bg, sidebar, surface and raised, each alone, hovered and selected</h4><div class="sw">
+      ${ink("fg", "--fg", "text")}${ink("fg-muted", "--fg-muted", "secondary text, counts")}${ink("fg-faint", "--fg-faint", "empty-state icons; never text")}${ink("accent", "--accent", "links, selected icon, genre icons", [...fills(theme), ...chips(theme)])}
+      ${sw("accent", "--accent", "progress, primary commit", "--accent-fg")}${sw("accent-soft", "--accent-soft", "the avatar")}${sw("ring", "--ring", "focus ring, 2 px")}${sw("gold", "--gold", "your rating only")}
+      ${ink("danger", "--danger", "destructive", plain(theme, "--bg", "--raised"))}${ink("warning", "--warning", "content-warning icon", [over(theme, "--chip", "--bg")])}
+    </div></div>
+    <div><h4>Elevation: three levels</h4><div class="wrap" style="gap:var(--s-24)">
+      ${st("0 · flat: a hairline or a fill", `<div class="panel" style="width:128px;height:96px"></div>`)}
+      ${st("1 · cover: the book as an object", cover(B.dune, "md", true))}
+      ${st("2 · popover: menus, dialogs", `<div class="popover" style="width:168px"><div class="menu-item">${ic("book")}Currently reading</div><div class="menu-item hover">${ic("inbox")}Want to read</div><div class="menu-item">${ic("check")}Read</div></div>`)}
+    </div><div class="note">Flat regions take no shadow. Hover, selected and chip are ink overlays, so a control on raised and a row on paper step the same way, and a chip stays visible on a hovered or selected row.</div>
+    <code>shadow-cover: ${tv(theme, "--shadow-cover")}</code><code>shadow-popover: ${tv(theme, "--shadow-popover")}</code><code>cover-edge: ${tv(theme, "--cover-edge")} · cover-hinge: ${tv(theme, "--cover-hinge")} to clear, 6% of the width</code></div>
+    <div><h4>Covers: the image, the cloth cover when there is none, the skeleton while loading</h4><div class="wrap">
+      ${cover(B.dune, "md", true)}${cover(B.dune, "sm")}${cover(B.moby, "md", true)}${cover(B.moby, "sm")}${cover(B.moby, "xs")}${cover(B.owl, "md", true)}${cover(B.owl, "sm")}${cover(B.dune, "md", false, "loading")}${cover(B.dune, "sm", false, "loading")}
+    </div></div>
+    <div><h4>Rating: gold is yours; the catalogue's is muted ink</h4><div class="wrap c" style="gap:var(--s-16)">
+      <span class="row-c g-8">${stars(4.5, "own", "lg")}<span class="small muted">yours</span></span>
+      <span class="row-c g-8">${stars(4.51, "cat")}<span class="small muted">Hardcover average</span></span>
+      <span class="row-c g-8">${stars(0, "own")}<span class="small muted">unrated</span></span>
+      <span class="row-c g-8">${stars(3.5, "preview", "lg")}<span class="small muted">hover preview: a click sets 3.5</span></span>
+    </div></div>
+    <div><h4>Chips: neutral; the icon's shape tells statuses apart; a genre's icon in accent, a warning's in warning; 6 apart when they wrap</h4><div class="wrap c" style="gap:var(--s-6)">
+      ${statuses.map(([i, l]) => `<span class="chip">${ic(i, "xs")}${l}</span>`).join("")}
+      ${["Fantasy", "Science Fiction", "Mystery", "Classics", "General"].map(genreChip).join("")}${tagChip("hopeful")}${warnChip("Violence")}
+    </div></div>
+    <div><h4>Control states: one treatment each, on every control</h4>
+      <div class="wrap" style="gap:var(--s-16)">
+        ${st("rest", `<span class="btn">Choose…</span>`)}${st("hover", `<span class="btn hover">Choose…</span>`)}${st("pressed", `<span class="btn pressed">Choose…</span>`)}${st("focus", `<span class="btn focus">Choose…</span>`)}${st("disabled", `<span class="btn dis">Choose…</span>`)}
+      </div>
+      <div class="note">hover: the hover fill · pressed: the selected fill · focus: an accent edge and a 3 px ring · disabled: 50% opacity. Nothing else changes.</div>
+      <div class="wrap mt-16" style="gap:var(--s-16)">
+        ${st("primary: one per decision", `<span class="btn primary">Save</span>`)}${st("ghost: tools", `<span class="btn ghost">${ic("layers")}Lists${ic("down", "xs")}</span>`)}${st("danger", `<span class="btn danger">${ic("trash")}Remove from library…</span>`)}${st("link: opens the browser", `<span class="link row-c g-4" style="height:var(--h-control)">Open on Hardcover ${ic("ext", "xs")}</span>`)}
+      </div>
+      <div class="wrap mt-16" style="gap:var(--s-16)">
+        ${st("input", `<div class="input" style="width:152px">${ic("search")}Filter</div>`)}${st("input, focus", `<div class="input focus" style="width:152px">${ic("search")}<span class="val">dune</span></div>`)}${st("switch off, on, disabled", `<span class="row-c g-8" style="height:var(--h-control)"><span class="switch"><i></i></span><span class="switch on"><i></i></span><span class="switch dis"><i></i></span></span>`)}
+      </div>
+    </div>
+    <div><h4>Row states, progress, loading and empty</h4><div class="wrap" style="gap:var(--s-24);align-items:flex-start">
+      <div class="demo-list">
+        <div class="nav">${ic("inbox")}<span>Rest</span><span class="n">8</span></div>
+        <div class="nav hover">${ic("check")}<span>Hover</span><span class="n">9</span></div>
+        <div class="nav sel">${ic("book")}<span>Selected</span><span class="n">3</span></div>
+        <div class="nav focus">${ic("pause")}<span>Keyboard focus</span><span class="n">1</span></div>
+        <div class="nav dis">${ic("target")}<span>Disabled</span></div>
+      </div>
+      <div class="col g-16" style="width:248px">
+        <div class="col g-8"><div class="bar"><i style="width:66%"></i></div><span class="small muted">meter: accent on track, 6 px; 2 px inside a row</span></div>
+        <div class="col g-8"><div class="bar"><i style="width:75%"></i><b style="left:88.8%"></b></div><span class="small muted">goal: the tick is where the pace should be</span></div>
+        <div class="row-c g-12">${cover(B.dune, "sm", false, "loading")}<div class="col g-8 fill"><div class="sk" style="width:70%"></div><div class="sk" style="width:45%"></div></div></div>
+        <span class="small muted">loading: skeleton fill, pulsing 100% to 50%; no spinner in a list</span>
+      </div>
+    </div>
+    <div class="boxed mt-16" style="height:168px;display:flex">${emptyState("search", "No matches", "No books in Read match “tolkien”.")}</div>
+    <div class="note">empty: a 24 px muted icon, a 14/500 title, one muted sentence, centred in the region it explains.</div></div>
+  </div>`;
+}
+
+function tokensScales() {
+  const t = (code, cls, sample, style = "") => `<div class="l"><code>${code}</code><span class="${cls}" style="${style}">${sample}</span></div>`;
+  const sp = [["--s-2", "optical"], ["--s-4", "one control"], ["--s-8", "related"], ["--s-12", "a group"], ["--s-16", "groups"], ["--s-24", "sections"], ["--s-32", "regions"]];
+  const rad = [["--r-cover-s", "covers xs, sm"], ["--r-cover", "covers md+"], ["--r-control", "controls, nav rows"], ["--r-box", "rows, panels, popovers"], ["--r-pill", "chips, bars"]];
+  const cvs = ["xs", "sm", "md", "lg", "xl", "xxl"];
+  return `<div class="tok theme-light">
+    <div class="section">Type</div>
+    <div><h4>Sans speaks for the app: Inter 400, 500, 600</h4><div class="ts">
+      ${t("page-title · 20/28 · 600", "page-title", "Currently reading")}
+      ${t("section · 16/24 · 600", "section", "Continue reading")}
+      ${t("heading · 14/20 · 600", "heading", "About this book")}
+      ${t("body · 14/20 · 400", "", "Borrowed from the library, due back on the 30th.")}
+      ${t("body-strong · 14/20 · 500", "strong", "Project Hail Mary")}
+      ${t("body, muted", "muted", "Andy Weir")}
+      ${t("label · 12/16 · 500, muted", "label", "2026 reading goal")}
+      ${t("caption · 12/16 · 400, muted", "small muted num", "Page 418 of 1,007 · 13 pages a day")}
+    </div></div>
+    <div><h4>Serif speaks for the book: Literata Display (36pt cut) 600, Literata Text (12pt cut) 400, 600</h4><div class="ts">
+      ${t("display-30 · 30/36 · Display 600", "display d-30", "The Way of Kings")}
+      ${t("display-24 · 24/30 · Display 600", "display d-24", "Project Hail Mary")}
+      ${t("title-18 · 18/24 · Text 600", "title-18", "Dune Messiah")}
+      ${t("prose · 16/26 · Text 400", "prose", "A schoolteacher wakes up alone on a spaceship light-years from home.", "max-width:320px")}
+      ${t("figure · display-30, lining", "display d-30 num", "9 &nbsp; 4.63")}
+    </div><div class="note">Seven sizes in all: 12, 14, 16, 18, 20, 24, 30. No letter-spacing anywhere; the Display cut does the tightening.</div></div>
+    <div><h4>Persian and Arabic: Vazirmatn everywhere, under the serif roles too</h4><div class="ts">
+      ${t("display-24, leading 1.5", "display d-24 rtl", "بوف کور", "").replace("<span", '<span dir="rtl"')}
+      ${t("body-strong", "strong rtl", "بوف کور", "").replace("<span", '<span dir="rtl"')}
+      ${t("body, muted", "muted rtl", "صادق هدایت", "").replace("<span", '<span dir="rtl"')}
+    </div><div class="note">The block sits on the leading edge like any other title; only the line runs right to left. A title that wraps fills its column and packs to the right.</div></div>
+    <div><h4>Numerals: tabular wherever figures stack or change in place</h4><div class="row-c g-24">
+      <div class="col num" style="align-items:flex-end"><span>66%</span><span>42%</span><span>100%</span></div>
+      <div class="col num muted"><span>Page 312 of 476</span><span>Page 418 of 1,007</span><span>Page 121 of 305</span></div>
+    </div></div>
+    <div><h4>Cloth: eight colours, the same in both themes; the title picks one</h4><div class="sw">
+      ${CLOTH.map(c => `<div><i style="background:${c};color:var(--cloth-ink)" class="serif">Aa</i><code>${c}</code><code>${contrast(rv("--cloth-ink"), c).toFixed(1)}:1</code></div>`).join("")}
+    </div><div class="note">cloth-ink ${rv("--cloth-ink")} for the stamp, title and author.</div></div>
+  </div><div class="tok theme-light">
+    <div class="section">Space, shape and size</div>
+    <div><h4>Spacing: named by relationship</h4><div class="scale">
+      ${sp.map(([v, n]) => `<div><div class="sq" style="width:var(${v});height:var(${v})"></div><code>${rv(v)}</code><span class="small muted">${n}</span></div>`).join("")}
+    </div><div class="note">Insets: sidebar 8, list 16, pane 24, page 32. Row gap 2. Section gap 24.</div></div>
+    <div><h4>Radius</h4><div class="scale">
+      ${rad.map(([v, n]) => `<div><div class="sq" style="width:56px;height:40px;border-radius:var(${v})"></div><code>${rv(v).replace("999px", "full")}</code><span class="small muted">${n}</span></div>`).join("")}
+    </div></div>
+    <div><h4>Frames</h4><div class="wrap" style="gap:var(--s-16)">
+      <div class="state"><span class="btn">Control 32</span><span class="small muted">buttons, inputs, nav rows</span></div>
+      <div class="state"><span class="btn sm">Small 24</span><span class="small muted">inside a row or panel</span></div>
+      <div class="state"><span class="chip">Chip 20</span><span class="small muted">chips</span></div>
+      <div class="state"><span class="row-c g-8" style="height:var(--h-control)">${ic("book")}${ic("book", "xs")}</span><span class="small muted">icons 16, 12</span></div>
+    </div><div class="note">Regions: sidebar 240, list 384, rail 272, bar 56, tall row 40, key column 96 (72 in a rail). Widths: select 168 and 128, meter 400 and 160, prose 640, empty-state text 288.</div></div>
+    <div><h4>Cover sizes (width): xs 20, sm 32, md 64, lg 80, xl 128, xxl 160</h4>
+      <div class="wrap" style="gap:var(--s-8)">${cvs.map(s => cover(B.dune, s, s !== "xs" && s !== "sm")).join("")}</div>
+      <div class="wrap mt-16" style="gap:var(--s-8)">${cvs.map(s => cover(B.moby, s, s !== "xs" && s !== "sm")).join("")}</div>
+      <div class="wrap mt-16">${["xs", "sm", "md", "lg", "xl"].map(s => cover(B.owl, s, s !== "xs" && s !== "sm")).join("")}</div>
+      <div class="note">xs, sm: rows and menus (edge only). md, lg: shelves and cards. xl: the pane and the Home lead. xxl: the book page. The hinge appears from md; the shadow where the cover leads its row. Cloth: xs an initial, sm an initial and a rule, md the title, lg and up the title and author.</div>
+    </div>
+  </div>`;
+}
+
+// ---------- Assemble ----------
+// ---------- Screen: Series (the started series and the next step in each) ----------
+const OL = isbn => `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg?default=false`;
+Object.assign(P, {
+  checkmark: '<path d="M20 6 9 17l-5-5"/>',
+  library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+});
+const K = {
+  wor: { t: "Words of Radiance", a: "Brandon Sanderson", c: OL("9780765326362") },
+  ob:  { t: "Oathbringer", a: "Brandon Sanderson", c: OL("9780765326379") },
+  row: { t: "Rhythm of War", a: "Brandon Sanderson", c: OL("9780765326386") },
+  wat: { t: "Wind and Truth", a: "Brandon Sanderson", c: OL("9781250319180") },
+  sl6: { t: "Untitled Stormlight Archive #6", a: "Brandon Sanderson" },
+  cod: { t: "Children of Dune", a: "Frank Herbert", c: C("edition/30825973/a2fec259-e3b1-4d17-8755-2bbe0af30ca9.jpg") },
+  ged: { t: "God Emperor of Dune", a: "Frank Herbert", c: C("external_data/30542666/b90d2d32426e5bf180573b4e97421db3307c93e0.jpeg") },
+  hod: { t: "Heretics of Dune", a: "Frank Herbert", c: OL("9780441328003") },
+  chd: { t: "Chapterhouse: Dune", a: "Frank Herbert", c: OL("9780441102679") },
+  if:  { t: "Iron Flame", a: "Rebecca Yarros", c: OL("9781649374172") },
+  os:  { t: "Onyx Storm", a: "Rebecca Yarros", c: OL("9781649374189") },
+  em4: { t: "Untitled Empyrean #4", a: "Rebecca Yarros" },
+  woa: { t: "The Well of Ascension", a: "Brandon Sanderson", c: OL("9780765316882") },
+  hoa: { t: "The Hero of Ages", a: "Brandon Sanderson", c: OL("9780765316899") },
+  mn:  { t: "Untitled Mistborn Novella", a: "Brandon Sanderson" },
+  fot: { t: "The Fellowship of the Ring", a: "J.R.R. Tolkien", c: OL("9780547928210") },
+  tt:  { t: "The Two Towers", a: "J.R.R. Tolkien", c: OL("9780547928203") },
+  rk:  { t: "The Return of the King", a: "J.R.R. Tolkien", c: OL("9780547928197") },
+};
+const fa = n => String(n).replace(/\d/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
+const KEL = Array.from({ length: 10 }, (_, i) => ({ t: `کلیدر ${fa(i + 1)}`, a: "محمود دولت‌آبادی", rtl: true }));
+
+// st: read | cr (with pct) | wtr | paused | dnf | none (not in your library) | soon (not out yet)
+const SERIES = [
+  { name: "The Stormlight Archive", a: "Brandon Sanderson", g: "progress", when: "Reading now",
+    books: [[B.wok, 1, "cr", 42], [K.wor, 2, "none"], [K.ob, 3, "none"], [K.row, 4, "none"], [K.wat, 5, "none"], [K.sl6, 6, "soon"]],
+    next: { kind: "reading", b: B.wok, pos: 1, line: "Page 418 of 1,007 · 42%" } },
+  { name: "Dune", a: "Frank Herbert", g: "progress", when: "Last finished Sep 28",
+    books: [[B.dune, 1, "read"], [B.dm, 2, "read"], [K.cod, 3, "wtr"], [K.ged, 4, "wtr"], [K.hod, 5, "none"], [K.chd, 6, "none"]],
+    next: { kind: "start", b: K.cod, pos: 3 } },
+  { name: "The Empyrean", a: "Rebecca Yarros", g: "waiting", when: "Caught up since Feb 2",
+    books: [[B.fw, 1, "read"], [K.if, 2, "read"], [K.os, 3, "read"], [K.em4, 4, "soon"]],
+    next: { kind: "waiting", b: K.em4, pos: 4, d: "Nov 26", soon: "In 6 days", onShelf: true } },
+  { name: "The Mistborn Saga: The Original Trilogy", a: "Brandon Sanderson", g: "stalled", when: "Last finished Mar 9, 2025",
+    books: [[B.mist, 1, "read"], [K.woa, 2, "none"], [K.hoa, 3, "none"], [K.mn, 3.5, "soon"]],
+    next: { kind: "add", b: K.woa, pos: 2 } },
+  { name: "کلیدر", a: "محمود دولت‌آبادی", rtl: true, g: "stalled", when: "Paused since Jun 2024",
+    books: KEL.map((b, i) => [b, i + 1, i < 2 ? "read" : i === 2 ? "paused" : "none"]),
+    next: { kind: "paused", b: KEL[2], pos: 3, line: "Paused at page 140 of 412" } },
+  { name: "The Lord of the Rings", a: "J.R.R. Tolkien", g: "done", when: "Finished Jan 12, 2025",
+    books: [[K.fot, 1, "read"], [K.tt, 2, "read"], [K.rk, 3, "read"]] },
+];
+const GROUPS = [
+  ["progress", "In progress", 2],
+  ["waiting", "Waiting for the next book", 1],
+  ["stalled", "Not touched in a year", 2],
+  ["done", "Finished", 1],
+];
+const STATUS_ICON = { read: "check", cr: "book", wtr: "inbox", paused: "pause", dnf: "ban" };
+const dirAttr = o => o.rtl ? ' dir="rtl"' : "";
+const rtlCls = o => o.rtl ? " rtl" : "";
+const released = s => s.books.filter(([, , st]) => st !== "soon");
+const readCount = s => s.books.filter(([, , st]) => st === "read").length;
+const facts = s => {
+  const out = released(s).length, soon = s.books.find(([, , st]) => st === "soon");
+  return `${readCount(s)} of ${out} read${soon && s.next?.kind !== "waiting" ? ` · #${soon[1]} not out yet` : ""}`;
+};
+
+// ---------- Series tracker: shared parts ----------
+// The filter: a select beside the filter input. "Not finished" is the default, so ~200 finished
+// series don't bury the ones that need you; the choice is kept for the session.
+const FILTERS = [["Not finished", 5], ["Finished", 1], ["All series", 6]];
+function pageHead(filter = "Not finished", open = false) {
+  const n = FILTERS.find(([f]) => f === filter)[1];
+  const menu = open ? `<div class="popover fmenu">${FILTERS.map(([f, c]) => `<div class="menu-item${f === filter ? " hover" : ""}"><span class="ck">${f === filter ? ic("checkmark") : ""}</span><span class="fill">${f}</span><span class="small muted num">${c}</span></div>`).join("")}</div>` : "";
+  return `<div class="row-c g-16"><div class="fill">
+      <div class="row-b g-8"><span class="page-title">Series</span><span class="muted num">${n}</span></div>
+      <div class="muted mt-4">The series you've started, and what's next in each.</div>
+    </div>
+    <div class="row-c g-8">
+      <div class="input" style="width:var(--w-select)">${ic("search")}Filter series</div>
+      <div class="fwrap"><span class="select${open ? " btn pressed" : ""}" style="width:var(--w-select)">${filter}${ic("down", "xs")}</span>${menu}</div>
+    </div></div>`;
+}
+// The next lane: the one thing to do in a series. 240 wide, kept on every row so the lanes line up.
+function nextLane(s) {
+  const n = s.next;
+  if (!n) return `<div class="nx"></div>`;
+  const head = { reading: "Reading", start: "Next", add: "Next", waiting: "Next", paused: "Paused" }[n.kind];
+  const act = {
+    reading: `<span class="btn sm">Update progress…</span>`,
+    start: `<span class="btn sm">Start reading</span>`,
+    add: `<span class="btn sm ghost nx-ghost">${ic("plus", "xs")}Want to read</span>`,
+    paused: `<span class="btn sm">Update progress…</span>`,
+    waiting: n.onShelf ? `<span class="chip">${ic("inbox", "xs")}Want to read</span>` : `<span class="btn sm ghost nx-ghost">${ic("plus", "xs")}Want to read</span>`,
+  }[n.kind];
+  const line = n.kind === "waiting" ? `<div class="num"><span class="strong">${n.d}</span><span class="small muted"> · ${n.soon}</span></div>` : n.line ? `<div class="small muted num">${n.line}</div>` : "";
+  return `<div class="nx">${cover(n.b, "sm")}<div class="fill col">
+      <div class="small muted num">${head} · #${n.pos}</div>
+      <div class="strong one-line${rtlCls(n.b)}"${dirAttr(n.b)}><span class="textbtn">${n.b.t}</span></div>
+      ${line}<div class="mt-8 row-c">${act}</div>
+    </div></div>`;
+}
+const seriesName = s => `<div class="title-18 one-line${rtlCls(s)}"${dirAttr(s)}><span class="textbtn">${s.name}</span></div>`;
+const seriesFacts = s => `<div class="muted one-line num"><span${dirAttr(s)}>${s.a}</span> · ${facts(s)}</div>`;
+
+// ---------- The strip: the series as a shelf of covers ----------
+// Every book in order at sm, with its position and status icon under it. A book that isn't in
+// your library is an empty slot; one that isn't out yet is a slot with its date.
+function strip(s) {
+  return `<div class="strip">${s.books.map(([b, pos, st, pct]) => {
+    const isNext = s.next && s.next.b === b;
+    const body = st === "none" || st === "soon"
+      ? `<div class="slot${st === "soon" ? " soon" : ""}">${st === "soon" ? ic("clock", "xs") : ""}</div>`
+      : cover(b, "sm");
+    const meter = `<div class="bar thin mslot">${st === "cr" ? `<i style="width:${pct}%"></i>` : ""}</div>`;
+    const mark = STATUS_ICON[st] ? ic(STATUS_ICON[st], "xs") : "";
+    return `<div class="sb-it${isNext ? " next" : ""}">${body}${meter}<div class="pos num">${mark}<span>${pos}</span></div></div>`;
+  }).join("")}</div>`;
+}
+function rowB(s) {
+  return `<div class="sr top">
+    <div class="fill col">
+      ${seriesName(s)}
+      <div class="muted one-line num"><span${dirAttr(s)}>${s.a}</span> · ${facts(s)} · ${s.when}</div>
+      <div class="mt-12">${strip(s)}</div>
+    </div>
+    ${nextLane(s)}
+  </div>`;
+}
+
+function seriesPage(filter = "Not finished", open = false) {
+  const shown = { "Not finished": ["progress", "waiting", "stalled"], "Finished": ["done"], "All series": ["progress", "waiting", "stalled", "done"] }[filter];
+  const hidden = filter === "Not finished" ? `<div class="row-c g-8 mt-24 hidden-note"><span class="muted">1 finished series isn't shown.</span><span class="btn sm ghost">Show finished</span></div>` : "";
+  return sidebar("series") + `<div class="main"><div class="scroll page"><div class="series-page">
+    ${pageHead(filter, open)}
+    ${GROUPS.filter(([g]) => shown.includes(g)).map(([g, label, n]) => {
+      const rows = SERIES.filter(s => s.g === g);
+      return `<div class="row-b g-8 group-label"><span class="label">${label}</span><span class="small muted num">${n}</span></div>
+        <div class="col">${rows.map(rowB).join("")}</div>`;
+    }).join("")}
+    ${hidden}
+  </div></div></div>`;
+}
+function seriesEmpty() {
+  return sidebar("series", null) + `<div class="main"><div class="scroll page" style="display:flex;flex-direction:column">
+    <div class="series-page" style="width:100%">${pageHead().replace('<span class="muted num">5</span>', "")}</div>
+    ${emptyState("library", "No series yet", "When you read a book that belongs to a series, the series shows here with what comes next.")}
+  </div></div>`;
+}
+// The strip's states, side by side at 2× so they can be read.
+function legend() {
+  const cell = (label, inner) => `<div class="col g-8" style="align-items:center;width:150px">${inner}<span class="small muted" style="text-align:center">${label}</span></div>`;
+  const it = (b, pos, st, pct) => `<div class="strip">${strip({ books: [[b, pos, st, pct]], next: null }).replace(/^<div class="strip">|<\/div>$/g, "")}</div>`;
+  return `<div class="page" style="flex:1"><div class="row-c g-24" style="transform:scale(2);transform-origin:top left;width:50%">
+    ${cell("Read", it(B.dune, 1, "read"))}
+    ${cell("Reading, with its progress", it(B.wok, 1, "cr", 42))}
+    ${cell("On Want to read", it(K.cod, 3, "wtr"))}
+    ${cell("Paused", it(KEL[2], 3, "paused"))}
+    ${cell("Not in your library", it(K.hod, 5, "none"))}
+    ${cell("Not out yet", it(K.em4, 4, "soon"))}
+  </div></div>`;
+}
+
+const D = {"relax": [{"t": "Legends & Lattes", "a": "Travis Baldree", "y": 2022, "r": 4.12, "u": 4892, "c": "https://assets.hardcover.app/editions/30396420/4372639752917043.jpg", "v": 186}, {"t": "A Psalm for the Wild-Built", "a": "Becky Chambers", "y": 2021, "r": 4.22, "u": 3111, "c": "https://assets.hardcover.app/editions/28452919/1694923853483346.jpg", "v": 96}, {"t": "Bookshops & Bonedust", "a": "Travis Baldree", "y": 2023, "r": 4.18, "u": 2215, "c": "https://assets.hardcover.app/editions/30599331/7462847827989860.jpg", "v": 51}, {"t": "The Very Secret Society of Irregular Witches", "a": "Sangu Mandanna", "y": 2022, "r": 4.08, "u": 2544, "c": "https://assets.hardcover.app/external_data/61614583/f9cbe04ab5cf75bc687eb8b9dd01ab95453d73ae.jpeg", "v": 48}, {"t": "A Prayer for the Crown-Shy", "a": "Becky Chambers", "y": 2022, "r": 4.32, "u": 1767, "c": "https://assets.hardcover.app/editions/30501405/6462135535022699.jpeg", "v": 47}, {"t": "The House in the Cerulean Sea", "a": "TJ Klune", "y": 2020, "r": 4.29, "u": 5517, "c": "https://assets.hardcover.app/edition/29272503/10207033-L.jpg", "v": 43}, {"t": "Days At The Morisaki Bookshop", "a": "Satoshi Yagisawa", "y": 2010, "r": 3.62, "u": 1428, "c": "https://assets.hardcover.app/editions/30642401/7290869771504136.jpeg", "v": 40}, {"t": "The Love Hypothesis", "a": "Ali Hazelwood", "y": 2021, "r": 3.95, "u": 3199, "c": "https://assets.hardcover.app/edition/1269356/e9701092-269f-4ff9-abbe-4b41b77eea11.jpg", "v": 36}, {"t": "Heartstopper: Volume One", "a": "Alice Oseman", "y": 2018, "r": 4.48, "u": 2107, "c": "https://assets.hardcover.app/edition/21247303/9020805-L.jpg", "v": 34}, {"t": "Before the Coffee Gets Cold", "a": "Toshikazu Kawaguchi", "y": 2015, "r": 3.63, "u": 3853, "c": "https://assets.hardcover.app/editions/24086923/8822767016251445-81GoE0na35L._AC_UF1000,1000_QL80_.jpg", "v": 34}, {"t": "Book Lovers", "a": "Emily Henry", "y": 2022, "r": 4.08, "u": 2996, "c": "https://assets.hardcover.app/edition/30435685/daf4db5f-b542-48fb-895e-82cb35bd4ada.jpg", "v": 31}, {"t": "Piranesi", "a": "Susanna Clarke", "y": 2019, "r": 4.22, "u": 8920, "c": "https://assets.hardcover.app/editions/30480426/ec301cb7-b118-48fd-aa3a-5d336e61c182.jpg", "v": 29}], "relaxMystery": [{"t": "Piranesi", "a": "Susanna Clarke", "y": 2019, "r": 4.22, "u": 8920, "c": "https://assets.hardcover.app/editions/30480426/ec301cb7-b118-48fd-aa3a-5d336e61c182.jpg", "v": 29}, {"t": "Remarkably Bright Creatures", "a": "Shelby Van Pelt", "y": 2022, "r": 4.15, "u": 3326, "c": "https://assets.hardcover.app/external_data/59469142/340246db2f5b43b566a8dfc27887bb13301ca4cd.jpeg", "v": 19}, {"t": "The Thursday Murder Club", "a": "Richard Osman", "y": 2020, "r": 3.84, "u": 3610, "c": "https://assets.hardcover.app/external_data/47667262/f7aa5ab35a99f0b0f24d4b75d06e02b96a81dcec.jpeg", "v": 18}, {"t": "All Systems Red", "a": "Martha Wells", "y": 2017, "r": 4.07, "u": 10284, "c": "https://assets.hardcover.app/edition/31608045/3c51e2999ec8dc7e94fdd569d083d45f2d46dd3b.jpeg", "v": 15}, {"t": "Project Hail Mary", "a": "Andy Weir", "y": 2021, "r": 4.51, "u": 19688, "c": "https://assets.hardcover.app/editions/3274049/8741341047797682-91mYu67RfUL._SL1500_.jpg", "v": 13}, {"t": "Vera Wong's Unsolicited Advice for Murderers", "a": "Jesse Q. Sutanto", "y": 2023, "r": 3.98, "u": 1162, "c": "https://assets.hardcover.app/external_data/59762621/74b161986634bc8ef8ceb9033fe4b059fda20a7e.jpeg", "v": 11}, {"t": "The Man Who Died Twice", "a": "Richard Osman", "y": 2019, "r": 4.28, "u": 1528, "c": "https://assets.hardcover.app/edition/30504308/c2bb10ec1d229ae90973da83899d60c1ba807d26.jpeg", "v": 8}, {"t": "Dungeon Crawler Carl", "a": "Matt Dinniman", "y": 2020, "r": 4.34, "u": 13260, "c": "https://assets.hardcover.app/edition/31601422/3a01ea07-01f4-45a2-9940-6fc7e00e0d08.jpeg", "v": 7}, {"t": "Murder at the Vicarage", "a": "Agatha Christie", "y": 1930, "r": 3.89, "u": 861, "c": "https://assets.hardcover.app/external_data/46826102/581526fedec8bc9aa42da63e46ba7ebd0cdf60b8.jpeg", "v": 5}, {"t": "Murder on the Orient Express", "a": "Agatha Christie", "y": 1934, "r": 4.1, "u": 3501, "c": "https://assets.hardcover.app/editions/30399401/9393001616356172-853510.jpg", "v": 4}, {"t": "Ready Player One", "a": "Ernest Cline", "y": 2011, "r": 4.06, "u": 9683, "c": "https://assets.hardcover.app/edition/30426366/12fd6daa-8487-471f-a962-58dd815420df.jpg", "v": 4}, {"t": "Fugitive Telemetry", "a": "Martha Wells", "y": 2021, "r": 4.19, "u": 3335, "c": "https://assets.hardcover.app/book_mappings/7333079/1dd5f1cc67a36104185d7cc0c9967729fc44bf18.jpeg", "v": 4}], "trend": [{"t": "Dungeon Crawler Carl", "a": "Matt Dinniman", "y": 2020, "r": 4.34, "u": 13260, "c": "https://assets.hardcover.app/edition/31601422/3a01ea07-01f4-45a2-9940-6fc7e00e0d08.jpeg"}, {"t": "The Dungeon Anarchist's Cookbook", "a": "Matt Dinniman", "y": 2021, "r": 4.28, "u": 6695, "c": "https://assets.hardcover.app/edition/30407849/4b70ed0d-fb89-4d2c-9e33-23def79d50a4.jpg"}, {"t": "Carl's Doomsday Scenario", "a": "Matt Dinniman", "y": 2021, "r": 4.37, "u": 7628, "c": "https://assets.hardcover.app/editions/31544885/72ed6606-0392-4666-a23e-a331365814a2.jpg"}, {"t": "A Court of Splintered Harmony", "a": "Sarah J. Maas", "y": 2026, "r": 3.37, "u": 998, "c": "https://assets.hardcover.app/edition/30390459/ee9f70bd-d62e-4636-a0b6-ad98746d065a.jpg"}, {"t": "The Gate of the Feral Gods", "a": "Matt Dinniman", "y": 2021, "r": 4.42, "u": 6059, "c": "https://assets.hardcover.app/edition/31943704/04d5cb18-1725-4b03-9303-b6e9ee14942d.jpg"}, {"t": "A Parade of Horribles", "a": "Matt Dinniman", "y": 2026, "r": 4.41, "u": 4034, "c": "https://assets.hardcover.app/edition/32462067/40a20ed0-0786-4425-b775-0af66472e853.jpg"}, {"t": "The Butcher's Masquerade", "a": "Matt Dinniman", "y": 2022, "r": 4.55, "u": 5615, "c": "https://assets.hardcover.app/editions/32004303/0e11e113-fd6c-4363-9a68-da8999b886f5.jpeg"}, {"t": "This Inevitable Ruin", "a": "Matt Dinniman", "y": 2024, "r": 4.56, "u": 4808, "c": "https://assets.hardcover.app/edition/32042174/54ee7e48-38e1-4303-824a-7da6156f5bfe.png"}, {"t": "The Eye of the Bedlam Bride", "a": "Matt Dinniman", "y": 2023, "r": 4.47, "u": 5206, "c": "https://assets.hardcover.app/editions/30829594/3f43c2b5-94bd-4d1b-9e64-35daa4e94b42.jpg"}, {"t": "Project Hail Mary", "a": "Andy Weir", "y": 2021, "r": 4.51, "u": 19688, "c": "https://assets.hardcover.app/editions/3274049/8741341047797682-91mYu67RfUL._SL1500_.jpg"}, {"t": "Red Rising", "a": "Pierce Brown", "y": 2014, "r": 4.2, "u": 12837, "c": "https://assets.hardcover.app/editions/26096001/3897005112280259.jpg"}, {"t": "Sunrise on the Reaping", "a": "Suzanne Collins", "y": 2025, "r": 4.31, "u": 4271, "c": "https://assets.hardcover.app/editions/31416911/2580982385827096.jpg"}, {"t": "Harry Potter and the Philosopher's Stone", "a": "J.K. Rowling", "y": 1997, "r": 4.28, "u": 17828, "c": "https://assets.hardcover.app/external_data/4257970/a3a1bbb3dae498a7a8316be0cc9bc5e91f6c34c9.jpeg"}, {"t": "1984", "a": "George Orwell", "y": 1949, "r": 4.25, "u": 19997, "c": "https://assets.hardcover.app/edition/29258002/fb69559e-7c34-40cb-8518-3ef4898b830c.jpg"}], "similar": [{"t": "Red Rising", "a": "Pierce Brown", "y": 2014, "r": 4.2, "u": 12837, "c": "https://assets.hardcover.app/editions/26096001/3897005112280259.jpg"}, {"t": "All Systems Red", "a": "Martha Wells", "y": 2017, "r": 4.07, "u": 10284, "c": "https://assets.hardcover.app/edition/31608045/3c51e2999ec8dc7e94fdd569d083d45f2d46dd3b.jpeg"}, {"t": "Dark Matter", "a": "Blake Crouch", "y": 2016, "r": 4.07, "u": 8038, "c": "https://assets.hardcover.app/edition/10826328/cf2a46e38272500aa60e04cb670eb265f06c6ee4.jpeg"}, {"t": "Children of Time", "a": "Adrian Tchaikovsky", "y": 2015, "r": 4.3, "u": 6545, "c": "https://assets.hardcover.app/editions/30400632/1512151722488735-25563522.jpg"}, {"t": "Wool", "a": "Hugh Howey", "y": 2012, "r": 4.18, "u": 5152, "c": "https://assets.hardcover.app/edition/30399206/f47e7a90-c12c-40b4-95ca-b9c03da719fe.jpg"}, {"t": "Leviathan Wakes", "a": "James S. A. Corey", "y": 2011, "r": 4.31, "u": 7601, "c": "https://assets.hardcover.app/edition/30438662/f86a3bcf-1f7e-4571-9c6a-59d58dfd267e.png"}, {"t": "The Way of Kings", "a": "Brandon Sanderson", "y": 2010, "r": 4.63, "u": 10213, "c": "https://assets.hardcover.app/edition/3134360/a18d937805a28e3214a556442c8d33f41c02f2cb.jpeg"}, {"t": "The Three-Body Problem", "a": "Cixin Liu", "y": 2006, "r": 4.0, "u": 10659, "c": "https://assets.hardcover.app/editions/30400656/4859176399294838.jpg"}, {"t": "The Fifth Season", "a": "N. K. Jemisin", "y": 2015, "r": 4.32, "u": 6730, "c": "https://assets.hardcover.app/editions/30436469/70e6b452-e137-4ff2-8d6f-d83a2c852070.jpg"}, {"t": "Dungeon Crawler Carl", "a": "Matt Dinniman", "y": 2020, "r": 4.34, "u": 13260, "c": "https://assets.hardcover.app/edition/31601422/3a01ea07-01f4-45a2-9940-6fc7e00e0d08.jpeg"}, {"t": "The Martian", "a": "Andy Weir", "y": 2011, "r": 4.45, "u": 11993, "c": "https://assets.hardcover.app/editions/21716111/5323176149970177.jpg"}, {"t": "The Will of the Many", "a": "James Islington", "y": 2023, "r": 4.48, "u": 6671, "c": "https://assets.hardcover.app/edition/30615590/1fe836a2-7004-4378-add0-dc78b96b2d17.jpg"}, {"t": "Piranesi", "a": "Susanna Clarke", "y": 2019, "r": 4.22, "u": 8920, "c": "https://assets.hardcover.app/editions/30480426/ec301cb7-b118-48fd-aa3a-5d336e61c182.jpg"}, {"t": "The Blade Itself", "a": "Joe Abercrombie", "y": 2006, "r": 4.15, "u": 5984, "c": "https://assets.hardcover.app/external_data/25818704/6d4c4406902175a5fe5292e8a64df7e6180f1712.jpeg"}]};
+// ======================================================================
+// Tags, moods and discovery: a proposal, not the design reference. Everything
+// above this line is the reference mockup's tokens and parts
+// (docs/design/mockup.html), unchanged; the screens below compose them.
+// Real (Hardcover's public catalogue): book facts, the Relaxing and Relaxing +
+// Mystery lists, trending and similar books (read 2026-11-22); the 14 moods'
+// site-wide votes, the mood and pace votes of the 24 books in shot 3, and
+// Project Hail Mary's "driven by" and character votes (Hardcover's per-book
+// taggable_counts, read 2026-11-23, so a share is exact). Ours, worked out in this file from those
+// counts: the header's line, the shares in the Votes popover and shot 3's
+// table (the rule is LIKE, below). Illustrative: Remarkably Bright Creatures'
+// figures, and the Want to read shelf (its books' lines are real; the shelf
+// and the books' genres are invented). The vibes' rows are the owner's real
+// ones, read 2026-11-23, shown in the invented reader's window.
+// The design system (.claude/skills/hardcover-design) specifies all of this
+// and wins where the two differ.
+// Covers load from Hardcover at view time. The reader is invented.
+// ======================================================================
+document.title = "Hardcover Desktop: tags, moods and discovery (proposal)";
+document.head.insertAdjacentHTML("beforeend", `<style>
+/* A chip that opens a page: the chip's own fill, plus the one hover and selected treatment. */
+.chip.go { cursor: pointer; }
+.chip.hover { background-image: linear-gradient(var(--hover), var(--hover)); }
+.chip.sel { background-image: linear-gradient(var(--selected), var(--selected)); color: var(--fg); }
+.chip.focus { box-shadow: 0 0 0 2px var(--ring), inset 0 0 0 1px var(--accent); }
+/* A filter chip on a shelf: a mood and how many of the shelf's books have it; selected, it has the check too. */
+.chip .ct { font-variant-numeric: tabular-nums; font-weight: 400; }
+/* A shelf's filter bar: one row of genre chips and one of mood chips, each as many as fit, then its More. */
+.fbar { display: flex; flex-direction: column; gap: var(--s-6); }
+.fbar .r { display: flex; align-items: center; gap: var(--s-6); height: var(--h-control-s); }
+.chip.dis { opacity: .5; }
+.list-head .h .btn { align-self: center; margin-right: calc(-1 * var(--s-8)); }
+/* Hardcover's figures are muted meters, like the ratings breakdown; the reader's own are accent. */
+.bar.muted > i { background: var(--fg-muted); }
+.mrows { display: flex; flex-direction: column; gap: var(--s-4); max-width: var(--w-meter); }
+.mrow { display: flex; align-items: center; gap: var(--s-8); }
+.mrow .k { width: 112px; flex: none; }
+.mrow .bar { flex: 1; }
+.mrow .n { width: 48px; flex: none; text-align: right; font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+/* A figure lane's name sits over it, on the group's label line. */
+.mhead { display: flex; align-items: baseline; max-width: var(--w-meter); margin-bottom: var(--s-6); }
+.tag-groups .mhead .label { margin-bottom: 0; }
+/* A three-way answer in its natural order (slow, medium, fast): three equal cells, each its name, its share and a
+   muted meter. The leading answer is ink 500; the words and figures carry it, the weight only points. */
+.way3 { display: flex; gap: var(--s-12); max-width: var(--w-meter); }
+.way3 .c { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: var(--s-4); }
+.way3 .l { display: flex; align-items: baseline; gap: var(--s-4); color: var(--fg-muted); }
+.way3 .l .pc { margin-left: auto; font-size: var(--t-12); line-height: var(--l-12); font-variant-numeric: tabular-nums; }
+.way3 .c.lead .nm { color: var(--fg); font-weight: 500; }
+/* A cover shelf on a page: one row of covers, as many as fit, titles in two lines under each. The page's lead
+   shelf is lg with the cover shadow; the others are md without. */
+.cshelf { display: flex; gap: var(--s-16); }
+.cshelf .it { width: var(--cv-md); flex: none; }
+.cshelf.lg .it { width: var(--cv-lg); }
+.cshelf .tt { font-size: var(--t-12); line-height: var(--l-12); margin-top: var(--s-8); font-weight: 500; }
+.cshelf .sub { font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.sect { margin-top: var(--s-32); }
+.sect-h { display: flex; align-items: center; min-height: var(--h-control-s); margin-bottom: var(--s-12); gap: var(--s-8); }
+/* Catalogue rows on a page, on the content spine. */
+.crows { display: flex; flex-direction: column; gap: var(--s-2); margin-left: calc(-1 * var(--s-8)); }
+.page-head { display: flex; align-items: flex-start; gap: var(--s-16); }
+.page-head .tools { display: flex; gap: var(--s-8); flex: none; }
+.page-head .tools .select { width: var(--w-select); }
+.ctx { position: absolute; z-index: 3; width: 320px; }
+.menu-sep { height: 1px; background: var(--border); margin: var(--s-4) 0; }
+/* A confirmation: the scrim, then the dialog on raised, 24 rem wide. */
+.scrim { position: absolute; inset: 0; z-index: 4; background: var(--scrim); display: flex; align-items: center; justify-content: center; border-radius: inherit; }
+.dlg { width: 384px; padding: var(--s-24); display: flex; flex-direction: column; gap: var(--s-8); }
+.dlg .foot { display: flex; justify-content: flex-end; gap: var(--s-8); margin-top: var(--s-16); }
+.btn.focus { box-shadow: 0 0 0 2px var(--ring); border-color: var(--accent); }
+/* What it's like. The header's line: the moods that stand out as text buttons, the pace word, and the
+   small menu button that opens the votes. */
+.likeline { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--s-4); }
+.likeline .sep { color: var(--fg-muted); }
+.likeline .end { display: inline-flex; align-items: center; gap: var(--s-4); white-space: nowrap; } /* the pace word never leaves its button behind */
+/* The votes on demand: a popover with its own inset (the app has none yet). */
+.pop { position: absolute; z-index: 3; width: 360px; padding: var(--s-16); }
+.pop .mrow .k { width: 96px; }
+/* A reference table, not an app screen: the rule's results, a hairline between rows. */
+.rt { flex: 1; min-width: 0; padding: var(--s-32); }
+.rt-row { display: grid; column-gap: var(--s-16); align-items: baseline; padding: var(--s-8) 0; border-top: 1px solid var(--border); }
+.rt-row.rt-head { border-top: 0; padding-bottom: var(--s-4); }
+</style>`);
+Object.assign(P, {
+  thumbsdown: '<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>',
+  sparkles2: '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/>',
+  heart: '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>',
+  ghost: '<path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/>',
+  scroll: '<path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>',
+  swords: '<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" x2="9" y1="14" y2="18"/><line x1="7" x2="4" y1="17" y2="20"/><line x1="3" x2="5" y1="19" y2="21"/>',
+  baby: '<path d="M9 12h.01"/><path d="M15 12h.01"/><path d="M10 16c.5.3 1.2.5 2 .5s1.5-.2 2-.5"/><path d="M19 6.3a9 9 0 0 1 1.8 3.9 2 2 0 0 1 0 3.6 9 9 0 0 1-17.6 0 2 2 0 0 1 0-3.6A9 9 0 0 1 12 3c2 0 3.5 1.1 3.5 2.5s-.9 2.5-2 2.5c-.8 0-1.5-.4-1.5-1"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+});
+Object.assign(GENRE_ICON, { "Young Adult": "baby", "Romance": "heart", "Horror": "ghost", "History": "scroll", "Biography": "user", "War": "swords", "Thriller": "search", "Fiction": "bookmarked" });
+
+// ---------- Data ----------
+const cap = s => s[0].toUpperCase() + s.slice(1);
+const n = v => v.toLocaleString("en");
+const MOODS = ["Adventurous", "Emotional", "Dark", "Mysterious", "Tense", "Funny", "Reflective", "Lighthearted", "Sad", "Hopeful", "Challenging", "Inspiring", "Informative", "Relaxing"];
+const GENRES = ["Fantasy", "Science Fiction", "Young Adult", "Romance", "Mystery", "Thriller", "Horror", "History", "Classics", "Biography", "Adventure", "War"];
+// Real votes (Hardcover's taggable_counts, read 2026-11-23): each book's votes for the 14 moods, in MOODS' order,
+// then its pace votes: slow, medium, fast. Shot 3's 24 books; a mood nobody chose is 0.
+const VOTES = [
+  ["Project Hail Mary", [422, 234, 24, 88, 170, 326, 67, 86, 51, 244, 59, 154, 129, 13], [22, 259, 169]],
+  ["The Martian", [102, 26, 2, 3, 64, 96, 10, 26, 0, 51, 14, 46, 30, 0], [12, 64, 37]],
+  ["Legends & Lattes", [98, 67, 1, 13, 4, 112, 20, 253, 3, 169, 2, 86, 0, 186], [43, 146, 87]],
+  ["The Love Hypothesis", [5, 58, 0, 1, 5, 131, 6, 139, 2, 34, 1, 10, 5, 36], [3, 68, 87]],
+  ["The Hobbit", [142, 21, 9, 23, 17, 58, 8, 74, 4, 40, 9, 35, 1, 22], [19, 81, 28]],
+  ["A Little Life", [0, 75, 74, 0, 32, 1, 35, 0, 83, 2, 43, 0, 2, 0], [53, 28, 1]],
+  ["It", [16, 9, 28, 14, 16, 4, 3, 0, 8, 2, 4, 3, 0, 0], [15, 11, 2]],
+  ["1984", [7, 42, 151, 48, 112, 1, 86, 0, 66, 3, 73, 5, 19, 0], [46, 94, 21]],
+  ["The Poppy War", [111, 74, 163, 26, 116, 3, 13, 0, 63, 3, 66, 2, 6, 0], [14, 122, 32]],
+  ["Gone Girl", [7, 13, 51, 48, 39, 4, 4, 1, 2, 1, 14, 0, 1, 0], [8, 30, 18]],
+  ["Red Rising", [149, 64, 136, 25, 124, 12, 13, 0, 26, 14, 38, 25, 1, 1], [6, 97, 87]],
+  ["The Cruel Prince", [94, 30, 65, 51, 67, 15, 6, 6, 6, 4, 21, 4, 0, 1], [12, 65, 35]],
+  ["Fourth Wing", [295, 170, 94, 86, 153, 74, 6, 26, 44, 25, 68, 27, 6, 3], [14, 185, 112]],
+  ["Mistborn: The Final Empire", [258, 99, 144, 156, 123, 42, 16, 14, 37, 84, 34, 63, 6, 5], [29, 186, 53]],
+  ["The Way of Kings", [159, 80, 55, 87, 90, 12, 38, 2, 29, 54, 55, 61, 9, 4], [75, 91, 6]],
+  ["Piranesi", [137, 88, 69, 266, 32, 18, 169, 21, 52, 63, 48, 39, 3, 29], [59, 164, 50]],
+  ["Circe", [122, 114, 45, 30, 25, 3, 89, 3, 53, 33, 32, 31, 9, 10], [46, 124, 11]],
+  ["Klara and the Sun", [7, 64, 14, 26, 6, 1, 80, 10, 40, 35, 15, 15, 1, 4], [46, 45, 9]],
+  ["The Midnight Library", [56, 185, 43, 40, 9, 21, 197, 16, 71, 160, 39, 138, 7, 9], [27, 145, 94]],
+  ["Lessons in Chemistry", [12, 91, 11, 2, 7, 72, 52, 13, 44, 51, 18, 89, 37, 3], [11, 87, 27]],
+  ["The Seven Husbands of Evelyn Hugo", [35, 258, 35, 55, 28, 38, 185, 23, 159, 49, 41, 102, 6, 13], [11, 190, 103]],
+  ["Tomorrow, and Tomorrow, and Tomorrow", [27, 204, 30, 4, 15, 45, 144, 13, 125, 72, 32, 63, 11, 7], [45, 160, 22]],
+  ["Educated", [4, 53, 33, 0, 22, 0, 42, 0, 31, 20, 30, 33, 11, 0], [9, 43, 10]],
+  ["Atomic Habits", [1, 1, 0, 0, 0, 3, 44, 5, 0, 18, 7, 56, 71, 0], [7, 47, 19]]
+];
+const readsOf = t => { const [, m, pace] = VOTES.find(v => v[0] === t); return { moods: MOODS.map((x, i) => [x, m[i]]), pace }; };
+const PHM = { ...B.phm, r: 4.51, rc: 9282, g: ["Science Fiction", "Space", "Adventure", "Hard Science Fiction"] };
+const lib = { "Project Hail Mary": ["check", "Read"], "Piranesi": ["inbox", "Want to read"], "Legends & Lattes": ["inbox", "Want to read"], "The Martian": ["check", "Read"], "Dune": ["check", "Read"], "1984": ["check", "Read"], "Red Rising": ["book", "Currently reading"] };
+const statusOf = b => lib[b.t];
+const byline = b => [b.a, b.y].filter(Boolean).join(" · ");
+
+// ---------- Shared parts of the proposal ----------
+const goChip = (t, st = "") => `<span class="chip go ${st}">${t}</span>`;
+const goGenre = (g, st = "") => `<span class="chip go ${st}">${GENRE_ICON[g] ? ic(GENRE_ICON[g], "xs genre") : ""}${g}</span>`;
+const statusChip = s => s ? `<span class="chip">${ic(s[0], "xs")}${s[1]}</span>` : "";
+// A catalogue row: sm cover, the title, a muted line, the StatusChip trailing.
+const crow = (b, meta, opts = {}) => `<div class="row${opts.sel ? " sel" : ""}${opts.hover ? " hover" : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line num">${meta}</div></div>${statusChip(opts.status === undefined ? statusOf(b) : opts.status)}</div>`;
+// Shares of a vote that add up to 100 (largest remainder), so three side by side never read 101.
+function shares(counts) {
+  const total = counts.reduce((x, y) => x + y, 0), raw = counts.map(c => c / total * 100), out = raw.map(Math.floor);
+  raw.map((r, i) => [r - out[i], i]).sort((x, y) => y[0] - x[0]).slice(0, 100 - out.reduce((x, y) => x + y, 0)).forEach(([, i]) => out[i]++);
+  return out;
+}
+// A three-way answer: the cells in their natural order, the leading one in ink.
+function way3(names, counts) {
+  const pc = shares(counts), lead = counts.indexOf(Math.max(...counts));
+  return `<div class="way3">${names.map((nm, i) => `<div class="c${i === lead ? " lead" : ""}"><div class="l"><span class="nm">${nm}</span><span class="pc">${pc[i]}%</span></div><div class="bar muted"><i style="width:${pc[i]}%"></i></div></div>`).join("")}</div>`;
+}
+// Project Hail Mary's answers, as Hardcover has them: its moods and pace (above); plot, a mix, character; each trait's yes and no.
+const PHM_READS = { ...readsOf("Project Hail Mary"), driven: [130, 232, 43], traits: [["Loveable", "Unloveable", 379, 31], ["Strong development", "Weak development", 267, 124], ["Diverse", "Not diverse", 203, 175]] };
+// Illustrative.
+const RBC_READS = { moods: [["Emotional", 212], ["Funny", 164], ["Hopeful", 158], ["Relaxing", 61], ["Reflective", 57], ["Lighthearted", 52], ["Mysterious", 44]], pace: [58, 187, 18], driven: [15, 77, 164], traits: [["Loveable", "Unloveable", 243, 13], ["Strong development", "Weak development", 171, 52]] };
+// What it's like: one line in the book's header and no block. The moods that stand out as text buttons, the pace
+// word when the book is slow or fast, and a small "Votes" menu button whose popover holds every figure.
+// Every figure comes from Hardcover's exact counts: the book's votes for each of the 14 moods (a share is of their
+// sum) and the 14 moods' site-wide votes (a mood's usual share).
+const SITE = { Adventurous: 75858, Emotional: 75096, Dark: 68433, Mysterious: 57316, Tense: 53022, Funny: 45687, Reflective: 44129, Lighthearted: 36867, Sad: 33225, Hopeful: 31712, Challenging: 28774, Inspiring: 23364, Informative: 21923, Relaxing: 10452 };
+const SITE_SUM = Object.values(SITE).reduce((x, y) => x + y, 0);
+const LIKE = { minVotes: 50, share: 0.10, lift: 1.5, most: 3, rarely: 0.2, rarelyVotes: 100, rarelyAmong: 10, pace: 0.5, paceVotes: 20 }; // the rule, as the design system has it
+function likeOf({ moods, pace }) {
+  // All 14 moods, the most votes first (ties in Hardcover's order); a mood left out has no votes.
+  const all = MOODS.map(m => [m, (moods.find(([x]) => x === m) || [m, 0])[1]]).sort((x, y) => y[1] - x[1]);
+  const sum = all.reduce((x, [, c]) => x + c, 0);
+  if (sum < LIKE.minVotes) return null; // too few votes: nothing shows
+  const rows = all.map(([m, c]) => ({ m, c, share: c / sum, usual: SITE[m] / SITE_SUM })).map(r => ({ ...r, lift: r.share / r.usual }));
+  // Stands out: at least a tenth of the book's mood votes and 1.5 times the mood's usual share, the furthest above usual first.
+  const out = rows.filter(r => r.share >= LIKE.share && r.lift >= LIKE.lift).sort((x, y) => y.lift - x.lift).slice(0, LIKE.most);
+  // Rarely (the popover only): one of the ten most used moods with at most a fifth of its usual share, the most used
+  // on Hardcover first; only from 100 mood votes. The four least used moods (Informative, say) are rare on most novels,
+  // so their absence says nothing, and under 100 votes a missing mood is mostly chance.
+  const rarely = sum < LIKE.rarelyVotes ? [] : MOODS.slice(0, LIKE.rarelyAmong).map(m => rows.find(r => r.m === m)).filter(r => r.lift <= LIKE.rarely).slice(0, LIKE.most);
+  // Pace is named only when it is Slow or Fast: on 24 real books nearly every one came out Medium, so Medium says nothing.
+  const pt = pace.reduce((x, y) => x + y, 0), pi = pace.indexOf(Math.max(...pace));
+  return { sum, rows, out, plain: out.length ? [] : rows.filter(r => r.c).slice(0, LIKE.most), rarely, pace: pi !== 1 && pt >= LIKE.paceVotes && pace[pi] / pt >= LIKE.pace ? ["Slow", "Medium", "Fast"][pi] : null };
+}
+const pct = v => Math.round(v * 100) + "%";
+const moodBtns = (rs, hover = -1) => rs.map((r, i) => `<span class="textbtn${i === hover ? " hover" : ""}">${r.m}</span>`).join('<span class="sep muted"> · </span>');
+// Every vote, for the popover: the moods with at least 5 votes, the most first; pace; what drives it; and the
+// character traits at least two thirds agree on (Project Hail Mary's diverse characters, 203 to 175, says nothing,
+// so it is left out). Floors: a group shows from 20 votes and a mood row from 5, so three votes never read as "67%".
+function votesDetail({ moods, pace, driven, traits = [] }) {
+  const shown = likeOf({ moods, pace }).rows.filter(r => r.c >= 5), max = shown[0].c;
+  const clear = traits.map(([yes, no, y, nn]) => y >= nn ? [yes, y, nn] : [no, nn, y]).filter(([, w, l]) => w / (w + l) >= 2 / 3);
+  return `<div class="tag-groups">
+    <div><div class="mhead"><span class="label">Moods</span><span class="push small muted">Votes</span></div><div class="mrows">${shown.map(({ m, c }) => `<div class="mrow"><span class="k"><span class="textbtn">${m}</span></span><div class="bar muted"><i style="width:${c / max * 100}%"></i></div><span class="n">${n(c)}</span></div>`).join("")}</div></div>
+    <div><div class="label">Pace</div>${way3(["Slow", "Medium", "Fast"], pace)}</div>
+    <div><div class="label">Driven by</div>${way3(["Plot", "A mix", "Character"], driven)}</div>
+    ${clear.length ? `<div><div class="label">Characters</div><div class="muted num">${clear.map(([t, w, l]) => `<span class="ink">${t}</span> ${Math.round(w / (w + l) * 100)}%`).join(" · ")}</div></div>` : ""}
+  </div>`;
+}
+function likeLine(reads, open = false) {
+  const k = likeOf(reads);
+  if (!k) return "";
+  return lineOf((k.out.length ? k.out : k.plain).map(r => r.m), k.pace, open);
+}
+function lineOf(moods, pace = null, open = false) {
+  const votes = `<span class="btn sm ghost${open ? " pressed" : ""}" data-votes>Votes${ic("down", "xs")}</span>`;
+  return `<div class="likeline">${moodBtns(moods.map(m => ({ m })))}${pace ? '<span class="sep"> · </span>' : ""}<span class="end">${pace ? `<span>${pace} pace</span>` : ""}${votes}</span></div>`;
+}
+function votesPopover(reads) {
+  const k = likeOf(reads);
+  const words = k.rarely.map(r => r.m.toLowerCase());
+  const rare = words.length ? `<div class="small muted">Rarely ${words.length > 1 ? words.slice(0, -1).join(", ") + " or " + words[words.length - 1] : words[0]}.</div>` : "";
+  return `<div class="popover pop" data-anchor="[data-votes]"><div class="small muted" style="margin-bottom:var(--s-12)">Votes from Hardcover readers</div>${votesDetail(reads)}${rare ? `<div class="hair" style="margin:var(--s-12) 0"></div>${rare}` : ""}</div>`;
+}
+// With genres and moods in the header, the Tags block has one group left, so it takes the group's name.
+const warningsBlock = (warnings, more) => `<div class="block">${blockH("Content warnings", more ? `<span class="btn sm ghost">Show ${more} more</span>` : "")}<div class="tag-row">${warnings.map(warnChip).join("")}</div></div>`;
+const sectH = (title, action = "") => `<div class="sect-h"><span class="section">${title}</span>${action ? `<span class="push"></span>${action}` : ""}</div>`;
+const shelfRow = (books, sub, lead = false) => `<div class="cshelf${lead ? " lg" : ""}">${books.map(b => `<div class="it">${cover(b, lead ? "lg" : "md", lead)}<div class="tt clamp-2">${b.t}</div>${sub ? `<div class="sub one-line">${sub(b)}</div>` : ""}</div>`).join("")}</div>`;
+const seeAll = n2 => `<span class="btn sm ghost">See all${n2 ? " " + n2 : ""}</span>`;
+const back = to => `<div class="objbar line"><span class="btn ghost back">${ic("left")}${to}</span><span class="push"></span></div>`;
+const backTools = to => `<div class="objbar line"><span class="btn ghost back">${ic("left")}${to}</span><span class="push"></span>${bookTools}</div>`;
+const onHardcoverRail = (r, rc, users) => `<div class="label">On Hardcover</div>
+  <div class="figure"><span class="display d-30 num">${r}</span>${stars(r, "cat")}</div>
+  <div class="muted num mt-4">${n(rc)} ratings · ${n(users)} readers</div>`;
+
+// ---------- 1. The book page: what it's like, in the header; genres and moods open pages ----------
+const PHM_ABOUT = "A lone astronaut wakes on a ship light-years from home with no memory of how he got there, and only his wits, a lot of science and an unlikely friend between Earth and extinction.";
+const withLine = (hdr, reads) => hdr.replace(/<span class="chip">/g, '<span class="chip go">').replace('<div class="bh-tags">', likeLine(reads) + '<div class="bh-tags">');
+const paneRest = `<div class="block">${blockH("About this book")}<div class="prose">${PHM_ABOUT}</div></div>${warningsBlock(["Death", "Medical content", "Injury", "Drug use", "Fire", "Suicide"], 4)}`;
+function bookMoodsPage() {
+  const hdr = bookHeader(PHM, "xxl", { title: "d-30", noAverage: true, actions: statusBtn("check", "Read") + `<div class="rate">${stars(4.5, "own", "lg")}</div>` })
+    .replace(/<span class="chip">([^]*?)<\/span>/g, (m, inner) => `<span class="chip go${inner.includes("Science Fiction") ? " hover" : ""}">${inner}</span>`)
+    .replace('<div class="bh-tags">', likeLine(PHM_READS, true) + '<div class="bh-tags">');
+  return sidebar("discover") + `<div class="main" style="position:relative">
+    ${backTools("Discover")}
+    <div class="scroll page"><div class="cols">
+      <div class="fill">
+        ${hdr}
+        <div class="block">${blockH("About this book")}<div class="prose">${PHM_ABOUT}</div></div>
+        ${warningsBlock(["Death", "Medical content", "Injury", "Drug use", "Fire", "Suicide"], 4)}
+        <div class="block">${blockH("Your review", `<span class="btn sm">${ic("pencil", "xs")}Write a review…</span>`)}<div class="muted">No review yet.</div></div>
+      </div>
+      <div class="rail">
+        ${onHardcoverRail(4.51, 9282, 19688)}
+        <div class="hair"></div>
+        <div class="label">Details</div>
+        <div class="mt-12">${details("Jun 2, 2026")}</div>
+        <div class="hair"></div>
+        <div class="row-c"><span class="label">Reads</span><span class="btn sm ghost push">${ic("plus", "xs")}Add a past read…</span></div>
+        <div class="reads mt-8"><div class="r">${ic("check")}<div class="col"><span>Read</span><span class="small muted num">Jun 2 – Jun 19, 2026</span></div></div></div>
+      </div>
+    </div></div>${votesPopover(PHM_READS)}</div>`;
+}
+
+// ---------- 3. The rule on 24 real books (Hardcover's taggable_counts, read 2026-11-23) ----------
+// Worked out here from VOTES by the same likeOf the header and the popover use.
+function ruleTable() {
+  const cols = "grid-template-columns: 264px 264px minmax(0, 1fr) 232px 88px";
+  const head = ["Book", "Line shown", "Rarely (in the popover)", "Top 3 by votes", "Mood votes"].map((h, i) => `<span class="label"${i === 4 ? ' style="text-align:right"' : ""}>${h}</span>`).join("");
+  const low = rs => rs.map(r => r.m.toLowerCase()).join(", ");
+  const rows = VOTES.map(([b]) => { const k = likeOf(readsOf(b)); return [b, (k.out.length ? k.out : k.plain).map(r => r.m).concat(k.pace ? [k.pace + " pace"] : []).join(" · "), low(k.rarely), low(k.rows.slice(0, 3)), k.sum]; }).map(([b, line, rare, top, v]) => `<div class="rt-row" style="${cols}"><span class="strong">${b}</span><span>${line}</span><span class="muted">${rare || "—"}</span><span class="muted">${top}</span><span class="muted num" style="text-align:right">${n(v)}</span></div>`).join("");
+  return `<div class="rt"><div class="page-title">The rule on 24 real books</div>
+    <div class="muted mt-4" style="max-width:var(--w-prose)">What the header's line says for each, beside the three moods with the most votes.</div>
+    <div class="rt-row rt-head mt-16" style="${cols}">${head}</div>${rows}</div>`;
+}
+
+// ---------- 2. The same line in a shelf's pane ----------
+function paneMoods() {
+  const r = (b, d, sel) => `<div class="row${sel ? " sel" : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line">${b.a}</div></div><div class="trail">${d}</div></div>`;
+  const hdr = withLine(bookHeader({ ...PHM, g: ["Science Fiction", "Space", "Adventure"] }, "xl", { actions: statusBtn("check", "Read") + `<div class="rate">${stars(4.5, "own", "lg")}</div>` }), PHM_READS);
+  return sidebar("read") + shelf("Read", 9, `<div class="rows">${r(B.phm, "Jun 19", true) + r({ t: "The Martian", a: "Andy Weir", c: "https://assets.hardcover.app/editions/21716111/5323176149970177.jpg" }, "Apr 2") + r(B.dune, "Feb 11")}</div>`) + `<div class="detail">
+    <div class="objbar"><span class="push"></span>${bookTools}</div>
+    <div class="pane">
+      ${hdr}
+      ${paneRest}
+    </div></div>`;
+}
+
+// ---------- 4, 5. A tag's page: a mood or a genre, narrowed by the other ----------
+// One page for both. The tag the reader came by is the title; the other kind is the one select ("Any genre" on a
+// mood's page, "Any mood" on a genre's). It always ranks by votes for the mood (or the genre, with no mood chosen).
+function tagPage({ mood = "Relaxing", genre = null, wide = false, backTo = "Project Hail Mary" } = {}) {
+  const books = genre ? D.relaxMystery : D.relax;
+  const rows = books.slice(0, wide ? 12 : 10).map((b, i) => crow(b, `${byline(b)} · ${n(b.v)} ${b.v === 1 ? "vote" : "votes"}`, { sel: wide && i === 1, hover: !wide && i === 2 })).join("");
+  const gsel = g => `<span class="row-c g-8">${ic(GENRE_ICON[g], "xs genre").replace('class="i', 'style="margin-left:0" class="i')}${g}</span>`;
+  const intro = genre ? `${genre} books Hardcover readers call ${mood.toLowerCase()}, the most votes first.` : `Books Hardcover readers call ${mood.toLowerCase()}, the most votes first.`;
+  const head = `<div class="page-head"><div class="fill"><div class="page-title">${mood}</div>
+      <div class="muted mt-4" style="max-width:var(--w-prose)">${intro}</div></div>
+      <div class="tools"><span class="select">${genre ? gsel(genre) : "Any genre"}${ic("down", "xs")}</span></div></div>`;
+  const list = `<div class="scroll page"${wide ? ' style="width:704px;flex:none"' : ""}><div class="list-page">${head}<div class="crows mt-16">${rows}</div></div></div>`;
+  if (!wide) return sidebar("discover") + `<div class="main">${back(backTo)}${list}</div>`;
+  const rbc = { ...books[1], g: ["Fiction", "Mystery"], p: 360 };
+  return sidebar("discover") + `<div class="main"><div class="objbar line"><span class="btn ghost back">${ic("left")}${backTo}</span></div><div style="display:flex;flex:1;min-height:0">${list}
+    <div class="detail" style="border-left:1px solid var(--border)">
+      <div class="objbar"><span class="push"></span>${bookTools}</div>
+      <div class="pane">
+        ${withLine(bookHeader(rbc, "xl", { noAverage: true, actions: statusBtn("plus", "Add to library") + rate }), RBC_READS)}
+        <div class="block">${blockH("About this book")}<div class="prose">A widow who cleans an aquarium at night befriends its giant Pacific octopus, who has worked out what happened to her son.</div></div>
+      </div></div></div></div>`;
+}
+
+// ---------- 6, 7. Want to read, by genre and mood: choosing the next book ----------
+// Narrowing the reader's own shelf, not discovery: nothing of Hardcover's recommendations is on a shelf.
+// Two rows under the tools, genres then moods: the shelf's own, the most common first, as many chips as fit, then
+// More (a menu with the rest). One genre and one mood at a time, and they combine: a book must have both.
+// - A book's genres are Hardcover's, merged under one name (Sci-fi, Science Fiction and Science-Fiction are one);
+//   a book has a mood when the mood is in its header's line, so the filter and the pane say the same thing.
+// - The counts are what a press would give: with a genre chosen, each mood's count is among that genre's books,
+//   and the other way round; they don't follow the text filter. An unselected chip that would give nothing is
+//   disabled. The list can still come up empty: the shelf changes under the chips (the last match is started),
+//   or the text filter finds nothing among them (shot 7).
+// - Pressing a selected chip clears it; "Clear filters" beside the count clears both and the text.
+// The seven books' lines are real (shot 3's table); the shelf, its dates and the books' genres are invented, and
+// the authors and years of the three cloth-covered books are filled in, not read from Hardcover.
+const WANT = [
+  [{ t: "Legends & Lattes", a: "Travis Baldree", y: 2022, c: D.relax[0].c }, ["Fantasy"], ["Relaxing", "Lighthearted", "Hopeful"], "Nov 14"],
+  [{ t: "The Poppy War", a: "R. F. Kuang", y: 2018 }, ["Fantasy"], ["Dark", "Challenging", "Tense"], "Nov 2"],
+  [B.hob, ["Fantasy", "Classics"], ["Lighthearted", "Adventurous", "Funny"], "Oct 30"],
+  [{ t: "Gone Girl", a: "Gillian Flynn", y: 2012 }, ["Mystery", "Thriller"], ["Mysterious", "Dark", "Tense"], "Sep 12"],
+  [{ t: "Piranesi", a: "Susanna Clarke", c: D.relax[11].c }, ["Fantasy", "Mystery"], ["Mysterious", "Reflective"], "Aug 19"],
+  [{ t: "The Cruel Prince", a: "Holly Black", y: 2018 }, ["Fantasy", "Young Adult"], ["Tense", "Adventurous", "Dark"], "Jul 3"],
+  [B.circe, ["Fantasy"], ["Reflective", "Adventurous", "Emotional"], "Jun 7"],
+]; // and one book with no votes at all, which no chip finds
+function wantFiltered({ genre = "Fantasy", mood = "Dark", text = "" } = {}) {
+  const has = (w, g, m) => (!g || w[1].includes(g)) && (!m || w[2].includes(m));
+  const tally = (i, order) => { const c = {}; WANT.forEach(w => w[i].forEach(x => c[x] = (c[x] || 0) + 1)); return Object.entries(c).sort((x, y) => y[1] - x[1] || order.indexOf(x[0]) - order.indexOf(y[0])).map(([x]) => x); };
+  const chip = (label, count, sel, icon = "") => `<span class="chip go${sel ? " sel" : ""}${count || sel ? "" : " dis"}">${sel ? ic("checkmark", "xs") : icon}${label}<span class="ct">${count}</span></span>`;
+  const more = `<span class="btn sm ghost">More${ic("down", "xs")}</span>`;
+  const genres = tally(1, GENRES).slice(0, 2).map(g => chip(g, WANT.filter(w => has(w, g, mood)).length, g === genre, GENRE_ICON[g] ? ic(GENRE_ICON[g], "xs genre") : "")).join("");
+  const moods = tally(2, MOODS).slice(0, 3).map(m => chip(m, WANT.filter(w => has(w, genre, m)).length, m === mood)).join("");
+  const shown = text ? [] : WANT.filter(w => has(w, genre, mood));
+  const rows = shown.map(([b, , , d], i) => `<div class="row${i === 0 ? " sel" : ""}">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line">${b.a}</div></div><div class="trail">${d}</div></div>`).join("");
+  const list = `<div class="list"><div class="list-head"><div class="h"><span class="page-title">Want to read</span><span class="muted num">${shown.length} of 8</span><span class="push"></span><span class="btn sm ghost">Clear filters</span></div>
+      <div class="list-tools"><div class="input fill">${ic("search")}${text ? `<span class="val">${text}</span>` : "Filter"}</div><span class="select">Recently added${ic("down", "xs")}</span></div>
+      <div class="fbar"><div class="r">${genres}${more}</div><div class="r">${moods}${more}</div></div></div>
+    ${shown.length ? `<div class="rows">${rows}</div>
+    <div class="small muted" style="padding:var(--s-8) var(--s-16)">1 book on this shelf has no genre or mood votes yet, so no chip finds it.</div>`
+      : emptyState("search", "No matches", text ? `No books in Want to read match “${text}” with these filters.` : `No books in Want to read are both ${genre} and ${mood}.`, `<span class="btn">Clear filters</span>`)}</div>`;
+  if (!shown.length) return sidebar("wtr") + list + `<div class="detail"><div class="objbar"><span class="push"></span></div>${emptyState("book", "Select a book to see its details")}</div>`;
+  const [b, gs, ms] = shown[0];
+  const hdr = bookHeader({ ...b, g: gs }, "xl", { actions: statusBtn("inbox", "Want to read") + rate })
+    .replace(/<span class="chip">/g, '<span class="chip go">').replace('<div class="bh-tags">', lineOf(ms) + '<div class="bh-tags">');
+  return sidebar("wtr") + list + `<div class="detail"><div class="objbar"><span class="push"></span>${bookTools}</div><div class="pane">
+      ${hdr}
+      <div class="panel start-panel"><div class="fill"><div class="strong">Not started</div><div class="muted">Starting moves it to Currently reading.</div></div><span class="btn">Start reading</span></div>
+      <div class="block">${blockH("About this book")}<div class="prose">A war orphan tests into her empire's most elite military academy, and finds there a power that could win a war at a terrible price.</div></div>
+    </div></div>`;
+}
+
+// ---------- 8, 9. Discover as a hub: all discovery lives here ----------
+const TREND = D.trend.filter(b => !/Dungeon Anarchist|Doomsday|Feral Gods|Horribles|Masquerade|Inevitable|Bedlam/.test(b.t));
+// The owner's own vibes, read 2026-11-23 with read:vibes: Recommendations (250 books) and Top Picks (35), in
+// Hardcover's order, and three of the vibes Hardcover features. Titles as supplied from the live read; the
+// authors are filled in from general knowledge, not read from Hardcover. Covers weren't read, so most are cloth
+// covers, and "Mistborn" borrows The Final Empire's.
+const REC = [["Mistborn: Secret History", "Brandon Sanderson"], ["Unsouled", "Will Wight"], ["The Lady of the Lake", "Andrzej Sapkowski"], ["Before They Are Hanged", "Joe Abercrombie"], ["The Dragon Reborn", "Robert Jordan"], ["The Wise Man's Fear", "Patrick Rothfuss"], ["Gardens of the Moon", "Steven Erikson"], ["Prince of Thorns", "Mark Lawrence"], ["The Warded Man", "Peter V. Brett"], ["Starsight", "Brandon Sanderson"]].map(([t, a]) => ({ t, a }));
+const bySimilar = t => D.similar.find(b => b.t === t);
+const TOP = [B.dune, { ...B.mist, t: "Mistborn" }, { t: "The Name of the Wind", a: "Patrick Rothfuss" }, bySimilar("Leviathan Wakes"), { t: "The Eye of the World", a: "Robert Jordan" }, bySimilar("The Blade Itself"), { t: "Hyperion", a: "Dan Simmons" }, { t: "The Last Wish", a: "Andrzej Sapkowski" }];
+const FEATURED = ["Hidden Gem Fantasy", "Romantasy", "Enemies to Lovers"];
+// One focal point: the first shelf is the reader's own (lg covers with the cover shadow); the rest are md, flat.
+// Then the ways to steer (Browse), then the wider shelves. No new releases: popular regardless of taste is noise.
+// A book shows once on the page: Because you loved leaves out what Top picks already has.
+function discoverHub(vibes = true) {
+  const fit = 11, fitLead = 9; // 896 inside the inset: nine lg covers, eleven md
+  const loved = D.similar.filter(b => !statusOf(b) && !["The Way of Kings", "Dungeon Crawler Carl"].includes(b.t) && !(vibes && TOP.some(x => x.t === b.t)));
+  const browse = `<div class="sect">${sectH("Browse")}<div class="tag-groups">
+      <div><div class="label">By mood</div><div class="tag-row">${MOODS.map(m => goChip(m, m === "Relaxing" ? "hover" : "")).join("")}</div></div>
+      <div><div class="label">By genre</div><div class="tag-row">${GENRES.map(g => goGenre(g)).join("")}</div></div>
+      ${vibes ? `<div><div class="label">Featured on Hardcover</div><div class="tag-row">${FEATURED.map(v => goChip(v)).join("")}</div></div>` : ""}</div></div>`;
+  const trending = `<div class="sect">${sectH("Trending this month", seeAll())}${shelfRow(TREND.slice(0, fit))}</div>`;
+  const body = vibes ? `
+      <div class="sect" style="margin-top:var(--s-24)">${sectH("For you", seeAll("250"))}<div class="muted" style="margin:-4px 0 var(--s-12)">Hardcover's recommendations from your library.</div>${shelfRow(REC.slice(0, fitLead), null, true)}</div>
+      ${browse}
+      <div class="sect">${sectH("Top picks", seeAll("35"))}${shelfRow(TOP)}</div>
+      <div class="sect">${sectH("Because you loved Project Hail Mary")}${shelfRow(loved.slice(0, fit))}</div>
+      ${trending}` : `
+      <div class="sect" style="margin-top:var(--s-24)">${sectH("Because you loved Project Hail Mary")}${shelfRow(loved.slice(0, fitLead), null, true)}</div>
+      ${browse}
+      ${trending}`;
+  return sidebar("discover") + `<div class="main"><div class="scroll page">
+    <div class="page-title">Discover</div>${body}
+  </div></div>`;
+}
+
+// ---------- 10 to 13. A vibe's page, and saying no to a recommendation ----------
+// Hardcover rebuilds a vibe only when its reader opens its page on hardcover.app, at most once a day. So the page
+// says how old the list is, and past 7 days says how to get a newer one, with the link.
+function vibePage({ confirm = false, days = 0 } = {}) {
+  const age = days === 0 ? "Updated today" : days === 1 ? "Updated yesterday" : `Updated ${days} days ago`;
+  const books = REC;
+  const rows = books.map((b, i) => crow(b, b.a, { sel: i === 2 })).join("");
+  const sel = books[2];
+  const menu = `<div class="popover ctx" style="left:${240 + 32 + 260}px;top:${56 + 32 + 28 + 24 + 20 + 16 + 2 * 66 + 40}px">
+    <div class="menu-item">${ic("book")}<span>Open</span></div>
+    <div class="menu-item">${ic("inbox")}<span>Want to read</span></div>
+    <div class="menu-sep"></div>
+    <div class="menu-item hover">${ic("thumbsdown")}<span>Never recommend…</span></div>
+  </div>`;
+  // Hardcover's API can add an exclusion and has no way to take one off, so the body says what the app knows.
+  // Not destructive, so the result is the dialog's primary button; Cancel has the focus, as in every confirmation.
+  const dialog = `<div class="scrim"><div class="popover dlg">
+    <div class="heading">Never recommend “${sel.t}”?</div>
+    <div class="muted">Hardcover will leave it out of your recommendations. You can't undo this from this app.</div>
+    <div class="foot"><span class="btn focus">Cancel</span><span class="btn primary">Never recommend</span></div>
+  </div></div>`;
+  return sidebar("discover") + `<div class="main" style="position:relative">${back("Discover")}
+    <div class="scroll page"><div class="list-page">
+      <div class="page-head"><div class="fill"><div class="page-title">For you</div>
+        <div class="muted mt-4" style="max-width:var(--w-prose)">Hardcover's recommendations from your library.</div>
+        <div class="muted num mt-4" style="max-width:var(--w-prose)">250 books · ${age}${days > 7 ? ". Hardcover updates this list when you open it on hardcover.app." : ""}</div></div>
+        ${days > 7 ? `<div class="tools"><span class="link row-c g-4" style="height:var(--h-control)">Open on Hardcover${ic("ext", "xs")}</span></div>` : ""}</div>
+      <div class="crows mt-16">${rows}</div>
+    </div></div>${confirm || days ? "" : menu}</div>${confirm ? dialog : ""}`;
+}
+function vibePending() {
+  return sidebar("discover") + `<div class="main">${back("Discover")}
+    <div class="scroll page" style="display:flex;flex-direction:column"><div class="page-title">For you</div>
+      ${emptyState("sparkles2", "Your recommendations aren't ready", "Hardcover builds this list when you open it on hardcover.app. It shows here after that.", `<span class="link row-c g-4 mt-12">Open on Hardcover${ic("ext", "xs")}</span>`)}
+    </div></div>`;
+}
+
+const shots = [
+  ["1 · Book page: what it's like", "light · no block: one line in the header, between the facts and the genres, with the moods that stand out as text buttons (each opens its page) and, for a slow or fast book, the pace word · Votes opens every figure in a popover, drawn open here: the moods with at least 5 votes as muted meters, the most votes first (all 14 here), pace and what drives it as three-way answers, the character traits at least two thirds agree on (diverse characters, 203 to 175, is left out), and one line for what the book rarely is; a group shows from 20 votes · the rule: a mood stands out when it has at least a tenth of the book's mood votes and 1.5 times the mood's usual share on Hardcover, the furthest above usual first, three at most. Here Hopeful (12% against 5% usually), Funny (16% against 8%) and Adventurous (20% against 13%): the plain top three, reordered; Inspiring and Informative are above usual but under a tenth. Pace is named only when it is Slow or Fast, with at least 20 pace votes and half of them: this book's is Medium (259 of 450), so the line says nothing and the popover has the split. Rarely, in the popover only: a mood with at most a fifth of its usual share, the most used on Hardcover first, three at most; here Dark, 24 of 2,067 votes (1% against 11% usually) · the figures are Hardcover's exact votes for the 14 moods, so a share is of all the book's mood votes · with no mood standing out the line shows the top three by votes (none of the 24 books in shot 3 needed it); under 50 mood votes there is no line and no Votes · genre chips open pages (Science Fiction is hovered); content warnings stay plain, and their block takes their name now that the Tags block holds nothing else · figures real", "light", 900, bookMoodsPage()],
+  ["2 · The same line in a shelf's pane", "dark · the narrow case, with the popover closed: the line sits in the header, so it shows without scrolling · figures real", "dark", 800, paneMoods()],
+  ["3 · The rule on 24 real books", "light · a reference table, not an app screen · the line each book's header would show, what its popover would call rare, and the plain top three by votes beside them · none hit the fallback; Emotional, the second most used mood on Hardcover, is in the top three of ten books and on the line of three (Circe, The Seven Husbands of Evelyn Hugo, Tomorrow, and Tomorrow, and Tomorrow); only three books name a pace · real data: Hardcover's exact votes for the 14 moods and for pace on each book, read 2026-11-23, with the rule worked out in this file, by the code that draws shots 1 and 2", "light", 1100, ruleTable()],
+  ["4 · A tag's page: a mood", "light · opened from a mood (a book's line, Discover's Browse), over the page it came from · the mood is the title and one select narrows by a genre · always ranked by votes for the mood, which each row shows · a genre's page is this same page from a genre chip: the genre is the title and the select is Any mood · list real", "light", 860, tagPage()],
+  ["5 · A tag's page with the other kind chosen, wide (1600)", "dark · Relaxing, narrowed to Mystery · the list keeps 704 and the selected book shows in the pane beside it, as on Discover; the pane's header has the book's own line, Hopeful · Funny · Emotional by the same rule (its figures are illustrative; the list is real)", "dark", 1000, tagPage({ genre: "Mystery", wide: true }), 1600],
+  ["6 · Want to read, by genre and mood", "light · choosing the next book: narrowing your own shelf, not discovery (nothing of Hardcover's recommendations is on a shelf) · two rows under the filter and the sort, genres then moods: the shelf's own, the most common first, as many chips as fit at the list's width, then More, a menu with the rest · one genre and one mood at a time, and they combine: Fantasy and Dark are selected (fill, ink and a check) and the list shows the 2 of 8 that are both · the counts are what a press would give (with Fantasy chosen, Adventurous finds 3) and don't follow the text filter; an unselected chip that would give nothing is disabled · pressing a selected chip clears it; Clear filters beside the count, there only while something is chosen, clears everything · the two More buttons are named More genres and More moods for a screen reader; a choice made from More takes the first place in its row while it is selected · each row is one Tab stop, and the arrows move along it · a genre is Hardcover's, its duplicates merged under one name (Sci-fi, Science Fiction, Science-Fiction); a book has a mood when the mood is in its header's line, so the filter and the pane agree · the foot says what no chip can find · every shelf gets the bar; Want to read is where it matters · the books' lines are real (shot 3's rule); the shelf, its dates and the books' genres are invented, and the cloth-covered books' authors and years are filled in · genres and moods come from one cached fetch of the library's tags", "light", 800, wantFiltered()],
+  ["7 · Want to read: a genre and a mood with no books", "light · Mystery and Adventurous, with nothing that is both · a zero chip can't be pressed, so this comes from the shelf changing under the chips (the last match was started or removed), or from the text filter on top of them, which words it as No books in Want to read match “…” with these filters · the system's No matches with one button, Clear filters; the selected chips stay pressable, so either can be cleared alone", "light", 800, wantFiltered({ genre: "Mystery", mood: "Adventurous" })],
+  ["8 · Discover as a hub", "light · all discovery lives here: for finding books you don't know · one lead: For you, Hardcover's Recommendations vibe, in lg covers with the cover shadow · then Browse: the 14 moods and the main genres as chips that open their tag pages, and the vibes Hardcover features (Hidden Gem Fantasy: \"Great books that never got their moment.\", 250 books, 44 likes), each opening a vibe's page like shot 10 · then Top picks (Hardcover's popular books in your taste), our own Because you loved (similar books of your latest 5-star read, less your library and what Top picks has; the account has no Because you read vibes, so ours stays; it has no See all, since the shelf is all there is) and Trending this month (one book per series) · scrolled content shown in full; cover shelves add covers as the window widens · For you, Top picks and the featured vibes are the owner's real ones, read 2026-11-23 with read:vibes, in Hardcover's order; the authors under the cloth covers are filled in, not read from Hardcover, and covers weren't read, so most are cloth", "light", 1260, discoverHub()],
+  ["9 · Discover without the vibes scope", "light · a session from before read:vibes, until Sign in again: no For you or Top picks, and no featured vibes (assumed to need the scope too; unverified); Because you loved takes the lead, then Browse and Trending", "light", 800, discoverHub(false)],
+  ["10 · A vibe's page: never recommend a book", "dark · For you opened from Discover: the books in Hardcover's order · under the intro, how many books and how old the list is (Updated today); there is no link while it is fresh (shot 13) · a book already in the library shows its usual StatusChip at the row's end and nothing more (48 of the owner's 250 recommendations are on their Want to read; none of these ten is drawn so) · the row's context menu; Never recommend… is also in the book's more menu while it is open from a vibe, so the context menu is never the only path · the book only in this first version, no author · it asks first (shot 11); then the row fades out and the book stays hidden everywhere on Discover, since Hardcover's own list only drops it at its next rebuild · needs write:vibes · the ten books are the owner's real recommendations, read 2026-11-23; their authors are filled in", "dark", 880, vibePage()],
+  ["11 · Never recommend: the confirmation", "dark · the API can add an exclusion and has no way to take one off, so the dialog says the one thing the app knows: it can't be undone here (whether hardcover.app can is unverified) · Cancel has the focus; the result isn't destructive, so it is the primary button, as in the app's other confirmations, not danger", "dark", 880, vibePage({ confirm: true })],
+  ["12 · A vibe whose results aren't built yet", "light · Hardcover builds a vibe only when its reader opens its page on hardcover.app, so a reader who never has sees this, with the link that builds it · the same words for any vibe; For you has its own title", "light", 760, vibePending()],
+  ["13 · A vibe not rebuilt for over a week", "dark · Hardcover rebuilds a vibe only on a visit to its page on hardcover.app, at most once a day, so the app can't refresh it · up to 7 days the page only says its age (shot 10); from the eighth day the line also says how to get a newer list, and Open on Hardcover shows beside the title", "dark", 900, vibePage({ days: 9 })],
+];
+
+// A word too long for its cover's width ends in "…", never split (the design system's rule for cover shelves):
+// measured once the fonts are in, as the app measures it.
+document.fonts.ready.then(() => {
+  // A popover hangs 4 under the control that opens it, on its leading edge.
+  document.querySelectorAll(".pop[data-anchor]").forEach(pop => {
+    const host = pop.parentElement, a = host.querySelector(pop.dataset.anchor).getBoundingClientRect(), h = host.getBoundingClientRect(), k = h.width / host.offsetWidth;
+    pop.style.left = (a.left - h.left) / k + "px";
+    pop.style.top = (a.bottom - h.top) / k + 4 + "px";
+  });
+  const ctx = document.createElement("canvas").getContext("2d");
+  document.querySelectorAll(".cshelf .tt").forEach(el => {
+    const cs = getComputedStyle(el), w = el.clientWidth;
+    ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    el.textContent = el.textContent.split(" ").map(word => {
+      if (ctx.measureText(word).width <= w) return word;
+      let cut = word;
+      while (cut.length > 1 && ctx.measureText(cut + "…").width > w) cut = cut.slice(0, -1);
+      return cut + "…";
+    }).join(" ");
+  });
+});
+
+const ONLY = null; // e.g. [4, 5] to render only some shots while checking
+const sheet = document.getElementById("sheet");
+shots.forEach(([title, sub, theme, h, html, w = 1200], i) => {
+  if (ONLY && !ONLY.includes(i)) return;
+  sheet.insertAdjacentHTML("beforeend", `<section><div class="cap">${title} <span>· ${sub}</span></div><div class="frame" data-h="${h}" data-w="${w}"><div class="win theme-${theme || "light"}" data-name="${i} ${title}" style="height:${h}px;width:${w}px">${html}</div></div></section>`);
+});
+
+function fit() {
+  document.querySelectorAll(".frame").forEach(f => {
+    const s = Math.min(1, f.parentElement.clientWidth / f.dataset.w);
+    f.style.height = (f.dataset.h * s) + "px";
+    f.firstElementChild.style.transform = `scale(${s})`;
+  });
+}
+fit();
+addEventListener("resize", fit);
+
+// ---------- Audit (console): fonts, contrast, clipped content ----------
+document.fonts.ready.then(() => {
+  const ok = ["600 16px Literata", "16px Inter", "16px Vazirmatn"].map(f => `${f}: ${document.fonts.check(f)}`);
+  console.log("fonts", ok.join(", "));
+  for (const t of ["light", "dark"]) {
+    const line = [["--fg"], ["--fg-muted", [...fills(t), over(t, "--chip", "--bg"), over(t, "--chip", "--sidebar")]], ["--fg-faint"], ["--accent", [...fills(t), ...chips(t)]], ["--danger", plain(t, "--bg", "--raised")], ["--warning", [over(t, "--chip", "--bg")]]]
+      .map(([fg, on]) => `${fg.slice(2)} ${worst(t, fg, on).toFixed(2)}`).join(", ");
+    console.log(`contrast ${t} (lowest over the fills each is used on): ${line}; accent-fg on accent ${contrast(tv(t, "--accent-fg"), tv(t, "--accent")).toFixed(2)}`);
+    // Marks at 3:1 (design::contrast_audit checks the same pairs): a field's outline, and gold against an empty star on paper.
+    const outline = worst(t, "--border-strong", plain(t, "--raised", "--bg", "--surface", "--sidebar"));
+    const papers = [tv(t, "--bg"), over(t, "--hover", "--bg"), over(t, "--selected", "--bg")];
+    const empty = papers.map(p => { const m = tv(t, "--star-empty").match(/[\d.]+/g).map(Number); return "#" + [0, 1, 2].map(i => hex2(m[i] * m[3] + parseInt(p.slice(1 + 2 * i, 3 + 2 * i), 16) * (1 - m[3]))).join(""); });
+    console.log(`marks ${t}: border-strong ${outline.toFixed(2)}, gold on an empty star ${worst(t, "--gold", empty).toFixed(2)}`);
+    // State fills must step the same way on every host: rest < hover < selected in distance from the host.
+    const steps = HOSTS.map(h => { const [r, hv, s] = [tv(t, h), over(t, "--hover", h), over(t, "--selected", h)].map(lum); return `${h.slice(2)} ${Math.sign(hv - r) === Math.sign(s - hv) ? "ok" : "FLIPS"} (${contrast(tv(t, h), over(t, "--hover", h)).toFixed(2)}, ${contrast(tv(t, h), over(t, "--selected", h)).toFixed(2)})`; });
+    console.log(`state steps ${t}: ${steps.join(", ")}`);
+  }
+  console.log("cloth ink on cloth:", CLOTH.map(c => contrast(rv("--cloth-ink"), c).toFixed(1)).join(" "));
+  const clipped = [];
+  document.querySelectorAll(".win").forEach(w => {
+    w.querySelectorAll(".sb, .main, .scroll, .list, .detail, .pane, .tok, .rail, .fill, .bh-info, .actbar, .objbar, .cr, .row, .hero").forEach(el => {
+      if (el.classList.contains("one-line")) return;
+      if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) clipped.push(`${w.dataset.name}: .${el.className.split(" ").join(".")} ${el.scrollWidth}x${el.scrollHeight} in ${el.clientWidth}x${el.clientHeight}`);
+    });
+    const bottom = Math.max(...[...w.querySelectorAll("*")].filter(e => !e.children.length && !e.closest(".sb") && !e.classList.contains("hair")).map(e => e.getBoundingClientRect().bottom)) - w.getBoundingClientRect().top;
+    const scale = w.getBoundingClientRect().width / w.clientWidth;
+    console.log(`window ${w.dataset.name}: content ends at ${Math.round(bottom / scale)} of ${w.clientHeight}`);
+  });
+  console.log(clipped.length ? "CLIPPED\n" + clipped.join("\n") : "no clipped regions");
+});
+</script>
+</body>
+</html>
