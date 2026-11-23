@@ -15,8 +15,8 @@
 //! 4. **Because you loved <title>:** the similar books of the reader's latest
 //!    5-star read ([`super::discover::loved_seed`]), from the catalogue (the
 //!    book's details, then `BooksByIds`, as the book page's Similar books),
-//!    less the books in the library and Top picks' books while Top picks
-//!    shows. No "See all".
+//!    less the books in the library, For you's loaded books and Top picks'
+//!    books while Top picks shows. No "See all".
 //! 5. **Trending this month:** one book per series
 //!    ([`super::discover::one_per_series`]), with "See all", which opens
 //!    Trending (`Page::Trending`).
@@ -350,7 +350,7 @@ impl DiscoverView {
             .unwrap_or_default()
     }
 
-    fn loved_shelf(&self, seed: Option<&Seed>, top_picks: &HashSet<BookId>, cx: &App) -> Shelf {
+    fn loved_shelf(&self, seed: Option<&Seed>, above: &HashSet<BookId>, cx: &App) -> Shelf {
         let (Some(seed), Some(catalog)) = (seed, &self.catalog) else {
             return Shelf::Hidden;
         };
@@ -374,7 +374,7 @@ impl DiscoverView {
                     .iter()
                     .map(|e| e.book.id)
                     .collect();
-                let books: Vec<BookSummary> = discover::loved_books(books, &in_library, top_picks)
+                let books: Vec<BookSummary> = discover::loved_books(books, &in_library, above)
                     .into_iter()
                     .cloned()
                     .collect();
@@ -607,8 +607,13 @@ impl DiscoverView {
         let seed = self.seed(cx);
         let for_you = self.vibe_shelf(VibeKind::Recommendations, cx);
         let top_picks = self.vibe_shelf(VibeKind::TopPicks, cx);
-        let top_pick_ids = self.top_pick_ids(&top_picks, cx);
-        let loved = self.loved_shelf(seed.as_ref(), &top_pick_ids, cx);
+        // "Because you loved" repeats nothing the vibes above it hold:
+        // For you's loaded books, and Top picks' books while it shows.
+        let mut above = self.top_pick_ids(&top_picks, cx);
+        if let Shelf::Books { books, .. } = &for_you {
+            above.extend(books.iter().map(|b| b.id));
+        }
+        let loved = self.loved_shelf(seed.as_ref(), &above, cx);
         let trending = self.trending_shelf(cx);
         let shelves = vec![
             (Section::ForYou, for_you),
@@ -795,7 +800,8 @@ mod tests {
         assert_eq!(order, [ForYou, Browse, TopPicks, Loved, Trending]);
         assert_eq!(lead, Some(ForYou));
         // Dune is the demo's latest 5-star read; of its similar books only
-        // Children of Dune is neither in the library nor in Top picks.
+        // Children of Dune is neither in the library nor in For you or Top
+        // picks.
         assert_eq!(titles(&shelves, Loved), ["Children of Dune"]);
         // One book per series: Dune's four books bring one.
         let trending = titles(&shelves, Trending);
@@ -856,7 +862,7 @@ mod tests {
         assert!(order.contains(&Section::Browse), "Browse needs no request");
     }
 
-    /// From the page: Tab reaches For you's "See all 12", which opens the
+    /// From the page: Tab reaches For you's "See all 11", which opens the
     /// vibe; then past its six titles, the moods (one Tab stop, the arrows
     /// moving along it) and the genres, each chip opening its tag's page,
     /// and the featured vibes, each opening the vibe's.

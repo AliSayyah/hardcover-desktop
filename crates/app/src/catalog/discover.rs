@@ -73,8 +73,8 @@ pub fn loved_seed(entries: &[LibraryEntry]) -> Option<&LibraryEntry> {
 }
 
 /// "Because you loved"'s books: the seed's similar books, in Hardcover's
-/// order, less those in the library and those `hidden` (Top picks' books,
-/// when Top picks shows).
+/// order, less those in the library and those `hidden` (the books For you
+/// loaded, and Top picks' books when Top picks shows).
 pub fn loved_books<'a>(
     similar: &'a [BookSummary],
     in_library: &HashSet<BookId>,
