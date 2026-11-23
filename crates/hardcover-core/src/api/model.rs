@@ -2500,13 +2500,17 @@ impl Vibe {
         self.built_at.is_some() && !self.book_ids.is_empty()
     }
 
-    /// Where the vibe is rebuilt: a visit there on hardcover.app is what
-    /// makes Hardcover build it again.
+    /// The vibe's page on hardcover.app, `https://hardcover.app/@<owner>/vibes/<slug>`
+    /// (the owner confirmed the pattern with their Recommendations page); a
+    /// visit there, or to Discover, is what makes Hardcover build a system
+    /// vibe again. Without the owner's username or the slug, Discover.
     #[must_use]
     pub fn web_url(&self) -> String {
-        // TODO(owner): exact vibe URL. Hardcover's vibe pages aren't
-        // confirmed yet; Discover on hardcover.app rebuilds the user's
-        // system vibes, so it stands in for every vibe until then.
-        "https://hardcover.app/discover".to_owned()
+        match (self.username.as_deref(), self.slug.as_deref()) {
+            (Some(user), Some(slug)) if !user.is_empty() && !slug.is_empty() => {
+                format!("https://hardcover.app/@{user}/vibes/{slug}")
+            }
+            _ => "https://hardcover.app/discover".to_owned(),
+        }
     }
 }
