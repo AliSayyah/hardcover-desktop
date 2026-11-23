@@ -482,3 +482,27 @@ fn browse_genres_find_their_spellings() {
     assert_eq!(browse_genre("fantasy").map(|g| g.name), Some("Fantasy"));
     assert_eq!(browse_genre("Science Fiction & Fantasy"), None);
 }
+
+#[test]
+fn other_tags_leave_out_the_votes_and_the_genres_again() {
+    let tags = [
+        "Not Diverse Characters",
+        "Diverse Characters",
+        "Space Opera",
+        "N/A driven",
+        "A mix driven",
+        "Weak Character Development",
+        "science fiction",
+        "Sci-fi",
+        "dark",
+        "LitRPG",
+        "audiobook",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    let genres = ["Science Fiction".to_owned(), "Fantasy".to_owned()];
+    assert_eq!(
+        other_tags(tags, &genres),
+        ["Space Opera", "LitRPG", "audiobook"]
+    );
+}

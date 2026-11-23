@@ -714,3 +714,36 @@ fn lean(votes: &BookVotes, pair: TraitPair) -> Option<CharacterLean> {
             pair_votes,
         })
 }
+
+// ----- the book page's other tags -----
+
+/// The tags of `cached_tags.Tag` worth showing as the book page's "Other
+/// tags", in their order: those left after taking out the vote tags and the
+/// tags that repeat one of the book's `genres`.
+///
+/// Checked live, read-only (2026-11-23, the 60 most read books): that
+/// category is mostly the votes behind the Votes popover, each pair's sides
+/// both listed ("Diverse Characters" beside "Not Diverse Characters"), and
+/// "N/A driven" where readers didn't pick a drive; the rest is free text,
+/// some of it a genre again in lower case ("fantasy", "science fiction").
+/// A tag is a vote tag when it names a mood, a pace, a drive or a character
+/// trait, or ends in "driven", whatever its case.
+#[must_use]
+pub fn other_tags(tags: Vec<String>, genres: &[String]) -> Vec<String> {
+    let genre_keys: Vec<String> = genres.iter().map(|g| genre_key(g)).collect();
+    tags.into_iter()
+        .filter(|t| !is_vote_tag(t) && !genre_keys.contains(&genre_key(t)))
+        .collect()
+}
+
+/// Whether `name` is one of the tags readers vote for on a book (a mood, a
+/// pace, a drive or a character trait), in any case; any "… driven" counts.
+fn is_vote_tag(name: &str) -> bool {
+    let name = name.trim().to_lowercase();
+    let named = |n: &str| n.to_lowercase() == name;
+    name.ends_with(" driven")
+        || Mood::ALL.iter().any(|m| named(m.name()))
+        || Pace::ALL.iter().any(|p| named(p.name()))
+        || Drive::ALL.iter().any(|d| named(d.name()))
+        || CharacterTrait::ALL.iter().any(|c| named(c.name()))
+}

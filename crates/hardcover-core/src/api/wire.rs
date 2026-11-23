@@ -379,7 +379,7 @@ impl RawBookDetails {
         d.release_date = self.release_date.as_deref().and_then(parse_date);
         d.genres = tags_in(tags, "Genre");
         d.moods = tags_in(tags, "Mood");
-        d.tags = tags_in(tags, "Tag");
+        d.tags = crate::tags::other_tags(tags_in(tags, "Tag"), &d.genres);
         d.content_warnings = tags_in(tags, "Content Warning");
         d.editions_count = opt_u32(self.editions_count);
         d.ratings_count = opt_u32(self.ratings_count);
