@@ -177,7 +177,8 @@ outcome.
 Choose the smallest surface that fits:
 - **Tooltip:** a short explanation, or a shortcut, for an unfamiliar symbol
   or an ambiguous scope. Don't restate an obvious label.
-- **Popover:** contextual controls that don't interrupt.
+- **Popover:** contextual controls, or detail on demand, that don't
+  interrupt.
 - **Menu:** a compact list of actions.
 - **Notification:** asynchronous status that needs no decision.
 - **Dialog:** a focused decision or a short form.
