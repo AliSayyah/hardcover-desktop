@@ -588,7 +588,7 @@ impl Workspace {
             // Follows the library and the upcoming books.
             Some(Page::Upcoming) => {}
             Some(Page::AddSeries) => self.follows.update(cx, |f, cx| {
-                f.request(crate::resource::Demand::Active, cx);
+                f.request(crate::catalog::book_list::demand(shown_again), cx);
             }),
             Some(Page::Vibe(_)) => self
                 .vibe_page
@@ -609,8 +609,15 @@ impl Workspace {
                 Destination::List(_) => self
                     .list_page
                     .update(cx, |l, cx| l.revalidate(shown_again, cx)),
-                // Worked out from the library and models that follow it.
-                Destination::Home | Destination::Series | Destination::Stats => {}
+                // The follows change on hardcover.app too.
+                Destination::Home => self.follows.update(cx, |f, cx| {
+                    f.request(crate::catalog::book_list::demand(shown_again), cx);
+                }),
+                Destination::Series => self
+                    .series
+                    .update(cx, |s, cx| s.revalidate(shown_again, cx)),
+                // Worked out from the library.
+                Destination::Stats => {}
             },
         }
     }
@@ -619,7 +626,13 @@ impl Workspace {
 
     fn open_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
         let from = remember_focus(window, cx);
+        let add_series = page == Page::AddSeries;
         if self.pages.push(page, from) {
+            // Opened, not come back to: the rows followed last time go.
+            if add_series {
+                self.add_series_page
+                    .update(cx, |p, cx| p.opened(window, cx));
+            }
             self.show_page(window, cx);
         }
     }
@@ -672,9 +685,7 @@ impl Workspace {
                 });
             }
             Some(Page::Upcoming) => {}
-            Some(Page::AddSeries) => self
-                .add_series_page
-                .update(cx, |p, cx| p.opened(window, cx)),
+            Some(Page::AddSeries) => {}
             Some(Page::Vibe(id)) => self.vibe_page.update(cx, |p, cx| p.show(id, window, cx)),
             Some(Page::Tag { tag, within }) => self
                 .tag_page

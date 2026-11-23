@@ -131,16 +131,20 @@ impl FollowsModel {
         Some(ids)
     }
 
-    /// The followed ids as a set; empty until known.
+    /// The followed ids as a set, with any merged duplicate a follow is
+    /// stored under (a shelf's entry may still name one); empty until
+    /// known.
     pub fn id_set(&self) -> HashSet<SeriesId> {
         self.followed()
-            .map(|f| f.iter().map(|s| s.id).collect())
-            .unwrap_or_default()
+            .into_iter()
+            .flatten()
+            .flat_map(|s| std::iter::once(s.id).chain(s.followed_as.iter().copied()))
+            .collect()
     }
 
     pub fn is_followed(&self, id: SeriesId) -> bool {
         self.followed()
-            .is_some_and(|f| f.iter().any(|s| s.id == id))
+            .is_some_and(|f| f.iter().any(|s| s.id == id || s.followed_as.contains(&id)))
     }
 
     /// The day each series was followed, here.

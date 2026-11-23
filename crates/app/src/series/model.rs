@@ -212,6 +212,19 @@ impl SeriesModel {
         self.request(followed, Demand::Active, cx);
     }
 
+    /// The page is shown (`shown_again`) or the window came back: asks for
+    /// the follows and the followed series that are stale (`resource`).
+    pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
+        let demand = if shown_again {
+            Demand::Shown
+        } else {
+            Demand::Active
+        };
+        self.follows.update(cx, |f, cx| f.request(demand, cx));
+        let followed = self.followed().to_vec();
+        self.request(followed, demand, cx);
+    }
+
     fn request(&mut self, ids: Vec<SeriesId>, demand: Demand, cx: &mut Context<Self>) {
         let call = |client: &Client, ids: &[SeriesId]| batch_of(ids, client.tracked_series(ids));
         if self
@@ -337,9 +350,12 @@ mod tests {
         let faults = hardcover_core::demo::Faults::parse("offline").unwrap();
         let (offline, follows, _) =
             launch(hardcover_core::demo::client_with(&faults), Some(cache), cx);
+        // From the cache: known, and every view keyed on the revision moves.
         assert_eq!(follows.read_with(cx, |f, _| f.ids()), followed);
+        assert!(follows.read_with(cx, |f, _| f.revision()) > 0);
         offline.read_with(cx, |m, cx| {
             assert_eq!(names(m), shown);
+            assert!(!m.summaries(crate::dates::today(), cx).is_empty());
             assert!(m.is_loaded());
             assert!(matches!(m.status(cx), LoadStatus::Failed(_)));
         });

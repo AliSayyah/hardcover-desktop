@@ -103,8 +103,8 @@ impl AddSeriesView {
         }
     }
 
-    /// The page is opened: the series followed last time leave, and the
-    /// filter starts empty.
+    /// The page is opened (not come back to): the series followed last
+    /// time leave, and the filter starts empty.
     pub fn opened(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.followed_here.clear();
         self.rows = None;
@@ -185,7 +185,8 @@ impl AddSeriesView {
             None => series.line(today),
         };
         let button = if following {
-            Button::new(SharedString::from(format!("add-series-following-{id}")))
+            // One id for Follow and Following, so focus stays as it turns.
+            Button::new(SharedString::from(format!("add-series-follow-{id}")))
                 .small_control()
                 .selected(true)
                 .icon(crate::icons::following())

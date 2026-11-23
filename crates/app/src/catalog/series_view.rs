@@ -328,7 +328,8 @@ impl SeriesView {
         let follow = known.then(|| {
             if following {
                 let name = name.clone();
-                Button::new("series-following")
+                // One id for Follow and Following, so focus stays as it turns.
+                Button::new("series-follow")
                     .selected(true)
                     .icon(crate::icons::following())
                     .label("Following")
