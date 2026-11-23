@@ -41,6 +41,7 @@ pub(super) struct State {
     pub(super) lists: Vec<List>,
     pub(super) goals: Vec<Goal>,
     pub(super) vibes: Vec<super::vibes::Vibe>,
+    pub(super) follows: Vec<super::follows::Follow>,
     next_id: i64,
 }
 
@@ -161,12 +162,14 @@ impl State {
             now.with_timezone(&Utc),
             super::vibes::SystemVibes::Built,
         );
+        let follows = super::follows::seed(catalogue, now.with_timezone(&Utc));
         Self {
             clock,
             library,
             lists,
             goals,
             vibes,
+            follows,
             next_id: FIRST_NEW_ID,
         }
     }
