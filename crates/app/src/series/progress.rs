@@ -1,14 +1,17 @@
-//! What the Series destination shows, worked out from the library, the
-//! series' books and the date: which series count as started, which books
-//! of each show and in what state, the one next step, the group and the
-//! order. Plain functions, so every rule is pinned by a test.
+//! What the Series destination shows, worked out from the followed series,
+//! the library, the series' books and the date: which books of each series
+//! show and in what state, the one next step, the group and the order; and
+//! the series of the library not followed yet, for Add series and the
+//! nudge. Plain functions, so every rule is pinned by a test.
 //!
+//! - **Which series:** the ones the reader follows on Hardcover; nothing
+//!   joins the page by itself.
 //! - **Started:** a series of a library entry (not Ignored) that is Read
 //!   (with a finish date or not, as on Home), Currently reading, Paused or
 //!   Did not finish. Only Want to read books don't start a series. A
 //!   compilation (a boxed set: `SeriesRef::compilation`) is no place in its
 //!   series and counts for nothing here; Hardcover's series lists leave it
-//!   out too.
+//!   out too. A followed series nobody started is "Not started".
 //! - **Books shown:** whole-numbered ones, plus fractional ones (novellas)
 //!   only when they're in the library or not out yet, and split parts
 //!   (`is_partial_book`) only when they're in the library. Of several at one position, the one in the library, else
@@ -25,19 +28,27 @@
 //!   finish or Ignored; with none, the first book not out yet.
 //! - **Groups:** "In progress" (a book is being read, or the next book is out
 //!   and the series was touched within a year), "Waiting for the next book",
-//!   "Not touched in a year" and "Finished"; within each the most recent
-//!   activity first, and the waiting ones by the release date.
+//!   "Not started" (followed, nothing started), "Not touched in a year" and
+//!   "Finished"; within each the most recent activity first (for "Not
+//!   started", the latest follow), and the waiting ones by the release date.
 //! - **Sorts:** "Status" is the groups; the others ("Recently active",
 //!   "Name", "Author", "Most read", "Fewest left to read") are one list
 //!   without them, each ending in the activity, the name and the id.
-//! - **Hidden:** a series the reader hid (kept in the preferences) shows only
-//!   under the "Hidden" filter, and counts nowhere else.
+//! - **Adding the rest:** "Add N books to Want to read…" adds the
+//!   whole-numbered books that are out and not in the library
+//!   ([`books_to_add`]).
+//! - **Not followed yet:** the series of the library's entries (Ignored ones
+//!   count for nothing) the reader doesn't follow: started ones, the most
+//!   recently active first, then those only on Want to read
+//!   ([`unfollowed`]). The nudge names the started ones touched in the last
+//!   30 days ([`nudge`]).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use chrono::Datelike as _;
 use hardcover_core::{
-    BookId, BookSummary, Date, LibraryEntry, ReadingStatus, SeriesId, TrackedSeries, UserBookId,
+    BookId, BookSummary, Date, LibraryEntry, ReadingStatus, SeriesId, SeriesRef, TrackedSeries,
+    UserBookId,
 };
 
 use crate::dates::local_day;
@@ -46,6 +57,10 @@ use crate::text::{indexed_words, search_words};
 
 /// A series not touched for longer than this is "Not touched in a year".
 const UNTOUCHED_DAYS: i64 = 365;
+
+/// The nudge names series not followed that were touched within this many
+/// days, so an old library doesn't nag for ever.
+const NUDGE_DAYS: i64 = 30;
 
 // ----- started series -----
 
@@ -68,18 +83,6 @@ fn places(entry: &LibraryEntry) -> impl Iterator<Item = SeriesId> + '_ {
         .iter()
         .filter(|s| s.counts_in_series())
         .filter_map(|s| s.id)
-}
-
-/// The series to ask about, sorted, each once.
-pub fn started_series(entries: &[LibraryEntry]) -> Vec<SeriesId> {
-    let mut ids: Vec<SeriesId> = entries
-        .iter()
-        .filter(|e| starts_series(e))
-        .flat_map(places)
-        .collect();
-    ids.sort_unstable();
-    ids.dedup();
-    ids
 }
 
 // ----- one series -----
@@ -136,6 +139,8 @@ impl SeriesBook {
 pub enum Group {
     InProgress,
     Waiting,
+    /// Followed, with nothing started.
+    NotStarted,
     Untouched,
     Finished,
 }
@@ -145,6 +150,7 @@ impl Group {
         match self {
             Group::InProgress => "In progress",
             Group::Waiting => "Waiting for the next book",
+            Group::NotStarted => "Not started",
             Group::Untouched => "Not touched in a year",
             Group::Finished => "Finished",
         }
@@ -179,6 +185,8 @@ pub enum Activity {
     FinishedOn(Date),
     LastFinished(Date),
     Started(Date),
+    /// A series followed with nothing started: when it was followed.
+    Followed(Date),
     None,
 }
 
@@ -194,12 +202,13 @@ impl Activity {
             Activity::FinishedOn(d) => format!("Finished {}", date(d)),
             Activity::LastFinished(d) => format!("Last finished {}", date(d)),
             Activity::Started(d) => format!("Started {}", date(d)),
+            Activity::Followed(d) => format!("Followed {}", date(d)),
             Activity::None => return None,
         })
     }
 }
 
-/// A started series, ready to show.
+/// A followed series, ready to show.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SeriesSummary {
     pub id: SeriesId,
@@ -211,7 +220,8 @@ pub struct SeriesSummary {
     pub next: Option<usize>,
     pub group: Group,
     pub activity: Activity,
-    /// The latest finish, start or update of the series' entries.
+    /// The latest finish, start or update of the series' entries; for a
+    /// series not started, when it was followed.
     pub last_activity: Option<Date>,
 }
 
@@ -495,11 +505,13 @@ fn series_books(
 }
 
 /// The series as the reader sees it. `upcoming` holds the release dates of
-/// the books not out yet that `UpcomingModel` knows.
+/// the books not out yet that `UpcomingModel` knows; `followed_on`, the day
+/// the reader followed it, if known.
 pub fn summarize(
     series: &TrackedSeries,
     library: &LibraryIndex,
     upcoming: &HashMap<BookId, Date>,
+    followed_on: Option<Date>,
     today: Date,
 ) -> SeriesSummary {
     let series_entries: &[&LibraryEntry] = library
@@ -515,11 +527,17 @@ pub fn summarize(
         .iter()
         .any(|b| b.status == Some(ReadingStatus::CurrentlyReading));
     let entries = || series_entries.iter().copied();
-    let last_activity = entries().flat_map(entry_dates).max();
+    let begun = entries().any(starts_series);
+    let last_activity = if begun {
+        entries().flat_map(entry_dates).max()
+    } else {
+        followed_on
+    };
     let touched_lately = last_activity.is_none_or(|d| (today - d).num_days() <= UNTOUCHED_DAYS);
     let next_out = next.map(|ix| books[ix].out);
     let group = match next_out {
         _ if reading => Group::InProgress,
+        Some(_) if !begun => Group::NotStarted,
         Some(true) if touched_lately => Group::InProgress,
         Some(true) => Group::Untouched,
         Some(false) => Group::Waiting,
@@ -540,6 +558,8 @@ pub fn summarize(
         .max();
     let activity = if reading {
         Activity::ReadingNow
+    } else if !begun {
+        followed_on.map_or(Activity::None, Activity::Followed)
     } else if let Some(since) = paused_since {
         Activity::PausedSince(since)
     } else {
@@ -570,22 +590,30 @@ pub fn summarize(
     }
 }
 
-/// Every started series in `series`, in group order, each group sorted.
-/// A series none of whose books has a position (a publisher's line such as
+/// Every series in `series` (the followed ones), in group order, each
+/// group sorted. `followed_on` holds the day each was followed. A series
+/// none of whose books has a position (a publisher's line such as
 /// "Grokking", where Hardcover numbers nothing) has no order to show and is
 /// left out; it would otherwise read as finished, with an empty strip.
 pub fn summaries(
     series: &[TrackedSeries],
     entries: &[LibraryEntry],
     upcoming: &HashMap<BookId, Date>,
+    followed_on: &HashMap<SeriesId, Date>,
     today: Date,
 ) -> Vec<SeriesSummary> {
-    let started = started_series(entries);
     let library = LibraryIndex::new(entries);
     let mut out: Vec<SeriesSummary> = series
         .iter()
-        .filter(|s| started.binary_search(&s.id).is_ok())
-        .map(|s| summarize(s, &library, upcoming, today))
+        .map(|s| {
+            summarize(
+                s,
+                &library,
+                upcoming,
+                followed_on.get(&s.id).copied(),
+                today,
+            )
+        })
         .filter(|s| !s.books.is_empty())
         .collect();
     out.sort_by(|a, b| {
@@ -608,39 +636,29 @@ pub fn summaries(
 
 // ----- the filters and the order -----
 
-/// The header's filter select. Hidden series show only under
-/// [`Filter::Hidden`], and every other choice leaves them out.
+/// The header's filter select.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub enum Filter {
     #[default]
     NotFinished,
     Finished,
     All,
-    Hidden,
 }
 
 impl Filter {
-    pub const ALL: [Filter; 4] = [
-        Filter::NotFinished,
-        Filter::Finished,
-        Filter::All,
-        Filter::Hidden,
-    ];
+    pub const ALL: [Filter; 3] = [Filter::NotFinished, Filter::Finished, Filter::All];
 
     pub fn label(self) -> &'static str {
         match self {
             Filter::NotFinished => "Not finished",
             Filter::Finished => "Finished",
             Filter::All => "All series",
-            Filter::Hidden => "Hidden",
         }
     }
 
-    /// Whether a series in `group`, hidden or not, shows under this choice.
-    pub fn admits(self, group: Group, hidden: bool) -> bool {
+    /// Whether a series in `group` shows under this choice.
+    pub fn admits(self, group: Group) -> bool {
         match self {
-            Filter::Hidden => hidden,
-            _ if hidden => false,
             Filter::NotFinished => !group.is_finished(),
             Filter::Finished => group.is_finished(),
             Filter::All => true,
@@ -755,13 +773,11 @@ pub fn matches_query(series: &SeriesSummary, query: &[String]) -> bool {
         .all(|q| haystack.iter().any(|w| w.starts_with(q.as_str())))
 }
 
-/// How many series each filter shows, given the text filter. Hidden series
-/// count only as hidden.
+/// How many series each filter shows, given the text filter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Counts {
     pub not_finished: usize,
     pub finished: usize,
-    pub hidden: usize,
 }
 
 impl Counts {
@@ -770,22 +786,15 @@ impl Counts {
             Filter::NotFinished => self.not_finished,
             Filter::Finished => self.finished,
             Filter::All => self.not_finished + self.finished,
-            Filter::Hidden => self.hidden,
         }
     }
 }
 
-pub fn counts<'a>(
-    series: impl IntoIterator<Item = &'a SeriesSummary>,
-    query: &str,
-    hidden: &BTreeSet<SeriesId>,
-) -> Counts {
+pub fn counts<'a>(series: impl IntoIterator<Item = &'a SeriesSummary>, query: &str) -> Counts {
     let query = search_words(query);
     let mut counts = Counts::default();
     for s in series.into_iter().filter(|s| matches_query(s, &query)) {
-        if hidden.contains(&s.id) {
-            counts.hidden += 1;
-        } else if s.group.is_finished() {
+        if s.group.is_finished() {
             counts.finished += 1;
         } else {
             counts.not_finished += 1;
@@ -800,7 +809,6 @@ pub struct Shown<'a> {
     pub filter: Filter,
     pub sort: Sort,
     pub query: &'a str,
-    pub hidden: &'a BTreeSet<SeriesId>,
 }
 
 /// The series to show, in order: under their groups with [`Sort::Status`]
@@ -810,9 +818,9 @@ pub fn sections<'a>(
     shown: Shown<'_>,
 ) -> Vec<(Option<Group>, Vec<&'a SeriesSummary>)> {
     let query = search_words(shown.query);
-    let rows = series.iter().filter(|s| {
-        shown.filter.admits(s.group, shown.hidden.contains(&s.id)) && matches_query(s, &query)
-    });
+    let rows = series
+        .iter()
+        .filter(|s| shown.filter.admits(s.group) && matches_query(s, &query));
     if !shown.sort.is_grouped() {
         let mut rows: Vec<&SeriesSummary> = rows.collect();
         if rows.is_empty() {
@@ -837,6 +845,219 @@ pub fn hidden_line(finished: usize) -> String {
         1 => "1 finished series isn't shown.".to_owned(),
         n => format!("{} finished series aren't shown.", count_text(n)),
     }
+}
+
+// ----- adding the rest -----
+
+/// A book of a series as "Add N books to Want to read…" weighs it.
+#[derive(Debug, Clone, Copy)]
+pub struct AddCandidate {
+    pub book: BookId,
+    pub position: Option<f32>,
+    pub out: bool,
+    pub in_library: bool,
+}
+
+/// The books "Add N books to Want to read…" adds, in reading order: the
+/// whole-numbered ones that are out and not in the library. Novellas,
+/// unnumbered extras and books not out yet stay out; a book already in the
+/// library (Ignored too) is never touched, since adding it again would
+/// overwrite its shelf.
+pub fn books_to_add(books: impl IntoIterator<Item = AddCandidate>) -> Vec<BookId> {
+    let mut seen = HashSet::new();
+    books
+        .into_iter()
+        .filter(|b| b.out && !b.in_library && b.position.is_some_and(|p| p.fract() == 0.0))
+        .filter(|b| seen.insert(b.book))
+        .map(|b| b.book)
+        .collect()
+}
+
+impl SeriesSummary {
+    /// The books of the strip "Add N books to Want to read…" adds.
+    pub fn books_to_add(&self) -> Vec<BookId> {
+        books_to_add(self.books.iter().map(|b| AddCandidate {
+            book: b.book.id,
+            position: Some(b.position),
+            out: b.out,
+            in_library: b.entry.is_some(),
+        }))
+    }
+}
+
+/// Whether a book with these dates is out on `today`, for a series page's
+/// books (the tracker's rule, from what a page knows).
+pub fn is_out(release_year: Option<i32>, upcoming: Option<Date>, today: Date) -> bool {
+    released(None, release_year, upcoming, today)
+}
+
+// ----- series not followed -----
+
+/// A series of the library the reader doesn't follow, for Add series.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Unfollowed {
+    pub id: SeriesId,
+    pub name: String,
+    pub author: Option<String>,
+    /// The library's book at the lowest position, for the row's cover.
+    pub book: BookSummary,
+    /// A book of it is read, being read, paused or given up on.
+    pub started: bool,
+    pub read: usize,
+    /// Books on Want to read.
+    pub want: usize,
+    pub activity: Activity,
+    /// The latest day an entry says the reader did something (for a series
+    /// only on Want to read, the latest added).
+    pub last_activity: Option<Date>,
+}
+
+impl Unfollowed {
+    /// "5 read · Last finished Oct 30", "Reading now", "2 on Want to read".
+    pub fn line(&self, today: Date) -> String {
+        if !self.started {
+            return format!("{} on Want to read", count_text(self.want));
+        }
+        let read = (self.read > 0).then(|| format!("{} read", count_text(self.read)));
+        [read, self.activity.text(today)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
+/// The series of the library's entries the reader doesn't follow: the
+/// started ones first, the most recently active first, then those only on
+/// Want to read, the latest added first. Ignored entries count for nothing.
+pub fn unfollowed(entries: &[LibraryEntry], followed: &HashSet<SeriesId>) -> Vec<Unfollowed> {
+    // Each series' reference and its entries, with their positions.
+    type Shelved<'a> = (&'a SeriesRef, Vec<(&'a LibraryEntry, f32)>);
+    let mut by_series: HashMap<SeriesId, Shelved> = HashMap::new();
+    for e in entries
+        .iter()
+        .filter(|e| e.status != ReadingStatus::Ignored)
+    {
+        for s in e.series.iter().filter(|s| s.counts_in_series()) {
+            let Some(id) = s.id.filter(|id| !followed.contains(id)) else {
+                continue;
+            };
+            by_series
+                .entry(id)
+                .or_insert_with(|| (s, Vec::new()))
+                .1
+                .push((e, s.position.unwrap_or(f32::MAX)));
+        }
+    }
+    let mut out: Vec<Unfollowed> = by_series
+        .into_iter()
+        .map(|(id, (series, mut books))| {
+            books.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.book.id.cmp(&b.0.book.id)));
+            let entries = || books.iter().map(|(e, _)| *e);
+            let started = entries().any(starts_series);
+            let count = |status| entries().filter(|e| e.status == status).count();
+            let activity = if !started {
+                Activity::None
+            } else if count(ReadingStatus::CurrentlyReading) > 0 {
+                Activity::ReadingNow
+            } else if let Some(paused) = entries()
+                .filter(|e| e.status == ReadingStatus::Paused)
+                .filter_map(|e| e.updated_at.map(local_day))
+                .max()
+            {
+                Activity::PausedSince(paused)
+            } else {
+                let started_on = entries()
+                    .flat_map(|e| e.reads.iter().filter_map(|r| r.started_at))
+                    .max();
+                match (latest_finish(entries()), started_on) {
+                    (Some(d), _) => Activity::LastFinished(d),
+                    (None, Some(d)) => Activity::Started(d),
+                    (None, None) => Activity::None,
+                }
+            };
+            let last_activity = if started {
+                entries()
+                    .filter(|e| starts_series(e))
+                    .flat_map(entry_dates)
+                    .max()
+            } else {
+                entries().filter_map(|e| e.date_added).max()
+            };
+            let first = books[0].0;
+            Unfollowed {
+                id,
+                name: series.name.clone(),
+                author: first.book.authors.first().cloned(),
+                book: first.book.clone(),
+                started,
+                read: count(ReadingStatus::Read),
+                want: count(ReadingStatus::WantToRead),
+                activity,
+                last_activity,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.started
+            .cmp(&a.started)
+            .then_with(|| b.last_activity.cmp(&a.last_activity))
+            .then_with(|| crate::text::fold(&a.name).cmp(&crate::text::fold(&b.name)))
+            .then(a.id.cmp(&b.id))
+    });
+    out
+}
+
+/// Whether every word of `query` starts a word of the series' name or its
+/// author, as the Series filter matches.
+pub fn unfollowed_matches(series: &Unfollowed, query: &[String]) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    let mut haystack = indexed_words(&series.name);
+    if let Some(author) = &series.author {
+        haystack.extend(indexed_words(author));
+    }
+    query
+        .iter()
+        .all(|q| haystack.iter().any(|w| w.starts_with(q.as_str())))
+}
+
+/// The nudge under the Series header: the started series not followed
+/// that were touched in the last 30 days, or `None`. "You've been reading
+/// 2 series you don't follow: Elfhame and The Expanse."
+pub fn nudge(unfollowed: &[Unfollowed], today: Date) -> Option<String> {
+    let names: Vec<&str> = unfollowed
+        .iter()
+        .filter(|s| {
+            s.started
+                && s.last_activity
+                    .is_some_and(|d| (today - d).num_days() <= NUDGE_DAYS)
+        })
+        .map(|s| s.name.as_str())
+        .collect();
+    let quoted = |n: &str| format!("“{n}”");
+    let list = match names.as_slice() {
+        [] => return None,
+        [one] => {
+            return Some(format!(
+                "You've been reading a series you don't follow: {}.",
+                quoted(one)
+            ));
+        }
+        [a, b] => format!("{} and {}", quoted(a), quoted(b)),
+        [a, b, c] => format!("{}, {} and {}", quoted(a), quoted(b), quoted(c)),
+        [a, b, rest @ ..] => format!(
+            "{}, {} and {} others",
+            quoted(a),
+            quoted(b),
+            count_text(rest.len())
+        ),
+    };
+    Some(format!(
+        "You've been reading {} series you don't follow: {list}.",
+        count_text(names.len())
+    ))
 }
 
 // ----- the strip and the lane -----
@@ -942,6 +1163,7 @@ mod tests {
             series,
             &LibraryIndex::new(entries),
             &HashMap::new(),
+            None,
             day(TODAY),
         )
     }
@@ -967,7 +1189,12 @@ mod tests {
             // A compilation is no place in its series.
             boxed_set,
         ];
-        let ids: Vec<i64> = started_series(&entries).iter().map(|s| s.get()).collect();
+        let mut ids: Vec<i64> = unfollowed(&entries, &HashSet::new())
+            .iter()
+            .filter(|s| s.started)
+            .map(|s| s.id.get())
+            .collect();
+        ids.sort_unstable();
         assert_eq!(ids, [10, 20, 30, 40, 50, 80]);
     }
 
@@ -985,6 +1212,7 @@ mod tests {
         let out = summaries(
             &[unnumbered, numbered],
             &entries,
+            &HashMap::new(),
             &HashMap::new(),
             day(TODAY),
         );
@@ -1139,7 +1367,13 @@ mod tests {
                 "2026-10-09",
             ),
         ];
-        let all = summaries(&[saga, order], &entries, &HashMap::new(), day(TODAY));
+        let all = summaries(
+            &[saga, order],
+            &entries,
+            &HashMap::new(),
+            &HashMap::new(),
+            day(TODAY),
+        );
         let saga = all.iter().find(|s| s.id == SeriesId::new(10)).unwrap();
         let order = all.iter().find(|s| s.id == SeriesId::new(20)).unwrap();
         assert_eq!(saga.group, Group::Finished);
@@ -1160,7 +1394,13 @@ mod tests {
             entry(3, ReadingStatus::WantToRead, &[(10, 3.0)]),
         ];
         let upcoming = HashMap::from([(BookId::new(3), day("2026-11-26"))]);
-        let s = summarize(&series, &LibraryIndex::new(&entries), &upcoming, day(TODAY));
+        let s = summarize(
+            &series,
+            &LibraryIndex::new(&entries),
+            &upcoming,
+            None,
+            day(TODAY),
+        );
         assert_eq!(s.group, Group::Waiting);
         assert_eq!(s.next_kind(), Some(NextKind::Waiting));
         assert_eq!(s.books[2].release_date, Some(day("2026-11-26")));
@@ -1306,7 +1546,13 @@ mod tests {
         ];
         let series: Vec<TrackedSeries> = rows.iter().map(|(s, _)| s.clone()).collect();
         let entries: Vec<LibraryEntry> = rows.iter().map(|(_, e)| e.clone()).collect();
-        let all = summaries(&series, &entries, &HashMap::new(), day(TODAY));
+        let all = summaries(
+            &series,
+            &entries,
+            &HashMap::new(),
+            &HashMap::new(),
+            day(TODAY),
+        );
         let order: Vec<(i64, Group)> = all.iter().map(|s| (s.id.get(), s.group)).collect();
         assert_eq!(
             order,
@@ -1335,25 +1581,24 @@ mod tests {
             &[finished_series, going, other],
             &entries,
             &HashMap::new(),
+            &HashMap::new(),
             day(TODAY),
         );
-        let none = BTreeSet::new();
-        let c = counts(&all, "", &none);
+        let c = counts(&all, "");
         assert_eq!(
             (
                 c.of(Filter::NotFinished),
                 c.of(Filter::Finished),
-                c.of(Filter::All),
-                c.of(Filter::Hidden)
+                c.of(Filter::All)
             ),
-            (2, 1, 3, 0)
+            (2, 1, 3)
         );
         // Every word must start a word of the name or the author.
-        let c = counts(&all, "lant", &none);
+        let c = counts(&all, "lant");
         assert_eq!((c.not_finished, c.finished), (1, 1));
-        assert_eq!(counts(&all, "ant", &none).of(Filter::All), 0);
-        assert_eq!(counts(&all, "salt ro", &none).of(Filter::All), 1);
-        assert_eq!(counts(&all, "salt quill", &none).of(Filter::All), 1);
+        assert_eq!(counts(&all, "ant").of(Filter::All), 0);
+        assert_eq!(counts(&all, "salt ro").of(Filter::All), 1);
+        assert_eq!(counts(&all, "salt quill").of(Filter::All), 1);
 
         let shown = |filter, query| {
             sections(
@@ -1362,7 +1607,6 @@ mod tests {
                     filter,
                     sort: Sort::Status,
                     query,
-                    hidden: &none,
                 },
             )
         };
@@ -1371,46 +1615,8 @@ mod tests {
         assert_eq!(not_finished[0].1.len(), 2);
         assert_eq!(shown(Filter::Finished, "salt"), []);
         assert_eq!(shown(Filter::All, "").len(), 2);
-        assert_eq!(shown(Filter::Hidden, ""), []);
         assert_eq!(hidden_line(1), "1 finished series isn't shown.");
         assert_eq!(hidden_line(3), "3 finished series aren't shown.");
-    }
-
-    /// A hidden series shows only under Hidden, and counts only there.
-    #[test]
-    fn a_hidden_series_shows_only_under_hidden() {
-        let finished_series = tracked(1, "The Lantern Cycle", &[(11, 1.0)]);
-        let going = tracked(2, "Salt Roads", &[(21, 1.0), (22, 2.0)]);
-        let entries = [
-            finished(entry(11, ReadingStatus::Read, &[(1, 1.0)]), "2026-10-01"),
-            finished(entry(21, ReadingStatus::Read, &[(2, 1.0)]), "2026-10-01"),
-        ];
-        let all = summaries(
-            &[finished_series, going],
-            &entries,
-            &HashMap::new(),
-            day(TODAY),
-        );
-        let hidden: BTreeSet<SeriesId> = [SeriesId::new(2)].into();
-        let c = counts(&all, "", &hidden);
-        assert_eq!((c.not_finished, c.finished, c.hidden), (0, 1, 1));
-        let ids = |filter| -> Vec<i64> {
-            sections(
-                &all,
-                Shown {
-                    filter,
-                    sort: Sort::Status,
-                    query: "",
-                    hidden: &hidden,
-                },
-            )
-            .into_iter()
-            .flat_map(|(_, rows)| rows.into_iter().map(|s| s.id.get()))
-            .collect()
-        };
-        assert_eq!(ids(Filter::NotFinished), Vec::<i64>::new());
-        assert_eq!(ids(Filter::All), [1]);
-        assert_eq!(ids(Filter::Hidden), [2]);
     }
 
     /// Every sort but Status is one list without groups, in its own order.
@@ -1449,8 +1655,13 @@ mod tests {
         ];
         let series: Vec<TrackedSeries> = rows.iter().map(|(s, _)| s.clone()).collect();
         let entries: Vec<LibraryEntry> = rows.iter().flat_map(|(_, e)| e.clone()).collect();
-        let all = summaries(&series, &entries, &HashMap::new(), day(TODAY));
-        let none = BTreeSet::new();
+        let all = summaries(
+            &series,
+            &entries,
+            &HashMap::new(),
+            &HashMap::new(),
+            day(TODAY),
+        );
         let order = |sort| -> Vec<i64> {
             let sections = sections(
                 &all,
@@ -1458,7 +1669,6 @@ mod tests {
                     filter: Filter::All,
                     sort,
                     query: "",
-                    hidden: &none,
                 },
             );
             if !sort.is_grouped() {
@@ -1510,5 +1720,88 @@ mod tests {
         assert_eq!(reading_line(&audio).unwrap(), "3h 12m of 9h 40m · 33%");
         assert_eq!(lane_caption(NextKind::Reading, 1.0), "Reading · #1");
         assert_eq!(lane_caption(NextKind::Waiting, 3.5), "Next · #3.5");
+    }
+
+    /// A followed series with nothing started is "Not started", dated by
+    /// its follow; its next step is the first book.
+    #[test]
+    fn a_followed_series_with_nothing_started_is_not_started() {
+        let series = tracked(10, "Lantern", &[(1, 1.0), (2, 2.0)]);
+        let entries = [entry(1, ReadingStatus::WantToRead, &[(10, 1.0)])];
+        let followed: HashMap<SeriesId, Date> = [(SeriesId::new(10), day("2026-11-08"))].into();
+        let all = summaries(&[series], &entries, &HashMap::new(), &followed, day(TODAY));
+        let s = &all[0];
+        assert_eq!(s.group, Group::NotStarted);
+        assert_eq!(s.activity.text(day(TODAY)).unwrap(), "Followed Nov 8");
+        assert_eq!(s.next_kind(), Some(NextKind::Start));
+        assert_eq!(s.books_to_add(), [BookId::new(2)]);
+    }
+
+    /// Only whole-numbered books that are out and not in the library are
+    /// added, each once.
+    #[test]
+    fn adding_the_rest_takes_whole_books_out_and_not_shelved() {
+        let c = |id, position, out, in_library| AddCandidate {
+            book: BookId::new(id),
+            position,
+            out,
+            in_library,
+        };
+        let ids: Vec<i64> = books_to_add([
+            c(1, Some(1.0), true, true),
+            c(2, Some(2.0), true, false),
+            c(3, Some(2.5), true, false),
+            c(4, None, true, false),
+            c(5, Some(3.0), false, false),
+            c(6, Some(4.0), true, false),
+            c(6, Some(4.0), true, false),
+        ])
+        .iter()
+        .map(|b| b.get())
+        .collect();
+        assert_eq!(ids, [2, 6]);
+        let today = day(TODAY);
+        assert!(is_out(Some(2020), None, today));
+        assert!(!is_out(Some(2027), None, today));
+        assert!(!is_out(Some(2026), Some(day("2026-12-01")), today));
+    }
+
+    /// Add series lists the library's series not followed: started ones,
+    /// most recently active first, then those only on Want to read. The
+    /// nudge names the started ones touched in the last 30 days.
+    #[test]
+    fn series_not_followed_are_offered_and_recent_ones_nudged() {
+        let mut lately = reading(
+            entry(1, ReadingStatus::CurrentlyReading, &[(10, 1.0)]),
+            "2026-11-10",
+            40,
+        );
+        lately.book.authors = vec!["Ada Quill".into()];
+        let entries = [
+            lately,
+            finished(entry(2, ReadingStatus::Read, &[(20, 1.0)]), "2026-11-01"),
+            finished(entry(3, ReadingStatus::Read, &[(30, 1.0)]), "2024-02-01"),
+            entry(4, ReadingStatus::WantToRead, &[(40, 1.0)]),
+            entry(5, ReadingStatus::Ignored, &[(50, 1.0)]),
+            finished(entry(6, ReadingStatus::Read, &[(60, 1.0)]), "2026-11-15"),
+        ];
+        let followed: HashSet<SeriesId> = [SeriesId::new(60)].into();
+        let all = unfollowed(&entries, &followed);
+        let ids: Vec<i64> = all.iter().map(|s| s.id.get()).collect();
+        assert_eq!(ids, [10, 20, 30, 40], "followed and Ignored ones left out");
+        let today = day(TODAY);
+        assert_eq!(all[0].line(today), "Reading now");
+        assert_eq!(all[1].line(today), "1 read · Last finished Nov 1");
+        assert_eq!(all[3].line(today), "1 on Want to read");
+        assert!(unfollowed_matches(&all[0], &search_words("quill")));
+        assert_eq!(
+            nudge(&all, today).unwrap(),
+            "You've been reading 2 series you don't follow: “Series 10” and “Series 20”."
+        );
+        assert_eq!(nudge(&all[2..], today), None, "nothing lately");
+        assert_eq!(
+            nudge(&all[..1], today).unwrap(),
+            "You've been reading a series you don't follow: “Series 10”."
+        );
     }
 }

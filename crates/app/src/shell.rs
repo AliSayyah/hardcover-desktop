@@ -20,7 +20,7 @@ use gpui_kit::{
     ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
     StyleRefinement, Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _,
 };
-use hardcover_core::auth::scopes::READ_CATALOG;
+use hardcover_core::auth::scopes::{READ_CATALOG, READ_SOCIAL};
 use hardcover_core::store::LibraryCache;
 use hardcover_core::{ListId, ReadingStatus};
 
@@ -47,6 +47,8 @@ use crate::lists::model::{ListsEvent, ListsModel};
 use crate::lists::sidebar::lists_section;
 use crate::resource::{self, Catalog};
 use crate::search::search_view::SearchView;
+use crate::series::add_view::AddSeriesView;
+use crate::series::follows::FollowsModel;
 use crate::series::model::SeriesModel;
 use crate::series::tracker_view::SeriesTrackerView;
 use crate::session::{self, SessionScope};
@@ -168,6 +170,7 @@ impl Shell {
         SessionScope::uninstall(cx);
         ListsModel::release(cx);
         VibesModel::release(cx);
+        FollowsModel::release(cx);
         Catalog::release(cx);
         let sign_in = cx.new(|cx| {
             if keyring_unavailable {
@@ -269,6 +272,8 @@ pub struct Workspace {
     series: Entity<SeriesModel>,
     shelf_tags: Entity<ShelfTagsModel>,
     series_view: Entity<SeriesTrackerView>,
+    follows: Entity<FollowsModel>,
+    add_series_page: Entity<AddSeriesView>,
     signing_out: bool,
     /// Whether the sidebar shows its keyboard shortcuts: only while Ctrl is
     /// held, so the rest of the time the rows stay clean.
@@ -300,6 +305,7 @@ impl Workspace {
         Catalog::init(&session, cx);
         let lists = ListsModel::init(session.clone(), &model, cx);
         let vibes = VibesModel::init(session.clone(), &model, cx);
+        let follows = FollowsModel::init(session.clone(), &model, cx);
         let vibe_page = cx.new(|cx| VibeView::new(model.clone(), window, cx));
         let tag_page = cx.new(|cx| TagView::new(model.clone(), window, cx));
         let list_page = cx.new(|cx| ListView::new(lists.clone(), model.clone(), window, cx));
@@ -308,7 +314,6 @@ impl Workspace {
         let search = cx.new(|cx| SearchView::new(&model, window, cx));
         let discover = cx.new(|cx| DiscoverView::new(&model, window, cx));
         let stats = cx.new(|cx| StatsView::new(model.clone(), cx));
-        let series_page = cx.new(|cx| SeriesView::new(model.clone(), window, cx));
         let author_page = cx.new(|cx| AuthorView::new(model.clone(), window, cx));
         let book_page = cx.new(|cx| {
             let mut page = BookDetailView::new(model.clone(), window, cx);
@@ -321,17 +326,48 @@ impl Workspace {
         let sidebar_scroll = ScrollHandle::new();
         let sidebar_keys = cx.new(|cx| SidebarKeys::new(window, cx));
         let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
-        let upcoming = cx.new(|cx| UpcomingModel::new(session.clone(), model.clone(), cx));
+        let upcoming =
+            cx.new(|cx| UpcomingModel::new(session.clone(), model.clone(), follows.clone(), cx));
         let upcoming_page = cx.new(|cx| UpcomingView::new(upcoming.clone(), model.clone(), cx));
-        let home =
-            cx.new(|cx| HomeView::new(model.clone(), goals.clone(), upcoming.clone(), window, cx));
-        let series =
-            cx.new(|cx| SeriesModel::new(session.clone(), model.clone(), upcoming.clone(), cx));
-        let series_view = cx
-            .new(|cx| SeriesTrackerView::new(series.clone(), model.clone(), &upcoming, window, cx));
+        let series_page = cx.new(|cx| {
+            SeriesView::new(model.clone(), follows.clone(), upcoming.clone(), window, cx)
+        });
+        let home = cx.new(|cx| {
+            HomeView::new(
+                model.clone(),
+                goals.clone(),
+                upcoming.clone(),
+                follows.clone(),
+                window,
+                cx,
+            )
+        });
+        let series = cx.new(|cx| {
+            SeriesModel::new(
+                session.clone(),
+                model.clone(),
+                upcoming.clone(),
+                follows.clone(),
+                cx,
+            )
+        });
+        let series_view = cx.new(|cx| {
+            SeriesTrackerView::new(
+                series.clone(),
+                model.clone(),
+                &upcoming,
+                follows.clone(),
+                window,
+                cx,
+            )
+        });
+        let add_series_page =
+            cx.new(|cx| AddSeriesView::new(model.clone(), follows.clone(), window, cx));
         model.update(cx, LibraryModel::start);
         lists.update(cx, ListsModel::load);
         vibes.update(cx, VibesModel::load);
+        // The Series page, Up next and Coming soon wait on the follows.
+        follows.update(cx, FollowsModel::load);
         // Views read today as they render. The cached ones (the book view,
         // Home, Stats, Series) draw again only when they change, so a new
         // day refreshes the whole window, and every tick draws Home, whose
@@ -388,6 +424,8 @@ impl Workspace {
             series,
             shelf_tags,
             series_view,
+            follows,
+            add_series_page,
             signing_out: false,
             key_hints: false,
             key_hint_delay: None,
@@ -406,7 +444,6 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let updates = Updates::global(cx).clone();
-        let preferences = crate::preferences::AppPreferences::global(cx).clone();
         let mut syncing = false;
         self.subscriptions = vec![
             cx.observe(&self.model, move |this, model, cx| {
@@ -429,9 +466,8 @@ impl Workspace {
             cx.observe(&updates, |_, _, cx| cx.notify()),
             cx.observe(&self.reauthorize, |_, _, cx| cx.notify()),
             cx.observe(&self.goals, |_, _, cx| cx.notify()),
-            // The sidebar counts the series not finished and not hidden.
+            // The sidebar counts the series followed and not finished.
             cx.observe(&self.series, |_, _, cx| cx.notify()),
-            cx.observe(&preferences, |_, _, cx| cx.notify()),
             // A list shown that is gone after a reload, or no longer
             // readable, hands over to a shelf.
             cx.observe_in(&self.lists, window, |this, lists, window, cx| {
@@ -551,6 +587,9 @@ impl Workspace {
                 .update(cx, |p, cx| p.revalidate(shown_again, cx)),
             // Follows the library and the upcoming books.
             Some(Page::Upcoming) => {}
+            Some(Page::AddSeries) => self.follows.update(cx, |f, cx| {
+                f.request(crate::catalog::book_list::demand(shown_again), cx);
+            }),
             Some(Page::Vibe(_)) => self
                 .vibe_page
                 .update(cx, |p, cx| p.revalidate(shown_again, cx)),
@@ -570,8 +609,15 @@ impl Workspace {
                 Destination::List(_) => self
                     .list_page
                     .update(cx, |l, cx| l.revalidate(shown_again, cx)),
-                // Worked out from the library and models that follow it.
-                Destination::Home | Destination::Series | Destination::Stats => {}
+                // The follows change on hardcover.app too.
+                Destination::Home => self.follows.update(cx, |f, cx| {
+                    f.request(crate::catalog::book_list::demand(shown_again), cx);
+                }),
+                Destination::Series => self
+                    .series
+                    .update(cx, |s, cx| s.revalidate(shown_again, cx)),
+                // Worked out from the library.
+                Destination::Stats => {}
             },
         }
     }
@@ -580,7 +626,13 @@ impl Workspace {
 
     fn open_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
         let from = remember_focus(window, cx);
+        let add_series = page == Page::AddSeries;
         if self.pages.push(page, from) {
+            // Opened, not come back to: the rows followed last time go.
+            if add_series {
+                self.add_series_page
+                    .update(cx, |p, cx| p.opened(window, cx));
+            }
             self.show_page(window, cx);
         }
     }
@@ -633,6 +685,7 @@ impl Workspace {
                 });
             }
             Some(Page::Upcoming) => {}
+            Some(Page::AddSeries) => {}
             Some(Page::Vibe(id)) => self.vibe_page.update(cx, |p, cx| p.show(id, window, cx)),
             Some(Page::Tag { tag, within }) => self
                 .tag_page
@@ -663,6 +716,7 @@ impl Workspace {
                 self.tag_page
                     .update(cx, |p, cx| p.focus(&fallback, window, cx));
             }
+            Some(Page::AddSeries) => self.add_series_page.update(cx, |p, cx| p.focus(window, cx)),
             Some(Page::Book(_) | Page::Upcoming) => window.focus(&self.page_focus, cx),
             None => {}
         }
@@ -681,6 +735,7 @@ impl Workspace {
             Page::Author(_) => self.author_page.clone().into_any_element(),
             Page::Book(_) => BookDetailView::embedded(&self.book_page),
             Page::Upcoming => self.upcoming_page.clone().into_any_element(),
+            Page::AddSeries => self.add_series_page.clone().into_any_element(),
             Page::Vibe(_) => self.vibe_page.clone().into_any_element(),
             Page::Tag { .. } => self.tag_page.clone().into_any_element(),
         };
@@ -726,6 +781,7 @@ impl Workspace {
         let previous = self.pages.previous().map(|page| match page {
             Page::Book(book) => BackTo::Named(&book.title),
             Page::Upcoming => BackTo::Named("Coming soon"),
+            Page::AddSeries => BackTo::Named("Add series"),
             Page::Series(id) => self
                 .series_page
                 .read(cx)
@@ -929,18 +985,18 @@ impl Workspace {
             .is_visible(cx)
             .then(|| self.goals_section.clone());
         let lists = self.sidebar_lists(cx);
-        // Hidden without the catalogue, which the page reads.
-        let series_row = session::has_scope(cx, READ_CATALOG).then(|| {
+        // Hidden without the catalogue, which the page reads, or the
+        // follows, which say what it shows.
+        let series_row = (session::has_scope(cx, READ_CATALOG)
+            && session::has_scope(cx, READ_SOCIAL))
+        .then(|| {
             let today = crate::dates::today();
             let series = self.series.read(cx);
-            let hidden = crate::preferences::AppPreferences::global(cx)
-                .read(cx)
-                .hidden_series();
             let count = series.is_loaded().then(|| {
                 series
                     .summaries(today, cx)
                     .iter()
-                    .filter(|s| !s.group.is_finished() && !hidden.contains(&s.id))
+                    .filter(|s| !s.group.is_finished())
                     .count()
             });
             nav_row(
@@ -1403,7 +1459,7 @@ impl Render for Workspace {
                 this.show(Destination::Discover, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowSeries, window, cx| {
-                if session::has_scope(cx, READ_CATALOG) {
+                if session::has_scope(cx, READ_CATALOG) && session::has_scope(cx, READ_SOCIAL) {
                     this.show(Destination::Series, window, cx);
                 }
             }))

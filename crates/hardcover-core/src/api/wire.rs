@@ -12,8 +12,8 @@ use serde_json::Value;
 use super::model::{
     AuthorBook, AuthorDetails, AuthorHit, AuthorId, AuthorRef, AuthorSeries, BookDetails, BookId,
     BookSummary, CommunityReview, Contributor, Cover, Date, EditionId, EditionParts,
-    EditionSummary, Goal, GoalConditions, GoalId, GoalMetric, Length, LibraryEntry, ListBook,
-    ListBookId, ListId, ListMembership, Measure, Privacy, Rating, RatingBucket, ReadId,
+    EditionSummary, FollowedSeries, Goal, GoalConditions, GoalId, GoalMetric, Length, LibraryEntry,
+    ListBook, ListBookId, ListId, ListMembership, Measure, Privacy, Rating, RatingBucket, ReadId,
     ReadSession, ReadingStatus, Review, Reviewer, SearchHits, SearchPage, SeriesBook,
     SeriesDetails, SeriesHit, SeriesId, SeriesRef, Timestamp, TrackedBook, TrackedSeries,
     UpcomingBook, User, UserBookId, UserId, UserList, Vibe, VibeId, VibeKind, measure_of,
@@ -1587,6 +1587,125 @@ impl VibePayload {
 pub(crate) struct SystemVibesPayload {
     #[serde(default)]
     pub ids: Vec<i64>,
+}
+
+/// A `follows` row of a series.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawFollow {
+    pub id: i64,
+    #[serde(default)]
+    pub followable_id: Option<i64>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub series: Option<RawFollowedSeries>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawFollowedSeries {
+    #[serde(default)]
+    pub canonical_id: Option<i64>,
+}
+
+impl RawFollow {
+    /// The series as the app knows it (the canonical one of a merged
+    /// duplicate), and the id the follow is stored under. `None` without an
+    /// id.
+    fn ids(&self) -> Option<(SeriesId, SeriesId)> {
+        let stored = self.followable_id.filter(|id| *id > 0)?;
+        let shown = self
+            .series
+            .as_ref()
+            .and_then(|s| s.canonical_id)
+            .filter(|id| *id > 0)
+            .unwrap_or(stored);
+        Some((SeriesId::new(shown), SeriesId::new(stored)))
+    }
+}
+
+/// The followed series, each once, in the order first followed. Follows of
+/// a merged duplicate count for the series it was merged into.
+pub(crate) fn followed_series(rows: Vec<RawFollow>) -> Vec<FollowedSeries> {
+    let mut out: Vec<FollowedSeries> = Vec::new();
+    for row in rows {
+        let Some((id, stored)) = row.ids() else {
+            continue;
+        };
+        let at = row.created_at.as_deref().and_then(parse_timestamp);
+        if let Some(seen) = out.iter_mut().find(|s| s.id == id) {
+            if !seen.followed_as.contains(&stored) {
+                seen.followed_as.push(stored);
+            }
+            seen.followed_at = match (seen.followed_at, at) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+        } else {
+            let mut s = FollowedSeries::new(id, at);
+            s.followed_as = vec![stored];
+            out.push(s);
+        }
+    }
+    out
+}
+
+/// `FollowType`: `insert_follow`'s payload.
+#[derive(Debug, Deserialize)]
+pub(crate) struct FollowPayload {
+    #[serde(default)]
+    pub id: Option<i64>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub follow: Option<RawFollow>,
+}
+
+/// `FollowDeleteType`: `delete_follow`'s payload.
+#[derive(Debug, Deserialize)]
+pub(crate) struct FollowDeletePayload {
+    #[serde(default)]
+    pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod follow_tests {
+    use super::*;
+
+    fn row(id: i64, series: i64, canonical: Option<i64>, at: &str) -> RawFollow {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "followable_id": series, "created_at": at,
+            "series": {"id": series, "canonical_id": canonical},
+        }))
+        .unwrap()
+    }
+
+    /// A followed duplicate counts for the series it was merged into, once,
+    /// and unfollowing it removes both follows.
+    #[test]
+    fn a_merged_duplicate_counts_for_its_canonical_series() {
+        let all = followed_series(vec![
+            row(1, 10, None, "2026-06-15T08:37:57.142918"),
+            row(2, 11, Some(10), "2026-05-01T00:00:00"),
+            row(3, 12, None, "2026-07-18T08:29:48"),
+        ]);
+        let ids: Vec<i64> = all.iter().map(|s| s.id.get()).collect();
+        assert_eq!(ids, [10, 12]);
+        assert_eq!(all[0].followed_as, [SeriesId::new(10), SeriesId::new(11)]);
+        assert_eq!(
+            all[0].followed_at.unwrap().to_rfc3339(),
+            "2026-05-01T00:00:00+00:00",
+            "the earliest; Hardcover's created_at is UTC without an offset"
+        );
+    }
+
+    #[test]
+    fn a_row_without_a_series_id_is_skipped() {
+        let raw: RawFollow =
+            serde_json::from_value(serde_json::json!({"id": 4, "followable_id": null})).unwrap();
+        assert!(followed_series(vec![raw]).is_empty());
+    }
 }
 
 #[cfg(test)]

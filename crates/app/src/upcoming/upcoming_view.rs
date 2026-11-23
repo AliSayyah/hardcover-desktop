@@ -63,9 +63,9 @@ impl UpcomingView {
 /// The muted line under the title.
 pub fn count_line(books: usize) -> String {
     match books {
-        1 => "1 book still to come in the series on your shelves".to_owned(),
+        1 => "1 book still to come in the series you follow".to_owned(),
         n => format!(
-            "{} books still to come in the series on your shelves",
+            "{} books still to come in the series you follow",
             count_text(n)
         ),
     }
@@ -129,7 +129,7 @@ impl Render for UpcomingView {
                 LoadStatus::Loaded => empty_state(
                     IconName::Calendar,
                     "Nothing coming soon".into(),
-                    "Hardcover lists no unreleased books in the series on your shelves.".into(),
+                    "Hardcover lists no unreleased books in the series you follow.".into(),
                 )
                 .into_any_element(),
             };
@@ -173,11 +173,11 @@ mod tests {
     fn the_count_line_counts_books() {
         assert_eq!(
             count_line(1),
-            "1 book still to come in the series on your shelves"
+            "1 book still to come in the series you follow"
         );
         assert_eq!(
             count_line(1200),
-            "1,200 books still to come in the series on your shelves"
+            "1,200 books still to come in the series you follow"
         );
     }
 }

@@ -1,6 +1,6 @@
 //! Catalogue pages (a series, an author, a book, the books coming soon, a
-//! vibe, a tag) and the history of the ones opened since the last sidebar
-//! destination.
+//! vibe, a tag, Add series) and the history of the ones opened since the
+//! last sidebar destination.
 //!
 //! Any view can open a page through the [`Navigator`] global; the workspace
 //! owns the stack, shows its top page over the destination and handles
@@ -31,6 +31,8 @@ pub enum Page {
         tag: Tag,
         within: Option<Tag>,
     },
+    /// The series of the library not followed yet, opened from Series.
+    AddSeries,
 }
 
 impl Page {

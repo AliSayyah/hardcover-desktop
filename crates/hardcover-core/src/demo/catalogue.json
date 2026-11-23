@@ -2343,5 +2343,35 @@
         ]
       }
     ]
-  }
+  },
+  "follows": [
+    {
+      "series": "The Stormlight Archive",
+      "days_ago": 240
+    },
+    {
+      "series": "Dune",
+      "days_ago": 200
+    },
+    {
+      "series": "Middle Earth",
+      "days_ago": 420
+    },
+    {
+      "series": "Reidverse",
+      "days_ago": 150
+    },
+    {
+      "series": "The Mistborn Saga: The Original Trilogy",
+      "days_ago": 330
+    },
+    {
+      "series": "The Martian",
+      "days_ago": 90
+    },
+    {
+      "series": "The Empyrean",
+      "days_ago": 12
+    }
+  ]
 }

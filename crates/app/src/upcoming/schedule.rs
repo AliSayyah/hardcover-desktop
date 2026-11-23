@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use chrono::{Datelike as _, Months};
-use hardcover_core::{BookId, Date, LibraryEntry, ReadingStatus, SeriesId, UpcomingBook};
+use hardcover_core::{BookId, Date, ReadingStatus, UpcomingBook};
 
 use crate::format::series_position_text;
 
@@ -13,24 +13,6 @@ use crate::format::series_position_text;
 pub const CARD_ROWS: usize = 5;
 /// A release at most this many days away also says how soon it is.
 const SOON_DAYS: i64 = 13;
-
-/// The series to ask about: those of every library entry the reader hasn't
-/// ignored or given up on, sorted, each once.
-pub fn watched_series(entries: &[LibraryEntry]) -> Vec<SeriesId> {
-    let mut ids: Vec<SeriesId> = entries
-        .iter()
-        .filter(|e| {
-            !matches!(
-                e.status,
-                ReadingStatus::Ignored | ReadingStatus::DidNotFinish
-            )
-        })
-        .flat_map(|e| e.series.iter().filter_map(|s| s.id))
-        .collect();
-    ids.sort_unstable();
-    ids.dedup();
-    ids
-}
 
 /// The books to show, the soonest first: still to come after `today`, and
 /// either not in the library or on Want to Read. A book the reader already
@@ -169,7 +151,7 @@ pub fn grouped<'a>(shown: &[&'a UpcomingBook], today: Date) -> Vec<(Group, Vec<&
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hardcover_core::{BookSummary, SeriesRef, UserBookId, UserId};
+    use hardcover_core::{BookSummary, SeriesRef};
 
     fn day(s: &str) -> Date {
         s.parse().unwrap()
@@ -180,35 +162,6 @@ mod tests {
             BookSummary::new(BookId::new(id), format!("Book {id}")),
             day(date),
         )
-    }
-
-    fn entry(id: i64, status: ReadingStatus, series: &[i64]) -> LibraryEntry {
-        let book = BookSummary::new(BookId::new(id), format!("Book {id}"));
-        let mut e = LibraryEntry::new(UserBookId::new(id), UserId::new(1), book, status);
-        for s in series {
-            let mut r = SeriesRef::new(format!("Series {s}"));
-            r.id = Some(SeriesId::new(*s));
-            e.series.push(r);
-        }
-        e
-    }
-
-    #[test]
-    fn series_of_ignored_and_abandoned_books_are_not_watched() {
-        let mut no_id = entry(9, ReadingStatus::Read, &[]);
-        no_id.series.push(SeriesRef::new("No id"));
-        let entries = [
-            entry(1, ReadingStatus::Read, &[30, 10]),
-            entry(2, ReadingStatus::WantToRead, &[10]),
-            entry(3, ReadingStatus::Ignored, &[40]),
-            entry(4, ReadingStatus::DidNotFinish, &[50]),
-            entry(5, ReadingStatus::Paused, &[20]),
-            // A series counts if any of its books is still followed.
-            entry(6, ReadingStatus::DidNotFinish, &[30]),
-            no_id,
-        ];
-        let ids: Vec<i64> = watched_series(&entries).iter().map(|s| s.get()).collect();
-        assert_eq!(ids, [10, 20, 30]);
     }
 
     #[test]

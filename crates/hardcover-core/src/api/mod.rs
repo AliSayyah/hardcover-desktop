@@ -27,14 +27,14 @@ use crate::ratelimit::TokenBucket;
 use crate::{Error, Result};
 pub(crate) use wire::as_i64 as wire_i64;
 use wire::{
-    DeletePayload, DeleteReadPayload, GoalPayload, ListBookDeletePayload, ListBookPayload,
-    ListDeletePayload, ListPayload, ProgressContext, RawAggregate, RawAuthorPage, RawBook,
-    RawBookDetails, RawBookTags, RawCommunityReview, RawEdition, RawGoal, RawList, RawListBook,
-    RawListMembership, RawReview, RawSearch, RawSeriesPage, RawTagBook, RawTrackedSeries,
-    RawTrending, RawUpcomingRow, RawUser, RawUserBook, RawVibe, ReadIdPayload, ReadRef,
-    ReviewedUserBookPayload, SystemVibesPayload, UserBookIdPayload, VibePayload,
-    author_from_search_document, search_hits, search_page, series_from_search_document,
-    upcoming_books,
+    DeletePayload, DeleteReadPayload, FollowDeletePayload, FollowPayload, GoalPayload,
+    ListBookDeletePayload, ListBookPayload, ListDeletePayload, ListPayload, ProgressContext,
+    RawAggregate, RawAuthorPage, RawBook, RawBookDetails, RawBookTags, RawCommunityReview,
+    RawEdition, RawFollow, RawGoal, RawList, RawListBook, RawListMembership, RawReview, RawSearch,
+    RawSeriesPage, RawTagBook, RawTrackedSeries, RawTrending, RawUpcomingRow, RawUser, RawUserBook,
+    RawVibe, ReadIdPayload, ReadRef, ReviewedUserBookPayload, SystemVibesPayload,
+    UserBookIdPayload, VibePayload, author_from_search_document, followed_series, search_hits,
+    search_page, series_from_search_document, upcoming_books,
 };
 
 /// GraphQL endpoint.
@@ -84,6 +84,9 @@ pub const FEATURED_VIBES_LIMIT: u32 = 12;
 /// Series per [`Client::tracked_series`] request: a reader with 200 started
 /// series costs 8 requests, within the rate limit's burst.
 pub const TRACKED_SERIES_BATCH: usize = 25;
+/// Follows asked for per request; how many Hardcover allows is unknown, so
+/// paging stops only on an empty page.
+const FOLLOWS_PAGE_SIZE: u32 = 100;
 /// Books each series in [`Client::tracked_series`] lists at most, duplicates
 /// included. Ordered by position, so a longer series loses only its tail.
 const TRACKED_SERIES_ROWS: u32 = 200;
@@ -2018,6 +2021,110 @@ impl Client {
             .ensure_system_vibes
             .ok_or_else(|| Error::Api("`ensure_system_vibes` returned null".into()))?;
         Ok(payload.ids.into_iter().map(VibeId::new).collect())
+    }
+
+    /// Every series the user follows on Hardcover, each once (a merged
+    /// duplicate counts for its canonical series), in the order followed.
+    /// Needs `read:social`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a request fails, a response cannot be decoded,
+    /// or paging stopped moving forward (a short answer would unfollow
+    /// series on screen).
+    pub fn followed_series(&self) -> Result<Vec<FollowedSeries>> {
+        #[derive(Deserialize)]
+        struct Data {
+            follows: Vec<RawFollow>,
+        }
+        let me = self.my_id()?;
+        let mut rows = Vec::new();
+        let complete = keyset_pages(
+            None,
+            |after| {
+                let data: Data = self.query(
+                    "FollowedSeries",
+                    queries::FOLLOWED_SERIES,
+                    json!({ "userId": me.get(), "afterId": after, "limit": FOLLOWS_PAGE_SIZE }),
+                    QUERY_TIMEOUT,
+                )?;
+                Ok(data.follows)
+            },
+            |raw| raw.id,
+            |page| rows.extend(page),
+        )?;
+        if !complete {
+            return Err(Error::Decode(
+                "the followed series stopped paging forward".into(),
+            ));
+        }
+        Ok(followed_series(rows))
+    }
+
+    /// Follows series `id` on Hardcover. Following one already followed
+    /// returns the existing follow. Needs `write:social`.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Api` if Hardcover refuses (an unknown series) or answers
+    /// with no follow.
+    pub fn follow_series(&self, id: SeriesId) -> Result<FollowedSeries> {
+        #[derive(Deserialize)]
+        struct Data {
+            insert_follow: Option<FollowPayload>,
+        }
+        let data: Data = self.query(
+            "FollowSeries",
+            queries::FOLLOW_SERIES,
+            json!({ "id": id.get() }),
+            QUERY_TIMEOUT,
+        )?;
+        let payload = data
+            .insert_follow
+            .ok_or_else(|| Error::Api("`insert_follow` returned null".into()))?;
+        if let Some(error) = payload.error.filter(|e| !e.trim().is_empty()) {
+            return Err(Error::Api(error));
+        }
+        if payload.id.is_none() {
+            return Err(Error::Api("`insert_follow` returned no follow".into()));
+        }
+        Ok(payload
+            .follow
+            .map(|f| followed_series(vec![f]))
+            .and_then(|mut all| all.pop())
+            .unwrap_or_else(|| FollowedSeries::new(id, None)))
+    }
+
+    /// Unfollows `followed`: every id its follows are stored under.
+    /// Unfollowing a series not followed succeeds. Needs `write:social`.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Api` if Hardcover reports a failure.
+    pub fn unfollow_series(&self, followed: &[SeriesId]) -> Result<()> {
+        #[derive(Deserialize)]
+        struct Data {
+            delete_follow: Option<FollowDeletePayload>,
+        }
+        for id in followed {
+            let data: Data = self.query(
+                "UnfollowSeries",
+                queries::UNFOLLOW_SERIES,
+                json!({ "id": id.get() }),
+                QUERY_TIMEOUT,
+            )?;
+            let payload = data
+                .delete_follow
+                .ok_or_else(|| Error::Api("`delete_follow` returned null".into()))?;
+            if !payload.success {
+                return Err(Error::Api(
+                    payload
+                        .error
+                        .unwrap_or_else(|| format!("couldn't unfollow series {id}")),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Leaves `book` out of vibe `id` ("Never recommend…"): reads the vibe

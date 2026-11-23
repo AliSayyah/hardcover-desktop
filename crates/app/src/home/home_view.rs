@@ -64,6 +64,7 @@ use crate::goals::goal_view::open_goal;
 use crate::goals::model::GoalsModel;
 use crate::library::model::{LibraryModel, WriteKind};
 use crate::library::writes::{self, Ratings};
+use crate::series::follows::FollowsModel;
 use crate::session;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{
@@ -97,22 +98,25 @@ struct HomeData {
     coming_soon: Option<ComingSoon>,
 }
 
-/// What [`HomeData`] was worked out from: the library's and the upcoming
-/// books' revisions, the day, the generation of the books rated here, and
-/// whether the session can write the library.
-type HomeKey = (u64, u64, Date, u64, bool);
+/// What [`HomeData`] was worked out from: the library's, the upcoming
+/// books' and the follows' revisions, the day, the generation of the books
+/// rated here, and whether the session can write the library.
+type HomeKey = (u64, u64, u64, Date, u64, bool);
 
 impl HomeData {
     fn new(
         library: &LibraryModel,
         upcoming: &UpcomingModel,
+        follows: &FollowsModel,
         today: Date,
         rated_here: &HashSet<UserBookId>,
         can_write: bool,
     ) -> Self {
         let entry = |id: UserBookId| library.entry(id).cloned();
         let unreleased = upcoming.unreleased(today);
-        let digest = compute(library.entries(), today, &unreleased);
+        // Up next looks only at the series followed; none until they are
+        // known.
+        let digest = compute(library.entries(), today, &unreleased, &follows.id_set());
         let (to_rate, unrated) = if can_write {
             to_rate(library.entries(), today, rated_here)
         } else {
@@ -145,6 +149,7 @@ pub struct HomeView {
     model: Entity<LibraryModel>,
     goals: Entity<GoalsModel>,
     upcoming: Entity<UpcomingModel>,
+    follows: Entity<FollowsModel>,
     focus_handle: FocusHandle,
     /// What Home shows, and what it was worked out from.
     computed: Option<(HomeKey, Rc<HomeData>)>,
@@ -175,6 +180,7 @@ impl HomeView {
         model: Entity<LibraryModel>,
         goals: Entity<GoalsModel>,
         upcoming: Entity<UpcomingModel>,
+        follows: Entity<FollowsModel>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -194,6 +200,7 @@ impl HomeView {
             cx.observe(&goals, |_, _, cx| cx.notify()),
             cx.observe(&ratings, |_, _, cx| cx.notify()),
             cx.observe(&upcoming, |_, _, cx| cx.notify()),
+            cx.observe(&follows, |_, _, cx| cx.notify()),
             // What it offers follows the grant (goals, rating, writes).
             session::observe_grant(cx, |_, cx| cx.notify()),
         ];
@@ -201,6 +208,7 @@ impl HomeView {
             model,
             goals,
             upcoming,
+            follows,
             focus_handle: cx.focus_handle(),
             computed: None,
             months: None,
@@ -231,10 +239,12 @@ impl HomeView {
     fn data(&mut self, today: Date, cx: &App) -> Rc<HomeData> {
         let model = self.model.read(cx);
         let upcoming = self.upcoming.read(cx);
+        let follows = self.follows.read(cx);
         let can_write = session::has_scope(cx, WRITE_LIBRARY);
         let key = (
             model.revision(),
             upcoming.revision(),
+            follows.revision(),
             today,
             self.rated_generation,
             can_write,
@@ -245,6 +255,7 @@ impl HomeView {
                 let data = Rc::new(HomeData::new(
                     model,
                     upcoming,
+                    follows,
                     today,
                     &self.rated_here,
                     can_write,
@@ -1293,10 +1304,11 @@ mod tests {
         model.update(cx, LibraryModel::start);
         cx.run_until_parked();
         let goals = cx.new(|cx| GoalsModel::new(session.clone(), &model, cx));
-        let upcoming = cx.new(|cx| UpcomingModel::new(session, model.clone(), cx));
+        let follows = cx.update(|cx| FollowsModel::init(session.clone(), &model, cx));
+        let upcoming = cx.new(|cx| UpcomingModel::new(session, model.clone(), follows.clone(), cx));
         let id = model.read_with(cx, |m, _| m.entries()[0].user_book_id);
         let (home, cx) = cx.add_window_view(|window, cx| {
-            HomeView::new(model.clone(), goals, upcoming, window, cx)
+            HomeView::new(model.clone(), goals, upcoming, follows, window, cx)
         });
         cx.update(|window, cx| {
             home.update(cx, |home, cx| home.rate(id, Rating::new(4.0), window, cx));

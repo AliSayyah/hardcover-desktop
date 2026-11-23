@@ -2514,3 +2514,29 @@ impl Vibe {
         }
     }
 }
+
+/// A series the user follows on Hardcover: the Series page shows these,
+/// and Home's Up next and Coming soon look only at them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct FollowedSeries {
+    /// The series, as the rest of the app knows it: the series a followed
+    /// duplicate was merged into, when it was.
+    pub id: SeriesId,
+    /// The ids the follows are stored under (`id` itself, and any merged
+    /// duplicate followed too), which unfollowing removes.
+    pub followed_as: Vec<SeriesId>,
+    /// When the user followed it (UTC), the earliest of `followed_as`.
+    pub followed_at: Option<Timestamp>,
+}
+
+impl FollowedSeries {
+    #[must_use]
+    pub fn new(id: SeriesId, followed_at: Option<Timestamp>) -> Self {
+        Self {
+            id,
+            followed_as: vec![id],
+            followed_at,
+        }
+    }
+}

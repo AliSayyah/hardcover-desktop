@@ -253,8 +253,8 @@ fn known_scope(v: &str) -> Result<&'static str, String> {
 /// `schema/hardcover-capabilities.json`.
 pub(super) fn required_scopes(op: &str) -> &'static [&'static str] {
     use crate::auth::scopes::{
-        READ_CATALOG, READ_GOALS, READ_LIBRARY, READ_LISTS, READ_ME, READ_VIBES, WRITE_GOALS,
-        WRITE_LIBRARY, WRITE_LISTS, WRITE_REVIEWS, WRITE_VIBES,
+        READ_CATALOG, READ_GOALS, READ_LIBRARY, READ_LISTS, READ_ME, READ_SOCIAL, READ_VIBES,
+        WRITE_GOALS, WRITE_LIBRARY, WRITE_LISTS, WRITE_REVIEWS, WRITE_SOCIAL, WRITE_VIBES,
     };
     match op {
         "Me" => &[READ_ME],
@@ -278,6 +278,8 @@ pub(super) fn required_scopes(op: &str) -> &'static [&'static str] {
         }
         "SystemVibes" | "FeaturedVibes" | "VibeById" => &[READ_VIBES],
         "EnsureSystemVibes" | "ExcludeFromVibe" => &[WRITE_VIBES],
+        "FollowedSeries" => &[READ_SOCIAL],
+        "FollowSeries" | "UnfollowSeries" => &[WRITE_SOCIAL],
         _ => &[],
     }
 }

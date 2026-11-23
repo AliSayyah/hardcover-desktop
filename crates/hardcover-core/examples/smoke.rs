@@ -55,6 +55,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    let follows = client.followed_series()?;
+    let dated = follows.iter().filter(|f| f.followed_at.is_some()).count();
+    println!("follows: {} series, {dated} dated", follows.len());
+
     let page = client.search_books("dune", 1)?;
     println!("search \"dune\": {} total", page.total.unwrap_or(0));
     for b in page.books.iter().take(3) {

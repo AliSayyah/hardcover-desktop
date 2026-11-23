@@ -745,7 +745,7 @@ function upcomingPage() {
     <div class="objbar line"><span class="btn ghost back">${ic("left")}Home</span></div>
     <div class="scroll page"><div class="list-page">
       <div class="page-title">Coming soon</div>
-      <div class="muted mt-4">5 books still to come in the series on your shelves</div>
+      <div class="muted mt-4">5 books still to come in the series you follow</div>
       ${groups.map(g => `<div class="label group-label">${g}</div><div class="col">${UP.filter(u => u.g === g).map(upRow).join("")}</div>`).join("")}
     </div></div></div>`;
 }
@@ -1224,22 +1224,23 @@ function seriesMeter(s) {
 
 // ---------- Series tracker: shared parts ----------
 // The filter: a select beside the filter input. "Not finished" is the default, so ~200 finished
-// series don't bury the ones that need you; the choice is kept for the session. "Hidden" holds the
-// series hidden from a row's "more" menu, which show nowhere else. Then the sort select: "Status"
+// series don't bury the ones that need you; the choice is kept for the session. The page shows only
+// the series the reader follows; "Add series…" adds more. Then the sort select: "Status"
 // (the groups) by default; Recently active, Name, Author, Most read and Fewest left to read are
 // one list without the group labels.
-const FILTERS = [["Not finished", 5], ["Finished", 1], ["All series", 6], ["Hidden", 0]];
+const FILTERS = [["Not finished", 5], ["Finished", 1], ["All series", 6]];
 function pageHead(filter = "Not finished", open = false) {
   const n = FILTERS.find(([f]) => f === filter)[1];
   const menu = open ? `<div class="popover fmenu">${FILTERS.map(([f, c]) => `<div class="menu-item${f === filter ? " hover" : ""}"><span class="ck">${f === filter ? ic("checkmark") : ""}</span><span class="fill">${f}</span><span class="small muted num">${c}</span></div>`).join("")}</div>` : "";
   return `<div class="row-c g-16"><div class="fill">
       <div class="row-b g-8"><span class="page-title">Series</span><span class="muted num">${n}</span></div>
-      <div class="muted mt-4">The series you've started, and what's next in each.</div>
+      <div class="muted mt-4">The series you follow, and what's next in each.</div>
     </div>
     <div class="row-c g-8">
       <div class="input" style="width:var(--w-select)">${ic("search")}Filter series</div>
       <div class="fwrap"><span class="select${open ? " btn pressed" : ""}" style="width:var(--w-select)">${filter}${ic("down", "xs")}</span>${menu}</div>
       <span class="select" style="width:var(--w-select)">Status${ic("down", "xs")}</span>
+      <span class="btn">${ic("plus")}Add series…</span>
     </div></div>`;
 }
 // The next lane: the one thing to do in a series. 240 wide, kept on every row so the lanes line up.
@@ -1261,7 +1262,7 @@ function nextLane(s) {
       ${line}<div class="mt-8 row-c">${act}</div>
     </div></div>`;
 }
-// The name, and on its line's trailing edge the small "more" button ("Hide series").
+// The name, and on its line's trailing edge the small "more" button ("Unfollow series", "Add N books to Want to read…").
 const seriesName = s => `<div class="row-c g-8"><div class="fill display d-24 one-line${rtlCls(s)}"${dirAttr(s)}><span class="textbtn">${s.name}</span></div><span class="btn sm ghost icon" style="width:var(--h-control-s)">${ic("more", "xs")}</span></div>`;
 
 // ---------- The strip: the series as a shelf of covers ----------
@@ -1321,12 +1322,6 @@ function seriesPage(filter = "Not finished", open = false) {
     ${hidden}
   </div></div></div>`;
 }
-function seriesEmpty() {
-  return sidebar("series", null) + `<div class="main"><div class="scroll page" style="display:flex;flex-direction:column">
-    <div class="series-page" style="width:100%">${pageHead().replace('<span class="muted num">5</span>', "")}</div>
-    ${emptyState("library", "No series yet", "When you read a book that belongs to a series, the series shows here with what comes next.")}
-  </div></div>`;
-}
 // The strip's states, side by side at 2× so they can be read.
 function legend() {
   const cell = (label, inner) => `<div class="col g-8" style="align-items:center;width:150px">${inner}<span class="small muted" style="text-align:center">${label}</span></div>`;
@@ -1341,6 +1336,188 @@ function legend() {
   </div></div>`;
 }
 
+// =====================================================================
+// Following series: the Series page shows only the series the reader
+// follows; Add series, a series page's Follow, and Home using the same set.
+// =====================================================================
+document.head.insertAdjacentHTML("beforeend", `<style>
+.page-head { display: flex; align-items: flex-start; gap: var(--s-16); }
+.page-head .tools { display: flex; gap: var(--s-8); flex: none; }
+.crows { display: flex; flex-direction: column; gap: var(--s-2); margin-left: calc(-1 * var(--s-8)); }
+.menu-sep { height: 1px; background: var(--border); margin: var(--s-4) 0; }
+.scrim { position: absolute; inset: 0; z-index: 4; background: var(--scrim); display: flex; align-items: center; justify-content: center; border-radius: inherit; }
+.dlg { width: 384px; padding: var(--s-24); display: flex; flex-direction: column; gap: var(--s-8); }
+.dlg .foot { display: flex; justify-content: flex-end; gap: var(--s-8); margin-top: var(--s-16); }
+.rmenu { position: absolute; top: calc(100% + var(--s-4)); right: 0; width: 272px; z-index: 3; }
+/* A notification, as the kit draws it: top right, over the content. */
+.toast { position: absolute; top: var(--s-16); right: var(--s-16); width: 360px; z-index: 5; padding: var(--s-12) var(--s-16); display: flex; align-items: center; gap: var(--s-12); }
+.tip { position: absolute; z-index: 5; width: 280px; padding: var(--s-8) var(--s-12); font-size: var(--t-12); line-height: var(--l-12); }
+.btn.dis { opacity: .5; }
+</style>`);
+Object.assign(P, {
+  bmplus: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><line x1="12" x2="12" y1="7" y2="13"/><line x1="15" x2="9" y1="10" y2="10"/>',
+  bmcheck: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><path d="m9 10 2 2 4-4"/>',
+  bmminus: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><line x1="15" x2="9" y1="10" y2="10"/>',
+});
+
+// ---------- Data: two series the reader follows and hasn't started ----------
+const MB = ["All Systems Red", "Artificial Condition", "Rogue Protocol", "Exit Strategy", "Network Effect", "Fugitive Telemetry", "System Collapse"]
+  .map((t, i) => ({ t, a: "Martha Wells", c: OL(["9780765397539", "9781250186928", "9781250185433", "9781250185464", "9781250229861", "9781250765376", "9781250826978"][i]) }));
+const MB8 = { t: "Untitled Murderbot Diaries #8", a: "Martha Wells" };
+const DCC = ["Dungeon Crawler Carl", "Carl's Doomsday Scenario", "The Dungeon Anarchist's Cookbook", "The Gate of the Feral Gods", "The Butcher's Masquerade", "The Eye of the Bedlam Bride", "This Inevitable Ruin"]
+  .map(t => ({ t, a: "Matt Dinniman" }));
+const DCC8 = { t: "Untitled Dungeon Crawler Carl #8", a: "Matt Dinniman" };
+const YEARS = [2020, 2020, 2020, 2021, 2021, 2022, 2024];
+
+const MURDERBOT = { name: "The Murderbot Diaries", a: "Martha Wells", g: "following", when: "Followed Oct 12", follows: true,
+  books: [...MB.map((b, i) => [b, i + 1, i < 2 ? "wtr" : "none"]), [MB8, 8, "soon"]],
+  next: { kind: "start", b: MB[0], pos: 1 } };
+const CARL = { name: "Dungeon Crawler Carl", a: "Matt Dinniman", g: "following", when: "Followed Jun 15", follows: true,
+  books: [...DCC.map((b, i) => [b, i + 1, "none"]), [DCC8, 8, "soon"]],
+  next: { kind: "add", b: DCC[0], pos: 1 } };
+// Every series on the page is one you follow on Hardcover; nothing joins it by itself.
+const ALL = [...SERIES, MURDERBOT, CARL].map(x => ({ ...x, follows: true }));
+const GROUPS_F = [
+  ["progress", "In progress"],
+  ["waiting", "Waiting for the next book"],
+  ["following", "Not started"],
+  ["stalled", "Not touched in a year"],
+  ["done", "Finished"],
+];
+const FILTERS_F = [["Not finished", 7], ["Finished", 1], ["All series", 8]];
+const missing = s => s.books.filter(([, , st]) => st === "none").length;
+
+// The header: "Add series…" joins the filter and the sort; the line says what the page is now.
+function pageHeadF(filter = "Not finished", open = false, n0 = null) {
+  const n = n0 ?? FILTERS_F.find(([f]) => f === filter)[1];
+  const menu = open ? `<div class="popover fmenu">${FILTERS_F.map(([f, c]) => `<div class="menu-item${f === filter ? " hover" : ""}"><span class="ck">${f === filter ? ic("checkmark") : ""}</span><span class="fill">${f}</span><span class="small muted num">${c}</span></div>`).join("")}</div>` : "";
+  return `<div class="row-c g-16"><div class="fill">
+      <div class="row-b g-8"><span class="page-title">Series</span>${n ? `<span class="muted num">${n}</span>` : ""}</div>
+      <div class="muted mt-4">The series you follow, and what's next in each.</div>
+    </div>
+    <div class="row-c g-8">
+      <div class="input" style="width:var(--w-select)">${ic("search")}Filter series</div>
+      <div class="fwrap"><span class="select${open ? " btn pressed" : ""}" style="width:var(--w-select)">${filter}${ic("down", "xs")}</span>${menu}</div>
+      <span class="select" style="width:var(--w-select)">Status${ic("down", "xs")}</span>
+      <span class="btn">${ic("plus")}Add series…</span>
+    </div></div>`;
+}
+// The nudge: only for series you've been reading in the last 30 days and don't follow, so an old library
+// doesn't nag forever. One muted line under the header; it never follows anything by itself.
+const nudge = `<div class="row-c g-8 mt-16"><span class="muted">You've been reading 2 series you don't follow: The Dresden Files and The Expanse.</span><span class="btn sm ghost">Add series…</span></div>`;
+// A row's "more" menu: unfollow, and add the books not in the library. Unfollowing is how
+// a series leaves the page, and it leaves Home too.
+function rowMenu(s) {
+  const n = missing(s);
+  return `<div class="popover rmenu">
+    <div class="menu-item hover">${ic("bmminus")}<span>Unfollow series</span></div>
+    ${n ? `<div class="menu-item">${ic("plus")}<span>Add ${n} books to Want to read…</span></div>` : ""}
+  </div>`;
+}
+const MORE_BTN = `<span class="btn sm ghost icon" style="width:var(--h-control-s)">${ic("more", "xs")}</span>`;
+function rowF(s, menu = false) {
+  const html = rowB(s, 8);
+  return menu ? html.replace(MORE_BTN, `<span class="fwrap">${MORE_BTN.replace("btn sm ghost icon", "btn sm ghost icon pressed")}${rowMenu(s)}</span>`) : html;
+}
+function trackerF({ filter = "Not finished", open = false, groups = null, menuOn = null, without = null, toast = "", hint = true } = {}) {
+  const shown = groups || ["progress", "waiting", "following", "stalled"];
+  const list = ALL.filter(s => s.name !== without);
+  const foot = !groups ? `<div class="row-c g-8 mt-24 hidden-note"><span class="muted">1 finished series isn't shown.</span><span class="btn sm ghost">Show finished</span></div>` : "";
+  return sidebar("series", without ? 6 : 7) + `<div class="main" style="position:relative"><div class="scroll page"><div class="series-page">
+    ${pageHeadF(filter, open, without ? 6 : null)}
+    ${hint ? nudge : ""}
+    ${GROUPS_F.filter(([g]) => shown.includes(g)).map(([g, label]) => {
+      const rows = list.filter(s => s.g === g);
+      if (!rows.length) return "";
+      return `<div class="row-b g-8 group-label"><span class="label">${label}</span><span class="small muted num">${rows.length}</span></div>
+        <div class="col">${rows.map(s => rowF(s, s.name === menuOn)).join("")}</div>`;
+    }).join("")}
+    ${foot}
+  </div></div>${toast}</div>`;
+}
+const toastOf = (text, action) => `<div class="popover toast"><div class="fill">${text}</div><span class="btn sm">${action}</span></div>`;
+function trackerEmpty() {
+  return sidebar("series", 0) + `<div class="main"><div class="scroll page" style="display:flex;flex-direction:column">
+    <div class="series-page" style="width:100%">${pageHeadF("Not finished", false, 0).replace(/<div class="input"[\s\S]*?<span class="btn">/, '<span class="btn">')}</div>
+    ${emptyState("library", "You don't follow any series", "Follow a series to see where you are in it and what comes next.", `<span class="btn">${ic("plus")}Add series…</span>`)}
+  </div></div>`;
+}
+
+// ---------- Add series: the series on your shelves that you don't follow yet ----------
+const AS = [
+  // Started: a book read, being read, paused or given up on. Most recently active first, as the nudge counts them.
+  { n: "The Expanse", a: "James S. A. Corey", line: "2 of 9 read · Reading now", c: OL("9780316129084"), t: "Leviathan Wakes", g: "started" },
+  { n: "The Dresden Files", a: "Jim Butcher", line: "5 of 17 read · Last finished Oct 30", c: OL("9780451457813"), t: "Storm Front", g: "started" },
+  { n: "The Hunger Games", a: "Suzanne Collins", line: "1 of 4 read · Last finished Aug 3, 2024", c: OL("9780439023481"), t: "The Hunger Games", g: "started" },
+  { n: "Harry Potter", a: "J.K. Rowling", line: "7 of 7 read · Finished Dec 2, 2019", c: OL("9780590353427"), t: "Harry Potter and the Sorcerer's Stone", g: "started" },
+  { n: "Goosebumps", a: "R.L. Stine", line: "1 of 62 read · Last finished Jun 12, 2003", c: OL("9780590453653"), t: "Welcome to Dead House", g: "started" },
+  // Only on Want to read.
+  { n: "Red Rising Saga", a: "Pierce Brown", line: "2 on Want to read · 7 books", c: OL("9780345539786"), t: "Red Rising", g: "wtr" },
+  { n: "The Wheel of Time", a: "Robert Jordan", line: "1 on Want to read · 15 books", c: OL("9780812511819"), t: "The Eye of the World", g: "wtr" },
+];
+function addSeries({ followed = [], noScope = false, filter = "" } = {}) {
+  const row = x => {
+    const on = followed.includes(x.n);
+    const btn = on ? `<span class="btn sm pressed">${ic("bmcheck", "xs")}Following</span>` : `<span class="btn sm${noScope ? " dis" : ""}">${ic("bmplus", "xs")}Follow</span>`;
+    return `<div class="seq-row">${cover({ t: x.t, a: x.a, c: x.c }, "sm")}<div class="fill"><div class="strong one-line"><span class="textbtn">${x.n}</span></div><div class="muted one-line num">${x.a} · ${x.line}</div></div>${btn}</div>`;
+  };
+  const rows = AS.filter(x => !filter || x.n.toLowerCase().includes(filter.toLowerCase()));
+  const group = (g, label) => { const r = rows.filter(x => x.g === g); return r.length ? `<div class="row-b g-8 group-label"><span class="label">${label}</span><span class="small muted num">${r.length}</span></div><div class="col">${r.map(row).join("")}</div>` : ""; };
+  const why = noScope ? `<div class="row-c g-8 mt-16"><span class="muted">Hardcover Desktop has no permission to follow series. Sign in again from the sidebar to grant it.</span></div>` : "";
+  return sidebar("series", 7 + followed.length) + `<div class="main">
+    <div class="objbar line"><span class="btn ghost back">${ic("left")}Series</span><span class="push"></span></div>
+    <div class="scroll page"><div class="list-page series-page" style="max-width:704px">
+      <div class="page-head"><div class="fill">
+        <div class="page-title">Add series</div>
+        <div class="muted mt-4">The series of the books on your shelves that you don't follow yet.</div>
+      </div><div class="tools"><div class="input" style="width:var(--w-select)">${ic("search")}${filter ? `<span class="val">${filter}</span>` : "Filter series"}</div></div></div>
+      ${why}
+      ${group("started", "Started")}
+      ${group("wtr", "Only on Want to read")}
+    </div></div></div>`;
+}
+const seven = html => html.replace('<span class="lab">Series</span><span class="n">5</span>', '<span class="lab">Series</span><span class="n">7</span>');
+function homeF() {
+  return seven(home());
+}
+function upcomingF() {
+  return seven(upcomingPage()).replace("5 books still to come in the series on your shelves", "5 books still to come in the series you follow");
+}
+
+// ---------- A series page: Follow, and adding the books not in the library ----------
+// The page as it is today (title, "by" its author, the facts, the description, Open on Hardcover, the books as
+// catalogue rows) with two commands on the header's trailing edge.
+function seriesPageF({ s = CARL, books = DCC, upcoming = DCC8, follows = false, added = false, confirm = false, noScope = false, desc } = {}) {
+  const n = books.length;
+  const follow = follows
+    ? `<span class="btn pressed">${ic("bmcheck")}Following</span>`
+    : `<span class="btn${noScope ? " dis" : ""}">${ic("bmplus")}Follow</span>`;
+  const add = added ? "" : `<span class="btn">${ic("plus")}Add ${n} books to Want to read…</span>`;
+  const tip = noScope ? `<div class="popover tip" style="left:${240 + 32 + 704 - 290}px;top:${56 + 32 + 40}px">Hardcover Desktop has no permission to follow series. Sign in again from the sidebar to grant it.</div>` : "";
+  const rows = books.map((b, i) => crowF(b, `#${i + 1} · ${b.a} · ${YEARS[i]}`, added ? ["inbox", "Want to read"] : null)).join("")
+    + crowF(upcoming, `#${books.length + 1} · ${upcoming.a} · 2026`, null);
+  const dialog = `<div class="scrim"><div class="popover dlg">
+    <div class="heading">Add ${n} books to Want to read?</div>
+    <div class="muted">From “${s.name}”: ${books.map(b => b.t).slice(0, -1).join(", ")} and ${books[n - 1].t}. #${n + 1} isn't out yet, so it's left out.</div>
+    <div class="foot"><span class="btn focus">Cancel</span><span class="btn primary">Add ${n} books</span></div>
+  </div></div>`;
+  return sidebar("series", 7) + `<div class="main" style="position:relative">
+    <div class="objbar line"><span class="btn ghost back">${ic("left")}Series</span><span class="push"></span></div>
+    <div class="scroll page"><div class="list-page" style="max-width:704px">
+      <div class="page-head"><div class="fill">
+        <div class="page-title">${s.name}</div>
+        <div class="row-c g-4 mt-4"><span class="muted">by</span><span class="textbtn">${s.a}</span></div>
+        <div class="muted num mt-4">${n} books · Ongoing${follows ? " · Following" : ""}</div>
+        ${added ? `<div class="num mt-4">${n} on Want to read</div>` : ""}
+      </div><div class="tools">${follow}${add}</div></div>
+      <div class="prose mt-16" style="max-width:var(--w-prose)">${desc}</div>
+      <div class="mt-8"><span class="link row-c g-4" style="display:inline-flex">Open on Hardcover${ic("ext", "xs")}</span></div>
+      <div class="crows mt-16">${rows}</div>
+    </div></div>${tip}</div>${confirm ? dialog : ""}`;
+}
+const crowF = (b, meta, chip) => `<div class="row">${cover(b, "sm")}<div class="fill"><div class="t one-line">${b.t}</div><div class="muted one-line num">${meta}</div></div>${chip ? `<span class="chip">${ic(chip[0], "xs")}${chip[1]}</span>` : ""}</div>`;
+const CARL_DESC = "A man and his ex-girlfriend's cat survive the end of the world by going down into an alien game show's dungeon, where every floor is deadlier than the last and the whole galaxy is watching.";
+
 const shots = [
   ["Home, wide (2560)", "light · a 4K monitor at 1.5, full height · the two content columns share the width and their rows fill them · Newest on Want to read leaves the rail for the second column, under Rate what you finished: one row of md covers, as many as fit", "light", 1400, homeFluid(), 2560],
   ["Library, wide (2560)", "light · the pane fills the window · the header, progress and rail as now · reading text keeps its 640 measure (About, Your review, Reviews); the width beside it holds Tags and Similar books, which add covers as it grows", "light", 1400, libraryFluid(), 2560],
@@ -1354,11 +1531,18 @@ const shots = [
   ["Book page over Discover", "light · the rail starts at the top; scrolled content shown in full", "light", 1140, bookPage()],
   ["Book page, scrolled to Reviews", "dark · other readers' reviews: a byline that opens their profile, muted stars, a collapsed long review, a spoiler, a Persian review", "dark", 900, reviewsPage()],
   ["Coming soon", "light · the full list over Home, grouped by month, then by year", "light", 760, upcomingPage()],
-  ["Series", "light · the default filter, Not finished: finished series are left out, and a line at the foot says how many · each strip one line of md covers, the next book ringed, books not in the library faded; کلیدر, longer than its line, ends in “Show the other N books”", "light", 1950, seriesPage()],
+  ["Series: only the series you follow", "light · nothing joins the page by itself · Add series… on the header's trailing edge · under the header, a nudge for series you've been reading in the last 30 days and don't follow; it never follows anything for you, and an old library doesn't nag · a followed series you haven't started is in Not started, its next step the first book · the sidebar counts the ones not finished", "light", 2690, trackerF()],
   ["Series, choosing a filter", "dark · the filter select open: Not finished, Finished, All series, each with its count · a Persian series (کلیدر) on the leading edge, running right to left", "dark", 1950, seriesPage("Not finished", true)],
   ["Series, filtered to Finished", "light · the same rows; a finished series has no next step, so its lane stays empty", "light", 760, seriesPage("Finished")],
   ["The marks under each book", "light · drawn at 2× · the icon and position carry the state; colour never does", "light", 330, legend()],
-  ["Series: empty", "light · nobody has started a series yet", "light", 760, seriesEmpty()],
+  ["A row's menu", "dark · Unfollow series, and Add 5 books to Want to read… (it asks first, as on a series page)", "dark", 820, trackerF({ groups: ["following"], menuOn: "The Murderbot Diaries", hint: false })],
+  ["Unfollowed", "light · the row fades out as a row leaving does, and a notification offers Undo, which follows it again", "light", 760, trackerF({ groups: ["following"], without: "Dungeon Crawler Carl", hint: false, toast: toastOf("You no longer follow “Dungeon Crawler Carl”. It's left Home too.", "Undo") })],
+  ["Series: following nothing", "light · the empty state offers Add series…; the filter and sort hide until there's something to filter", "light", 760, trackerEmpty()],
+  ["Add series", "light · over Series, with Back · the series of every book on your shelves that you don't follow: Started (a book read, being read, paused or given up on), most recently active first, so the nudge's series lead; then Only on Want to read · each row: the cover of its first book, the name (opens the series page), how far you are, and Follow · a followed row stays where it is, as Following, until the page is opened again, so nothing moves under the pointer and a slip is one press to undo · Ignored books count for nothing", "light", 800, addSeries({ followed: ["The Dresden Files"] })],
+  ["Add series, filtered", "dark · the filter matches the name or the author, as on Series", "dark", 760, addSeries({ filter: "the" })],
+  ["Without the permission", "light · following needs write:social; until Sign in again… grants it, Follow is disabled everywhere and Add series says why in one line · reading the follows needs read:social, so the Series page itself works", "light", 800, addSeries({ noScope: true })],
+  ["A series page: Follow", "light · any series, also one not on your shelves (from search's Series tab, an author's Series tab, a book's series) · Follow, and Add 7 books to Want to read…", "light", 800, seriesPageF({ desc: CARL_DESC })],
+  ["Followed, then adding the rest", "light · Following is pressed, with a check, and the facts say so; pressing it unfollows · Add 7 books… asks first, naming them; the one not out yet is left out", "light", 800, seriesPageF({ follows: true, confirm: true, desc: CARL_DESC })],
   ["Library: empty states", "light · a filter with no matches and no book selected, in the app's own copy", "light", 760, library("none")],
   ["Tokens: colour, elevation and states", "both themes", null, 2344, tokensTheme("light", "Light") + tokensTheme("dark", "Dark")],
   ["Tokens: type, space, shape and size", "the same in both themes", null, 1328, tokensScales()],

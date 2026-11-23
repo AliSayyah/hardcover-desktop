@@ -23,6 +23,10 @@ gpui_kit::assets::icon_assets!(
         Library,
         Clock,
         Target,
+        // Following a series: Follow, Following, Unfollow.
+        BookmarkPlus,
+        BookmarkCheck,
+        BookmarkMinus,
         // The genre icons (`chip::genre`); search, heart and palette are
         // among the kit's defaults.
         Backpack,
@@ -107,13 +111,36 @@ pub fn target() -> IconName {
     IconName::Target
 }
 
+/// "Follow": a series not followed yet.
+pub fn follow() -> IconName {
+    IconName::BookmarkPlus
+}
+
+/// "Following": the pressed Follow button of a followed series.
+pub fn following() -> IconName {
+    IconName::BookmarkCheck
+}
+
+/// "Unfollow series", in a series row's menu.
+pub fn unfollow() -> IconName {
+    IconName::BookmarkMinus
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn the_extra_icons_and_the_defaults_both_load() {
-        for icon in [library(), clock(), target(), sparkles()] {
+        for icon in [
+            library(),
+            clock(),
+            target(),
+            sparkles(),
+            follow(),
+            following(),
+            unfollow(),
+        ] {
             let bytes = AppAssets.load(&icon.path()).unwrap().unwrap();
             assert!(bytes.starts_with(b"<svg"));
         }

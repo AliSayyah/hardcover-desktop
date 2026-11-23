@@ -51,6 +51,8 @@ pub(super) fn is_write(op: &str) -> bool {
             | "DeleteListBook"
             | "EnsureSystemVibes"
             | "ExcludeFromVibe"
+            | "FollowSeries"
+            | "UnfollowSeries"
     )
 }
 
@@ -81,6 +83,8 @@ pub(super) fn apply(state: &mut State, op: &str, vars: &Value) -> Result<Value, 
         "DeleteGoal" => Ok(delete_goal(state, int("id"))),
         "EnsureSystemVibes" => Ok(super::vibes::ensure_system_vibes(state)),
         "ExcludeFromVibe" => super::vibes::update_vibe(state, int("id"), &vars["object"]),
+        "FollowSeries" => Ok(super::follows::follow(state, int("id"))),
+        "UnfollowSeries" => Ok(super::follows::unfollow(state, int("id"))),
         other => Err(format!("The demo has no answer for {other}.")),
     }
 }
