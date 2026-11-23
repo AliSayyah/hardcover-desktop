@@ -938,7 +938,14 @@ About, sign-in and the dialogs use the same parts:
 - display type only for a book's or person's name and for headline figures.
 
 An author page's header puts the photo where a book has its cover (a large
-avatar), with the name in `display-24`. Stats charts use `accent` for the
+avatar), with the name in `display-24`. Under the header, where a section
+title would be, a small segmented "Books" | "Series" switches the list (an
+author without series gets the "Books" title); the order select sits at its
+trailing edge on Books only. Series lists every series, the most read first,
+as sequence rows in the list's place, their covers on the book rows' spine:
+an sm cover (their most-read book in it), the name as a text button that
+opens the series page, and a muted line ("7 books · Complete · 3 read").
+Stats charts use `accent` for the
 series, `track` for the grid and muted labels. Stats is one column, and two
 on a wide region, filling it (see "Wide windows").
 

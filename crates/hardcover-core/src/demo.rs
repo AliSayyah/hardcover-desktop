@@ -917,6 +917,7 @@ fn author_page(catalogue: &Catalogue, id: i64) -> Option<Value> {
         .map(|b| {
             let mut book = book_summary(b);
             book["is_partial_book"] = json!(false);
+            book["book_series"] = Value::Array(author_book_series(catalogue, b));
             json!({ "contribution": null, "book": book })
         })
         .collect();
@@ -932,6 +933,34 @@ fn author_page(catalogue: &Catalogue, id: i64) -> Option<Value> {
         "books_count": null,
         "contributions": contributions,
     }))
+}
+
+/// A book's `book_series` rows for `AuthorPage`, with the facts it asks for
+/// of each series. The catalogue records no merged series, and no main-book
+/// count, so that is its own books in the series with a position, not
+/// compilations.
+fn author_book_series(catalogue: &Catalogue, book: &Book) -> Vec<Value> {
+    book.series
+        .iter()
+        .map(|s| {
+            let main_books = catalogue
+                .books
+                .iter()
+                .filter_map(|b| b.in_series(&s.name))
+                .filter(|row| row.position.is_some() && !row.compilation)
+                .count();
+            json!({
+                "series": {
+                    "id": catalogue.series_id(&s.name),
+                    "name": s.name,
+                    "author_id": catalogue.series_author(&s.name).map(|a| catalogue.author_id(a)),
+                    "canonical_id": null,
+                    "primary_books_count": main_books,
+                    "is_completed": null,
+                },
+            })
+        })
+        .collect()
 }
 
 fn search_document(book: &Book) -> Value {

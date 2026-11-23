@@ -1,42 +1,60 @@
-//! An author page: photo, bio and their most-read books.
+//! An author page: photo, bio, then their books or their series.
 //!
 //! The header puts the author's photo where a book has its cover, a large
 //! `ui::Avatar` (initials on `accent-soft` without one), beside their name
 //! in `display-24`, the facts, how many of their books the reader has read
-//! and "Open on Hardcover". The bio follows in `prose`, then "Books" with
-//! the order, and the books as catalogue rows.
+//! and "Open on Hardcover". The bio follows in `prose`.
+//!
+//! Under the header, a small segmented "Books" | "Series" switches what the
+//! page lists (an author without series gets the "Books" heading instead).
+//! Books: the order, and the books as catalogue rows. Series: every series,
+//! the most read first, as sequence rows on the book rows' spine, each with
+//! the cover of their most-read book in it, the name as a text button that
+//! opens the series page, and its facts ("7 books · Complete · 3 read"). The
+//! choice goes back to Books for another author. The book pane beside a wide
+//! page keeps the book selected in Books.
 //!
 //! The photo, name and bio scroll on their own in a short window
-//! (`book_list::page_header_scrolling`); "Books" and the list stay, with
+//! (`book_list::page_header_scrolling`); the switch and the list stay, with
 //! room for at least three rows.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui_kit::ScrollHandle;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::list::ListState;
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
+use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::{IndexPath, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Subscription, Window, div,
-    prelude::FluentBuilder as _,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable as _,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
+    Subscription, Window, div, prelude::FluentBuilder as _,
 };
-use hardcover_core::{AuthorBook, AuthorDetails, AuthorId};
+use hardcover_core::{
+    AuthorBook, AuthorDetails, AuthorId, AuthorSeries, LibraryEntry, ReadingStatus, SeriesId,
+};
 
 use super::book_list::{
     CatalogBooks, CatalogRow, ListPane, PageRows, demand, focus_list_if_fallback_is_focused,
     follow_list, new_list, page_body, page_header, page_header_scrolling, page_list, read_summary,
     reset_scroll, row_details,
 };
+use super::navigation::Page;
 use crate::bidi::WrappingText;
+use crate::cover::{Cover, CoverSize};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::library::model::LibraryModel;
 use crate::resource::{Catalog, Demand, SharedChanged};
 use crate::ui::kit::OnTextSpine as _;
 use crate::ui::kit::RaisedField as _;
 use crate::ui::kit::SmallControl as _;
-use crate::ui::{Avatar, AvatarSize, ExternalLink, LoadFailed, SectionHeader, Skeleton};
+use crate::ui::kit::small_tab;
+use crate::ui::reveal::RevealScroll as _;
+use crate::ui::{
+    Avatar, AvatarSize, ExternalLink, LoadFailed, SectionHeader, Sequence, Skeleton, TextButton,
+};
 
 /// How an author's books are ordered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -101,6 +119,62 @@ fn life_years(author: &AuthorDetails) -> Option<String> {
 /// Bios longer than this start collapsed.
 const LONG_BIO: usize = 400;
 
+/// What the page lists under its header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Tab {
+    #[default]
+    Books,
+    Series,
+}
+
+impl Tab {
+    const ALL: [Tab; 2] = [Tab::Books, Tab::Series];
+
+    fn label(self) -> &'static str {
+        match self {
+            Tab::Books => "Books",
+            Tab::Series => "Series",
+        }
+    }
+}
+
+/// How many books of each series the reader has read, from their library.
+fn read_per_series(entries: &[LibraryEntry]) -> HashMap<SeriesId, u32> {
+    let mut read: HashMap<SeriesId, u32> = HashMap::new();
+    for entry in entries.iter().filter(|e| e.status == ReadingStatus::Read) {
+        let mut seen: Vec<SeriesId> = Vec::new();
+        for id in entry.series.iter().filter_map(|s| s.id) {
+            if !seen.contains(&id) {
+                seen.push(id);
+                *read.entry(id).or_default() += 1;
+            }
+        }
+    }
+    read
+}
+
+/// "7 books · Complete · 3 read". The count of books is Hardcover's count of
+/// the main ones, and the read count the library's of any book in the series
+/// (novellas, compilations), so the count is left out when it is lower than
+/// the books read, rather than read as "2 books · 4 read".
+fn series_facts(series: &AuthorSeries, read: u32) -> String {
+    let mut facts: Vec<String> = Vec::new();
+    match series.primary_books_count.filter(|n| *n >= read) {
+        Some(1) => facts.push("1 book".into()),
+        Some(n) => facts.push(format!("{} books", crate::format::count_text(n))),
+        None => {}
+    }
+    match series.is_completed {
+        Some(true) => facts.push("Complete".into()),
+        Some(false) => facts.push("Ongoing".into()),
+        None => {}
+    }
+    if read > 0 {
+        facts.push(format!("{} read", crate::format::count_text(read)));
+    }
+    facts.join(" · ")
+}
+
 pub struct AuthorView {
     model: Entity<LibraryModel>,
     /// The session's catalogue, which holds the pages; `None` once signed
@@ -112,6 +186,11 @@ pub struct AuthorView {
     order: BookOrder,
     order_select: Entity<SelectState<Vec<OrderOption>>>,
     bio_expanded: bool,
+    /// What the page lists: Books unless the reader picked Series.
+    tab: Tab,
+    /// The Series tab's list, which takes focus from the book list when the
+    /// tab changes under it.
+    series_focus: FocusHandle,
     list: Entity<ListState<CatalogBooks>>,
     /// The selected book, beside the list when the window is wide.
     pane: ListPane,
@@ -171,6 +250,8 @@ impl AuthorView {
             order: BookOrder::default(),
             order_select,
             bio_expanded: false,
+            tab: Tab::default(),
+            series_focus: cx.focus_handle(),
             list,
             pane,
             rows: PageRows::default(),
@@ -183,8 +264,7 @@ impl AuthorView {
     pub fn show(&mut self, id: AuthorId, window: &mut Window, cx: &mut Context<Self>) {
         if self.current != Some(id) {
             self.bio_expanded = false;
-        }
-        if self.current != Some(id) {
+            self.tab = Tab::default();
             reset_scroll(&self.header_scroll);
         }
         self.current = Some(id);
@@ -197,7 +277,11 @@ impl AuthorView {
     /// Until then `fallback` holds focus, so Escape and Back keep working, and
     /// the list takes over when the page arrives if `fallback` still has it.
     pub fn focus(&mut self, fallback: &FocusHandle, window: &mut Window, cx: &mut Context<Self>) {
-        if self.page(cx).is_some() {
+        let page = self.page(cx);
+        if page.as_deref().map(|author| self.tab_for(author)) == Some(Tab::Series) {
+            self.focus_when_ready = None;
+            window.focus(&self.series_focus, cx);
+        } else if page.is_some() {
             self.focus_when_ready = None;
             crate::ui::enter_list(&self.list, window, cx);
         } else {
@@ -377,18 +461,132 @@ impl AuthorView {
             .into_any_element()
     }
 
-    /// "Books" and the order, over the list: 24 under the header (whose own
-    /// 16 of foot this completes).
-    fn render_books_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        page_header().pt_2().child(
-            SectionHeader::new("Books").action(
-                div().w(size::SELECT_SMALL).child(
-                    Select::new(&self.order_select)
+    /// The tab shown for `author`: Books when they have no series.
+    fn tab_for(&self, author: &AuthorDetails) -> Tab {
+        if author.series.is_empty() {
+            Tab::Books
+        } else {
+            self.tab
+        }
+    }
+
+    /// Switches the list under the header. Focus on the list that goes moves
+    /// to the one that comes, so Escape and the keys keep working.
+    fn set_tab(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tab == tab {
+            return;
+        }
+        let list_focused = self
+            .list
+            .read(cx)
+            .focus_handle(cx)
+            .contains_focused(window, cx);
+        let series_focused = self.series_focus.contains_focused(window, cx);
+        self.tab = tab;
+        match tab {
+            Tab::Series if list_focused => window.focus(&self.series_focus, cx),
+            Tab::Books if series_focused => crate::ui::enter_list(&self.list, window, cx),
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    /// Every series, as sequence rows on the book rows' spine, scrolling in
+    /// the list's place.
+    fn render_series(&self, series: &[AuthorSeries], cx: &mut Context<Self>) -> AnyElement {
+        let muted = colors(cx).fg_muted;
+        let read = read_per_series(self.model.read(cx).entries());
+        let rows = series.iter().map(|s| {
+            let id = s.id.get();
+            let page = Page::Series(s.id);
+            let facts = series_facts(s, read.get(&s.id).copied().unwrap_or(0));
+            h_flex()
+                .w_full()
+                .gap_3()
+                .child(
+                    Cover::new(CoverSize::Sm, s.lead.title.clone())
+                        .thumbnail(s.lead.cover.as_ref().map(|c| c.url.clone()))
+                        .opens(
+                            SharedString::from(format!("author-series-cover-{id}")),
+                            page.clone(),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            TextButton::new(
+                                SharedString::from(format!("author-series-{id}")),
+                                s.name.clone(),
+                            )
+                            .opens(page),
+                        )
+                        .when(!facts.is_empty(), |this| {
+                            this.child(div().body().text_color(muted).truncate().child(facts))
+                        }),
+                )
+        });
+        div()
+            .id("author-series")
+            .track_focus(&self.series_focus)
+            .size_full()
+            .scroll_y_revealing_focus()
+            // The page's inset: the list's 24 and a row's own 8.
+            .child(
+                div()
+                    .px_8()
+                    .pb_6()
+                    .child(Sequence::new().flush_top().children(rows)),
+            )
+            .into_any_element()
+    }
+
+    /// The switch between books and series (or "Books" alone) and, for the
+    /// books, the order, over the list: 24 under the header (whose own 16 of
+    /// foot this completes).
+    fn render_list_bar(
+        &self,
+        tab: Tab,
+        has_series: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let order = (tab == Tab::Books).then(|| {
+            div().w(size::SELECT_SMALL).child(
+                Select::new(&self.order_select)
+                    .small_control()
+                    .raised_field(false, cx),
+            )
+        });
+        let bar = if has_series {
+            let view = cx.entity().downgrade();
+            let selected = Tab::ALL.iter().position(|t| *t == tab).unwrap_or(0);
+            h_flex()
+                .w_full()
+                .min_h(size::CONTROL_SMALL)
+                .gap_2()
+                .justify_between()
+                .child(
+                    TabBar::new("author-tab")
+                        .segmented()
                         .small_control()
-                        .raised_field(false, cx),
-                ),
-            ),
-        )
+                        .selected_index(selected)
+                        .children(Tab::ALL.map(|t| small_tab(t.label())))
+                        .on_click(move |ix, window, cx| {
+                            let tab = Tab::ALL[*ix];
+                            let _ = view.update(cx, |this, cx| this.set_tab(tab, window, cx));
+                        }),
+                )
+                .children(order)
+                .into_any_element()
+        } else {
+            SectionHeader::new("Books")
+                .when_some(order, |this, order| this.action(order))
+                .into_any_element()
+        };
+        page_header().pt_2().child(bar)
     }
 }
 
@@ -416,7 +614,14 @@ impl Render for AuthorView {
             }
             _ => None,
         };
-        let ready = page.is_some();
+        let listing = page.as_ref().map(|author| {
+            let tab = self.tab_for(author);
+            let body = match tab {
+                Tab::Books => page_list(&self.list).into_any_element(),
+                Tab::Series => self.render_series(&author.series, cx),
+            };
+            (tab, !author.series.is_empty(), body)
+        });
         let header = match (page, error) {
             (Some(author), _) => self.render_header(&author, cx),
             (None, Some(message)) => LoadFailed::new("retry-author", message)
@@ -436,16 +641,16 @@ impl Render for AuthorView {
                 .into_any_element(),
         };
         let column = v_flex().size_full().min_w_0().map(|this| {
-            if ready {
+            if let Some((tab, has_series, body)) = listing {
                 // The header scrolls on its own when the window is short;
-                // "Books" and the list keep their room.
+                // the switch and the list keep their room.
                 this.child(page_header_scrolling(
                     "author-header",
                     &self.header_scroll,
                     header,
                 ))
-                .child(self.render_books_bar(cx))
-                .child(page_body().child(page_list(&self.list)))
+                .child(self.render_list_bar(tab, has_series, cx))
+                .child(page_body().child(body))
             } else {
                 this.child(page_header().child(header))
             }
@@ -483,6 +688,56 @@ mod tests {
         assert_eq!(ids(BookOrder::MostRead), vec![1, 2, 3, 4]);
         assert_eq!(ids(BookOrder::Newest), vec![3, 1, 4, 2]);
         assert_eq!(ids(BookOrder::Oldest), vec![1, 4, 3, 2]);
+    }
+
+    #[test]
+    fn series_facts_leave_out_a_count_below_the_books_read() {
+        let mut s = AuthorSeries::new(
+            SeriesId::new(1),
+            "A Series",
+            BookSummary::new(BookId::new(1), "Book 1"),
+        );
+        assert_eq!(series_facts(&s, 0), "");
+        s.primary_books_count = Some(7);
+        s.is_completed = Some(true);
+        assert_eq!(series_facts(&s, 0), "7 books · Complete");
+        assert_eq!(series_facts(&s, 3), "7 books · Complete · 3 read");
+        s.primary_books_count = Some(1);
+        s.is_completed = Some(false);
+        assert_eq!(series_facts(&s, 1), "1 book · Ongoing · 1 read");
+        // Novellas and compilations read past Hardcover's count of main books.
+        s.primary_books_count = Some(2);
+        s.is_completed = None;
+        assert_eq!(series_facts(&s, 4), "4 read");
+    }
+
+    #[test]
+    fn read_per_series_counts_read_books_once_each() {
+        use hardcover_core::{SeriesRef, UserBookId, UserId};
+        let entry = |id: i64, status, series: &[i64]| {
+            let mut e = LibraryEntry::new(
+                UserBookId::new(id),
+                UserId::new(1),
+                BookSummary::new(BookId::new(id), format!("Book {id}")),
+                status,
+            );
+            e.series = series
+                .iter()
+                .map(|s| {
+                    let mut r = SeriesRef::new(format!("Series {s}"));
+                    r.id = Some(SeriesId::new(*s));
+                    r
+                })
+                .collect();
+            e
+        };
+        let read = read_per_series(&[
+            entry(1, ReadingStatus::Read, &[10, 20, 10]),
+            entry(2, ReadingStatus::Read, &[10]),
+            entry(3, ReadingStatus::CurrentlyReading, &[10, 20]),
+        ]);
+        assert_eq!(read.get(&SeriesId::new(10)), Some(&2));
+        assert_eq!(read.get(&SeriesId::new(20)), Some(&1));
     }
 
     #[test]

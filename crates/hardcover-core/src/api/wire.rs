@@ -10,13 +10,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::model::{
-    AuthorBook, AuthorDetails, AuthorHit, AuthorId, AuthorRef, BookDetails, BookId, BookSummary,
-    CommunityReview, Contributor, Cover, Date, EditionId, EditionParts, EditionSummary, Goal,
-    GoalConditions, GoalId, GoalMetric, Length, LibraryEntry, ListBook, ListBookId, ListId,
-    ListMembership, Measure, Privacy, Rating, RatingBucket, ReadId, ReadSession, ReadingStatus,
-    Review, Reviewer, SearchHits, SearchPage, SeriesBook, SeriesDetails, SeriesHit, SeriesId,
-    SeriesRef, Timestamp, TrackedBook, TrackedSeries, UpcomingBook, User, UserBookId, UserId,
-    UserList, measure_of, read_order,
+    AuthorBook, AuthorDetails, AuthorHit, AuthorId, AuthorRef, AuthorSeries, BookDetails, BookId,
+    BookSummary, CommunityReview, Contributor, Cover, Date, EditionId, EditionParts,
+    EditionSummary, Goal, GoalConditions, GoalId, GoalMetric, Length, LibraryEntry, ListBook,
+    ListBookId, ListId, ListMembership, Measure, Privacy, Rating, RatingBucket, ReadId,
+    ReadSession, ReadingStatus, Review, Reviewer, SearchHits, SearchPage, SeriesBook,
+    SeriesDetails, SeriesHit, SeriesId, SeriesRef, Timestamp, TrackedBook, TrackedSeries,
+    UpcomingBook, User, UserBookId, UserId, UserList, measure_of, read_order,
 };
 
 // ---------- scalar helpers ----------
@@ -516,7 +516,31 @@ pub(crate) struct RawAuthorPage {
 #[derive(Debug, Deserialize)]
 pub(crate) struct RawAuthorContribution {
     pub contribution: Option<String>,
-    pub book: Option<RawPartialBook>,
+    pub book: Option<RawAuthorBook>,
+}
+
+/// A book on an author page, with its series.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawAuthorBook {
+    #[serde(flatten)]
+    pub book: RawPartialBook,
+    #[serde(default)]
+    pub book_series: Vec<RawAuthorBookSeries>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawAuthorBookSeries {
+    pub series: Option<RawAuthorSeries>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawAuthorSeries {
+    pub id: Option<i64>,
+    pub name: Option<String>,
+    pub author_id: Option<i64>,
+    pub canonical_id: Option<i64>,
+    pub primary_books_count: Option<i64>,
+    pub is_completed: Option<bool>,
 }
 
 impl RawAuthorPage {
@@ -532,25 +556,93 @@ impl RawAuthorPage {
         d.born_year = year(self.born_year);
         d.death_year = year(self.death_year);
         d.books_count = opt_u32(self.books_count);
+        // Each book's series, in the order of the books.
+        let mut series_of: Vec<(BookId, Vec<RawAuthorSeries>)> = Vec::new();
         for c in self.contributions {
             let Some(book) = c.book else { continue };
-            if book.is_partial_book == Some(true) {
+            if book.book.is_partial_book == Some(true) {
                 continue;
             }
             let role = non_empty(c.contribution).filter(|r| !r.eq_ignore_ascii_case("author"));
-            let summary = book.book.into_summary();
+            let summary = book.book.book.into_summary();
             if let Some(existing) = d.books.iter_mut().find(|b| b.book.id == summary.id) {
                 if role.is_none() {
                     existing.role = None;
                 }
             } else {
+                series_of.push((
+                    summary.id,
+                    book.book_series
+                        .into_iter()
+                        .filter_map(|s| s.series)
+                        .collect(),
+                ));
                 let mut b = AuthorBook::new(summary);
                 b.role = role;
                 d.books.push(b);
             }
         }
+        d.series = author_series(d.id, &d.books, series_of);
         d
     }
+}
+
+/// An author's series, from the books on their page (most read first) and
+/// each book's series. Only books they wrote count, not those they edited,
+/// introduced or translated. A series counts when Hardcover names them its
+/// author, or when at least two of their books are in it: one book alone in
+/// someone else's series is mostly a crossover, a shared world or a mistaken
+/// credit (checked live, read-only, on six prolific authors: Batman, Magic:
+/// The Gathering, Pern), while a co-written series keeps two or more (The
+/// Wheel of Time). The most read first, by the readers of their books in it.
+fn author_series(
+    author: AuthorId,
+    books: &[AuthorBook],
+    series_of: Vec<(BookId, Vec<RawAuthorSeries>)>,
+) -> Vec<AuthorSeries> {
+    struct Tally {
+        series: AuthorSeries,
+        theirs: bool,
+        readers: u64,
+    }
+    let mut tallies: Vec<Tally> = Vec::new();
+    for (book_id, series) in series_of {
+        let Some(book) = books
+            .iter()
+            .find(|b| b.book.id == book_id && b.role.is_none())
+        else {
+            continue;
+        };
+        let mut seen: Vec<i64> = Vec::new();
+        for s in series {
+            let Some(id) = s.id else { continue };
+            if s.canonical_id.is_some() || seen.contains(&id) {
+                continue;
+            }
+            seen.push(id);
+            let readers = u64::from(book.book.users_count.unwrap_or(0));
+            if let Some(t) = tallies.iter_mut().find(|t| t.series.id.get() == id) {
+                t.series.books += 1;
+                t.readers += readers;
+                continue;
+            }
+            let Some(name) = non_empty(s.name) else {
+                continue;
+            };
+            let mut series = AuthorSeries::new(SeriesId::new(id), name, book.book.clone());
+            series.primary_books_count = opt_u32(s.primary_books_count).filter(|n| *n > 0);
+            series.is_completed = s.is_completed;
+            tallies.push(Tally {
+                series,
+                theirs: s.author_id == Some(author.get()),
+                readers,
+            });
+        }
+    }
+    tallies.retain(|t| t.theirs || t.series.books >= 2);
+    // Stable: equal readers keep the order of their most-read book.
+    tallies.sort_by_key(|t| std::cmp::Reverse(t.readers));
+    tallies.into_iter().map(|t| t.series).collect()
 }
 
 // ---------- library ----------
