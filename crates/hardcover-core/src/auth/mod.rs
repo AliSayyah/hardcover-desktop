@@ -46,7 +46,7 @@ pub const CLIENT_ID_ENV: &str = "HARDCOVER_CLIENT_ID";
 /// Scopes requested at sign-in: profile, catalog, read/write on the library,
 /// reviews, reading goals, lists, the journal, other readers and notifications. Adding one makes every existing session
 /// ask the user to sign in again, so add them sparingly.
-pub const DEFAULT_SCOPES: [&str; 14] = [
+pub const DEFAULT_SCOPES: [&str; 16] = [
     scopes::READ_ME,
     scopes::READ_CATALOG,
     scopes::READ_LIBRARY,
@@ -61,6 +61,8 @@ pub const DEFAULT_SCOPES: [&str; 14] = [
     scopes::READ_USERS,
     scopes::READ_NOTIFICATIONS,
     scopes::WRITE_NOTIFICATIONS,
+    scopes::READ_VIBES,
+    scopes::WRITE_VIBES,
 ];
 
 /// `HARDCOVER_CLIENT_ID` if set and non-empty, otherwise `default`.
@@ -298,7 +300,9 @@ mod tests {
                 "read:social",
                 "read:users",
                 "read:notifications",
-                "write:notifications"
+                "write:notifications",
+                "read:vibes",
+                "write:vibes"
             ]
         );
         assert_eq!(c.redirect_path(), "/callback");

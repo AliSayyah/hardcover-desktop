@@ -491,6 +491,7 @@ fn scope_feature(scope: &str) -> &'static str {
         scopes::READ_JOURNAL => "your reading journal",
         scopes::READ_SOCIAL | scopes::READ_USERS => "other readers' reviews",
         scopes::READ_NOTIFICATIONS | scopes::WRITE_NOTIFICATIONS => "notifications",
+        scopes::READ_VIBES | scopes::WRITE_VIBES => "recommendations",
         _ => "your library",
     }
 }

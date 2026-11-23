@@ -38,6 +38,12 @@ pub const READ_USERS: &str = "read:users";
 pub const READ_NOTIFICATIONS: &str = "read:notifications";
 /// Marking notifications read.
 pub const WRITE_NOTIFICATIONS: &str = "write:notifications";
+/// Vibes: Hardcover's lists of recommended books (the user's own
+/// Recommendations and Top Picks, and the ones Hardcover features).
+pub const READ_VIBES: &str = "read:vibes";
+/// Changing vibes: making sure the user's system vibes exist, and leaving a
+/// book out of one ("Never recommend…").
+pub const WRITE_VIBES: &str = "write:vibes";
 
 /// What versions up to 0.1.x requested. A session saved without a granted
 /// scope is assumed to hold exactly these.
@@ -237,7 +243,9 @@ mod tests {
                 READ_SOCIAL,
                 READ_USERS,
                 READ_NOTIFICATIONS,
-                WRITE_NOTIFICATIONS
+                WRITE_NOTIFICATIONS,
+                READ_VIBES,
+                WRITE_VIBES
             ]
         );
         assert!(granted(&DEFAULT_SCOPES.join(" ")).covers(&DEFAULT_SCOPES));
@@ -258,6 +266,9 @@ mod tests {
     fn every_narrow_part_stands_for_the_broad_scope() {
         let g = granted("read:goals:public read:goals:following read:goals:private");
         assert!(g.contains(READ_GOALS));
+        let g = granted("read:vibes");
+        assert!(g.contains("read:vibes:public") && g.contains("read:vibes:private"));
+        assert!(!g.contains(WRITE_VIBES), "reading never implies writing");
         assert!(!granted("read:goals:public read:goals:private").contains(READ_GOALS));
         // write:reviews has no narrower parts, so nothing stands for it.
         assert!(!granted("write:library").contains(WRITE_REVIEWS));
