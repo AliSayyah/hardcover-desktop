@@ -7,6 +7,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::tags::{BookGenres, BookVotes};
+
 /// Calendar date (`date` in the schema), e.g. a read's start date.
 pub type Date = chrono::NaiveDate;
 /// Point in time (`timestamptz` in the schema), always UTC.
@@ -75,6 +77,10 @@ id_type!(
 id_type!(
     /// `authors.id`
     AuthorId
+);
+id_type!(
+    /// `tags.id`: a genre, mood, pace or other community tag (see [`crate::tags`]).
+    TagId
 );
 id_type!(
     /// `goals.id`: one reading goal.
@@ -935,6 +941,11 @@ pub struct BookDetails {
     /// Hardcover's similar books, most similar first (`cached_similar_book_ids`).
     #[serde(default)]
     pub similar_book_ids: Vec<BookId>,
+    /// Readers' exact votes for the moods, pace and character tags
+    /// (`taggable_counts`), for the mood line and the "Votes" popover
+    /// ([`crate::tags::mood_line`], [`crate::tags::breakdown`]).
+    #[serde(default)]
+    pub votes: BookVotes,
 }
 
 impl BookDetails {
@@ -955,6 +966,7 @@ impl BookDetails {
             ratings_distribution: Vec::new(),
             alternative_titles: Vec::new(),
             similar_book_ids: Vec::new(),
+            votes: BookVotes::default(),
         }
     }
 }
@@ -2131,6 +2143,59 @@ pub struct TrackedSeriesLoad {
     pub series: Vec<TrackedSeries>,
     /// The ids asked for in batches that failed.
     pub missing: Vec<SeriesId>,
+    /// The first batch's failure, if any failed.
+    pub error: Option<crate::Error>,
+}
+
+/// A book on a tag's page, with its readers' votes for the tag.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct TagBook {
+    pub book: BookSummary,
+    /// The votes for the tag the page is for (not the narrowing one).
+    pub votes: u32,
+}
+
+impl TagBook {
+    #[must_use]
+    pub fn new(book: BookSummary, votes: u32) -> Self {
+        Self { book, votes }
+    }
+}
+
+/// A book's genres and mood votes, for a shelf's genre and mood filter
+/// ([`crate::api::Client::book_tags`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct BookTags {
+    pub book: BookId,
+    /// `cached_tags`' genres, merged by [`crate::tags::genre_key`].
+    pub genres: BookGenres,
+    /// The votes for the 14 moods only: no pace or character tags, so a
+    /// [`crate::tags::mood_line`] of them names no pace. Filter with
+    /// [`crate::tags::has_mood`].
+    pub moods: BookVotes,
+}
+
+impl BookTags {
+    #[must_use]
+    pub fn new(book: BookId, genres: BookGenres, moods: BookVotes) -> Self {
+        Self {
+            book,
+            genres,
+            moods,
+        }
+    }
+}
+
+/// What [`crate::api::Client::book_tags`] loaded. One batch failing doesn't
+/// throw away the others.
+#[derive(Debug, Default)]
+#[non_exhaustive]
+pub struct BookTagsLoad {
+    pub books: Vec<BookTags>,
+    /// The ids asked for in batches that failed.
+    pub missing: Vec<BookId>,
     /// The first batch's failure, if any failed.
     pub error: Option<crate::Error>,
 }

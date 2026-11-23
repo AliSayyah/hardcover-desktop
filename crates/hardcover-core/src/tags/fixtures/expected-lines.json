@@ -1,0 +1,538 @@
+{
+ "rule": "standout: share>=0.10 of the 14 moods' votes and lift>=1.5 (share / site share), by lift desc, at most 3; fallback top 3 by votes when none; no line under 50 mood votes. pace: fast or slow leads with >=20 pace votes and count*2>=pace total; medium never. rarely: only among the ten most used moods (adventurous, emotional, dark, mysterious, tense, funny, reflective, lighthearted, sad, hopeful), lift<=0.2, by site total desc, at most 3, and only when the book has >=100 mood votes. Ties: break by votes desc then tag id asc.",
+ "expected": [
+  {
+   "id": 44186,
+   "title": "Educated: A Memoir",
+   "mood_votes": 279,
+   "line": [
+    "inspiring",
+    "challenging",
+    "reflective"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "adventurous",
+    "mysterious",
+    "funny"
+   ]
+  },
+  {
+   "id": 89871,
+   "title": "Infinite Jest",
+   "mood_votes": 52,
+   "line": [
+    "challenging",
+    "funny",
+    "sad"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": []
+  },
+  {
+   "id": 98065,
+   "title": "The Cruel Prince",
+   "mood_votes": 370,
+   "line": [
+    "tense",
+    "adventurous",
+    "dark"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": []
+  },
+  {
+   "id": 139773,
+   "title": "The Fellowship of the Ring",
+   "mood_votes": 449,
+   "line": [
+    "adventurous",
+    "hopeful"
+   ],
+   "fallback": false,
+   "pace": "slow",
+   "rarely": []
+  },
+  {
+   "id": 143200,
+   "title": "The Poppy War",
+   "mood_votes": 646,
+   "line": [
+    "dark",
+    "challenging",
+    "tense"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "funny",
+    "lighthearted",
+    "hopeful"
+   ]
+  },
+  {
+   "id": 175280,
+   "title": "Piranesi",
+   "mood_votes": 1034,
+   "line": [
+    "mysterious",
+    "reflective"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": []
+  },
+  {
+   "id": 179241,
+   "title": "A Little Life",
+   "mood_votes": 347,
+   "line": [
+    "sad",
+    "challenging",
+    "dark"
+   ],
+   "fallback": false,
+   "pace": "slow",
+   "rarely": [
+    "adventurous",
+    "mysterious",
+    "funny"
+   ]
+  },
+  {
+   "id": 266607,
+   "title": "Klara and the Sun",
+   "mood_votes": 318,
+   "line": [
+    "reflective",
+    "sad",
+    "hopeful"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "adventurous",
+    "funny"
+   ]
+  },
+  {
+   "id": 292354,
+   "title": "The Martian",
+   "mood_votes": 470,
+   "line": [
+    "funny",
+    "hopeful",
+    "adventurous"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "dark",
+    "mysterious",
+    "sad"
+   ]
+  },
+  {
+   "id": 312460,
+   "title": "Dune",
+   "mood_votes": 590,
+   "line": [
+    "challenging",
+    "adventurous"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "funny",
+    "lighthearted"
+   ]
+  },
+  {
+   "id": 340654,
+   "title": "The Seven Husbands of Evelyn Hugo",
+   "mood_votes": 1027,
+   "line": [
+    "sad",
+    "reflective",
+    "emotional"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": []
+  },
+  {
+   "id": 369692,
+   "title": "Mistborn: The Final Empire",
+   "mood_votes": 1081,
+   "line": [
+    "adventurous",
+    "mysterious"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": []
+  },
+  {
+   "id": 373525,
+   "title": "It",
+   "mood_votes": 107,
+   "line": [
+    "dark",
+    "tense"
+   ],
+   "fallback": false,
+   "pace": "slow",
+   "rarely": [
+    "lighthearted"
+   ]
+  },
+  {
+   "id": 377193,
+   "title": "The Great Gatsby",
+   "mood_votes": 197,
+   "line": [
+    "sad",
+    "reflective"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "lighthearted"
+   ]
+  },
+  {
+   "id": 377938,
+   "title": "The Lord of the Rings",
+   "mood_votes": 82,
+   "line": [
+    "inspiring",
+    "hopeful",
+    "adventurous"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": []
+  },
+  {
+   "id": 379647,
+   "title": "Pride and Prejudice",
+   "mood_votes": 329,
+   "line": [
+    "lighthearted",
+    "funny",
+    "hopeful"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "dark",
+    "mysterious",
+    "tense"
+   ]
+  },
+  {
+   "id": 379760,
+   "title": "1984",
+   "mood_votes": 613,
+   "line": [
+    "challenging",
+    "dark",
+    "tense"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "adventurous",
+    "funny",
+    "lighthearted"
+   ]
+  },
+  {
+   "id": 383598,
+   "title": "Circe",
+   "mood_votes": 599,
+   "line": [
+    "reflective",
+    "adventurous",
+    "emotional"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "funny",
+    "lighthearted"
+   ]
+  },
+  {
+   "id": 386446,
+   "title": "The Way of Kings",
+   "mood_votes": 735,
+   "line": [
+    "adventurous"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "lighthearted"
+   ]
+  },
+  {
+   "id": 427314,
+   "title": "Children of Dune",
+   "mood_votes": 140,
+   "line": [
+    "challenging",
+    "reflective",
+    "mysterious"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "funny",
+    "lighthearted",
+    "hopeful"
+   ]
+  },
+  {
+   "id": 427363,
+   "title": "God Emperor of Dune",
+   "mood_votes": 91,
+   "line": [
+    "challenging",
+    "reflective",
+    "mysterious"
+   ],
+   "fallback": false,
+   "pace": "slow",
+   "rarely": []
+  },
+  {
+   "id": 427393,
+   "title": "Dune Messiah",
+   "mood_votes": 221,
+   "line": [
+    "challenging",
+    "reflective"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "funny",
+    "lighthearted",
+    "hopeful"
+   ]
+  },
+  {
+   "id": 427473,
+   "title": "Red Rising",
+   "mood_votes": 628,
+   "line": [
+    "tense",
+    "dark",
+    "adventurous"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "lighthearted"
+   ]
+  },
+  {
+   "id": 427513,
+   "title": "Ulysses",
+   "mood_votes": 14,
+   "line": null,
+   "fallback": false,
+   "pace": null,
+   "rarely": []
+  },
+  {
+   "id": 427544,
+   "title": "Edgedancer",
+   "mood_votes": 232,
+   "line": [
+    "funny",
+    "adventurous",
+    "lighthearted"
+   ],
+   "fallback": false,
+   "pace": "fast",
+   "rarely": []
+  },
+  {
+   "id": 427578,
+   "title": "Project Hail Mary",
+   "mood_votes": 2067,
+   "line": [
+    "hopeful",
+    "funny",
+    "adventurous"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "dark"
+   ]
+  },
+  {
+   "id": 428018,
+   "title": "The Midnight Library",
+   "mood_votes": 991,
+   "line": [
+    "inspiring",
+    "hopeful",
+    "reflective"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "tense"
+   ]
+  },
+  {
+   "id": 428023,
+   "title": "Atomic habits: An Easy & Proven Way to Build Good Habits & Break Bad Ones",
+   "mood_votes": 206,
+   "line": [
+    "informative",
+    "inspiring",
+    "reflective"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "adventurous",
+    "emotional",
+    "dark"
+   ]
+  },
+  {
+   "id": 428778,
+   "title": "The Love Hypothesis",
+   "mood_votes": 433,
+   "line": [
+    "lighthearted",
+    "funny"
+   ],
+   "fallback": false,
+   "pace": "fast",
+   "rarely": [
+    "adventurous",
+    "dark",
+    "mysterious"
+   ]
+  },
+  {
+   "id": 475214,
+   "title": "Legends & Lattes",
+   "mood_votes": 1014,
+   "line": [
+    "relaxing",
+    "lighthearted",
+    "hopeful"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "dark",
+    "mysterious",
+    "tense"
+   ]
+  },
+  {
+   "id": 479910,
+   "title": "Tomorrow, and Tomorrow, and Tomorrow",
+   "mood_votes": 792,
+   "line": [
+    "sad",
+    "reflective",
+    "emotional"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "mysterious"
+   ]
+  },
+  {
+   "id": 490300,
+   "title": "Lessons in Chemistry",
+   "mood_votes": 502,
+   "line": [
+    "inspiring",
+    "hopeful",
+    "funny"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "adventurous",
+    "dark",
+    "mysterious"
+   ]
+  },
+  {
+   "id": 714600,
+   "title": "Fourth Wing",
+   "mood_votes": 1077,
+   "line": [
+    "adventurous",
+    "tense"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "reflective"
+   ]
+  },
+  {
+   "id": 1145808,
+   "title": "Gone Girl",
+   "mood_votes": 185,
+   "line": [
+    "mysterious",
+    "dark",
+    "tense"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "lighthearted",
+    "sad",
+    "hopeful"
+   ]
+  },
+  {
+   "id": 1788666,
+   "title": "Moby Dick",
+   "mood_votes": 52,
+   "line": [
+    "informative",
+    "challenging",
+    "adventurous"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": []
+  },
+  {
+   "id": 2459845,
+   "title": "The Hobbit, or There and Back Again",
+   "mood_votes": 463,
+   "line": [
+    "lighthearted",
+    "adventurous",
+    "funny"
+   ],
+   "fallback": false,
+   "pace": null,
+   "rarely": [
+    "dark",
+    "sad"
+   ]
+  }
+ ]
+}

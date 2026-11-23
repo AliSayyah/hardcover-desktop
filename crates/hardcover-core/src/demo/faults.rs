@@ -264,7 +264,7 @@ pub(super) fn required_scopes(op: &str) -> &'static [&'static str] {
         }
         "SearchBooks" | "SearchAuthors" | "SearchSeries" | "BooksTrending" | "BookDetails"
         | "SeriesPage" | "AuthorPage" | "BooksByIds" | "BookEditions" | "UpcomingInSeries"
-        | "SeriesOverview" => &[READ_CATALOG],
+        | "SeriesOverview" | "BooksByTag" | "BooksByTagWith" | "BookTags" => &[READ_CATALOG],
         "InsertUserBook" | "UpdateUserBook" | "DeleteUserBook" | "InsertUserBookRead"
         | "UpdateUserBookRead" | "DeleteUserBookRead" | "EditionOwned" => &[WRITE_LIBRARY],
         "UpdateUserBookReview" | "DeleteUserBookReview" => &[WRITE_LIBRARY, WRITE_REVIEWS],

@@ -24,6 +24,9 @@
 //! Series and author pages are built from the catalogue alone: a series lists
 //! the catalogue's books in it, an author their books in the catalogue. Their
 //! ids are the demo's own, not Hardcover's. Authors have no bio, photo or book count.
+//! Each book has its real genres and its real votes for the moods, pace and
+//! character tags, from Hardcover's public catalogue; tag pages rank the
+//! catalogue's books by those votes ([`tags`]).
 //! "Similar books" are the catalogue's books sharing the most genres, not
 //! Hardcover's picks, and books have no ratings distribution or alternative
 //! titles: the catalogue does not record them.
@@ -45,7 +48,7 @@
 //! makes requests slow, fail or lack a scope. Only built with the `demo`
 //! feature (and in tests).
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
@@ -61,6 +64,7 @@ use crate::{Error, Result};
 mod faults;
 mod reviews;
 mod state;
+mod tags;
 #[cfg(test)]
 mod tests;
 mod vibes;
@@ -228,7 +232,12 @@ struct Book {
     ratings_count: i64,
     users_count: i64,
     editions_count: i64,
-    genres: Vec<String>,
+    /// The book's top genres, with their real votes (`cached_tags`).
+    genres: Vec<DemoGenre>,
+    /// The book's real votes per mood, pace and character tag
+    /// (`taggable_counts`), by tag id.
+    #[serde(default)]
+    votes: BTreeMap<i64, u32>,
     /// The book's `book_series` rows, as Hardcover has them.
     #[serde(default)]
     series: Vec<SeriesRow>,
@@ -248,6 +257,13 @@ impl Book {
     fn in_series(&self, name: &str) -> Option<&SeriesRow> {
         self.series.iter().find(|s| s.name == name)
     }
+}
+
+/// One of a book's genres on Hardcover, with its votes.
+#[derive(Deserialize)]
+struct DemoGenre {
+    name: String,
+    votes: u32,
 }
 
 #[derive(Deserialize)]
@@ -403,7 +419,10 @@ impl Catalogue {
             .filter(|b| b.id != book.id)
             .map(|b| {
                 (
-                    b.genres.iter().filter(|g| book.genres.contains(g)).count(),
+                    b.genres
+                        .iter()
+                        .filter(|g| book.genres.iter().any(|o| o.name == g.name))
+                        .count(),
                     b,
                 )
             })
@@ -666,6 +685,7 @@ fn upcoming_details(catalogue: &Catalogue, book: &Upcoming) -> Value {
             "featured": true,
             "series": upcoming_series(catalogue, book),
         }],
+        "taggable_counts": [],
     });
     if let (Some(map), Value::Object(extra)) = (details.as_object_mut(), extra) {
         map.extend(extra);
@@ -775,13 +795,9 @@ fn by_position(a: Option<f64>, b: Option<f64>) -> std::cmp::Ordering {
     }
 }
 
-fn book_details(book: &Book) -> Value {
+fn book_details(book: &Book, vars: &Value) -> Value {
     let mut details = book_summary(book);
-    let genres: Vec<Value> = book
-        .genres
-        .iter()
-        .map(|g| json!({ "tag": g, "count": 1 }))
-        .collect();
+    let genres = tags::genre_list(book);
     let series = book_series(book);
     let extra = json!({
         "description": book.description,
@@ -793,6 +809,7 @@ fn book_details(book: &Book) -> Value {
         "alternative_titles": [],
         "cached_similar_book_ids": CATALOGUE.similar(book),
         "book_series": series,
+        "taggable_counts": tags::taggable_counts(book, vars),
     });
     if let (Some(map), Value::Object(extra)) = (details.as_object_mut(), extra) {
         map.extend(extra);
@@ -1157,7 +1174,7 @@ fn answer(state: &mut State, op: &str, vars: &Value) -> Value {
         "SearchSeries" => search_series(catalogue, vars),
         "BooksTrending" => trending(catalogue, vars),
         "BookDetails" => json!({
-            "books_by_pk": catalogue.book(int("id")).map(book_details).or_else(|| {
+            "books_by_pk": catalogue.book(int("id")).map(|b| book_details(b, vars)).or_else(|| {
                 catalogue.upcoming(int("id")).map(|u| upcoming_details(catalogue, u))
             }),
         }),
@@ -1166,6 +1183,9 @@ fn answer(state: &mut State, op: &str, vars: &Value) -> Value {
         "SeriesOverview" => series_overview(catalogue, vars),
         "AuthorPage" => json!({ "authors_by_pk": author_page(catalogue, int("id")) }),
         "BooksByIds" => books_by_ids(catalogue, vars),
+        "BooksByTag" => tags::books_by_tag(catalogue, vars, false),
+        "BooksByTagWith" => tags::books_by_tag(catalogue, vars, true),
+        "BookTags" => tags::book_tags(catalogue, vars),
         "ProgressContext" => progress_context(state, int("id"), vars),
         "BookEditions" => {
             let editions: Vec<Value> = catalogue

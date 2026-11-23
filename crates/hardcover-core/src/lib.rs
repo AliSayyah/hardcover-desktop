@@ -9,6 +9,7 @@
 //! - [`covers`]: on-disk cache of cover images.
 //! - [`prefs`]: the user's preferences, a small JSON file.
 //! - [`update`]: self-update from signed GitHub releases.
+//! - [`tags`]: moods, pace and character votes, the mood line rule, and genres merged across spellings.
 //! - [`instance`]: one running app per data directory; a later launch shows it.
 //! - [`lock`]: advisory file locks between processes (the token refresh, the instance).
 //! - `demo` (with the `demo` feature): a sample library of popular books, served without an account.
@@ -23,6 +24,7 @@ pub mod instance;
 pub mod lock;
 pub mod prefs;
 pub mod store;
+pub mod tags;
 pub mod update;
 
 mod http;
@@ -40,6 +42,7 @@ pub use api::{
     SeriesRef, Timestamp, TokenSource, TrackedBook, TrackedSeries, TrendingPeriod, User,
     UserBookId, UserId, UserList,
 };
+pub use api::{BOOK_TAGS_BATCH, BookTags, BookTagsLoad, TAG_BOOKS_PER_PAGE, TagBook, TagId};
 pub use api::{CommunityReview, REVIEWS_PER_PAGE, Reviewer, ReviewsPage};
 pub use api::{
     Coverage, LibrarySync, ListEdit, OffsetPage, Priority, ProgressChange, TrackedSeriesLoad,
