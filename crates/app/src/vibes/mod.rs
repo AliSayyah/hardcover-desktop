@@ -1,8 +1,9 @@
 //! Vibes: Hardcover's lists of recommended books (`hardcover-design`,
 //! Discover and A vibe's page). The user's Recommendations ("For you") and
-//! Top Picks lead Discover ([`shelves`]); each, and any vibe Hardcover
-//! features, has its page ([`vibe_view`]), where "Never recommend…" leaves a
-//! book out of the user's own ones.
+//! Top Picks are shelves on Discover (`catalog::discover_view`), whose
+//! Browse also lists the vibes Hardcover features; each has its page
+//! ([`vibe_view`]), where "Never recommend…" leaves a book out of the
+//! user's own ones.
 //!
 //! Hardcover builds a user's vibes only when they open them (or Discover) on
 //! hardcover.app, at most once a day; no API call does. So the page says how
@@ -10,7 +11,6 @@
 //! builds it again ([`facts_line`], `Vibe::web_url`).
 
 pub mod model;
-pub mod shelves;
 pub mod vibe_view;
 
 use chrono::TimeZone;
@@ -26,6 +26,9 @@ use crate::ui::kit::open_alert_dialog;
 /// builds it again.
 pub const STALE_AFTER_DAYS: i64 = 7;
 
+/// For you's intro, under its name on Discover and on its page.
+pub const FOR_YOU_INTRO: &str = "Hardcover's recommendations from your library.";
+
 /// The vibe's name as the app shows it: "For you" for Hardcover's
 /// Recommendations, "Top picks" for its Top Picks, else its own.
 pub fn vibe_name(vibe: &Vibe) -> String {
@@ -40,7 +43,7 @@ pub fn vibe_name(vibe: &Vibe) -> String {
 /// user's system vibes, a featured vibe's own description.
 pub fn vibe_intro(vibe: &Vibe) -> Option<String> {
     match vibe.kind {
-        VibeKind::Recommendations => Some("Hardcover's recommendations from your library.".into()),
+        VibeKind::Recommendations => Some(FOR_YOU_INTRO.into()),
         VibeKind::TopPicks => Some("Popular books Hardcover picked for your taste.".into()),
         _ => vibe.description.clone(),
     }

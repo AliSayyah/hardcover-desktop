@@ -23,7 +23,7 @@ use hardcover_core::auth::scopes::{READ_CATALOG, READ_LISTS, READ_SOCIAL};
 use hardcover_core::{
     AuthorDetails, AuthorId, BookDetails, BookId, BookSummary, Client, CommunityReview,
     EditionSummary, ListBook, ListBookId, ListId, OffsetPage, ReviewsPage, SeriesDetails, SeriesId,
-    TagBook, TagId, Timestamp, TrendingPeriod, UserBookId, UserId, VibeId,
+    TagBook, TagId, Timestamp, TrendingBook, TrendingPeriod, UserBookId, UserId, VibeId,
 };
 
 use super::{Binding, Demand, Resource};
@@ -257,7 +257,7 @@ pub struct Catalog {
     pub editions: Entity<Shared<BookId, Paged<EditionSummary>>>,
     pub series: Entity<Shared<SeriesId, SeriesDetails>>,
     pub authors: Entity<Shared<AuthorId, AuthorDetails>>,
-    pub trending: Entity<Shared<TrendingPeriod, Vec<BookSummary>>>,
+    pub trending: Entity<Shared<TrendingPeriod, Vec<TrendingBook>>>,
     pub list_books: Entity<Shared<ListId, Paged<ListBook>>>,
     pub vibe_books: Entity<Shared<VibeBooksKey, VibeBooks>>,
     pub tag_books: Entity<Shared<TagBooksKey, Paged<TagBook>>>,

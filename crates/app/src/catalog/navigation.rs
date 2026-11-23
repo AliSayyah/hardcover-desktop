@@ -1,13 +1,13 @@
 //! Catalogue pages (a series, an author, a book, the books coming soon, a
-//! vibe, a tag, Add series) and the history of the ones opened since the
-//! last sidebar destination.
+//! vibe, a tag, Trending, Add series) and the history of the ones opened
+//! since the last sidebar destination.
 //!
 //! Any view can open a page through the [`Navigator`] global; the workspace
 //! owns the stack, shows its top page over the destination and handles
 //! `GoBack`.
 
 use gpui_kit::{App, AppContext as _, Entity, EventEmitter, Global};
-use hardcover_core::{AuthorId, BookSummary, SeriesId, VibeId};
+use hardcover_core::{AuthorId, BookSummary, SeriesId, TrendingPeriod, VibeId};
 
 use super::tag::Tag;
 use crate::ui::focus::FocusReturn;
@@ -31,16 +31,24 @@ pub enum Page {
         tag: Tag,
         within: Option<Tag>,
     },
+    /// The books trending on Hardcover in a period, opened from Discover's
+    /// "Trending this month"; the period is the page's segments' choice,
+    /// kept with the page so Back finds it.
+    Trending(TrendingPeriod),
     /// The series of the library not followed yet, opened from Series.
     AddSeries,
 }
 
 impl Page {
-    fn same_target(&self, other: &Page) -> bool {
+    /// Whether `other` is this page, however it is narrowed (a book by id,
+    /// a tag whatever its choice, Trending whatever its period).
+    pub fn same_target(&self, other: &Page) -> bool {
         match (self, other) {
             (Page::Book(a), Page::Book(b)) => a.id == b.id,
             // However it is narrowed: the tag's page is shown.
             (Page::Tag { tag: a, .. }, Page::Tag { tag: b, .. }) => a == b,
+            // Whatever its period: Trending is shown.
+            (Page::Trending(_), Page::Trending(_)) => true,
             _ => self == other,
         }
     }
@@ -146,7 +154,7 @@ pub fn open(page: Page, cx: &mut App) {
 }
 
 /// Records that the page shown is now `page` (a tag's page narrowed by its
-/// select), without showing it again or moving focus.
+/// select, Trending's period), without showing it again or moving focus.
 pub fn replace(page: Page, cx: &mut App) {
     Navigator::emit(NavigationEvent::Replace(page), cx);
 }
@@ -228,6 +236,20 @@ mod tests {
             }),
             "Back finds the choice"
         );
+    }
+
+    #[test]
+    fn trending_keeps_its_period_for_back() {
+        let mut stack = PageStack::default();
+        assert!(stack.push(Page::Trending(TrendingPeriod::Month), None));
+        assert!(
+            !stack.push(Page::Trending(TrendingPeriod::Week), None),
+            "Trending is already shown, whatever its period"
+        );
+        assert!(stack.replace_current(Page::Trending(TrendingPeriod::Year)));
+        stack.push(Page::Book(BookSummary::new(BookId::new(3), "A")), None);
+        stack.pop();
+        assert_eq!(stack.current(), Some(&Page::Trending(TrendingPeriod::Year)));
     }
 
     #[test]

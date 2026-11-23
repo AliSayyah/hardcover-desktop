@@ -16,8 +16,8 @@ use super::model::{
     ListBook, ListBookId, ListId, ListMembership, Measure, Privacy, Rating, RatingBucket, ReadId,
     ReadSession, ReadingStatus, Review, Reviewer, SearchHits, SearchPage, SeriesBook,
     SeriesDetails, SeriesHit, SeriesId, SeriesRef, Timestamp, TrackedBook, TrackedSeries,
-    UpcomingBook, User, UserBookId, UserId, UserList, Vibe, VibeId, VibeKind, measure_of,
-    read_order,
+    TrendingBook, UpcomingBook, User, UserBookId, UserId, UserList, Vibe, VibeId, VibeKind,
+    measure_of, read_order,
 };
 use super::model::{BookTags, TagBook, TagId};
 use crate::tags::{BookGenres, BookVotes};
@@ -347,6 +347,23 @@ pub(crate) struct RawSeries {
     pub id: Option<i64>,
     pub name: Option<String>,
     pub slug: Option<String>,
+}
+
+/// A book of `TrendingBooks`: its summary and its series.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawTrendingBook {
+    #[serde(flatten)]
+    pub book: RawBook,
+    #[serde(default)]
+    pub book_series: Vec<RawBookSeries>,
+}
+
+impl RawTrendingBook {
+    pub fn into_trending(self) -> TrendingBook {
+        let mut t = TrendingBook::new(self.book.into_summary());
+        t.series = series_refs(self.book_series);
+        t
+    }
 }
 
 impl RawBookDetails {

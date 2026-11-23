@@ -39,8 +39,8 @@ pub use api::{
     ListMembership, ListMemberships, Measure, NewGoal, OWNED_LIST_SLUG, Privacy, ProgressUnit,
     ProgressUpdate, Rating, RatingBucket, ReadId, ReadSession, ReadingStatus, Review,
     ReviewedEntry, SearchHits, SearchPage, SeriesBook, SeriesDetails, SeriesHit, SeriesId,
-    SeriesRef, Timestamp, TokenSource, TrackedBook, TrackedSeries, TrendingPeriod, User,
-    UserBookId, UserId, UserList,
+    SeriesRef, Timestamp, TokenSource, TrackedBook, TrackedSeries, TrendingBook, TrendingPeriod,
+    User, UserBookId, UserId, UserList,
 };
 pub use api::{BOOK_TAGS_BATCH, BookTags, BookTagsLoad, TAG_BOOKS_PER_PAGE, TagBook, TagId};
 pub use api::{CommunityReview, REVIEWS_PER_PAGE, Reviewer, ReviewsPage};

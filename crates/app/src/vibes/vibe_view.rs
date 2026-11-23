@@ -721,7 +721,7 @@ mod tests {
     fn a_book_never_recommended_leaves_the_page(cx: &mut TestAppContext) {
         let (view, vibes, cx) = vibe_view("", cx);
         let before = shown(&view, cx);
-        assert_eq!(before.len(), 12, "the demo's twelve recommendations");
+        assert_eq!(before.len(), 11, "the demo's eleven recommendations");
         let book = before[2];
 
         let task = vibes.update(cx, |m, cx| m.exclude(FOR_YOU, book, cx));
@@ -731,7 +731,7 @@ mod tests {
         settle(cx);
 
         let after = shown(&view, cx);
-        assert_eq!(after.len(), 11);
+        assert_eq!(after.len(), 10);
         assert!(!after.contains(&book), "its row left");
         let left_out =
             cx.update(|_, cx| AppPreferences::global(cx).read(cx).vibe_exclusions().len());

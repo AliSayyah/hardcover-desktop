@@ -1187,6 +1187,7 @@ fn answer(state: &mut State, op: &str, vars: &Value) -> Value {
         "SeriesOverview" => series_overview(catalogue, vars),
         "AuthorPage" => json!({ "authors_by_pk": author_page(catalogue, int("id")) }),
         "BooksByIds" => books_by_ids(catalogue, vars),
+        "TrendingBooks" => trending_books(catalogue, vars),
         "BooksByTag" => tags::books_by_tag(catalogue, vars, false),
         "BooksByTagWith" => tags::books_by_tag(catalogue, vars, true),
         "BookTags" => tags::book_tags(catalogue, vars),
@@ -1396,6 +1397,24 @@ fn books_by_ids(catalogue: &Catalogue, vars: &Value) -> Value {
         .iter()
         .filter(|b| ids.contains(&b.id))
         .map(book_summary)
+        .collect();
+    json!({ "books": books })
+}
+
+/// `BooksByIds` with each book's `book_series`, as `TrendingBooks` asks.
+fn trending_books(catalogue: &Catalogue, vars: &Value) -> Value {
+    let ids: Vec<i64> = vars["ids"]
+        .as_array()
+        .map_or_default(|ids| ids.iter().filter_map(Value::as_i64).collect());
+    let books: Vec<Value> = catalogue
+        .books
+        .iter()
+        .filter(|b| ids.contains(&b.id))
+        .map(|b| {
+            let mut summary = book_summary(b);
+            summary["book_series"] = Value::Array(book_series(b));
+            summary
+        })
         .collect();
     json!({ "books": books })
 }
