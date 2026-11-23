@@ -10,6 +10,7 @@
 //! builds it again ([`facts_line`], `Vibe::web_url`).
 
 pub mod model;
+pub mod shelves;
 pub mod vibe_view;
 
 use chrono::TimeZone;
