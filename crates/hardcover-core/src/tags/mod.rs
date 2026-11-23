@@ -71,7 +71,7 @@ pub const TRAIT_MIN_SHARE: (u32, u32) = (2, 3);
 /// many votes for that tag (`Client::books_by_tag`), so one stray vote
 /// doesn't put a book on it. The narrowing query was verified live by the
 /// owner.
-pub const MIN_OTHER_TAG_VOTES: u32 = 3;
+pub const MIN_OTHER_TAG_VOTES: u32 = 5;
 
 // ----- the tags -----
 
