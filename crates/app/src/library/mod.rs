@@ -6,6 +6,8 @@ pub mod cache_worker;
 pub mod collection;
 pub mod library_view;
 pub mod model;
+pub mod shelf_tags;
+pub mod tag_filter;
 pub(crate) mod writes;
 
 use gpui_kit::{Entity, SharedString};
