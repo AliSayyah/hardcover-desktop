@@ -151,7 +151,23 @@ impl DiscoverView {
         let mut subscriptions = vec![
             cx.observe(&AppPreferences::global(cx).clone(), |_, _, cx| cx.notify()),
             session::observe_grant(cx, |_, cx| cx.notify()),
-            cx.observe(model, |_, _, cx| cx.notify()),
+            cx.observe(model, |this, _, cx| {
+                // A new 5-star read changes "Because you loved"'s book: ask
+                // for its similar books now, not at the next Refresh. Only
+                // once the page has worked a seed out, so a Discover never
+                // opened asks for nothing.
+                if let Some((_, before)) = this.seed.clone() {
+                    let before = before.map(|s| s.book);
+                    let after = this.seed_book(cx);
+                    if after != before
+                        && let (Some(book), Some(catalog)) = (after, this.catalog.clone())
+                    {
+                        catalog.request_details(book, Demand::Active, cx);
+                        catalog.request_similar(book, Demand::Active, cx);
+                    }
+                }
+                cx.notify();
+            }),
         ];
         if let Some(vibes) = &vibes {
             // A vibe landed or was built again: its books follow.
@@ -823,6 +839,42 @@ mod tests {
             _ => None,
         });
         assert_eq!(see_all, Some(Page::Trending(TrendingPeriod::Month)));
+    }
+
+    #[gpui_kit::test]
+    fn a_new_five_star_read_brings_its_similar_books_while_discover_is_open(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::library::model::{LibraryWrite, WriteKind};
+        use hardcover_core::Rating;
+
+        let (view, _, _vibes, cx) = discover("", cx);
+        let library = view.read_with(cx, |v, _| v.model.clone());
+        // The Martian, finished lately and unrated, after Dune.
+        let martian = library.read_with(cx, |m, _| {
+            m.entries()
+                .iter()
+                .find(|e| e.book.title == "The Martian")
+                .map(|e| (e.user_book_id, e.status))
+        });
+        let (id, keep) = martian.expect("the demo has The Martian");
+        cx.update(|window, cx| {
+            let write = LibraryWrite::entry(id, WriteKind::Rating, "Couldn't save the rating", {
+                move |client| client.set_rating(id, Rating::new(5.0), keep)
+            });
+            drop(library.update(cx, |m, cx| m.write(write, window, cx)));
+        });
+        settle(cx);
+        settle(cx);
+
+        let seed = view.update(cx, |v, cx| v.seed(cx)).map(|s| s.title);
+        assert_eq!(seed.as_deref(), Some("The Martian"));
+        let (shelves, _, _) = sections(&view, cx);
+        let loved = shelves.iter().find(|(s, _)| *s == Section::Loved);
+        assert!(
+            !matches!(loved, Some((_, Shelf::Loading))),
+            "its similar books were asked for, not left loading"
+        );
     }
 
     #[gpui_kit::test]

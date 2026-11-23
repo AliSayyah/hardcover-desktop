@@ -271,19 +271,27 @@ impl FilterBar {
         let available = self
             .width
             .unwrap_or_else(|| (size::LIST - rems(2.)).to_pixels(window.rem_size()));
+        // Each chip as it is drawn unpressed. A press puts a check in a
+        // chip without an icon, which widens it: that check's room is kept
+        // free from the start, so pressing a chip never pushes another into
+        // "More".
+        let has_icon = |c: &Chip<T>| row == Row::Genres && genre_icon(&c.name).is_some();
         let widths: Vec<f32> = chips
             .iter()
-            .map(|c| {
-                let lead = c.selected || (row == Row::Genres && genre_icon(&c.name).is_some());
-                f32::from(filter_chip_width(&c.name, c.count, lead, window))
-            })
+            .map(|c| f32::from(filter_chip_width(&c.name, c.count, has_icon(c), window)))
             .collect();
+        let check_room = if chips.iter().any(|c| !has_icon(c)) {
+            // The check and its gap, 12 + 4: one rem.
+            window.rem_size()
+        } else {
+            Pixels::ZERO
+        };
         let more_width = f32::from(small_menu_button_width("More", window));
         let selected = chips.iter().position(|c| c.selected);
         let fit = fit_row(
             &widths,
             selected,
-            f32::from(available),
+            f32::from(available - check_room),
             f32::from(gap),
             more_width,
         );
