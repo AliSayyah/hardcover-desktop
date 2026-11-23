@@ -199,7 +199,9 @@ pub(crate) const SERIES_PAGE: &str = concat!(
 );
 
 /// An author and their most-read books, filtered as in Hardcover's guide to an
-/// author's books. Partial books are dropped by the client.
+/// author's books, with each book's series (merged series filtered here and
+/// again by the client), from which the client works out the author's series.
+/// Partial books are dropped by the client.
 pub(crate) const AUTHOR_PAGE: &str = concat!(
     "query AuthorPage($id: Int!, $limit: Int!) {
   authors_by_pk(id: $id) {
@@ -210,7 +212,12 @@ pub(crate) const AUTHOR_PAGE: &str = concat!(
       limit: $limit
     ) {
       contribution
-      book { ...BookSummaryFields is_partial_book }
+      book {
+        ...BookSummaryFields is_partial_book
+        book_series(where: {series: {canonical_id: {_is_null: true}}}) {
+          series { id name author_id canonical_id primary_books_count is_completed }
+        }
+      }
     }
   }
 }

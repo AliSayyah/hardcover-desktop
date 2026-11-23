@@ -683,6 +683,62 @@ fn author_page_merges_roles_and_drops_partial_books() {
 }
 
 #[test]
+fn author_page_works_out_the_authors_series() {
+    // A book with its readers and series: (id, author_id, canonical_id).
+    fn in_series(id: i64, readers: i64, series: &[(i64, Option<i64>, Option<i64>)]) -> Value {
+        let mut b = book(id, &format!("Book {id}"));
+        b["users_count"] = json!(readers);
+        b["book_series"] = series
+            .iter()
+            .map(|(sid, author, canonical)| {
+                json!({ "series": {
+                    "id": sid,
+                    "name": format!("Series {sid}"),
+                    "author_id": author,
+                    "canonical_id": canonical,
+                    "primary_books_count": if *sid == 31 { json!(5) } else { json!(0) },
+                    "is_completed": *sid == 31,
+                }})
+            })
+            .collect();
+        b
+    }
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({ "authors_by_pk": {
+            "id": 9,
+            "name": "Jane Quill",
+            "contributions": [
+                // Theirs, with one book: counts.
+                {"contribution": null, "book": in_series(301, 900, &[(31, Some(9), None), (35, Some(77), None)])},
+                // Someone else's, with two of their books: counts (co-written).
+                {"contribution": "Author", "book": in_series(302, 500, &[(32, Some(77), None), (31, Some(9), None)])},
+                {"contribution": null, "book": in_series(303, 400, &[(32, Some(77), None), (32, Some(77), None)])},
+                // Someone else's, with one book: a crossover, left out (35 too).
+                {"contribution": null, "book": in_series(304, 300, &[(33, None, None)])},
+                // Edited, not written: their series don't count.
+                {"contribution": "Editor", "book": in_series(305, 200, &[(34, Some(9), None)])},
+                // Merged into another series.
+                {"contribution": null, "book": in_series(306, 100, &[(36, Some(9), Some(31))])}
+            ]
+        }})),
+    );
+    let a = c.author(AuthorId::new(9)).unwrap();
+    let series: Vec<(i64, u32, i64)> = a
+        .series
+        .iter()
+        .map(|s| (s.id.get(), s.books, s.lead.id.get()))
+        .collect();
+    // 31: 900 + 500 readers; 32: 500 + 400 (303's duplicate row counted once).
+    assert_eq!(series, vec![(31, 2, 301), (32, 2, 302)]);
+    assert_eq!(a.series[0].name, "Series 31");
+    assert_eq!(a.series[0].primary_books_count, Some(5));
+    assert_eq!(a.series[0].is_completed, Some(true));
+    assert_eq!(a.series[1].primary_books_count, None, "0 is no count");
+}
+
+#[test]
 fn books_by_ids_keeps_the_given_order() {
     let (c, http) = client(TestTokens::new(false));
     assert_eq!(c.books_by_ids(&[]).unwrap(), []);

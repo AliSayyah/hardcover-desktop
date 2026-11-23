@@ -1055,6 +1055,35 @@ impl AuthorBook {
     }
 }
 
+/// One of an author's series on their page, from their books in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct AuthorSeries {
+    pub id: SeriesId,
+    pub name: String,
+    /// Hardcover's count of the main books (without companions).
+    pub primary_books_count: Option<u32>,
+    pub is_completed: Option<bool>,
+    /// How many of the author's books on the page are in it.
+    pub books: u32,
+    /// The author's most-read book in it, whose cover stands for the series.
+    pub lead: BookSummary,
+}
+
+impl AuthorSeries {
+    #[must_use]
+    pub fn new(id: SeriesId, name: impl Into<String>, lead: BookSummary) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            primary_books_count: None,
+            is_completed: None,
+            books: 1,
+            lead,
+        }
+    }
+}
+
 /// An author page (`authors_by_pk`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -1071,6 +1100,11 @@ pub struct AuthorDetails {
     /// Their most-read books (at most [`crate::api::AUTHOR_BOOKS_LIMIT`]),
     /// most-read first, one row per book.
     pub books: Vec<AuthorBook>,
+    /// Their series, the most read first, worked out from `books`: a series
+    /// none of whose books is among those is missing (a prolific author's
+    /// least-read ones).
+    #[serde(default)]
+    pub series: Vec<AuthorSeries>,
 }
 
 impl AuthorDetails {
@@ -1085,6 +1119,7 @@ impl AuthorDetails {
             death_year: None,
             books_count: None,
             books: Vec::new(),
+            series: Vec::new(),
         }
     }
 
