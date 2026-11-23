@@ -41,6 +41,7 @@ use crate::home::home_view::HomeView;
 use crate::io::{self, Priority};
 use crate::library::library_view::LibraryView;
 use crate::library::model::{LibraryModel, SyncStatus};
+use crate::library::shelf_tags::ShelfTagsModel;
 use crate::lists::list_view::ListView;
 use crate::lists::model::{ListsEvent, ListsModel};
 use crate::lists::sidebar::lists_section;
@@ -266,6 +267,7 @@ pub struct Workspace {
     vibe_page: Entity<VibeView>,
     tag_page: Entity<TagView>,
     series: Entity<SeriesModel>,
+    shelf_tags: Entity<ShelfTagsModel>,
     series_view: Entity<SeriesTrackerView>,
     signing_out: bool,
     /// Whether the sidebar shows its keyboard shortcuts: only while Ctrl is
@@ -301,7 +303,8 @@ impl Workspace {
         let vibe_page = cx.new(|cx| VibeView::new(model.clone(), window, cx));
         let tag_page = cx.new(|cx| TagView::new(model.clone(), window, cx));
         let list_page = cx.new(|cx| ListView::new(lists.clone(), model.clone(), window, cx));
-        let library = cx.new(|cx| LibraryView::new(model.clone(), window, cx));
+        let shelf_tags = cx.new(|cx| ShelfTagsModel::new(session.clone(), model.clone(), cx));
+        let library = cx.new(|cx| LibraryView::new(model.clone(), shelf_tags.clone(), window, cx));
         let search = cx.new(|cx| SearchView::new(&model, window, cx));
         let discover = cx.new(|cx| DiscoverView::new(&model, window, cx));
         let stats = cx.new(|cx| StatsView::new(model.clone(), cx));
@@ -383,6 +386,7 @@ impl Workspace {
             vibe_page,
             tag_page,
             series,
+            shelf_tags,
             series_view,
             signing_out: false,
             key_hints: false,
@@ -749,6 +753,7 @@ impl Workspace {
         self.lists.update(cx, ListsModel::reload);
         self.upcoming.update(cx, UpcomingModel::load);
         self.series.update(cx, SeriesModel::load);
+        self.shelf_tags.update(cx, ShelfTagsModel::load);
         self.vibes.update(cx, VibesModel::load);
         cx.notify();
     }
@@ -761,6 +766,7 @@ impl Workspace {
         self.lists.update(cx, ListsModel::reload);
         self.upcoming.update(cx, UpcomingModel::load);
         self.series.update(cx, SeriesModel::load);
+        self.shelf_tags.update(cx, ShelfTagsModel::load);
         self.vibes.update(cx, VibesModel::load);
     }
 

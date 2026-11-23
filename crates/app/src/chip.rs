@@ -25,7 +25,10 @@
 //! - `TagGroup`: one group of the Tags block, its label (`label` role) 6
 //!   above its `TagRow`; `tag_groups` stacks them 16 apart.
 
+mod filter;
 pub mod genre;
+
+pub use filter::{FilterChip, filter_chip_width, small_menu_button_width};
 
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};

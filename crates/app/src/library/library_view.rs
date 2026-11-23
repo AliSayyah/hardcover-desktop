@@ -2,14 +2,21 @@
 //! sorted collection beside the book pane.
 //!
 //! - **Header:** padding 12/16 and a hairline under it: the shelf's name with
-//!   its count, then the filter (filling the width) and the sort, 8 apart.
-//! - **Rows:** list rows, inset 8 ([`BookRow`] in a `ui::ListRow`).
+//!   its count ("2 of 8" while filtered, with "Clear filters" on the trailing
+//!   edge), then the filter (filling the width) and the sort, 8 apart, then
+//!   the genre and mood chips ([`FilterBar`]), 12 under them.
+//! - **Rows:** list rows, inset 8 ([`BookRow`] in a `ui::ListRow`). The
+//!   text filter, the chips and the sort work together; with nothing left,
+//!   "No matches" and "Clear filters". While a chip is picked, a foot line
+//!   says how many books no chip finds.
 //! - **Split:** the list is 384 wide by default, 272 to 640, and the pane
 //!   takes the rest, at least 288. As the list narrows, the sort gives way
 //!   before the filter (`size::LIST_MIN`, `size::FILTER_MIN`).
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::list::{ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
@@ -19,20 +26,26 @@ use gpui_kit::component::{
 use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, ScrollStrategy,
     SharedString, StyleRefinement, Styled as _, Subscription, Window, div,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::{LibraryEntry, ReadingStatus, UserBookId};
 
 use super::book_row::{BookRow, loading_rows};
 use super::collection::{SortOrder, shelf_rows};
+use super::filter_bar::{FilterBar, PickChanged};
 use super::model::LibraryModel;
+use super::shelf_tags::ShelfTagsModel;
+use super::tag_filter::{TagPick, no_matches};
 use crate::book::detail_view::{BookDetailView, Subject};
 use crate::chip::status_icon;
-use crate::design::{colors, size};
+use crate::design::{TypeRoles as _, colors, size};
 use crate::format::status_label;
 use crate::ui::kit::RaisedField as _;
-use crate::ui::kit::gutter_list;
+use crate::ui::kit::{SmallControl as _, gutter_list, row_action};
 use crate::ui::leaving::{Leaving, ROW_LEAVE};
-use crate::ui::{ListRow as _, PageHeader, RowFocus, empty_state, on_keyboard_entry};
+use crate::ui::{
+    ListRow as _, PageHeader, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
+};
 
 #[derive(Clone)]
 pub struct SortOption(SortOrder, SharedString);
@@ -58,17 +71,26 @@ enum Empty {
         title: SharedString,
         description: SharedString,
     },
+    /// The filters leave nothing of a shelf that has books: why, with
+    /// "Clear filters".
+    NoMatches(SharedString),
     /// The library has never loaded: why, with "Try again".
     Failed(SharedString),
 }
+
+/// What "Clear filters" does: clears the chips and the text.
+type ClearFilters = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// Rows of one shelf for the virtualized list: the entries' ids, each row
 /// drawn from the model's entry, so a new revision copies no entries.
 pub struct ShelfDelegate {
     model: Entity<LibraryModel>,
     rows: Vec<UserBookId>,
+    /// How many rows the filters leave, without those leaving.
+    matches: usize,
     loading: bool,
     empty: Empty,
+    clear: ClearFilters,
     focus: RowFocus,
     /// Rows fading out as they leave the shelf (`ui::leaving`).
     leaving: Leaving<UserBookId>,
@@ -147,6 +169,21 @@ impl ListDelegate for ShelfDelegate {
                 title,
                 description,
             } => empty_state(icon.clone(), title.clone(), description.clone()).into_any_element(),
+            Empty::NoMatches(description) => {
+                let clear = self.clear.clone();
+                empty_state_with_action(
+                    IconName::Search,
+                    "No matches".into(),
+                    description.clone(),
+                    // Enter presses it, not the list's Confirm.
+                    row_action(
+                        Button::new("shelf-clear-filters")
+                            .label("Clear filters")
+                            .on_click(move |_, window, cx| clear(window, cx)),
+                    ),
+                )
+                .into_any_element()
+            }
             Empty::Failed(message) => {
                 crate::library::load_failed("shelf-retry", &self.model, message.clone())
                     .into_any_element()
@@ -173,6 +210,10 @@ struct RowsKey {
     revision: u64,
     status: ReadingStatus,
     query: SharedString,
+    pick: TagPick,
+    /// The shelf tags' revision, while a pick is set (without one the tags
+    /// change nothing).
+    tags: u64,
     order: SortOrder,
     loading: bool,
     failure: Option<SharedString>,
@@ -184,6 +225,7 @@ impl RowsKey {
     fn same_rows_as(&self, next: &RowsKey) -> bool {
         self.status == next.status
             && self.query == next.query
+            && self.pick == next.pick
             && self.order == next.order
             && !self.loading
             && !next.loading
@@ -194,8 +236,10 @@ impl RowsKey {
 
 pub struct LibraryView {
     model: Entity<LibraryModel>,
+    tags: Entity<ShelfTagsModel>,
     status: ReadingStatus,
     filter: Entity<InputState>,
+    bar: Entity<FilterBar>,
     order: SortOrder,
     list: Entity<ListState<ShelfDelegate>>,
     pane: Entity<ShelfPane>,
@@ -214,8 +258,20 @@ pub struct LibraryView {
 }
 
 impl LibraryView {
-    pub fn new(model: Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        model: Entity<LibraryModel>,
+        tags: Entity<ShelfTagsModel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
+        let bar = cx.new(|cx| FilterBar::new(model.clone(), tags.clone(), window, cx));
+        let clear: ClearFilters = {
+            let this = cx.entity().downgrade();
+            Rc::new(move |window, cx| {
+                let _ = this.update(cx, |this, cx| this.clear_filters(window, cx));
+            })
+        };
         let options: Vec<SortOption> = SortOrder::ALL
             .into_iter()
             .map(|o| SortOption(o, o.label().into()))
@@ -226,6 +282,7 @@ impl LibraryView {
                 ShelfDelegate {
                     model: model.clone(),
                     rows: Vec::new(),
+                    matches: 0,
                     loading: true,
                     empty: Empty::Copy {
                         icon: IconName::Inbox,
@@ -235,6 +292,7 @@ impl LibraryView {
                     focus: RowFocus::default(),
                     leaving: Leaving::default(),
                     gone: Vec::new(),
+                    clear: clear.clone(),
                 },
                 window,
                 cx,
@@ -243,12 +301,17 @@ impl LibraryView {
         RowFocus::attach(&list, |d| &mut d.focus, cx);
         let detail = cx.new(|cx| BookDetailView::new(model.clone(), window, cx));
         let pane = cx.new(|cx| ShelfPane {
-            _model: cx.observe(&model, |_, _, cx| cx.notify()),
+            _subscriptions: vec![
+                cx.observe(&model, |_, _, cx| cx.notify()),
+                cx.observe(&bar, |_, _, cx| cx.notify()),
+            ],
             model: model.clone(),
             status: ReadingStatus::CurrentlyReading,
             filter: filter.clone(),
             sort: sort.clone(),
+            bar: bar.clone(),
             list: list.clone(),
+            clear,
         });
 
         let subscriptions = vec![
@@ -258,6 +321,14 @@ impl LibraryView {
                     this.select_first(window, cx);
                 }
                 cx.notify();
+            }),
+            // The chips' books, while a pick narrows the shelf.
+            cx.observe_in(&tags, window, |this, _, window, cx| {
+                this.refresh_rows(window, cx);
+            }),
+            cx.subscribe_in(&bar, window, |this, _, _: &PickChanged, window, cx| {
+                this.refresh_rows(window, cx);
+                this.keep_selection_shown(window, cx);
             }),
             cx.subscribe_in(
                 &filter,
@@ -300,8 +371,10 @@ impl LibraryView {
 
         let mut this = Self {
             model,
+            tags,
             status: ReadingStatus::CurrentlyReading,
             filter,
+            bar,
             order: SortOrder::RecentlyUpdated,
             list,
             pane,
@@ -330,8 +403,10 @@ impl LibraryView {
                 cx.notify();
             });
             self.filter.update(cx, |f, cx| f.set_value("", window, cx));
+            self.bar.update(cx, |bar, cx| bar.set_status(status, cx));
             self.refresh_rows(window, cx);
         }
+        self.tags.update(cx, |tags, cx| tags.show_shelf(status, cx));
         match self.selection.get(&status).copied() {
             Some(id) => self.select(id, window, cx),
             None => self.select_first(window, cx),
@@ -344,6 +419,34 @@ impl LibraryView {
     pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
         self.detail
             .update(cx, |detail, cx| detail.revalidate(shown_again, cx));
+        let status = self.status;
+        self.tags.update(cx, |tags, cx| {
+            if shown_again {
+                tags.show_shelf(status, cx);
+            } else {
+                tags.revalidate(status, cx);
+            }
+        });
+    }
+
+    /// "Clear filters": the chips and the text. Focus goes to the list,
+    /// since the button that asked is gone.
+    fn clear_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.bar.update(cx, FilterBar::clear);
+        self.filter.update(cx, |f, cx| f.set_value("", window, cx));
+        self.refresh_rows(window, cx);
+        self.focus_list(window, cx);
+    }
+
+    /// The chips changed: a selected book they leave out gives way to the
+    /// first that stays, or to none.
+    fn keep_selection_shown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.selection.get(&self.status).copied();
+        let shown = selected.is_some_and(|id| self.list.read(cx).delegate().rows.contains(&id));
+        if !shown {
+            self.select_first(window, cx);
+        }
+        self.scroll_to_selection(window, cx);
     }
 
     pub fn focus_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -369,9 +472,11 @@ impl LibraryView {
         }
     }
 
-    /// Rebuilds the shelf rows from the model, the filter and the sort order.
+    /// Rebuilds the shelf rows from the model, the filters and the sort order.
     fn refresh_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.filter.read(cx).value();
+        let pick = self.bar.read(cx).pick(cx);
+        let tags = self.tags.read(cx);
         let model = self.model.read(cx);
         let failure = model.load_failure().cloned();
         // Loading until the library loads, unless its first sync failed.
@@ -380,6 +485,8 @@ impl LibraryView {
             revision: model.revision(),
             status: self.status,
             query: query.clone(),
+            pick: pick.clone(),
+            tags: if pick.is_empty() { 0 } else { tags.revision() },
             order: self.order,
             loading,
             failure: failure.clone(),
@@ -396,17 +503,15 @@ impl LibraryView {
         let entries = model.entries();
         let rows: Vec<UserBookId> = shelf_rows(entries, self.status, &query, self.order)
             .into_iter()
+            .filter(|ix| pick.keeps(tags.facts(entries[*ix].book.id)))
             .map(|ix| entries[ix].user_book_id)
             .collect();
+        let matches = rows.len();
         let shelf_name = status_label(self.status);
         let empty = if let Some(message) = failure {
             Empty::Failed(message)
-        } else if !query.trim().is_empty() {
-            Empty::Copy {
-                icon: IconName::Search,
-                title: "No matches".into(),
-                description: format!("No books in {shelf_name} match “{}”.", query.trim()).into(),
-            }
+        } else if (!query.trim().is_empty() || !pick.is_empty()) && model.count(self.status) > 0 {
+            Empty::NoMatches(no_matches(shelf_name, &pick, &query).into())
         } else {
             Empty::Copy {
                 icon: status_icon(self.status),
@@ -445,10 +550,13 @@ impl LibraryView {
                 delegate.gone.extend(entry);
             }
             delegate.loading = loading;
+            delegate.matches = matches;
             delegate.empty = empty;
             cx.notify();
             shown.started
         });
+        // The title's "2 of 8".
+        self.pane.update(cx, |_, cx| cx.notify());
         if started {
             cx.spawn_in(window, async move |this, cx| {
                 cx.background_executor().timer(ROW_LEAVE).await;
@@ -494,14 +602,18 @@ impl LibraryView {
 /// [`LibraryView`] can cache it. Frames driven by the detail pane (its loading
 /// animation, its cover) then reuse the list instead of rendering every row
 /// again. Whatever changes the pane notifies it: the list, the filter and the
-/// sort are views inside it, and it observes the model for the count.
+/// sort are views inside it, and it observes the model for the count and
+/// the filter bar for whether it shows; the shelf notifies it when its rows
+/// change ("2 of 8").
 struct ShelfPane {
     model: Entity<LibraryModel>,
     status: ReadingStatus,
     filter: Entity<InputState>,
     sort: Entity<SelectState<Vec<SortOption>>>,
+    bar: Entity<FilterBar>,
     list: Entity<ListState<ShelfDelegate>>,
-    _model: Subscription,
+    clear: ClearFilters,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl Render for ShelfPane {
@@ -509,7 +621,20 @@ impl Render for ShelfPane {
         let model = self.model.read(cx);
         // No count until the library has loaded: 0 would say it's empty.
         let count = model.is_loaded().then(|| model.count(self.status));
+        let bar = self.bar.read(cx);
+        let filtered = !bar.pick(cx).is_empty() || !self.filter.read(cx).value().trim().is_empty();
+        let bar_shown = bar.is_shown(cx);
+        let foot = bar.foot(cx);
+        let matches = self.list.read(cx).delegate().matches;
         let colors = colors(cx);
+        let header = match count {
+            Some(count) if filtered => {
+                PageHeader::new(status_label(self.status)).count_of(matches, count)
+            }
+            Some(count) => PageHeader::new(status_label(self.status)).count(count),
+            None => PageHeader::new(status_label(self.status)),
+        };
+        let clear = self.clear.clone();
         v_flex()
             .size_full()
             .min_w_0()
@@ -521,10 +646,23 @@ impl Render for ShelfPane {
                     .py_3()
                     .border_b_1()
                     .border_color(colors.border)
-                    .child(h_flex().h(size::CONTROL).child(match count {
-                        Some(count) => PageHeader::new(status_label(self.status)).count(count),
-                        None => PageHeader::new(status_label(self.status)),
-                    }))
+                    .child(
+                        h_flex()
+                            .h(size::CONTROL)
+                            .gap_2()
+                            .justify_between()
+                            .child(div().min_w_0().child(header))
+                            .when(filtered, |this| {
+                                this.child(
+                                    Button::new("shelf-clear-filters-title")
+                                        .ghost()
+                                        .small_control()
+                                        .label("Clear filters")
+                                        .flex_none()
+                                        .on_click(move |_, window, cx| clear(window, cx)),
+                                )
+                            }),
+                    )
                     .child(
                         // As the list narrows the sort gives way first, down
                         // to a small select; the filter keeps a usable width,
@@ -548,7 +686,8 @@ impl Render for ShelfPane {
                                     .min_w(size::SELECT_SMALL)
                                     .child(Select::new(&self.sort).raised_field(false, cx)),
                             ),
-                    ),
+                    )
+                    .when(bar_shown, |this| this.child(self.bar.clone())),
             )
             .child(
                 div()
@@ -556,6 +695,9 @@ impl Render for ShelfPane {
                     .min_h_0()
                     .child(gutter_list("shelf-scrollbar", &self.list, cx)),
             )
+            .when_some(foot, |this, foot| {
+                this.child(div().flex_none().px_4().py_2().caption(cx).child(foot))
+            })
     }
 }
 

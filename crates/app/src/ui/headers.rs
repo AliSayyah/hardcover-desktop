@@ -31,6 +31,7 @@ use crate::design::{TypeRole, TypeRoles as _, colors, size};
 ///
 /// ```ignore
 /// PageHeader::new("Currently reading").count(3)
+/// PageHeader::new("Want to read").count_of(2, 8) // filtered
 /// PageHeader::new("Coming soon").line("5 books still to come in the series on your shelves")
 /// // A catalogue page: a name that may wrap, its tools, its facts.
 /// PageHeader::new(list.name.clone())
@@ -65,6 +66,23 @@ impl PageHeader {
     /// How many things the destination holds, beside the title.
     pub fn count(mut self, count: impl crate::format::Count) -> Self {
         self.count = Some(crate::format::count_text(count).into());
+        self
+    }
+
+    /// How many of them a filter shows, beside the title: "2 of 8".
+    pub fn count_of(
+        mut self,
+        shown: impl crate::format::Count,
+        total: impl crate::format::Count,
+    ) -> Self {
+        self.count = Some(
+            format!(
+                "{} of {}",
+                crate::format::count_text(shown),
+                crate::format::count_text(total)
+            )
+            .into(),
+        );
         self
     }
 
