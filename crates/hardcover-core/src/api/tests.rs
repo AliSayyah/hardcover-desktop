@@ -3282,3 +3282,22 @@ fn a_failed_book_tags_batch_keeps_the_others() {
     assert_eq!(load.missing, ids);
     assert_eq!(load.error, Some(Error::Timeout));
 }
+
+/// A vibe links to its own page on hardcover.app, else to Discover.
+#[test]
+fn a_vibe_links_to_its_page_on_hardcover() {
+    let mut v = crate::Vibe::new(
+        VibeId::new(1),
+        crate::VibeKind::Recommendations,
+        "Recommendations",
+    );
+    assert_eq!(v.web_url(), "https://hardcover.app/discover");
+    v.username = Some("reader".into());
+    v.slug = Some("recommendations".into());
+    assert_eq!(
+        v.web_url(),
+        "https://hardcover.app/@reader/vibes/recommendations"
+    );
+    v.slug = Some(String::new());
+    assert_eq!(v.web_url(), "https://hardcover.app/discover");
+}
