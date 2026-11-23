@@ -538,6 +538,30 @@ fn book_details_parse() {
 }
 
 #[test]
+fn an_html_description_comes_back_as_plain_paragraphs() {
+    let (c, http) = client(TestTokens::new(false));
+    let mut b = book(7, "Detailed");
+    b.as_object_mut().unwrap().insert(
+        "description".into(),
+        json!("<p><b>A synthetic hook</b></p> <p>Then <i>Detailed</i> &amp; more.</p>"),
+    );
+    http.push(200, &data(json!({ "books_by_pk": b })));
+    let d = c.book_details(BookId::new(7)).unwrap();
+    assert_eq!(
+        d.description.as_deref(),
+        Some("A synthetic hook\n\nThen Detailed & more.")
+    );
+
+    // Markup and nothing else is no description.
+    let mut b = book(8, "Empty");
+    b.as_object_mut()
+        .unwrap()
+        .insert("description".into(), json!("<p> </p>"));
+    http.push(200, &data(json!({ "books_by_pk": b })));
+    assert_eq!(c.book_details(BookId::new(8)).unwrap().description, None);
+}
+
+#[test]
 fn book_details_parse_catalogue_blobs() {
     let (c, http) = client(TestTokens::new(false));
     let mut b = book(7, "Detailed");
