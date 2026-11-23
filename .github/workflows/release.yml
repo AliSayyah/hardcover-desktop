@@ -25,7 +25,7 @@ jobs:
   build:
     name: Build x86_64 tarball and AppImage
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     # Building on the oldest supported Ubuntu keeps the glibc floor at 2.35.
     container: ubuntu:22.04
     steps:

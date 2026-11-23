@@ -31,10 +31,12 @@ else
 fi
 attempts=${APT_ATTEMPTS:-3}
 # A healthy refresh takes seconds and the build dependencies' download
-# (about 90 MB) well under a minute; a slow mirror has served them at a few
-# hundred kB/s.
-update_limit=${APT_UPDATE_LIMIT:-240}
-download_limit=${APT_DOWNLOAD_LIMIT:-600}
+# (about 90 MB) well under a minute, but a slow mirror has taken minutes for
+# either and still finished: on 2026-11-23 one refresh ran past 4 minutes
+# three times in a row, while the next job's second try took under 2. So
+# the limits are generous, and only a wait far past them is cut short.
+update_limit=${APT_UPDATE_LIMIT:-480}
+download_limit=${APT_DOWNLOAD_LIMIT:-900}
 retry_delay=${APT_RETRY_DELAY:-10}
 # A connection silent for 30 s (not apt's default 120) is dropped, and a file
 # that fails is fetched again by apt itself before the attempt fails.
@@ -75,7 +77,8 @@ bounded() {
 }
 
 refresh() {
-  bounded "$attempts" "$update_limit" "refreshing the package lists" update -qq
+  # -q, not -qq: a line per list fetched, so a slow one shows which.
+  bounded "$attempts" "$update_limit" "refreshing the package lists" update -q
 }
 
 # download TRIES PACKAGE...
