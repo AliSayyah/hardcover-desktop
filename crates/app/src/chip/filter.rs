@@ -30,8 +30,8 @@ use std::rc::Rc;
 use gpui_kit::base::Button as BaseButton;
 use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::{
-    App, ClickEvent, ElementId, Font, FontFeatures, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement as _, Pixels, RenderOnce, SharedString,
+    App, ClickEvent, ElementId, FocusHandle, Font, FontFeatures, FontWeight,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, RenderOnce, SharedString,
     StatefulInteractiveElement as _, Styled as _, TextRun, Toggled, Window, div, font,
     prelude::FluentBuilder as _, px,
 };
@@ -51,6 +51,7 @@ pub struct FilterChip {
     count: usize,
     genre: bool,
     selected: bool,
+    focus: Option<FocusHandle>,
     on_click: Option<ClickHandler>,
 }
 
@@ -71,12 +72,20 @@ impl FilterChip {
             count,
             genre: false,
             selected: false,
+            focus: None,
             on_click: None,
         }
     }
 
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// The chip's focus, kept by its owner (a bar that moves focus between
+    /// its chips); else one kept for its id.
+    pub fn focus(mut self, focus: FocusHandle) -> Self {
+        self.focus = Some(focus);
         self
     }
 
@@ -107,7 +116,15 @@ impl RenderOnce for FilterChip {
         let colors = colors(cx);
         let disabled = self.disabled();
         let selected = self.selected;
-        let focus = keyed_focus(self.id.clone(), window, cx);
+        let focus = match self.focus {
+            Some(focus) => focus,
+            None => keyed_focus(self.id.clone(), window, cx),
+        };
+        #[cfg(test)]
+        let selector = match &self.id {
+            ElementId::Name(name) => name.to_string(),
+            _ => String::new(),
+        };
         let focused = !disabled && focus_visible(&focus, window);
         let radius = size::CHIP.to_pixels(window.rem_size()) / 2.;
         let lead = if selected {
@@ -170,6 +187,8 @@ impl RenderOnce for FilterChip {
                     .tabular()
                     .child(crate::format::count_text(self.count)),
             );
+        #[cfg(test)]
+        let chip = chip.debug_selector(move || selector);
         probe(div().flex().min_w_0().child(chip))
     }
 }

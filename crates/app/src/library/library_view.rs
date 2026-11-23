@@ -41,7 +41,7 @@ use crate::chip::status_icon;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::status_label;
 use crate::ui::kit::RaisedField as _;
-use crate::ui::kit::{SmallControl as _, gutter_list};
+use crate::ui::kit::{SmallControl as _, gutter_list, row_action};
 use crate::ui::leaving::{Leaving, ROW_LEAVE};
 use crate::ui::{
     ListRow as _, PageHeader, RowFocus, empty_state, empty_state_with_action, on_keyboard_entry,
@@ -175,9 +175,12 @@ impl ListDelegate for ShelfDelegate {
                     IconName::Search,
                     "No matches".into(),
                     description.clone(),
-                    Button::new("shelf-clear-filters")
-                        .label("Clear filters")
-                        .on_click(move |_, window, cx| clear(window, cx)),
+                    // Enter presses it, not the list's Confirm.
+                    row_action(
+                        Button::new("shelf-clear-filters")
+                            .label("Clear filters")
+                            .on_click(move |_, window, cx| clear(window, cx)),
+                    ),
                 )
                 .into_any_element()
             }

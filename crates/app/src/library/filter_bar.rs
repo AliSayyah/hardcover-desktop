@@ -30,7 +30,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FocusHandle,
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
     Styled as _, Subscription, WeakEntity, Window, canvas, div, prelude::FluentBuilder as _, rems,
 };
@@ -46,7 +46,6 @@ use crate::chip::{FilterChip, filter_chip_width, small_menu_button_width};
 use crate::design::{TypeRoles as _, colors, size};
 use crate::session;
 use crate::ui::chip_keys::ChipKeys;
-use crate::ui::focus::keyed_focus;
 use crate::ui::kit::SmallControl as _;
 use crate::ui::{LoadFailed, Skeleton, refresh_after_draw};
 
@@ -84,6 +83,9 @@ pub struct FilterBar {
     /// The chip last pressed, with its row, so focus stays in the row when
     /// the chip leaves it.
     pressed: Option<(Row, ElementId)>,
+    /// Each chip's focus, kept here so the bar can tell which chip has it
+    /// and move it.
+    focus: HashMap<ElementId, FocusHandle>,
     /// The last facets worked out, and from what. Filled on read, so
     /// `render` and the shelf can ask without updating the bar.
     facets: RefCell<Option<(FacetsKey, Rc<Facets>)>>,
@@ -118,6 +120,7 @@ impl FilterBar {
             mood_keys: cx.new(|cx| ChipKeys::new(window, cx)),
             width: None,
             pressed: None,
+            focus: HashMap::new(),
             facets: RefCell::new(None),
             _subscriptions: subscriptions,
         }
@@ -167,6 +170,13 @@ impl FilterBar {
         self.pressed = Some((row, id));
         cx.emit(PickChanged);
         cx.notify();
+    }
+
+    fn focus_of(&mut self, id: &ElementId, cx: &mut App) -> FocusHandle {
+        self.focus
+            .entry(id.clone())
+            .or_insert_with(|| cx.focus_handle())
+            .clone()
     }
 
     fn shelf_books(&self, cx: &App) -> Vec<BookId> {
@@ -285,11 +295,11 @@ impl FilterBar {
         {
             let shown = fit.shown.iter().any(|ix| chip_id(&chips[*ix].value) == id);
             if !shown {
-                let pressed = keyed_focus(id, window, cx);
+                let pressed = self.focus_of(&id, cx);
                 if pressed.is_focused(window)
                     && let Some(first) = fit.shown.first()
                 {
-                    let first = keyed_focus(chip_id(&chips[*first].value), window, cx);
+                    let first = self.focus_of(&chip_id(&chips[*first].value), cx);
                     window.defer(cx, move |window, cx| window.focus(&first, cx));
                 }
             }
@@ -297,19 +307,25 @@ impl FilterBar {
         }
 
         let this = cx.entity().downgrade();
-        let shown = fit.shown.iter().map(|ix| {
-            let chip = chips[*ix].clone();
-            let id = chip_id(&chip.value);
-            let element = match row {
-                Row::Genres => FilterChip::genre(id.clone(), chip.name.clone(), chip.count),
-                Row::Moods => FilterChip::mood(id.clone(), chip.name.clone(), chip.count),
-            };
-            element
-                .selected(chip.selected)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.update_pick(row, id.clone(), |pick| press(pick, &chip), cx);
-                }))
-        });
+        let shown: Vec<_> = fit
+            .shown
+            .iter()
+            .map(|ix| {
+                let chip = chips[*ix].clone();
+                let id = chip_id(&chip.value);
+                let focus = self.focus_of(&id, cx);
+                let element = match row {
+                    Row::Genres => FilterChip::genre(id.clone(), chip.name.clone(), chip.count),
+                    Row::Moods => FilterChip::mood(id.clone(), chip.name.clone(), chip.count),
+                };
+                element
+                    .selected(chip.selected)
+                    .focus(focus)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.update_pick(row, id.clone(), |pick| press(pick, &chip), cx);
+                    }))
+            })
+            .collect();
         let more = (!fit.more.is_empty()).then(|| {
             let rest: Vec<Chip<T>> = fit.more.iter().map(|ix| chips[*ix].clone()).collect();
             more_menu(row, rest, chip_id, press, this)
@@ -487,6 +503,14 @@ mod tests {
     /// A button, the Want to read shelf's bar, and a button after it, with
     /// the demo's tags loaded.
     fn bar(cx: &mut TestAppContext) -> (&mut VisualTestContext, Entity<FilterBar>) {
+        bar_at(rems(40.), cx)
+    }
+
+    /// [`bar`] at `width`.
+    fn bar_at(
+        width: gpui_kit::Rems,
+        cx: &mut TestAppContext,
+    ) -> (&mut VisualTestContext, Entity<FilterBar>) {
         let session = SessionScope::for_tests(hardcover_core::demo::client(), None);
         cx.update(|cx| session.install(cx));
         let library = cx.new(|_| LibraryModel::new(session.clone()));
@@ -509,7 +533,7 @@ mod tests {
                 })
                 .clone();
             div()
-                .w(rems(40.))
+                .w(width)
                 .child(Button::new("before").label("Before"))
                 .child(bar)
                 .child(Button::new("after").label("After"))
@@ -584,5 +608,80 @@ mod tests {
             Some(&second.value),
             "back on the chip it left"
         );
+    }
+
+    /// A chip picked from "More" goes first; cleared from the keyboard, it
+    /// leaves the row, and focus goes to the row's first chip.
+    #[gpui_kit::test]
+    fn focus_stays_in_a_row_whose_pressed_chip_leaves_it(cx: &mut TestAppContext) {
+        let (cx, bar) = bar_at(rems(14.), cx);
+        let facets = cx.update(|_, cx| bar.read(cx).facets(cx));
+        let last = facets.moods.last().expect("moods").value;
+        assert_ne!(last, facets.moods[0].value);
+        cx.update(|_, cx| {
+            bar.update(cx, |bar, cx| {
+                bar.picks.entry(ReadingStatus::WantToRead).or_default().mood = Some(last);
+                cx.notify();
+            });
+        });
+        settle(cx);
+
+        // Into the genres, then the moods: the picked chip, drawn first.
+        press(cx, "a");
+        tab(cx);
+        tab(cx);
+        settle(cx);
+        press(cx, "tab");
+        settle(cx);
+        press(cx, "enter");
+        settle(cx);
+        assert_eq!(pick(&bar, cx).mood, None, "cleared");
+        press(cx, "enter");
+        settle(cx);
+        assert_eq!(
+            pick(&bar, cx).mood,
+            Some(facets.moods[0].value),
+            "focus went to the row's first chip"
+        );
+    }
+
+    /// A click toggles a chip; a disabled chip ignores it.
+    #[gpui_kit::test]
+    fn a_click_toggles_a_chip_but_not_a_disabled_one(cx: &mut TestAppContext) {
+        let (cx, bar) = bar(cx);
+        let click = |selector: String, cx: &mut VisualTestContext| {
+            let bounds = cx
+                .debug_bounds(Box::leak(selector.into_boxed_str()))
+                .expect("the chip is drawn");
+            cx.simulate_click(bounds.center(), gpui_kit::Modifiers::none());
+            settle(cx);
+        };
+        let facets = cx.update(|_, cx| bar.read(cx).facets(cx));
+        let first = facets.genres[0].value.clone();
+        click(format!("filter-genre-{first}"), cx);
+        let picked = pick(&bar, cx).genre.map(|g| g.key);
+        assert_eq!(picked.as_ref(), Some(&first));
+        click(format!("filter-genre-{first}"), cx);
+        assert!(pick(&bar, cx).is_empty(), "a second click clears it");
+
+        // A mood that leaves some drawn genre with no books.
+        let found = facets.moods.iter().find_map(|mood| {
+            cx.update(|_, cx| {
+                bar.update(cx, |bar, cx| {
+                    bar.picks.entry(ReadingStatus::WantToRead).or_default().mood = Some(mood.value);
+                    cx.notify();
+                });
+            });
+            settle(cx);
+            let f = cx.update(|_, cx| bar.read(cx).facets(cx));
+            f.genres[..2]
+                .iter()
+                .find(|g| g.disabled())
+                .map(|g| g.value.clone())
+        });
+        let disabled = found.expect("a mood that disables a drawn genre");
+        let before = pick(&bar, cx);
+        click(format!("filter-genre-{disabled}"), cx);
+        assert_eq!(pick(&bar, cx), before, "nothing happened");
     }
 }
