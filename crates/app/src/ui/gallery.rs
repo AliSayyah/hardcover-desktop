@@ -60,6 +60,8 @@ pub struct Gallery {
     selected_nav: usize,
     focus: FocusHandle,
     scroll: ScrollHandle,
+    /// The page chips' row keys.
+    chip_keys: Entity<super::chip_keys::ChipKeys>,
 }
 
 impl Gallery {
@@ -97,6 +99,7 @@ impl Gallery {
             selected_nav: 1,
             focus,
             scroll: ScrollHandle::new(),
+            chip_keys: cx.new(|cx| super::chip_keys::ChipKeys::new(window, cx)),
         }
     }
 
@@ -156,7 +159,8 @@ impl Render for Gallery {
             .child(series_strips(cx))
             .child(list_rows(cx))
             .child(blocks_and_properties(cx))
-            .child(chips_and_tags())
+            .child(chips_and_tags(&self.chip_keys))
+            .child(moods_and_votes(cx))
             .child(skeletons())
             .child(kit_fixes(&self.input, cx))
             .child(release_notes(cx))
@@ -638,7 +642,7 @@ fn blocks_and_properties(cx: &App) -> AnyElement {
     )
 }
 
-fn chips_and_tags() -> AnyElement {
+fn chips_and_tags(chip_keys: &Entity<super::chip_keys::ChipKeys>) -> AnyElement {
     let statuses = [
         ReadingStatus::WantToRead,
         ReadingStatus::CurrentlyReading,
@@ -676,18 +680,6 @@ fn chips_and_tags() -> AnyElement {
                     .map(TagChip::genre),
                 ),
                 TagGroup::new(
-                    "Moods",
-                    [
-                        "mysterious",
-                        "reflective",
-                        "adventurous",
-                        "emotional",
-                        "dark",
-                        "hopeful",
-                    ]
-                    .map(TagChip::new),
-                ),
-                TagGroup::new(
                     "Content warnings",
                     [
                         "kidnapping",
@@ -720,8 +712,194 @@ fn chips_and_tags() -> AnyElement {
             .gap_6()
             .child(h_flex().gap_1p5().children(statuses.map(StatusChip)))
             .child(div().max_w(size::PROSE).child(TagRow::new(genres)))
+            // Page chips: a genre with a tag page opens it (hover for the
+            // fill, Tab for the ring, the arrows along the row); General
+            // has no page and stays plain.
+            .child(
+                div().max_w(size::PROSE).child(
+                    TagRow::new(
+                        [
+                            "Fantasy",
+                            "Science Fiction",
+                            "General",
+                            "Mystery",
+                            "Young Adult",
+                        ]
+                        .map(TagChip::genre_page),
+                    )
+                    .keys("g-page-chips", chip_keys),
+                ),
+            )
+            // A Tags block left with one group takes the group's name.
+            .child(
+                div()
+                    .max_w(size::PROSE)
+                    .child(Block::new("Content warnings").child(TagRow::new(
+                        ["Death", "Grief", "Pandemic"].map(|t| TagChip::new(t).warning(true)),
+                    ))),
+            )
             .child(div().max_w(size::PROSE).child(tags("g-tags", false)))
             .child(div().w(rems(15.)).child(tags("g-tags-narrow", true))),
+    )
+}
+
+/// Synthetic votes for the mood line's and the popover's states: moods,
+/// then pace (slow, medium, fast), drive (plot, a mix, character) and the
+/// character pairs (yes, no).
+fn votes(
+    moods: &[(hardcover_core::tags::Mood, u32)],
+    pace: [u32; 3],
+    drive: [u32; 3],
+    traits: &[(hardcover_core::tags::CharacterTrait, u32)],
+) -> hardcover_core::tags::BookVotes {
+    use hardcover_core::tags::{BookVotes, Drive, Pace};
+    BookVotes::from_counts(
+        moods
+            .iter()
+            .map(|(m, n)| (m.id(), *n))
+            .chain(Pace::ALL.into_iter().zip(pace).map(|(p, n)| (p.id(), n)))
+            .chain(Drive::ALL.into_iter().zip(drive).map(|(d, n)| (d.id(), n)))
+            .chain(traits.iter().map(|(t, n)| (t.id(), *n))),
+    )
+}
+
+fn moods_and_votes(cx: &App) -> AnyElement {
+    use std::rc::Rc;
+
+    use hardcover_core::tags::{self, CharacterTrait as T, Mood as M};
+
+    use crate::book::moods::{MoodLine, VotesPanel};
+
+    // Hopeful, Funny and Adventurous stand out; Medium pace; Rarely dark.
+    let everything = votes(
+        &[
+            (M::Adventurous, 420),
+            (M::Funny, 330),
+            (M::Hopeful, 250),
+            (M::Emotional, 180),
+            (M::Lighthearted, 160),
+            (M::Inspiring, 150),
+            (M::Mysterious, 140),
+            (M::Reflective, 120),
+            (M::Tense, 110),
+            (M::Informative, 90),
+            (M::Challenging, 40),
+            (M::Sad, 30),
+            (M::Dark, 24),
+            (M::Relaxing, 23),
+        ],
+        [58, 259, 133],
+        [130, 232, 43],
+        &[
+            (T::Loveable, 379),
+            (T::Unloveable, 31),
+            (T::StrongDevelopment, 267),
+            (T::WeakDevelopment, 124),
+            (T::Diverse, 203),
+            (T::NotDiverse, 175),
+        ],
+    );
+    // Fast, with a pace and a drive but no character pair readers agree on.
+    let fast = votes(
+        &[
+            (M::Adventurous, 300),
+            (M::Tense, 220),
+            (M::Funny, 90),
+            (M::Dark, 60),
+        ],
+        [10, 60, 240],
+        [180, 40, 20],
+        &[],
+    );
+    // As used across Hardcover: nothing stands out, so the most voted.
+    let fallback = votes(
+        &M::ALL.map(|m| {
+            let share = u64::from(m.site_votes()) * 1000 / tags::SITE_MOOD_VOTES;
+            (m, u32::try_from(share).unwrap_or(0))
+        }),
+        [0; 3],
+        [0; 3],
+        &[],
+    );
+    // 80 mood votes: a line, but no Rarely and no other group.
+    let moods_only = votes(
+        &[
+            (M::Reflective, 30),
+            (M::Sad, 22),
+            (M::Emotional, 18),
+            (M::Challenging, 6),
+            (M::Hopeful, 4),
+        ],
+        [0; 3],
+        [0; 3],
+        &[],
+    );
+    // 140 mood votes and none dark, mysterious or sad.
+    let with_rarely = votes(
+        &[
+            (M::Relaxing, 50),
+            (M::Lighthearted, 40),
+            (M::Funny, 30),
+            (M::Hopeful, 20),
+        ],
+        [0; 3],
+        [0; 3],
+        &[],
+    );
+    let too_few = votes(&[(M::Dark, 20), (M::Tense, 20)], [0; 3], [0; 3], &[]);
+    let line = |label: &'static str, id: i64, votes: &tags::BookVotes| {
+        v_flex()
+            .gap_1()
+            .child(div().caption(cx).child(label))
+            .child(
+                MoodLine::new(hardcover_core::BookId::new(id), votes).map_or_else(
+                    || {
+                        div()
+                            .body()
+                            .text_color(colors(cx).fg_muted)
+                            .child("(no line, no Votes)")
+                            .into_any_element()
+                    },
+                    IntoElement::into_any_element,
+                ),
+            )
+    };
+    let c = colors(cx);
+    let panel = |votes: &tags::BookVotes| {
+        div()
+            .flex_none()
+            .p_4()
+            .rounded(super::focus::box_radius(cx))
+            .bg(c.raised)
+            .shadow(c.shadow_popover())
+            .child(VotesPanel::new(Rc::new(tags::breakdown(votes))))
+    };
+    specimen(
+        "Mood line and votes",
+        v_flex()
+            .gap_6()
+            .child(
+                v_flex()
+                    .gap_4()
+                    .max_w(size::PROSE)
+                    .child(line("Standouts, no pace", 9_000_001, &everything))
+                    .child(line("Standouts and a pace", 9_000_002, &fast))
+                    .child(line(
+                        "Nothing stands out: the most voted",
+                        9_000_003,
+                        &fallback,
+                    ))
+                    .child(line("Under 50 mood votes", 9_000_004, &too_few)),
+            )
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .items_start()
+                    .gap_6()
+                    .child(panel(&everything))
+                    .child(panel(&moods_only))
+                    .child(panel(&with_rarely)),
+            ),
     )
 }
 
