@@ -77,6 +77,10 @@ id_type!(
     AuthorId
 );
 id_type!(
+    /// `tags.id`: a genre, mood, pace or other community tag (see [`crate::tags`]).
+    TagId
+);
+id_type!(
     /// `goals.id`: one reading goal.
     GoalId
 );

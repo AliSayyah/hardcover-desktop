@@ -1,0 +1,2746 @@
+{
+ "note": "Hardcover public catalogue, read 2026-11-23 (live, read-only). taggable_counts for: moods 154 adventurous,191 emotional,148 dark,207 mysterious,206 tense,180 funny,192 reflective,181 lighthearted,193 sad,187 hopeful,190 challenging,240 inspiring,203 informative,241 relaxing; pace 182 medium,188 fast,195 slow; attributes 185 Loveable Characters,197 Unloveable Characters,184 Strong Character Development,189 Weak Character Development,186 Diverse Characters,196 Not Diverse Characters,208 Plot driven,194 Character driven,183 A mix driven. genres = cached_tags(path:\"Genre\") as Hardcover returns it.",
+ "site_mood_totals": {
+  "154": 75858,
+  "191": 75096,
+  "148": 68433,
+  "207": 57316,
+  "206": 53022,
+  "180": 45687,
+  "192": 44129,
+  "181": 36867,
+  "193": 33225,
+  "187": 31712,
+  "190": 28774,
+  "240": 23364,
+  "203": 21923,
+  "241": 10452
+ },
+ "books": [
+  {
+   "id": 44186,
+   "title": "Educated: A Memoir",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "188": 10,
+    "195": 9,
+    "148": 33,
+    "193": 31,
+    "203": 11,
+    "190": 30,
+    "240": 33,
+    "192": 42,
+    "187": 20,
+    "191": 53,
+    "182": 43,
+    "154": 4,
+    "206": 22
+   },
+   "genres": [
+    {
+     "tag": "Memoir",
+     "slug": "memoir",
+     "count": 14
+    },
+    {
+     "tag": "Women",
+     "slug": "women",
+     "count": 4
+    },
+    {
+     "tag": "religious",
+     "slug": "religious",
+     "count": 4
+    },
+    {
+     "tag": "Biography & Autobiography",
+     "slug": "biography-autobiography",
+     "count": 3
+    },
+    {
+     "tag": "Christian biography",
+     "slug": "christian-biography",
+     "count": 2
+    },
+    {
+     "tag": "Education",
+     "slug": "education",
+     "count": 2
+    },
+    {
+     "tag": "Biographies & Memoirs",
+     "slug": "biographies-memoirs",
+     "count": 2
+    },
+    {
+     "tag": "History",
+     "slug": "history",
+     "count": 1
+    },
+    {
+     "tag": "autobiography",
+     "slug": "autobiography",
+     "count": 1
+    },
+    {
+     "tag": "Young Adult Fiction",
+     "slug": "young-adult-fiction",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 89871,
+   "title": "Infinite Jest",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "187": 1,
+    "148": 6,
+    "183": 5,
+    "186": 4,
+    "196": 4,
+    "206": 3,
+    "180": 10,
+    "190": 10,
+    "203": 2,
+    "188": 1,
+    "192": 8,
+    "184": 6,
+    "191": 5,
+    "194": 5,
+    "185": 4,
+    "193": 7,
+    "182": 2,
+    "208": 1,
+    "195": 6,
+    "197": 6,
+    "189": 3
+   },
+   "genres": [
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 5
+    },
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 3
+    },
+    {
+     "tag": "General",
+     "slug": "general",
+     "count": 2
+    },
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 2
+    },
+    {
+     "tag": "Humor",
+     "slug": "humor",
+     "count": 1
+    },
+    {
+     "tag": "Literary",
+     "slug": "literary",
+     "count": 1
+    },
+    {
+     "tag": "Fiction / Humorous / Dark Humor",
+     "slug": "fiction-humorous-dark-humor",
+     "count": 1
+    },
+    {
+     "tag": "Fiction / Literary",
+     "slug": "fiction-literary",
+     "count": 1
+    },
+    {
+     "tag": "Friendship",
+     "slug": "friendship",
+     "count": 1
+    },
+    {
+     "tag": "Dystopian",
+     "slug": "dystopian",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 98065,
+   "title": "The Cruel Prince",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "193": 6,
+    "240": 4,
+    "187": 4,
+    "190": 21,
+    "207": 51,
+    "180": 15,
+    "192": 6,
+    "148": 65,
+    "181": 6,
+    "195": 12,
+    "194": 15,
+    "184": 71,
+    "241": 1,
+    "206": 67,
+    "196": 38,
+    "154": 94,
+    "188": 35,
+    "189": 32,
+    "208": 17,
+    "191": 30,
+    "182": 65,
+    "197": 44,
+    "185": 60,
+    "183": 69,
+    "186": 56
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 8
+    },
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 5
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 2
+    },
+    {
+     "tag": "Young Adult Fiction",
+     "slug": "young-adult-fiction",
+     "count": 2
+    },
+    {
+     "tag": "Young Adult Fiction / Fantasy / Dark Fantasy",
+     "slug": "young-adult-fiction-fantasy-dark-fantasy",
+     "count": 1
+    },
+    {
+     "tag": "Young Adult Fiction / Royalty",
+     "slug": "young-adult-fiction-royalty",
+     "count": 1
+    },
+    {
+     "tag": "Action",
+     "slug": "action",
+     "count": 1
+    },
+    {
+     "tag": "Young Adult Fiction / Legends",
+     "slug": "young-adult-fiction-legends",
+     "count": 1
+    },
+    {
+     "tag": "Courts and courtiers",
+     "slug": "courts-and-courtiers",
+     "count": 1
+    },
+    {
+     "tag": "Young Adult Fiction / Fairy Tales & Folklore / General",
+     "slug": "young-adult-fiction-fairy-tales-folklore-general",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 139773,
+   "title": "The Fellowship of the Ring",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "181": 9,
+    "193": 9,
+    "192": 10,
+    "241": 14,
+    "190": 25,
+    "148": 20,
+    "185": 109,
+    "206": 40,
+    "207": 32,
+    "240": 40,
+    "188": 2,
+    "186": 60,
+    "154": 134,
+    "197": 4,
+    "180": 21,
+    "208": 52,
+    "189": 35,
+    "196": 48,
+    "195": 89,
+    "182": 37,
+    "183": 56,
+    "184": 77,
+    "194": 4,
+    "187": 53,
+    "191": 41,
+    "203": 1
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 32
+    },
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 13
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 6
+    },
+    {
+     "tag": "Literature & Fiction",
+     "slug": "literature-fiction",
+     "count": 6
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 6
+    },
+    {
+     "tag": "Epic",
+     "slug": "epic-cb4665c5-e348-4bed-8498-0954580449b2",
+     "count": 5
+    },
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 4
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 4
+    },
+    {
+     "tag": "Middle Earth (Imaginary place)",
+     "slug": "middle-earth-imaginary-place",
+     "count": 3
+    },
+    {
+     "tag": "General",
+     "slug": "general",
+     "count": 3
+    }
+   ]
+  },
+  {
+   "id": 143200,
+   "title": "The Poppy War",
+   "in_demo": false,
+   "in_rule_table": true,
+   "counts": {
+    "207": 26,
+    "185": 34,
+    "192": 13,
+    "203": 6,
+    "187": 3,
+    "191": 74,
+    "189": 54,
+    "196": 38,
+    "188": 32,
+    "208": 31,
+    "193": 63,
+    "183": 90,
+    "195": 14,
+    "190": 66,
+    "180": 3,
+    "184": 93,
+    "154": 111,
+    "240": 2,
+    "148": 163,
+    "182": 122,
+    "206": 116,
+    "197": 112,
+    "186": 105,
+    "194": 24
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 15
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 4
+    },
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 3
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 2
+    },
+    {
+     "tag": "War",
+     "slug": "war",
+     "count": 2
+    },
+    {
+     "tag": "Horror",
+     "slug": "horror",
+     "count": 2
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 2
+    },
+    {
+     "tag": "Paranormal",
+     "slug": "paranormal",
+     "count": 1
+    },
+    {
+     "tag": "Dark Academia",
+     "slug": "dark-academia",
+     "count": 1
+    },
+    {
+     "tag": "Cultural Heritage",
+     "slug": "cultural-heritage-3b84c439-e303-4ce4-8854-bcf832fd5ba6",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 175280,
+   "title": "Piranesi",
+   "in_demo": false,
+   "in_rule_table": true,
+   "counts": {
+    "207": 266,
+    "183": 104,
+    "181": 21,
+    "203": 3,
+    "241": 29,
+    "208": 22,
+    "189": 82,
+    "180": 18,
+    "186": 49,
+    "190": 48,
+    "193": 52,
+    "154": 137,
+    "240": 39,
+    "194": 122,
+    "195": 59,
+    "188": 50,
+    "187": 63,
+    "197": 66,
+    "196": 176,
+    "182": 164,
+    "148": 69,
+    "184": 164,
+    "206": 32,
+    "185": 181,
+    "191": 88,
+    "192": 169
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 28
+    },
+    {
+     "tag": "Mystery",
+     "slug": "mystery",
+     "count": 12
+    },
+    {
+     "tag": "Magical Realism",
+     "slug": "magical-realism",
+     "count": 10
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 6
+    },
+    {
+     "tag": "Literary",
+     "slug": "literary",
+     "count": 5
+    },
+    {
+     "tag": "Literature & Fiction",
+     "slug": "literature-fiction",
+     "count": 4
+    },
+    {
+     "tag": "General",
+     "slug": "general",
+     "count": 4
+    },
+    {
+     "tag": "Genre Fiction",
+     "slug": "genre-fiction",
+     "count": 4
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 4
+    },
+    {
+     "tag": "Dark Fantasy",
+     "slug": "dark-fantasy",
+     "count": 3
+    }
+   ]
+  },
+  {
+   "id": 179241,
+   "title": "A Little Life",
+   "in_demo": false,
+   "in_rule_table": true,
+   "counts": {
+    "208": 3,
+    "180": 1,
+    "196": 9,
+    "189": 38,
+    "148": 74,
+    "190": 43,
+    "191": 75,
+    "194": 67,
+    "197": 27,
+    "182": 28,
+    "193": 83,
+    "206": 32,
+    "192": 35,
+    "203": 2,
+    "185": 49,
+    "184": 39,
+    "195": 53,
+    "183": 3,
+    "188": 1,
+    "186": 65,
+    "187": 2
+   },
+   "genres": [
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 4
+    },
+    {
+     "tag": "Sagas",
+     "slug": "sagas",
+     "count": 3
+    },
+    {
+     "tag": "Literary",
+     "slug": "literary",
+     "count": 3
+    },
+    {
+     "tag": "Coming of Age",
+     "slug": "coming-of-age-7a8c5a5e-b98b-4589-bc26-4be18a640ecd",
+     "count": 3
+    },
+    {
+     "tag": "Trauer",
+     "slug": "trauer",
+     "count": 2
+    },
+    {
+     "tag": "Sad",
+     "slug": "sad-780fdcf9-3a33-4c4c-9086-080d2af606c4",
+     "count": 1
+    },
+    {
+     "tag": "Grief",
+     "slug": "grief",
+     "count": 1
+    },
+    {
+     "tag": "Gay",
+     "slug": "gay-8f3a4080-9ceb-4def-8f72-0fae92b663ff",
+     "count": 1
+    },
+    {
+     "tag": "Drama",
+     "slug": "drama-86645ce7-ecb6-438a-bc0d-e1802905e838",
+     "count": 1
+    },
+    {
+     "tag": "LGBTQ",
+     "slug": "lgbtq",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 266607,
+   "title": "Klara and the Sun",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "148": 14,
+    "203": 1,
+    "190": 15,
+    "241": 4,
+    "208": 11,
+    "154": 7,
+    "183": 14,
+    "186": 18,
+    "188": 9,
+    "207": 26,
+    "197": 32,
+    "193": 40,
+    "182": 45,
+    "206": 6,
+    "189": 30,
+    "187": 35,
+    "185": 55,
+    "192": 80,
+    "191": 64,
+    "194": 65,
+    "184": 54,
+    "195": 46,
+    "196": 62,
+    "240": 15,
+    "181": 10,
+    "180": 1
+   },
+   "genres": [
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 9
+    },
+    {
+     "tag": "Dystopian",
+     "slug": "dystopian",
+     "count": 5
+    },
+    {
+     "tag": "Sci-fi",
+     "slug": "sci-fi",
+     "count": 3
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 3
+    },
+    {
+     "tag": "Literary",
+     "slug": "literary",
+     "count": 2
+    },
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 1
+    },
+    {
+     "tag": "greek mythology",
+     "slug": "greek-mythology",
+     "count": 1
+    },
+    {
+     "tag": "Ancient Greece",
+     "slug": "ancient-greece",
+     "count": 1
+    },
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 1
+    },
+    {
+     "tag": "Friendship",
+     "slug": "friendship",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 292354,
+   "title": "The Martian",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "184": 36,
+    "197": 9,
+    "191": 26,
+    "189": 55,
+    "148": 2,
+    "190": 14,
+    "186": 40,
+    "181": 26,
+    "187": 51,
+    "192": 10,
+    "180": 96,
+    "208": 35,
+    "188": 37,
+    "195": 12,
+    "196": 52,
+    "185": 90,
+    "154": 102,
+    "207": 3,
+    "194": 24,
+    "206": 64,
+    "182": 64,
+    "203": 30,
+    "240": 46,
+    "183": 37
+   },
+   "genres": [
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 29
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 10
+    },
+    {
+     "tag": "Space",
+     "slug": "space",
+     "count": 9
+    },
+    {
+     "tag": "Hard Science Fiction",
+     "slug": "hard-science-fiction-c7a768a4-925e-4396-a0f3-dc1918f4cfc9",
+     "count": 7
+    },
+    {
+     "tag": "Action & Adventure",
+     "slug": "action-adventure-885c1c28-c861-4e79-906d-e3ce299758ca",
+     "count": 6
+    },
+    {
+     "tag": "Thriller",
+     "slug": "thriller",
+     "count": 5
+    },
+    {
+     "tag": "Suspense",
+     "slug": "suspense",
+     "count": 3
+    },
+    {
+     "tag": "Audiobook",
+     "slug": "audiobook-28d9b978-31e9-43d5-a61a-499c03237945",
+     "count": 4
+    }
+   ]
+  },
+  {
+   "id": 312460,
+   "title": "Dune",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "241": 1,
+    "154": 167,
+    "203": 1,
+    "240": 13,
+    "194": 33,
+    "185": 50,
+    "148": 57,
+    "192": 50,
+    "183": 89,
+    "189": 33,
+    "207": 79,
+    "188": 7,
+    "196": 53,
+    "187": 12,
+    "191": 28,
+    "208": 35,
+    "195": 86,
+    "182": 86,
+    "206": 74,
+    "186": 102,
+    "197": 110,
+    "184": 131,
+    "190": 95,
+    "193": 13
+   },
+   "genres": [
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 54
+    }
+   ]
+  },
+  {
+   "id": 340654,
+   "title": "The Seven Husbands of Evelyn Hugo",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "203": 6,
+    "196": 42,
+    "197": 141,
+    "208": 21,
+    "188": 103,
+    "154": 35,
+    "148": 35,
+    "206": 28,
+    "185": 141,
+    "180": 38,
+    "183": 72,
+    "187": 49,
+    "241": 13,
+    "207": 55,
+    "184": 209,
+    "195": 11,
+    "192": 185,
+    "181": 23,
+    "193": 159,
+    "186": 229,
+    "191": 258,
+    "182": 190,
+    "190": 41,
+    "189": 71,
+    "240": 102,
+    "194": 194
+   },
+   "genres": [
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 10
+    },
+    {
+     "tag": "LGBTQ",
+     "slug": "lgbtq",
+     "count": 6
+    },
+    {
+     "tag": "Historical Fiction",
+     "slug": "historical-fiction",
+     "count": 5
+    },
+    {
+     "tag": "Contemporary",
+     "slug": "contemporary-5aa3bf50-fe7e-496f-835d-8659c4fe219b",
+     "count": 4
+    },
+    {
+     "tag": "Women",
+     "slug": "women",
+     "count": 2
+    },
+    {
+     "tag": "LGBTQ+",
+     "slug": "lgbtq-07ff2ba7-c953-4b95-b998-5d3a1267e3fe",
+     "count": 2
+    },
+    {
+     "tag": "Queer",
+     "slug": "queer-ae61041c-e94d-4b0c-a27f-67d6fb789720",
+     "count": 2
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 2
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 1
+    },
+    {
+     "tag": "Biography",
+     "slug": "biography",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 369692,
+   "title": "Mistborn: The Final Empire",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "203": 6,
+    "240": 63,
+    "184": 221,
+    "241": 5,
+    "180": 42,
+    "189": 25,
+    "193": 37,
+    "206": 123,
+    "190": 34,
+    "194": 27,
+    "186": 150,
+    "208": 48,
+    "182": 186,
+    "196": 85,
+    "188": 53,
+    "192": 16,
+    "187": 84,
+    "181": 14,
+    "183": 171,
+    "195": 29,
+    "148": 144,
+    "207": 156,
+    "154": 258,
+    "197": 25,
+    "191": 99,
+    "185": 225
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 65
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 28
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 26
+    },
+    {
+     "tag": "Epic Fantasy",
+     "slug": "epic-fantasy",
+     "count": 5
+    },
+    {
+     "tag": "Magic",
+     "slug": "magic",
+     "count": 5
+    },
+    {
+     "tag": "High Fantasy",
+     "slug": "high-fantasy-dfcd50f5-2789-45fc-9ee3-3e4354620e62",
+     "count": 4
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 3
+    },
+    {
+     "tag": "Audiobook",
+     "slug": "audiobook-28d9b978-31e9-43d5-a61a-499c03237945",
+     "count": 2
+    },
+    {
+     "tag": "Dystopian",
+     "slug": "dystopian",
+     "count": 2
+    },
+    {
+     "tag": "adult",
+     "slug": "adult",
+     "count": 2
+    }
+   ]
+  },
+  {
+   "id": 373525,
+   "title": "It",
+   "in_demo": false,
+   "in_rule_table": true,
+   "counts": {
+    "192": 3,
+    "193": 8,
+    "191": 9,
+    "208": 2,
+    "207": 14,
+    "206": 16,
+    "184": 19,
+    "186": 16,
+    "194": 6,
+    "180": 4,
+    "148": 28,
+    "240": 3,
+    "187": 2,
+    "196": 8,
+    "190": 4,
+    "154": 16,
+    "183": 16,
+    "197": 8,
+    "188": 2,
+    "189": 4,
+    "182": 11,
+    "185": 15,
+    "195": 15
+   },
+   "genres": [
+    {
+     "tag": "Horror",
+     "slug": "horror",
+     "count": 19
+    }
+   ]
+  },
+  {
+   "id": 377193,
+   "title": "The Great Gatsby",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "154": 8,
+    "186": 8,
+    "185": 13,
+    "207": 22,
+    "195": 18,
+    "187": 5,
+    "240": 3,
+    "188": 21,
+    "241": 2,
+    "190": 12,
+    "184": 19,
+    "193": 34,
+    "182": 36,
+    "196": 56,
+    "203": 4,
+    "194": 50,
+    "197": 56,
+    "183": 11,
+    "148": 18,
+    "189": 45,
+    "191": 28,
+    "181": 1,
+    "192": 42,
+    "208": 4,
+    "180": 9,
+    "206": 9
+   },
+   "genres": [
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 19
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 6
+    },
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 4
+    },
+    {
+     "tag": "Literary",
+     "slug": "literary",
+     "count": 3
+    },
+    {
+     "tag": "Literature & Fiction",
+     "slug": "literature-fiction",
+     "count": 3
+    },
+    {
+     "tag": "Literature",
+     "slug": "literature",
+     "count": 2
+    }
+   ]
+  },
+  {
+   "id": 377938,
+   "title": "The Lord of the Rings",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "186": 8,
+    "181": 2,
+    "192": 2,
+    "188": 1,
+    "184": 11,
+    "191": 11,
+    "193": 2,
+    "206": 4,
+    "189": 3,
+    "148": 7,
+    "190": 7,
+    "187": 11,
+    "207": 4,
+    "183": 9,
+    "196": 5,
+    "240": 9,
+    "195": 12,
+    "208": 4,
+    "185": 13,
+    "180": 3,
+    "182": 2,
+    "154": 19,
+    "241": 1
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 16
+    },
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 8
+    },
+    {
+     "tag": "Epic",
+     "slug": "epic-cb4665c5-e348-4bed-8498-0954580449b2",
+     "count": 4
+    },
+    {
+     "tag": "General",
+     "slug": "general",
+     "count": 2
+    },
+    {
+     "tag": " English",
+     "slug": "english-bdd2948e-1fab-48aa-b7a0-37d6a609b03c",
+     "count": 1
+    },
+    {
+     "tag": "Juvenile Fiction",
+     "slug": "juvenile-fiction",
+     "count": 1
+    },
+    {
+     "tag": "History",
+     "slug": "history",
+     "count": 1
+    },
+    {
+     "tag": "Fantasy fiction",
+     "slug": "fantasy-fiction",
+     "count": 1
+    },
+    {
+     "tag": "High Fantasy",
+     "slug": "high-fantasy-dfcd50f5-2789-45fc-9ee3-3e4354620e62",
+     "count": 1
+    },
+    {
+     "tag": " Frodo (Fictitious character)",
+     "slug": "frodo-fictitious-character",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 379647,
+   "title": "Pride and Prejudice",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "193": 2,
+    "154": 16,
+    "208": 4,
+    "180": 77,
+    "181": 79,
+    "182": 59,
+    "185": 94,
+    "194": 67,
+    "192": 17,
+    "187": 33,
+    "188": 8,
+    "207": 1,
+    "240": 14,
+    "183": 33,
+    "195": 59,
+    "206": 4,
+    "197": 18,
+    "189": 8,
+    "190": 9,
+    "191": 51,
+    "186": 19,
+    "241": 26,
+    "196": 85,
+    "184": 102
+   },
+   "genres": [
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 25
+    },
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 17
+    },
+    {
+     "tag": "Historical Fiction",
+     "slug": "historical-fiction",
+     "count": 4
+    },
+    {
+     "tag": "Literature",
+     "slug": "literature",
+     "count": 2
+    },
+    {
+     "tag": "Family & Relationships",
+     "slug": "family-relationships",
+     "count": 2
+    },
+    {
+     "tag": "English fiction",
+     "slug": "english-fiction",
+     "count": 2
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 2
+    },
+    {
+     "tag": "Children's stories",
+     "slug": "childrens-stories",
+     "count": 1
+    },
+    {
+     "tag": "Language Arts & Disciplines",
+     "slug": "language-arts-disciplines",
+     "count": 1
+    },
+    {
+     "tag": "High interest-low vocabulary books",
+     "slug": "high-interest-low-vocabulary-books",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 379760,
+   "title": "1984",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "207": 48,
+    "185": 21,
+    "203": 19,
+    "186": 13,
+    "191": 42,
+    "183": 73,
+    "154": 7,
+    "195": 46,
+    "190": 73,
+    "194": 39,
+    "196": 120,
+    "197": 120,
+    "188": 21,
+    "187": 3,
+    "192": 86,
+    "148": 151,
+    "184": 74,
+    "240": 5,
+    "189": 70,
+    "206": 112,
+    "182": 94,
+    "193": 66,
+    "180": 1,
+    "208": 30
+   },
+   "genres": [
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 31
+    },
+    {
+     "tag": "Dystopian",
+     "slug": "dystopian",
+     "count": 36
+    }
+   ]
+  },
+  {
+   "id": 383598,
+   "title": "Circe",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "206": 25,
+    "189": 17,
+    "154": 122,
+    "183": 35,
+    "190": 32,
+    "203": 9,
+    "180": 3,
+    "181": 3,
+    "187": 33,
+    "207": 30,
+    "241": 10,
+    "193": 53,
+    "188": 11,
+    "240": 31,
+    "186": 54,
+    "192": 89,
+    "184": 146,
+    "185": 91,
+    "208": 3,
+    "195": 46,
+    "182": 124,
+    "196": 85,
+    "148": 45,
+    "197": 64,
+    "191": 114,
+    "194": 122
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 13
+    },
+    {
+     "tag": "Historical Fiction",
+     "slug": "historical-fiction",
+     "count": 7
+    },
+    {
+     "tag": "Mythology",
+     "slug": "mythology-0fe49f8c-88c9-4454-9a3d-01b2b10edd39",
+     "count": 6
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 5
+    },
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 5
+    },
+    {
+     "tag": "greek mythology",
+     "slug": "greek-mythology",
+     "count": 3
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 2
+    },
+    {
+     "tag": "Literature & Fiction",
+     "slug": "literature-fiction",
+     "count": 2
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 2
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 2
+    }
+   ]
+  },
+  {
+   "id": 386446,
+   "title": "The Way of Kings",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "183": 103,
+    "240": 61,
+    "189": 10,
+    "203": 9,
+    "208": 12,
+    "180": 12,
+    "197": 24,
+    "207": 87,
+    "190": 55,
+    "187": 54,
+    "194": 42,
+    "185": 131,
+    "196": 32,
+    "181": 2,
+    "241": 4,
+    "195": 75,
+    "193": 29,
+    "188": 6,
+    "192": 38,
+    "186": 118,
+    "182": 91,
+    "154": 159,
+    "191": 80,
+    "206": 90,
+    "184": 148,
+    "148": 55
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 29
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 3
+    },
+    {
+     "tag": "High Fantasy",
+     "slug": "high-fantasy-dfcd50f5-2789-45fc-9ee3-3e4354620e62",
+     "count": 3
+    },
+    {
+     "tag": "Magic",
+     "slug": "magic",
+     "count": 2
+    },
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 2
+    },
+    {
+     "tag": "Epic Fantasy",
+     "slug": "epic-fantasy",
+     "count": 2
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 1
+    },
+    {
+     "tag": "War",
+     "slug": "war",
+     "count": 1
+    },
+    {
+     "tag": "Epic",
+     "slug": "epic-cb4665c5-e348-4bed-8498-0954580449b2",
+     "count": 1
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 427314,
+   "title": "Children of Dune",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "208": 6,
+    "206": 13,
+    "183": 18,
+    "148": 19,
+    "190": 23,
+    "189": 15,
+    "154": 23,
+    "192": 22,
+    "185": 8,
+    "186": 22,
+    "240": 1,
+    "188": 1,
+    "196": 15,
+    "182": 23,
+    "181": 1,
+    "207": 25,
+    "194": 13,
+    "184": 23,
+    "193": 7,
+    "195": 20,
+    "197": 31,
+    "191": 4,
+    "203": 2
+   },
+   "genres": [
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 23
+    }
+   ]
+  },
+  {
+   "id": 427363,
+   "title": "God Emperor of Dune",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "207": 16,
+    "184": 16,
+    "194": 13,
+    "182": 8,
+    "206": 4,
+    "193": 5,
+    "154": 7,
+    "195": 16,
+    "148": 9,
+    "208": 5,
+    "197": 20,
+    "186": 12,
+    "191": 5,
+    "190": 18,
+    "189": 7,
+    "180": 2,
+    "187": 3,
+    "185": 4,
+    "196": 10,
+    "183": 4,
+    "240": 1,
+    "192": 20,
+    "188": 1,
+    "203": 1
+   },
+   "genres": [
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 19
+    },
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 11
+    },
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 7
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 5
+    },
+    {
+     "tag": "Space Opera",
+     "slug": "space-opera",
+     "count": 5
+    },
+    {
+     "tag": "Philosophy",
+     "slug": "philosophy",
+     "count": 4
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 4
+    },
+    {
+     "tag": "science fiction fantasy",
+     "slug": "science-fiction-fantasy",
+     "count": 3
+    },
+    {
+     "tag": "Space",
+     "slug": "space",
+     "count": 3
+    },
+    {
+     "tag": "Dune (Imaginary place)",
+     "slug": "dune-imaginary-place",
+     "count": 2
+    }
+   ]
+  },
+  {
+   "id": 427393,
+   "title": "Dune Messiah",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "206": 29,
+    "240": 4,
+    "183": 30,
+    "203": 2,
+    "207": 25,
+    "194": 20,
+    "192": 32,
+    "190": 31,
+    "195": 27,
+    "154": 28,
+    "188": 5,
+    "189": 24,
+    "196": 25,
+    "208": 10,
+    "148": 36,
+    "184": 38,
+    "197": 47,
+    "191": 18,
+    "185": 16,
+    "182": 38,
+    "186": 33,
+    "193": 15,
+    "187": 1
+   },
+   "genres": [
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 24
+    }
+   ]
+  },
+  {
+   "id": 427473,
+   "title": "Red Rising",
+   "in_demo": false,
+   "in_rule_table": true,
+   "counts": {
+    "192": 13,
+    "194": 34,
+    "180": 12,
+    "208": 27,
+    "148": 136,
+    "203": 1,
+    "240": 25,
+    "185": 90,
+    "197": 76,
+    "183": 106,
+    "191": 64,
+    "187": 14,
+    "186": 90,
+    "207": 25,
+    "182": 97,
+    "193": 26,
+    "189": 40,
+    "195": 6,
+    "241": 1,
+    "184": 123,
+    "206": 124,
+    "154": 149,
+    "190": 38,
+    "188": 87,
+    "196": 66
+   },
+   "genres": [
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 29
+    },
+    {
+     "tag": "Dystopian",
+     "slug": "dystopian",
+     "count": 16
+    },
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 14
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 7
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 6
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 5
+    },
+    {
+     "tag": "Dystopia",
+     "slug": "dystopia",
+     "count": 3
+    },
+    {
+     "tag": "Audiobook",
+     "slug": "audiobook-28d9b978-31e9-43d5-a61a-499c03237945",
+     "count": 3
+    },
+    {
+     "tag": "War",
+     "slug": "war",
+     "count": 3
+    },
+    {
+     "tag": "Action & Adventure",
+     "slug": "action-adventure-885c1c28-c861-4e79-906d-e3ce299758ca",
+     "count": 3
+    }
+   ]
+  },
+  {
+   "id": 427513,
+   "title": "Ulysses",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "180": 2,
+    "194": 4,
+    "186": 2,
+    "190": 5,
+    "189": 2,
+    "192": 2,
+    "195": 5,
+    "185": 2,
+    "154": 2,
+    "191": 1,
+    "207": 1,
+    "240": 1
+   },
+   "genres": [
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 3
+    },
+    {
+     "tag": "General",
+     "slug": "general",
+     "count": 2
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 2
+    },
+    {
+     "tag": "Family life",
+     "slug": "family-life",
+     "count": 1
+    },
+    {
+     "tag": "Friendship",
+     "slug": "friendship",
+     "count": 1
+    },
+    {
+     "tag": "Europe",
+     "slug": "europe-5e5bc7b3-9c93-45a8-86d6-c779b59cac33",
+     "count": 1
+    },
+    {
+     "tag": "Marriage & Divorce",
+     "slug": "marriage-divorce-7c0d243d-6cb1-4678-b265-cd3ddd422e43",
+     "count": 1
+    },
+    {
+     "tag": "Psychological",
+     "slug": "psychological-067ea4fe-3b93-4ea9-95cd-7078461b2102",
+     "count": 1
+    },
+    {
+     "tag": "Literature",
+     "slug": "literature",
+     "count": 1
+    },
+    {
+     "tag": "Places",
+     "slug": "places-a5bfbc76-a083-45be-9669-ed9a871a7af6",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 427544,
+   "title": "Edgedancer",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "240": 7,
+    "203": 2,
+    "182": 19,
+    "186": 30,
+    "183": 20,
+    "189": 16,
+    "207": 16,
+    "191": 13,
+    "194": 28,
+    "197": 13,
+    "241": 4,
+    "195": 3,
+    "185": 49,
+    "187": 20,
+    "206": 9,
+    "192": 5,
+    "193": 3,
+    "148": 7,
+    "208": 11,
+    "184": 45,
+    "196": 29,
+    "190": 2,
+    "180": 48,
+    "154": 66,
+    "188": 48,
+    "181": 30
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 11
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 2
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 1
+    },
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 1
+    },
+    {
+     "tag": "Science Fiction And Fantasy",
+     "slug": "science-fiction-and-fantasy",
+     "count": 1
+    },
+    {
+     "tag": "Audiobooks",
+     "slug": "audiobooks-69631021-b8ff-4425-a6b6-db6e225606b8",
+     "count": 1
+    },
+    {
+     "tag": "Cosmere",
+     "slug": "cosmere-c001c2d7-0966-493e-84b9-85e3199cac3e",
+     "count": 1
+    },
+    {
+     "tag": "\"Fiction\"",
+     "slug": "fiction-e2b223c2-ebf0-4b5c-81c6-a75db4991d2f",
+     "count": 1
+    },
+    {
+     "tag": "\"Cosmere\"",
+     "slug": "cosmere-dcb32881-c3fe-4b5f-aa0b-c746dbf41ed0",
+     "count": 1
+    },
+    {
+     "tag": "\"Audiobooks\"]",
+     "slug": "audiobooks-5ec47f8f-e260-4f6e-8b9f-4f58630fea3c",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 427578,
+   "title": "Project Hail Mary",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "192": 67,
+    "208": 130,
+    "206": 170,
+    "193": 51,
+    "148": 24,
+    "194": 43,
+    "181": 86,
+    "195": 22,
+    "186": 203,
+    "197": 31,
+    "207": 88,
+    "241": 13,
+    "190": 59,
+    "182": 259,
+    "180": 326,
+    "154": 422,
+    "185": 379,
+    "183": 232,
+    "196": 175,
+    "240": 154,
+    "189": 124,
+    "184": 267,
+    "203": 129,
+    "188": 169,
+    "187": 244,
+    "191": 234
+   },
+   "genres": [
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 67
+    },
+    {
+     "tag": "Space",
+     "slug": "space",
+     "count": 15
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 12
+    },
+    {
+     "tag": "Hard Science Fiction",
+     "slug": "hard-science-fiction-c7a768a4-925e-4396-a0f3-dc1918f4cfc9",
+     "count": 13
+    },
+    {
+     "tag": "Sci-fi",
+     "slug": "sci-fi",
+     "count": 13
+    }
+   ]
+  },
+  {
+   "id": 428018,
+   "title": "The Midnight Library",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "195": 27,
+    "183": 47,
+    "194": 168,
+    "196": 148,
+    "188": 94,
+    "241": 9,
+    "181": 16,
+    "206": 9,
+    "187": 160,
+    "193": 71,
+    "184": 204,
+    "203": 7,
+    "189": 33,
+    "191": 185,
+    "185": 137,
+    "180": 21,
+    "148": 43,
+    "192": 197,
+    "190": 39,
+    "207": 40,
+    "197": 91,
+    "154": 56,
+    "182": 145,
+    "240": 138,
+    "186": 64,
+    "208": 16
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 9
+    },
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 9
+    },
+    {
+     "tag": "Magical Realism",
+     "slug": "magical-realism",
+     "count": 6
+    },
+    {
+     "tag": "Time Travel",
+     "slug": "time-travel-8fa5a0da-559a-4c88-9c07-55f3168399db",
+     "count": 4
+    },
+    {
+     "tag": "Literary",
+     "slug": "literary",
+     "count": 4
+    },
+    {
+     "tag": "Contemporary",
+     "slug": "contemporary-5aa3bf50-fe7e-496f-835d-8659c4fe219b",
+     "count": 4
+    },
+    {
+     "tag": "General",
+     "slug": "general",
+     "count": 3
+    },
+    {
+     "tag": "Women",
+     "slug": "women",
+     "count": 3
+    },
+    {
+     "tag": "Women's Fiction",
+     "slug": "womens-fiction",
+     "count": 3
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 3
+    }
+   ]
+  },
+  {
+   "id": 428023,
+   "title": "Atomic habits: An Easy & Proven Way to Build Good Habits & Break Bad Ones",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "188": 19,
+    "182": 47,
+    "195": 7,
+    "181": 5,
+    "203": 71,
+    "192": 44,
+    "240": 56,
+    "154": 1,
+    "191": 1,
+    "180": 3,
+    "187": 18,
+    "190": 7
+   },
+   "genres": [
+    {
+     "tag": "Self-Help",
+     "slug": "self-help-e026dece-d926-4e01-9480-a316b3be0396",
+     "count": 10
+    },
+    {
+     "tag": "Psychology",
+     "slug": "psychology",
+     "count": 9
+    },
+    {
+     "tag": "Business",
+     "slug": "business",
+     "count": 8
+    },
+    {
+     "tag": "Personal Development",
+     "slug": "personal-development",
+     "count": 6
+    },
+    {
+     "tag": "Personal Growth",
+     "slug": "personal-growth-35657f49-5017-4147-98ac-7462fa450501",
+     "count": 4
+    },
+    {
+     "tag": "Self help",
+     "slug": "self-help",
+     "count": 4
+    },
+    {
+     "tag": "Organizational behavior",
+     "slug": "organizational-behavior",
+     "count": 3
+    },
+    {
+     "tag": "Productivity",
+     "slug": "productivity-6fb4e6e9-6c2a-4196-9c85-bbfc5052de2c",
+     "count": 3
+    },
+    {
+     "tag": "Business & Economics",
+     "slug": "business-economics",
+     "count": 3
+    },
+    {
+     "tag": "Business & Careers",
+     "slug": "business-careers",
+     "count": 3
+    }
+   ]
+  },
+  {
+   "id": 428778,
+   "title": "The Love Hypothesis",
+   "in_demo": false,
+   "in_rule_table": true,
+   "counts": {
+    "190": 1,
+    "154": 5,
+    "208": 20,
+    "184": 86,
+    "189": 47,
+    "241": 36,
+    "188": 87,
+    "197": 21,
+    "194": 67,
+    "186": 85,
+    "191": 58,
+    "206": 5,
+    "187": 34,
+    "181": 139,
+    "182": 68,
+    "207": 1,
+    "185": 124,
+    "196": 48,
+    "192": 6,
+    "195": 3,
+    "180": 131,
+    "183": 51,
+    "240": 10,
+    "193": 2,
+    "203": 5
+   },
+   "genres": [
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 16
+    },
+    {
+     "tag": "Contemporary",
+     "slug": "contemporary-5aa3bf50-fe7e-496f-835d-8659c4fe219b",
+     "count": 2
+    },
+    {
+     "tag": "Dating",
+     "slug": "dating-8b7638d1-6c53-4520-9274-2b691e5c5e1b",
+     "count": 1
+    },
+    {
+     "tag": "Adult & Contemporary Romance",
+     "slug": "adult-and-contemporary-romance",
+     "count": 1
+    },
+    {
+     "tag": "Relationships",
+     "slug": "relationships-dd76c34c-3665-473e-9f72-0dc5d6ce4980",
+     "count": 1
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 1
+    },
+    {
+     "tag": "Living Together & Marriage",
+     "slug": "living-together-and-marriage",
+     "count": 1
+    },
+    {
+     "tag": "Family & Relationships",
+     "slug": "family-relationships",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 475214,
+   "title": "Legends & Lattes",
+   "in_demo": false,
+   "in_rule_table": true,
+   "counts": {
+    "192": 20,
+    "196": 31,
+    "148": 1,
+    "181": 253,
+    "241": 186,
+    "180": 112,
+    "240": 86,
+    "208": 15,
+    "191": 67,
+    "183": 86,
+    "197": 10,
+    "195": 43,
+    "190": 2,
+    "189": 67,
+    "193": 3,
+    "194": 148,
+    "184": 164,
+    "182": 146,
+    "154": 98,
+    "187": 169,
+    "188": 87,
+    "206": 4,
+    "207": 13,
+    "185": 247,
+    "186": 215
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 34
+    },
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 10
+    },
+    {
+     "tag": "LGBTQ",
+     "slug": "lgbtq",
+     "count": 8
+    },
+    {
+     "tag": "cozy fantasy",
+     "slug": "cozy-fantasy-9c0d124d-57c8-4c00-916e-6ee266678f21",
+     "count": 6
+    },
+    {
+     "tag": "Cozy",
+     "slug": "cozy-9dc5110e-2afe-45bb-b84b-f6c3d9c0647d",
+     "count": 4
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 3
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 3
+    },
+    {
+     "tag": "Mystery",
+     "slug": "mystery",
+     "count": 2
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 2
+    },
+    {
+     "tag": "Action & Adventure",
+     "slug": "action-adventure-885c1c28-c861-4e79-906d-e3ce299758ca",
+     "count": 2
+    }
+   ]
+  },
+  {
+   "id": 479910,
+   "title": "Tomorrow, and Tomorrow, and Tomorrow",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "181": 13,
+    "184": 162,
+    "206": 15,
+    "148": 30,
+    "187": 72,
+    "188": 22,
+    "208": 5,
+    "207": 4,
+    "190": 32,
+    "183": 58,
+    "154": 27,
+    "189": 51,
+    "180": 45,
+    "186": 185,
+    "197": 99,
+    "182": 160,
+    "194": 151,
+    "195": 45,
+    "203": 11,
+    "241": 7,
+    "193": 125,
+    "240": 63,
+    "192": 144,
+    "191": 204,
+    "185": 109,
+    "196": 20
+   },
+   "genres": [
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 8
+    },
+    {
+     "tag": "Contemporary",
+     "slug": "contemporary-5aa3bf50-fe7e-496f-835d-8659c4fe219b",
+     "count": 7
+    },
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 6
+    },
+    {
+     "tag": "Coming of Age",
+     "slug": "coming-of-age-7a8c5a5e-b98b-4589-bc26-4be18a640ecd",
+     "count": 4
+    },
+    {
+     "tag": "Friendship",
+     "slug": "friendship",
+     "count": 4
+    },
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 4
+    },
+    {
+     "tag": "Literary",
+     "slug": "literary",
+     "count": 4
+    },
+    {
+     "tag": "Action & Adventure",
+     "slug": "action-adventure-885c1c28-c861-4e79-906d-e3ce299758ca",
+     "count": 2
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 2
+    },
+    {
+     "tag": "Cultural Heritage",
+     "slug": "cultural-heritage-3b84c439-e303-4ce4-8854-bcf832fd5ba6",
+     "count": 2
+    }
+   ]
+  },
+  {
+   "id": 490300,
+   "title": "Lessons in Chemistry",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "208": 5,
+    "241": 3,
+    "192": 52,
+    "187": 51,
+    "193": 44,
+    "206": 7,
+    "148": 11,
+    "188": 27,
+    "183": 46,
+    "195": 11,
+    "154": 12,
+    "240": 89,
+    "189": 32,
+    "207": 2,
+    "180": 72,
+    "191": 91,
+    "196": 77,
+    "185": 100,
+    "194": 62,
+    "181": 13,
+    "186": 27,
+    "203": 37,
+    "197": 19,
+    "190": 18,
+    "184": 77,
+    "182": 87
+   },
+   "genres": [
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 4
+    },
+    {
+     "tag": "Historical Fiction",
+     "slug": "historical-fiction",
+     "count": 3
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 2
+    },
+    {
+     "tag": "Women",
+     "slug": "women",
+     "count": 2
+    },
+    {
+     "tag": "History",
+     "slug": "history",
+     "count": 1
+    },
+    {
+     "tag": "Literature & Fiction",
+     "slug": "literature-fiction",
+     "count": 1
+    },
+    {
+     "tag": "did-not-finish",
+     "slug": "did-not-finish",
+     "count": 1
+    },
+    {
+     "tag": "American fiction",
+     "slug": "american-fiction",
+     "count": 1
+    },
+    {
+     "tag": "Drama",
+     "slug": "drama-86645ce7-ecb6-438a-bc0d-e1802905e838",
+     "count": 1
+    },
+    {
+     "tag": "Science",
+     "slug": "science",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 714600,
+   "title": "Fourth Wing",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "183": 183,
+    "194": 50,
+    "241": 3,
+    "203": 6,
+    "181": 26,
+    "240": 27,
+    "207": 86,
+    "208": 44,
+    "154": 295,
+    "195": 14,
+    "148": 94,
+    "188": 112,
+    "196": 76,
+    "186": 176,
+    "187": 25,
+    "190": 68,
+    "193": 44,
+    "192": 6,
+    "197": 76,
+    "206": 153,
+    "182": 185,
+    "189": 69,
+    "191": 170,
+    "184": 208,
+    "185": 203,
+    "180": 74
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 47
+    },
+    {
+     "tag": "Romantasy",
+     "slug": "romantasy",
+     "count": 21
+    },
+    {
+     "tag": "Romance",
+     "slug": "romance",
+     "count": 20
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 7
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 5
+    },
+    {
+     "tag": "Fantasy romance",
+     "slug": "fantasy-romance",
+     "count": 5
+    },
+    {
+     "tag": "War",
+     "slug": "war",
+     "count": 4
+    },
+    {
+     "tag": "High Fantasy",
+     "slug": "high-fantasy-dfcd50f5-2789-45fc-9ee3-3e4354620e62",
+     "count": 3
+    },
+    {
+     "tag": "Science Fiction & Fantasy",
+     "slug": "science-fiction-fantasy-4c14c349-8d52-4893-aaf0-34f7e33bf275",
+     "count": 3
+    },
+    {
+     "tag": "dragons",
+     "slug": "dragons-8ec90ae1-d840-461e-a0a5-3880a057db74",
+     "count": 3
+    }
+   ]
+  },
+  {
+   "id": 1145808,
+   "title": "Gone Girl",
+   "in_demo": false,
+   "in_rule_table": true,
+   "counts": {
+    "186": 5,
+    "193": 2,
+    "184": 21,
+    "185": 4,
+    "208": 5,
+    "191": 13,
+    "180": 4,
+    "188": 18,
+    "154": 7,
+    "197": 50,
+    "148": 51,
+    "182": 30,
+    "189": 26,
+    "190": 14,
+    "194": 12,
+    "181": 1,
+    "192": 4,
+    "187": 1,
+    "207": 48,
+    "206": 39,
+    "183": 31,
+    "203": 1,
+    "195": 8,
+    "196": 42
+   },
+   "genres": [
+    {
+     "tag": "Mystery",
+     "slug": "mystery",
+     "count": 8
+    },
+    {
+     "tag": "Thriller",
+     "slug": "thriller",
+     "count": 5
+    },
+    {
+     "tag": "Suspense",
+     "slug": "suspense",
+     "count": 4
+    },
+    {
+     "tag": "Contemporary",
+     "slug": "contemporary-5aa3bf50-fe7e-496f-835d-8659c4fe219b",
+     "count": 2
+    },
+    {
+     "tag": "Crime",
+     "slug": "crime",
+     "count": 2
+    },
+    {
+     "tag": "Mystery & Thriller",
+     "slug": "mystery-and-thriller-eb9f28ab-7a33-45d6-b976-e6079124277c",
+     "count": 1
+    },
+    {
+     "tag": "Marriage",
+     "slug": "marriage",
+     "count": 1
+    },
+    {
+     "tag": "Literature & Fiction:Genre Fiction:Movie",
+     "slug": "literature-fiction-genre-fiction-movie",
+     "count": 1
+    },
+    {
+     "tag": "TV & Video Game Tie-Ins",
+     "slug": "tv-video-game-tie-ins-d6e2ee93-c74c-4f42-a4e3-73835f34caac",
+     "count": 1
+    },
+    {
+     "tag": "Thrillers",
+     "slug": "thrillers-bfd3cfa7-0fb6-4a6c-8e7c-c673931fecd6",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 1788666,
+   "title": "Moby Dick",
+   "in_demo": true,
+   "in_rule_table": false,
+   "counts": {
+    "195": 13,
+    "206": 6,
+    "185": 5,
+    "186": 6,
+    "184": 2,
+    "191": 1,
+    "183": 7,
+    "208": 3,
+    "197": 5,
+    "189": 8,
+    "192": 6,
+    "190": 9,
+    "196": 4,
+    "154": 11,
+    "203": 8,
+    "180": 5,
+    "240": 1,
+    "193": 1,
+    "148": 4,
+    "194": 1,
+    "182": 3
+   },
+   "genres": [
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 6
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 3
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 2
+    },
+    {
+     "tag": "Adventure stories",
+     "slug": "adventure-stories",
+     "count": 2
+    },
+    {
+     "tag": "literary criticism",
+     "slug": "literary-criticism",
+     "count": 1
+    },
+    {
+     "tag": "Mentally ill",
+     "slug": "mentally-ill",
+     "count": 1
+    },
+    {
+     "tag": "Comics",
+     "slug": "comics",
+     "count": 1
+    },
+    {
+     "tag": "Sea stories",
+     "slug": "sea-stories",
+     "count": 1
+    },
+    {
+     "tag": "Literature",
+     "slug": "literature",
+     "count": 1
+    },
+    {
+     "tag": "Literary Collections",
+     "slug": "literary-collections",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": 2459845,
+   "title": "The Hobbit, or There and Back Again",
+   "in_demo": true,
+   "in_rule_table": true,
+   "counts": {
+    "196": 50,
+    "194": 6,
+    "187": 40,
+    "195": 19,
+    "241": 22,
+    "181": 74,
+    "203": 1,
+    "189": 23,
+    "240": 35,
+    "185": 108,
+    "208": 51,
+    "186": 58,
+    "182": 81,
+    "154": 142,
+    "197": 9,
+    "190": 9,
+    "148": 9,
+    "184": 85,
+    "207": 23,
+    "193": 4,
+    "183": 51,
+    "191": 21,
+    "206": 17,
+    "188": 28,
+    "180": 58,
+    "192": 8
+   },
+   "genres": [
+    {
+     "tag": "Fantasy",
+     "slug": "fantasy",
+     "count": 54
+    },
+    {
+     "tag": "Classics",
+     "slug": "classics",
+     "count": 23
+    },
+    {
+     "tag": "Adventure",
+     "slug": "adventure",
+     "count": 13
+    },
+    {
+     "tag": "Young Adult",
+     "slug": "young-adult",
+     "count": 8
+    },
+    {
+     "tag": "Epic",
+     "slug": "epic-cb4665c5-e348-4bed-8498-0954580449b2",
+     "count": 5
+    },
+    {
+     "tag": "Science Fiction",
+     "slug": "science-fiction",
+     "count": 5
+    },
+    {
+     "tag": "Literary Fiction",
+     "slug": "literary-fiction",
+     "count": 4
+    },
+    {
+     "tag": "Action & Adventure",
+     "slug": "action-adventure-885c1c28-c861-4e79-906d-e3ce299758ca",
+     "count": 4
+    },
+    {
+     "tag": "General",
+     "slug": "general",
+     "count": 4
+    },
+    {
+     "tag": "High Fantasy",
+     "slug": "high-fantasy-dfcd50f5-2789-45fc-9ee3-3e4354620e62",
+     "count": 4
+    }
+   ]
+  }
+ ]
+}
