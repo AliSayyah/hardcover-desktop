@@ -114,6 +114,8 @@ jobs:
         with:
           persist-credentials: false
       - run: shellcheck install.sh packaging/linux/*.sh ci/*.sh scripts/*.sh
+      - name: Test the release script's handling of a flaky network
+        run: scripts/release-test.sh
       # The release workflow tests the installer on the tarball it just
       # signed; this tests the download path, against the latest release.
       - name: Install the latest release
