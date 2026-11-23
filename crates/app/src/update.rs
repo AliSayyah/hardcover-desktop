@@ -297,14 +297,91 @@ fn failure_message(error: &Error) -> String {
     }
 }
 
-/// Release notes without the install instructions meant for the release page,
-/// which start at an `<!-- install -->` marker.
+/// Release notes for the update dialog: the part before the install
+/// instructions (an `<!-- install -->` marker), with GitHub's generated
+/// notes tidied for reading in the app.
+/// - Each change keeps its title: "by @login in <the pull request's URL>"
+///   goes, as do the release's own bump ("Release 0.4.1") and the "Full
+///   Changelog" line (the dialog links the release page).
+/// - "What's Changed" and the "New Contributors" section go; another
+///   heading becomes a bold line, so it doesn't outsize the dialog's title.
+///
+/// Lines in any other shape are kept as written. Empty when nothing is left.
 pub fn release_notes(body: &str) -> String {
-    body.split("<!-- install -->")
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_owned()
+    let notes = body.split("<!-- install -->").next().unwrap_or_default();
+    let mut lines: Vec<String> = Vec::new();
+    let mut in_contributors = false;
+    for line in notes.lines() {
+        let trimmed = line.trim();
+        if let Some(heading) = heading(trimmed) {
+            in_contributors = heading.eq_ignore_ascii_case("New Contributors");
+            if !in_contributors && !heading.eq_ignore_ascii_case("What's Changed") {
+                lines.push(format!("**{heading}**"));
+            }
+            continue;
+        }
+        if in_contributors && !trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("**Full Changelog**") {
+            continue;
+        }
+        match change_title(trimmed) {
+            Some(title) if is_release_bump(title) => {}
+            Some(title) => lines.push(format!("* {title}")),
+            None => lines.push(line.trim_end().to_owned()),
+        }
+    }
+    // Blank lines only between paragraphs, one at a time.
+    let mut tidy = String::new();
+    let mut blank = false;
+    for line in &lines {
+        if line.is_empty() {
+            blank = !tidy.is_empty();
+            continue;
+        }
+        if blank {
+            tidy.push('\n');
+            blank = false;
+        }
+        tidy.push_str(line);
+        tidy.push('\n');
+    }
+    tidy.trim_end().to_owned()
+}
+
+/// A Markdown heading's text.
+fn heading(line: &str) -> Option<&str> {
+    let text = line.trim_start_matches('#');
+    let level = line.len() - text.len();
+    ((1..=6).contains(&level) && text.starts_with(' ')).then(|| text.trim())
+}
+
+/// The title of a change in GitHub's generated notes:
+/// `* <title> by @<login> in https://github.com/<owner>/<repo>/pull/<n>`.
+fn change_title(line: &str) -> Option<&str> {
+    let item = line
+        .strip_prefix("* ")
+        .or_else(|| line.strip_prefix("- "))?;
+    let (title, tail) = item.rsplit_once(" by @")?;
+    let (login, url) = tail.split_once(" in ")?;
+    let number = url
+        .strip_prefix("https://github.com/")?
+        .rsplit_once("/pull/")?
+        .1;
+    let valid = !login.is_empty()
+        && !login.contains(char::is_whitespace)
+        && !number.is_empty()
+        && number.bytes().all(|b| b.is_ascii_digit());
+    (valid && !title.trim().is_empty()).then(|| title.trim())
+}
+
+/// The release's own version bump, "Release 0.4.1".
+fn is_release_bump(title: &str) -> bool {
+    title
+        .strip_prefix("Release ")
+        .and_then(Version::parse)
+        .is_some()
 }
 
 #[cfg(test)]
@@ -326,8 +403,55 @@ mod tests {
     #[test]
     fn release_notes_stop_at_the_install_marker() {
         let body = "## What's Changed\n* Fix\n\n<!-- install -->\n## Install\ntar …";
-        assert_eq!(release_notes(body), "## What's Changed\n* Fix");
+        assert_eq!(release_notes(body), "* Fix");
         assert_eq!(release_notes("Just notes\n"), "Just notes");
         assert_eq!(release_notes(""), "");
+    }
+
+    /// GitHub's generated notes, shaped as 0.4.1's.
+    #[test]
+    fn generated_notes_keep_only_the_changes() {
+        let body = "## What's Changed\n\
+            * Upgrade the dependencies by @AliSayyah in https://github.com/AliSayyah/hardcover-desktop/pull/90\n\
+            * Series: a readable shelf in each series by @AliSayyah in https://github.com/AliSayyah/hardcover-desktop/pull/91\n\
+            * Bump ureq by @dependabot[bot] in https://github.com/AliSayyah/hardcover-desktop/pull/94\n\
+            * Release 0.4.1 by @AliSayyah in https://github.com/AliSayyah/hardcover-desktop/pull/93\n\
+            \n\n\
+            ## New Contributors\n\
+            * @someone made their first contribution in https://github.com/AliSayyah/hardcover-desktop/pull/95\n\
+            \n\
+            **Full Changelog**: https://github.com/AliSayyah/hardcover-desktop/compare/v0.4.0...v0.4.1\n\
+            \n\n\
+            <!-- install -->\n## Install\n";
+        assert_eq!(
+            release_notes(body),
+            "* Upgrade the dependencies\n\
+             * Series: a readable shelf in each series\n\
+             * Bump ureq"
+        );
+    }
+
+    #[test]
+    fn a_release_with_only_its_bump_has_no_notes() {
+        let body = "## What's Changed\n\
+            * Release 0.4.2 by @AliSayyah in https://github.com/AliSayyah/hardcover-desktop/pull/96\n\n\
+            **Full Changelog**: https://github.com/AliSayyah/hardcover-desktop/compare/v0.4.1...v0.4.2\n";
+        assert_eq!(release_notes(body), "");
+    }
+
+    #[test]
+    fn written_notes_are_kept_with_headings_as_bold_lines() {
+        let body = "# Highlights\n\nSeries in by order.\n\n\
+            ## Fixes\n- Books by year in the stats\n* Release notes, by hand\n\
+            * A title by @someone in https://example.com/pull/3\n";
+        assert_eq!(
+            release_notes(body),
+            "**Highlights**\n\n\
+             Series in by order.\n\n\
+             **Fixes**\n\
+             - Books by year in the stats\n\
+             * Release notes, by hand\n\
+             * A title by @someone in https://example.com/pull/3"
+        );
     }
 }

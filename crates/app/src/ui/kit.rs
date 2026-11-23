@@ -513,9 +513,11 @@ const GUTTER_THUMB_INSET: Pixels = px(1.);
 /// The kit's vertical scrollbar over a scroller whose rows sit 8 in from its
 /// trailing edge (the sidebar), kept in that inset: the thumb is 4 wide and
 /// 1 in, at rest, hovered and dragged, so it never covers a row's selection
-/// fill or its focus ring. Its colours stay the theme's. Add it as the scroller's last child,
-/// in place of `.vertical_scrollbar(&handle)`; `id` keeps its own state (two
-/// scrollbars drawn from this one place would share it otherwise).
+/// fill or its focus ring. Its colours stay the theme's. Add it beside the
+/// scroller, as the last child of a `relative` wrapper the scroller fills, in
+/// place of `.vertical_scrollbar(&handle)`: inside the scroller it would
+/// scroll away with the rows. `id` keeps its own state (two scrollbars drawn
+/// from this one place would share it otherwise).
 pub fn gutter_scrollbar<H: ScrollbarHandle + Clone>(
     id: impl Into<ElementId>,
     handle: &H,

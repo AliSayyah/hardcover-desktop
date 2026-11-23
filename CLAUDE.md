@@ -331,4 +331,4 @@ The core side is `hardcover_core::update`; the app side is `crates/app/src/updat
   - `release.yml` signs in the publish job, with the `MINISIGN_SECRET_KEY` repository secret exposed to that one step only, then verifies with `packaging/minisign.pub`.
   - Never replace the key: installed copies trust only this one.
   - Never re-publish different bytes under an existing version. If a release goes wrong, release a new patch version.
-- **Release notes:** generated changes come first, followed by `<!-- install -->` and `packaging/linux/release-notes.md`. The app's update dialog shows only the part before the marker.
+- **Release notes:** generated changes come first, followed by `<!-- install -->` and `packaging/linux/release-notes.md`. The app's update dialog shows only the part before the marker, tidied (`update::release_notes`): each change keeps its title (no author or PR link), and the release's own bump, "What's Changed" and "Full Changelog" go.

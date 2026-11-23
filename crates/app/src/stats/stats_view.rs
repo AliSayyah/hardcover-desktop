@@ -189,12 +189,20 @@ impl Render for StatsView {
                 .child(render_ratings(&stats, bar, cx))
                 .child(render_shelves(&stats, cx))
         };
-        root.on_key_down(cx.listener(Self::on_key_down))
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll)
+        // The scrollbar overlays a wrapper: inside the scroller it would
+        // scroll away with the page.
+        div()
+            .id("stats-region")
+            .relative()
+            .size_full()
+            .child(
+                root.on_key_down(cx.listener(Self::on_key_down))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .child(page)
+                    .reveals_focus(&self.scroll),
+            )
             .vertical_scrollbar(&self.scroll)
-            .child(page)
-            .reveals_focus(&self.scroll)
             .into_any_element()
     }
 }

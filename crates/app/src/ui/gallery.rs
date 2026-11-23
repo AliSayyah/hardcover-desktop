@@ -159,6 +159,7 @@ impl Render for Gallery {
             .child(chips_and_tags())
             .child(skeletons())
             .child(kit_fixes(&self.input, cx))
+            .child(release_notes(cx))
             .child(self.controls(cx))
             // A cover asked for before the pipeline opens is missing for
             // the run, so these wait for it.
@@ -185,22 +186,30 @@ impl Render for Gallery {
                     .tools(tools()),
             )
             .child(
+                // The scrollbar overlays a wrapper: inside the scroller it
+                // would scroll away with the page.
                 div()
-                    .id("gallery-scroll")
+                    .id("gallery-region")
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .vertical_scrollbar(&self.scroll)
                     .child(
-                        h_flex()
-                            .items_start()
-                            .gap_6()
-                            .p_8()
-                            .child(main)
-                            .child(rail(self.selected_nav, cx)),
+                        div()
+                            .id("gallery-scroll")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .child(
+                                h_flex()
+                                    .items_start()
+                                    .gap_6()
+                                    .p_8()
+                                    .child(main)
+                                    .child(rail(self.selected_nav, cx)),
+                            )
+                            .reveals_focus(&self.scroll),
                     )
-                    .reveals_focus(&self.scroll),
+                    .vertical_scrollbar(&self.scroll),
             )
     }
 }
@@ -1168,6 +1177,70 @@ fn covers_and_avatars(cx: &App) -> AnyElement {
 /// Wrapped right-to-left text and cloth covers with long titles: the
 /// punctuation, digits, brackets and Latin runs `WrappingText` lays out
 /// itself, and titles broken between words.
+/// The update dialog's release notes, as GitHub generates them: a short
+/// release that fits, and a long one that scrolls.
+fn release_notes(cx: &App) -> AnyElement {
+    let change = |title: &str, n: usize| {
+        format!(
+            "* {title} by @AliSayyah in https://github.com/AliSayyah/hardcover-desktop/pull/{n}\n"
+        )
+    };
+    let body = |titles: &[&str]| {
+        let mut body = String::from("## What's Changed\n");
+        for (n, title) in titles.iter().enumerate() {
+            body.push_str(&change(title, 90 + n));
+        }
+        body.push_str(&change("Release 0.4.1", 99));
+        body.push_str("\n\n**Full Changelog**: https://github.com/AliSayyah/hardcover-desktop/compare/v0.4.0...v0.4.1\n");
+        body
+    };
+    let short = body(&[
+        "Upgrade the dependencies, keyring to keyring-core",
+        "Series: a readable shelf for each series",
+        "Show HTML descriptions as plain paragraphs",
+    ]);
+    let long = body(&[
+        "Polish the UI: bold text, search keys, read dates, shortcut hints, Persian text",
+        "Redraw the rating stars",
+        "Add a Home page: reading pace, goal outlook and what to read next",
+        "Home: rate what you finished; Search: your own books first",
+        "Redesign chips: neutral pills with status icons, tags on the label line",
+        "Show other readers' reviews on the book page",
+        "Coming soon: upcoming books in the reader's series",
+        "Design system: Vazirmatn for Persian and Arabic everywhere",
+        "Design foundation: palette, tokens, fonts, cover component, chips",
+        "Series: where you are in each series, and what's next",
+        "QA fixes: keyboard, focus and chrome",
+        "Add a self-updating AppImage and a signed installer for Linux",
+    ]);
+    let dialog = |id: &'static str, body: &str| {
+        let notes: SharedString = crate::update::release_notes(body).into();
+        v_flex()
+            .id(id)
+            .w(size::DIALOG_CONFIRM)
+            .p_6()
+            .gap_4()
+            .bg(colors(cx).raised)
+            .border_1()
+            .border_color(colors(cx).border)
+            .rounded(gpui_kit::component::ActiveTheme::theme(cx).radius_lg)
+            .children(crate::shell::release_notes_view(&notes))
+            .child(ExternalLink::new(
+                "release-page",
+                "Open the release page",
+                "https://github.com/AliSayyah/hardcover-desktop/releases",
+            ))
+    };
+    specimen(
+        "Release notes in the update dialog (short; long, scrolling)",
+        h_flex()
+            .items_start()
+            .gap_6()
+            .child(dialog("notes-short", &short))
+            .child(dialog("notes-long", &long)),
+    )
+}
+
 fn wrapping_text(cx: &App) -> AnyElement {
     let paragraph = "کتابی پرکشش و پر از امید. دوستی دو شخصیت اصلی (Rocky و Grace) را خیلی دوست داشتم، \
         و تا صفحهٔ ۴۷۶ نتوانستم کتاب را زمین بگذارم. چرا زودتر نخوانده بودم؟ «پروژهٔ هیل مری» در 2021 منتشر شد.";
