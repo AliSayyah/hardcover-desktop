@@ -1,6 +1,7 @@
 //! The catalogue as this session has fetched it, shared by every view: a
 //! book's details, similar books, other readers' reviews and editions,
-//! series and author pages, Discover's periods and a list's books.
+//! series and author pages, Discover's periods, a list's books and a
+//! vibe's books.
 //!
 //! Each is a [`Shared`] store, one entity per kind, holding a [`Resource`]
 //! per id. Views ask for what they show ([`Catalog`]'s `request_*`) and
@@ -15,13 +16,14 @@
 
 use std::collections::HashSet;
 use std::hash::Hash;
+use std::sync::Arc;
 
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Global};
 use hardcover_core::auth::scopes::{READ_CATALOG, READ_LISTS, READ_SOCIAL};
 use hardcover_core::{
     AuthorDetails, AuthorId, BookDetails, BookId, BookSummary, Client, CommunityReview,
     EditionSummary, ListBook, ListBookId, ListId, OffsetPage, ReviewsPage, SeriesDetails, SeriesId,
-    TrendingPeriod, UserBookId, UserId,
+    Timestamp, TrendingPeriod, UserBookId, UserId, VibeId,
 };
 
 use super::{Binding, Demand, Resource};
@@ -216,6 +218,24 @@ impl ReviewPages {
     }
 }
 
+/// Which vibe's books, as built when: a vibe Hardcover builds again is
+/// another key, so its new books are fetched, while the same build with a
+/// book left out (the demo takes it out at once) keeps its pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VibeBooksKey {
+    pub vibe: VibeId,
+    pub built: Option<Timestamp>,
+}
+
+/// A vibe's books, as many pages as were asked for, and the ids they page
+/// through (the vibe's as of the first page), so later pages follow them
+/// whatever the vibe holds by then.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VibeBooks {
+    pub ids: Arc<Vec<BookId>>,
+    pub books: Paged<BookSummary>,
+}
+
 /// Similar books fetched: two rows of lg covers in the side column of a wide
 /// window. One `books` field, so one request whatever the count.
 pub const SIMILAR_FETCHED: usize = 16;
@@ -231,6 +251,7 @@ pub struct Catalog {
     pub authors: Entity<Shared<AuthorId, AuthorDetails>>,
     pub trending: Entity<Shared<TrendingPeriod, Vec<BookSummary>>>,
     pub list_books: Entity<Shared<ListId, Paged<ListBook>>>,
+    pub vibe_books: Entity<Shared<VibeBooksKey, VibeBooks>>,
 }
 
 struct CatalogGlobal(Catalog);
@@ -250,6 +271,7 @@ impl Catalog {
             authors: cx.new(|_| Shared::new(s(), READ_CATALOG, Priority::Interactive)),
             trending: cx.new(|_| Shared::new(s(), READ_CATALOG, Priority::Interactive)),
             list_books: cx.new(|_| Shared::new(s(), READ_LISTS, Priority::Interactive)),
+            vibe_books: cx.new(|_| Shared::new(s(), READ_CATALOG, Priority::Interactive)),
         };
         cx.set_global(CatalogGlobal(catalog.clone()));
         catalog
@@ -422,6 +444,56 @@ impl Catalog {
                 list,
                 demand,
                 move |c| c.list_books(list, 0).map(Paged::first),
+                cx,
+            );
+        });
+    }
+
+    /// Asks for the first page of a vibe's books: those of `ids` (the
+    /// vibe's, in its order).
+    pub fn request_vibe_books(
+        &self,
+        key: VibeBooksKey,
+        ids: Vec<BookId>,
+        demand: Demand,
+        cx: &mut App,
+    ) {
+        self.vibe_books.update(cx, |s, cx| {
+            s.request(
+                key,
+                demand,
+                move |c| {
+                    let books = c.vibe_books(&ids, 0).map(Paged::first)?;
+                    Ok(VibeBooks {
+                        ids: Arc::new(ids),
+                        books,
+                    })
+                },
+                cx,
+            );
+        });
+    }
+
+    /// Asks for the next page of a vibe's books.
+    pub fn more_vibe_books(&self, key: VibeBooksKey, cx: &mut App) {
+        let Some((ids, offset)) = self
+            .vibe_books
+            .read(cx)
+            .resource()
+            .value(&key)
+            .filter(|v| v.books.has_more)
+            .map(|v| (v.ids.clone(), v.books.next_offset))
+        else {
+            return;
+        };
+        self.vibe_books.update(cx, |s, cx| {
+            s.extend(
+                key,
+                move |c| c.vibe_books(&ids, offset),
+                |v, page| VibeBooks {
+                    ids: v.ids.clone(),
+                    books: v.books.then(page, |a, b| a.id == b.id),
+                },
                 cx,
             );
         });

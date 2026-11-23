@@ -38,6 +38,7 @@ mod ui;
 mod ui_scale;
 mod upcoming;
 mod update;
+mod vibes;
 
 use gpui_kit::{
     App, AppContext as _, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, actions,

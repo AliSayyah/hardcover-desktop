@@ -97,6 +97,11 @@ pub fn clock() -> IconName {
     IconName::Clock
 }
 
+/// A vibe not built yet: its page's empty state.
+pub fn sparkles() -> IconName {
+    IconName::Sparkles
+}
+
 /// The reading goal: the sidebar's goal row.
 pub fn target() -> IconName {
     IconName::Target
@@ -108,7 +113,7 @@ mod tests {
 
     #[test]
     fn the_extra_icons_and_the_defaults_both_load() {
-        for icon in [library(), clock(), target()] {
+        for icon in [library(), clock(), target(), sparkles()] {
             let bytes = AppAssets.load(&icon.path()).unwrap().unwrap();
             assert!(bytes.starts_with(b"<svg"));
         }
