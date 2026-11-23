@@ -44,7 +44,7 @@ use crate::app_state::CoverService;
 use crate::bidi::WrappingText;
 use crate::book::star_rating::StarRating;
 use crate::chip::genre::GENRES;
-use crate::chip::{StatusChip, StatusIconChip, TagChip, TagGroup, TagRow, tag_groups};
+use crate::chip::{FilterChip, StatusChip, StatusIconChip, TagChip, TagGroup, TagRow, tag_groups};
 use crate::cover::{Cover, CoverArt, CoverSize};
 
 use crate::design::type_roles::Family;
@@ -161,6 +161,7 @@ impl Render for Gallery {
             .child(blocks_and_properties(cx))
             .child(chips_and_tags(&self.chip_keys))
             .child(moods_and_votes(cx))
+            .child(filter_chips())
             .child(skeletons())
             .child(kit_fixes(&self.input, cx))
             .child(release_notes(cx))
@@ -899,6 +900,50 @@ fn moods_and_votes(cx: &App) -> AnyElement {
                     .child(panel(&everything))
                     .child(panel(&moods_only))
                     .child(panel(&with_rarely)),
+            ),
+    )
+}
+
+/// A shelf's filter chips: a genre and a mood, at rest, selected and
+/// disabled; a Persian genre; a row as narrow as the list gets, its first
+/// chip cut; and "More".
+fn filter_chips() -> AnyElement {
+    let more = |id: &'static str| {
+        Button::new(id)
+            .ghost()
+            .small_control()
+            .label("More")
+            .dropdown_caret(true)
+    };
+    let row = || h_flex().h(size::CONTROL_SMALL).gap_1p5().min_w_0();
+    specimen(
+        "Filter chips (a shelf's filter bar)",
+        v_flex()
+            .gap_1p5()
+            .child(
+                row()
+                    .child(FilterChip::genre("g-fc-fantasy", "Fantasy", 5).selected(true))
+                    .child(FilterChip::genre("g-fc-scifi", "Science Fiction", 3))
+                    .child(FilterChip::genre("g-fc-classics", "Classics", 0))
+                    .child(FilterChip::genre("g-fc-fa", "ادبیات فارسی", 2))
+                    .child(more("g-fc-more-genres")),
+            )
+            .child(
+                row()
+                    .child(FilterChip::mood("g-fc-dark", "Dark", 2).selected(true))
+                    .child(FilterChip::mood("g-fc-adventurous", "Adventurous", 3))
+                    .child(FilterChip::mood("g-fc-relaxing", "Relaxing", 0))
+                    .child(more("g-fc-more-moods")),
+            )
+            .child(
+                row()
+                    .w(rems(10.))
+                    .child(FilterChip::genre(
+                        "g-fc-long",
+                        "Science Fiction & Fantasy",
+                        12,
+                    ))
+                    .child(more("g-fc-more-narrow")),
             ),
     )
 }

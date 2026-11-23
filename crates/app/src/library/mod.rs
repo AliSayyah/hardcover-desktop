@@ -4,6 +4,7 @@
 pub mod book_row;
 pub mod cache_worker;
 pub mod collection;
+pub mod filter_bar;
 pub mod library_view;
 pub mod model;
 pub mod shelf_tags;

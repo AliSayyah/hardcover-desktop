@@ -256,7 +256,11 @@ impl ShelfTagsModel {
 
     fn request(&mut self, books: Vec<BookId>, demand: Demand, cx: &mut Context<Self>) {
         let call = |client: &Client, ids: &[BookId]| batch_of(ids, client.book_tags(ids));
-        if self.tags.request_many(books, demand, call, Self::bind(), cx) > 0 {
+        if self
+            .tags
+            .request_many(books, demand, call, Self::bind(), cx)
+            > 0
+        {
             cx.notify();
         }
     }
@@ -394,11 +398,8 @@ mod tests {
         assert!(known > 0);
 
         let faults = hardcover_core::demo::Faults::parse("offline").unwrap();
-        let (library, offline) = launch(
-            hardcover_core::demo::client_with(&faults),
-            Some(cache),
-            cx,
-        );
+        let (library, offline) =
+            launch(hardcover_core::demo::client_with(&faults), Some(cache), cx);
         let books = library.read_with(cx, |l, _| books_on(l, &[ReadingStatus::WantToRead]));
         offline.read_with(cx, |m, _| {
             assert_eq!(m.facts.len(), known);
@@ -422,11 +423,7 @@ mod tests {
             cache.remove_companion(SAVED_AS, &key).unwrap();
         }
         let faults = hardcover_core::demo::Faults::parse("offline").unwrap();
-        let (library, model) = launch(
-            hardcover_core::demo::client_with(&faults),
-            Some(cache),
-            cx,
-        );
+        let (library, model) = launch(hardcover_core::demo::client_with(&faults), Some(cache), cx);
         let books = library.read_with(cx, |l, _| books_on(l, &[ReadingStatus::WantToRead]));
         assert!(!books.is_empty());
         model.read_with(cx, |m, _| {

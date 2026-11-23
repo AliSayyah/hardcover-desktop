@@ -248,7 +248,8 @@ pub fn facets<'a>(
             (shelf, chip)
         })
         .collect();
-    mood_chips.sort_by(|(a, x), (b, y)| b.cmp(a).then_with(|| order(&x.value).cmp(&order(&y.value))));
+    mood_chips
+        .sort_by(|(a, x), (b, y)| b.cmp(a).then_with(|| order(&x.value).cmp(&order(&y.value))));
     let mut mood_chips: Vec<Chip<Mood>> = mood_chips.into_iter().map(|(_, c)| c).collect();
     if let Some(mood) = pick.mood
         && !mood_chips.iter().any(|c| c.value == mood)
@@ -334,7 +335,11 @@ pub fn no_matches(shelf: &str, pick: &TagPick, query: &str) -> String {
     }
     match (&pick.genre, pick.mood) {
         (Some(genre), Some(mood)) => {
-            format!("No books in {shelf} are both {} and {}.", genre.name, mood.name())
+            format!(
+                "No books in {shelf} are both {} and {}.",
+                genre.name,
+                mood.name()
+            )
         }
         (Some(genre), None) => format!("No books in {shelf} match {}.", genre.name),
         (None, Some(mood)) => format!("No books in {shelf} match {}.", mood.name()),
@@ -377,7 +382,10 @@ mod tests {
         vec![
             book(&["Fantasy"], &[Relaxing, Lighthearted, Hopeful]),
             book(&["Fantasy"], &[Dark, Challenging, Tense]),
-            book(&["Fantasy", "Classics"], &[Lighthearted, Adventurous, Funny]),
+            book(
+                &["Fantasy", "Classics"],
+                &[Lighthearted, Adventurous, Funny],
+            ),
             book(&["Mystery", "Thriller"], &[Mysterious, Dark, Tense]),
             book(&["Fantasy", "Mystery"], &[Mysterious, Reflective]),
             book(&["Fantasy", "Young Adult"], &[Tense, Adventurous, Dark]),
@@ -413,7 +421,10 @@ mod tests {
         let f = of(&shelf(), &TagPick::default());
         let names: Vec<&str> = f.genres.iter().map(|c| c.name.as_str()).collect();
         // Ties by name.
-        assert_eq!(names, ["Fantasy", "Mystery", "Classics", "Thriller", "Young Adult"]);
+        assert_eq!(
+            names,
+            ["Fantasy", "Mystery", "Classics", "Thriller", "Young Adult"]
+        );
         let moods: Vec<Mood> = f.moods.iter().map(|c| c.value).collect();
         // Adventurous, Dark and Tense have 3 each: Hardcover's order.
         assert_eq!(&moods[..3], [Mood::Adventurous, Mood::Dark, Mood::Tense]);
@@ -428,7 +439,11 @@ mod tests {
         let f = of(&shelf(), &pick(Some("Fantasy"), None));
         assert_eq!(mood(&f, Mood::Adventurous).count, 3);
         assert_eq!(mood(&f, Mood::Mysterious).count, 1);
-        assert_eq!(genre(&f, "Mystery").count, 2, "genres ignore their own pick");
+        assert_eq!(
+            genre(&f, "Mystery").count,
+            2,
+            "genres ignore their own pick"
+        );
         assert!(genre(&f, "Fantasy").selected);
 
         let f = of(&shelf(), &pick(Some("Fantasy"), Some(Mood::Dark)));
@@ -488,7 +503,10 @@ mod tests {
         let p = pick(Some("Mystery"), Some(Mood::Adventurous));
         let f = of(&books, &p);
         let chip = genre(&f, "Mystery");
-        assert_eq!((chip.count, chip.selected, chip.disabled()), (0, true, false));
+        assert_eq!(
+            (chip.count, chip.selected, chip.disabled()),
+            (0, true, false)
+        );
         assert_eq!(books.iter().filter(|b| p.keeps(Some(b))).count(), 0);
         assert_eq!(
             no_matches("Want to read", &p, ""),
@@ -512,7 +530,10 @@ mod tests {
     #[test]
     fn a_row_fits_as_many_as_it_can_then_more() {
         let w = [50.0, 40.0, 60.0, 30.0];
-        assert_eq!(fit_row(&w, None, 500.0, 6.0, 40.0).more, Vec::<usize>::new());
+        assert_eq!(
+            fit_row(&w, None, 500.0, 6.0, 40.0).more,
+            Vec::<usize>::new()
+        );
         // 50 + 6 + 40 + 6 + More (40) = 142.
         let fit = fit_row(&w, None, 150.0, 6.0, 40.0);
         assert_eq!(fit.shown, [0, 1]);
@@ -540,11 +561,17 @@ mod tests {
     #[test]
     fn the_empty_states_words() {
         let p = pick(Some("Mystery"), None);
-        assert_eq!(no_matches("Read", &p, ""), "No books in Read match Mystery.");
+        assert_eq!(
+            no_matches("Read", &p, ""),
+            "No books in Read match Mystery."
+        );
         assert_eq!(
             no_matches("Read", &p, " dune "),
             "No books in Read match “dune” with these filters."
         );
-        assert_eq!(unfindable_line(3), "3 books on this shelf have no genre or mood votes yet, so no chip finds them.");
+        assert_eq!(
+            unfindable_line(3),
+            "3 books on this shelf have no genre or mood votes yet, so no chip finds them."
+        );
     }
 }
