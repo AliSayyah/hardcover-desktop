@@ -1,5 +1,6 @@
 //! Blocking GraphQL client for the Hardcover API.
 
+mod markup;
 mod model;
 mod queries;
 #[cfg(test)]
