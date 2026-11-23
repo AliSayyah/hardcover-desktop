@@ -19,6 +19,8 @@ use super::model::{
     UpcomingBook, User, UserBookId, UserId, UserList, Vibe, VibeId, VibeKind, measure_of,
     read_order,
 };
+use super::model::{BookTags, TagBook, TagId};
+use crate::tags::{BookGenres, BookVotes};
 
 // ---------- scalar helpers ----------
 
@@ -325,6 +327,8 @@ pub(crate) struct RawBookDetails {
     pub cached_similar_book_ids: Value,
     #[serde(default)]
     pub book_series: Vec<RawBookSeries>,
+    #[serde(default)]
+    pub taggable_counts: Vec<RawTagCount>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -363,8 +367,90 @@ impl RawBookDetails {
         d.editions_count = opt_u32(self.editions_count);
         d.ratings_count = opt_u32(self.ratings_count);
         d.series = series_refs(self.book_series);
+        d.votes = book_votes(&self.taggable_counts);
         d
     }
+}
+
+// ---------- tags ----------
+
+/// A `taggable_counts` row: a tag and its votes on a book.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawTagCount {
+    #[serde(default)]
+    pub tag_id: Value,
+    #[serde(default)]
+    pub count: Value,
+}
+
+/// The votes in a book's `taggable_counts` rows; a row that doesn't read is
+/// left out.
+pub(crate) fn book_votes(rows: &[RawTagCount]) -> BookVotes {
+    BookVotes::from_counts(
+        rows.iter()
+            .filter_map(|r| Some((TagId::new(as_i64(&r.tag_id)?), as_u32(&r.count)?))),
+    )
+}
+
+/// A row of a tag's page: the votes and the book.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawTagBook {
+    #[serde(default)]
+    pub count: Value,
+    pub book: Option<RawBook>,
+}
+
+impl RawTagBook {
+    /// `None` when the book didn't resolve.
+    pub fn into_tag_book(self) -> Option<TagBook> {
+        let votes = as_u32(&self.count).unwrap_or(0);
+        Some(TagBook::new(self.book?.into_summary(), votes))
+    }
+}
+
+/// A book of `BookTags`: its genres (`cached_tags(path: "Genre")`) and mood votes.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawBookTags {
+    pub id: i64,
+    #[serde(default)]
+    pub cached_tags: Value,
+    #[serde(default)]
+    pub taggable_counts: Vec<RawTagCount>,
+}
+
+impl RawBookTags {
+    /// Only the moods' votes are kept, as [`BookTags::moods`] promises.
+    pub fn into_book_tags(self) -> BookTags {
+        let votes = book_votes(&self.taggable_counts);
+        let moods = BookVotes::from_counts(
+            crate::tags::MOOD_IDS
+                .into_iter()
+                .map(|tag| (tag, votes.get(tag))),
+        );
+        BookTags::new(
+            BookId::new(self.id),
+            BookGenres::from_tags(genre_votes(&self.cached_tags)),
+            moods,
+        )
+    }
+}
+
+/// `(name, votes)` per genre: `cached_tags(path: "Genre")` is the Genre list
+/// itself, `[{"tag": "...", "count": n, ...}]`; the whole `cached_tags`
+/// object is read too. An entry without a count counts 0.
+fn genre_votes(cached: &Value) -> Vec<(String, u32)> {
+    let list = cached
+        .as_array()
+        .or_else(|| cached.get("Genre").and_then(Value::as_array));
+    list.map_or_default(|list| {
+        list.iter()
+            .filter_map(|t| {
+                let name = t.get("tag").and_then(as_string)?;
+                let votes = t.get("count").and_then(as_u32).unwrap_or(0);
+                Some((name, votes))
+            })
+            .collect()
+    })
 }
 
 /// A book's `book_series` rows, in the order asked for (featured first). A

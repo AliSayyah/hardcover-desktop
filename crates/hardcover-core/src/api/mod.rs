@@ -29,11 +29,12 @@ pub(crate) use wire::as_i64 as wire_i64;
 use wire::{
     DeletePayload, DeleteReadPayload, GoalPayload, ListBookDeletePayload, ListBookPayload,
     ListDeletePayload, ListPayload, ProgressContext, RawAggregate, RawAuthorPage, RawBook,
-    RawBookDetails, RawCommunityReview, RawEdition, RawGoal, RawList, RawListBook,
-    RawListMembership, RawReview, RawSearch, RawSeriesPage, RawTrackedSeries, RawTrending,
-    RawUpcomingRow, RawUser, RawUserBook, RawVibe, ReadIdPayload, ReadRef, ReviewedUserBookPayload,
-    SystemVibesPayload, UserBookIdPayload, VibePayload, author_from_search_document, search_hits,
-    search_page, series_from_search_document, upcoming_books,
+    RawBookDetails, RawBookTags, RawCommunityReview, RawEdition, RawGoal, RawList, RawListBook,
+    RawListMembership, RawReview, RawSearch, RawSeriesPage, RawTagBook, RawTrackedSeries,
+    RawTrending, RawUpcomingRow, RawUser, RawUserBook, RawVibe, ReadIdPayload, ReadRef,
+    ReviewedUserBookPayload, SystemVibesPayload, UserBookIdPayload, VibePayload,
+    author_from_search_document, search_hits, search_page, series_from_search_document,
+    upcoming_books,
 };
 
 /// GraphQL endpoint.
@@ -86,6 +87,11 @@ pub const TRACKED_SERIES_BATCH: usize = 25;
 /// Books each series in [`Client::tracked_series`] lists at most, duplicates
 /// included. Ordered by position, so a longer series loses only its tail.
 const TRACKED_SERIES_ROWS: u32 = 200;
+/// Books per page in [`Client::books_by_tag`].
+pub const TAG_BOOKS_PER_PAGE: u32 = 50;
+/// Books per [`Client::book_tags`] request: a shelf of 500 costs 5 requests,
+/// within the rate limit's burst.
+pub const BOOK_TAGS_BATCH: usize = 100;
 
 /// The server cuts queries off at 30s and searches at 2s; leave room for the network.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(40);
@@ -518,7 +524,7 @@ impl Client {
         let data: Data = self.query(
             "BookDetails",
             queries::BOOK_DETAILS,
-            json!({ "id": id.get() }),
+            json!({ "id": id.get(), "tags": crate::tags::VOTE_TAG_IDS }),
             QUERY_TIMEOUT,
         )?;
         data.books_by_pk
@@ -679,40 +685,112 @@ impl Client {
         struct Data {
             series: Vec<RawTrackedSeries>,
         }
-        let mut ids: Vec<i64> = ids.iter().map(|s| s.get()).collect();
-        ids.sort_unstable();
-        ids.dedup();
-        let mut load = TrackedSeriesLoad::default();
-        let mut batches = ids.chunks(TRACKED_SERIES_BATCH);
-        while let Some(batch) = batches.next() {
-            let fetched: Result<Data> = self.query(
+        let ids: Vec<i64> = ids.iter().map(|s| s.get()).collect();
+        let (series, missing, error) = in_batches(ids, TRACKED_SERIES_BATCH, |batch| {
+            let data: Data = self.query(
                 "SeriesOverview",
                 queries::SERIES_OVERVIEW,
                 json!({ "ids": batch, "limit": batch.len(), "rows": TRACKED_SERIES_ROWS }),
                 QUERY_TIMEOUT,
-            );
-            match fetched {
-                Ok(data) => load
-                    .series
-                    .extend(data.series.into_iter().map(RawTrackedSeries::into_tracked)),
-                Err(e) => {
-                    // Only an answer about this batch is worth going on past;
-                    // a network, session, scope or rate-limit failure would
-                    // repeat for every batch, each at the cost of a request
-                    // or a timeout.
-                    let lasting = !matches!(e, Error::Api(_) | Error::Decode(_));
-                    load.missing
-                        .extend(batch.iter().copied().map(SeriesId::new));
-                    load.error.get_or_insert(e);
-                    if lasting {
-                        load.missing
-                            .extend(batches.flatten().copied().map(SeriesId::new));
-                        break;
-                    }
-                }
-            }
+            )?;
+            Ok(data
+                .series
+                .into_iter()
+                .map(RawTrackedSeries::into_tracked)
+                .collect())
+        });
+        TrackedSeriesLoad {
+            series,
+            missing: missing.into_iter().map(SeriesId::new).collect(),
+            error,
         }
-        load
+    }
+
+    /// One page of a tag's books (a mood, a genre), the most voted for it
+    /// first, each with its votes. `within` narrows it to the books with at
+    /// least [`crate::tags::MIN_OTHER_TAG_VOTES`] for a second tag (a genre
+    /// within a mood, say). `offset` is the previous page's
+    /// [`OffsetPage::next_offset`], 0 for the first. Merged duplicates are
+    /// left out.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the catalogue request fails or its response cannot be
+    /// decoded.
+    pub fn books_by_tag(
+        &self,
+        tag: TagId,
+        within: Option<TagId>,
+        offset: u32,
+    ) -> Result<OffsetPage<TagBook>> {
+        #[derive(Deserialize)]
+        struct Data {
+            taggable_counts: Vec<RawTagBook>,
+        }
+        let limit = TAG_BOOKS_PER_PAGE + 1;
+        let data: Data = match within {
+            None => self.query(
+                "BooksByTag",
+                queries::BOOKS_BY_TAG,
+                json!({ "tag": tag.get(), "limit": limit, "offset": offset }),
+                QUERY_TIMEOUT,
+            )?,
+            Some(other) => self.query(
+                "BooksByTagWith",
+                queries::BOOKS_BY_TAG_WITH,
+                json!({
+                    "tag": tag.get(),
+                    "other": other.get(),
+                    "min": crate::tags::MIN_OTHER_TAG_VOTES,
+                    "limit": limit,
+                    "offset": offset,
+                }),
+                QUERY_TIMEOUT,
+            )?,
+        };
+        Ok(offset_page(
+            data.taggable_counts,
+            offset,
+            TAG_BOOKS_PER_PAGE,
+            RawTagBook::into_tag_book,
+        ))
+    }
+
+    /// These books' genres and mood votes, for a shelf's filter,
+    /// [`BOOK_TAGS_BATCH`] books per request, in the order Hardcover
+    /// returns them. Ids Hardcover doesn't know are left out. No ids, no
+    /// request.
+    ///
+    /// A batch that fails doesn't throw away the others, as in
+    /// [`Client::tracked_series`]: its ids are in [`BookTagsLoad::missing`]
+    /// and the first failure in [`BookTagsLoad::error`]; a failure that would
+    /// repeat (network, session, scope, rate limit) stops the rest, which are
+    /// missing too.
+    #[must_use]
+    pub fn book_tags(&self, ids: &[BookId]) -> BookTagsLoad {
+        #[derive(Deserialize)]
+        struct Data {
+            books: Vec<RawBookTags>,
+        }
+        let ids: Vec<i64> = ids.iter().map(|b| b.get()).collect();
+        let (books, missing, error) = in_batches(ids, BOOK_TAGS_BATCH, |batch| {
+            let data: Data = self.query(
+                "BookTags",
+                queries::BOOK_TAGS,
+                json!({ "ids": batch, "limit": batch.len(), "tags": crate::tags::MOOD_IDS }),
+                QUERY_TIMEOUT,
+            )?;
+            Ok(data
+                .books
+                .into_iter()
+                .map(RawBookTags::into_book_tags)
+                .collect())
+        });
+        BookTagsLoad {
+            books,
+            missing: missing.into_iter().map(BookId::new).collect(),
+            error,
+        }
     }
 
     // ----- writes -----
@@ -2126,6 +2204,40 @@ fn keyset_pages<R>(
 /// under a server cap below `limit + 1`; none is known). The offset moves on
 /// by the rows Hardcover sent, so a row `read` can't use (`None`) doesn't
 /// shift the next page.
+/// Runs `fetch` over `ids` (sorted, without repeats) in batches of `size`,
+/// and returns what loaded, the ids of the batches that failed and the first
+/// failure. Only a failure about that batch (an API error, an unreadable
+/// answer) lets the rest go on; any other (network, session, scope, rate
+/// limit) would repeat for every batch, each at the cost of a request or a
+/// timeout, so the batches not sent yet count as failed too.
+fn in_batches<T>(
+    mut ids: Vec<i64>,
+    size: usize,
+    mut fetch: impl FnMut(&[i64]) -> Result<Vec<T>>,
+) -> (Vec<T>, Vec<i64>, Option<Error>) {
+    ids.sort_unstable();
+    ids.dedup();
+    let mut loaded = Vec::new();
+    let mut missing = Vec::new();
+    let mut error = None;
+    let mut batches = ids.chunks(size);
+    while let Some(batch) = batches.next() {
+        match fetch(batch) {
+            Ok(rows) => loaded.extend(rows),
+            Err(e) => {
+                let lasting = !matches!(e, Error::Api(_) | Error::Decode(_));
+                missing.extend_from_slice(batch);
+                error.get_or_insert(e);
+                if lasting {
+                    missing.extend(batches.flatten().copied());
+                    break;
+                }
+            }
+        }
+    }
+    (loaded, missing, error)
+}
+
 fn offset_page<R, T>(
     mut rows: Vec<R>,
     offset: u32,

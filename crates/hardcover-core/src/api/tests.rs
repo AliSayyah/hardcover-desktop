@@ -3074,3 +3074,211 @@ fn ensure_system_vibes_returns_the_ids() {
         [VibeId::new(4), VibeId::new(5)]
     );
 }
+
+// ----- tags -----
+
+/// The book page asks for the vote tags' exact counts and keeps the known ones.
+#[test]
+fn book_details_carry_the_exact_votes() {
+    use crate::tags::{Mood, Pace, VOTE_TAG_IDS};
+    let (c, http) = client(TestTokens::new(false));
+    let mut b = book(7, "Detailed");
+    b["cached_tags"] = json!({});
+    b["book_series"] = json!([]);
+    b["taggable_counts"] = json!([
+        {"tag_id": 241, "count": 40},
+        {"tag_id": 154, "count": 25},
+        {"tag_id": 188, "count": 30},
+        // Not asked for, and not readable: left out.
+        {"tag_id": 2, "count": 9},
+        {"tag_id": null, "count": 3},
+        {"tag_id": 148, "count": "x"}
+    ]);
+    http.push(200, &data(json!({ "books_by_pk": b })));
+    let d = c.book_details(BookId::new(7)).unwrap();
+    assert_eq!(d.votes.mood(Mood::Relaxing), 40);
+    assert_eq!(d.votes.mood(Mood::Dark), 0);
+    assert_eq!(d.votes.pace(Pace::Fast), 30);
+    assert_eq!(d.votes.mood_votes(), 65);
+    let line = crate::tags::mood_line(&d.votes).unwrap();
+    assert_eq!(line.moods, [Mood::Relaxing, Mood::Adventurous]);
+    assert_eq!(line.pace, Some(Pace::Fast));
+
+    let req = &http.requests()[0];
+    let vars = &req.json.as_ref().unwrap()["variables"];
+    let asked: Vec<i64> = vars["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_i64().unwrap())
+        .collect();
+    let want: Vec<i64> = VOTE_TAG_IDS.iter().map(|t| t.get()).collect();
+    assert_eq!(asked, want);
+
+    // A response without the counts (an older cache's shape) has no votes.
+    let mut b = book(8, "Plain");
+    b["cached_tags"] = json!({});
+    http.push(200, &data(json!({ "books_by_pk": b })));
+    assert!(c.book_details(BookId::new(8)).unwrap().votes.is_empty());
+}
+
+#[test]
+fn a_tag_page_is_paged_by_offset_with_each_books_votes() {
+    let (c, http) = client(TestTokens::new(false));
+    let row = |n: i64, b: Value| json!({ "count": n, "book": b });
+    // A full page and one more: there is more.
+    let mut rows: Vec<Value> = (0..=i64::from(TAG_BOOKS_PER_PAGE))
+        .map(|i| row(500 - i, book(100 + i, &format!("Book {i}"))))
+        .collect();
+    // A book that didn't resolve still counts towards the offset.
+    rows[3] = row(497, Value::Null);
+    http.push(200, &data(json!({ "taggable_counts": rows })));
+    let page = c.books_by_tag(TagId::new(241), None, 0).unwrap();
+    assert!(page.has_more);
+    assert_eq!(page.next_offset, TAG_BOOKS_PER_PAGE);
+    assert_eq!(page.items.len(), TAG_BOOKS_PER_PAGE as usize - 1);
+    assert_eq!(page.items[0].book.title, "Book 0");
+    assert_eq!(page.items[0].votes, 500);
+    assert_eq!(page.items[3].book.title, "Book 4");
+
+    let req = &http.requests()[0];
+    let body = req.json.as_ref().unwrap();
+    assert_eq!(body["operationName"], "BooksByTag");
+    assert_eq!(
+        body["variables"],
+        json!({ "tag": 241, "limit": TAG_BOOKS_PER_PAGE + 1, "offset": 0 })
+    );
+
+    // Narrowed by a second tag: the other document, with the threshold.
+    http.push(
+        200,
+        &data(json!({ "taggable_counts": [row(12, book(9, "Last"))] })),
+    );
+    let page = c
+        .books_by_tag(TagId::new(2), Some(TagId::new(154)), 50)
+        .unwrap();
+    assert!(!page.has_more);
+    assert_eq!(page.next_offset, 51);
+    assert_eq!(page.items[0].votes, 12);
+    let req = &http.requests()[1];
+    let body = req.json.as_ref().unwrap();
+    assert_eq!(body["operationName"], "BooksByTagWith");
+    assert_eq!(
+        body["variables"],
+        json!({
+            "tag": 2, "other": 154, "min": crate::tags::MIN_OTHER_TAG_VOTES,
+            "limit": TAG_BOOKS_PER_PAGE + 1, "offset": 50,
+        })
+    );
+}
+
+fn tag_row(id: i64, genres: Value, moods: Value) -> Value {
+    json!({ "id": id, "cached_tags": genres, "taggable_counts": moods })
+}
+
+#[test]
+fn book_tags_batch_the_ids_and_merge_genres() {
+    use crate::tags::{MOOD_IDS, Mood, has_mood};
+    let (c, http) = client(TestTokens::new(false));
+    let none = c.book_tags(&[]);
+    assert!(none.books.is_empty() && none.error.is_none());
+    assert!(http.requests().is_empty(), "no ids, no request");
+
+    http.push(
+        200,
+        &data(json!({ "books": [
+            tag_row(
+                3,
+                json!([
+                    {"tag": "Science Fiction", "tagSlug": "science-fiction", "count": 9},
+                    {"tag": "Sci-fi", "count": 3},
+                    {"tag": "Space", "count": 2},
+                    {"tag": "Romance"},
+                    {"count": 8}
+                ]),
+                json!([{"tag_id": 241, "count": 30}, {"tag_id": 154, "count": 30}, {"tag_id": 188, "count": 40}]),
+            ),
+            // No genres at all.
+            tag_row(6, Value::Null, json!([])),
+        ]})),
+    );
+    http.push(
+        200,
+        // The whole cached_tags object reads too.
+        &data(json!({ "books": [tag_row(
+            9_999,
+            json!({"Genre": [{"tag": "Horror", "count": 4}], "Mood": []}),
+            json!([]),
+        )]})),
+    );
+    let ids: Vec<BookId> = (1..=101)
+        .rev()
+        .map(|i| BookId::new(i * 3))
+        .chain([BookId::new(3)])
+        .collect();
+    let mut want_ids: Vec<i64> = (1..=101).map(|i| i * 3).collect();
+    want_ids.dedup();
+    let load = c.book_tags(&ids);
+    assert!(load.error.is_none() && load.missing.is_empty());
+    assert_eq!(load.books.len(), 3);
+
+    let reqs = http.requests();
+    assert_eq!(reqs.len(), 2);
+    let first = &reqs[0].json.as_ref().unwrap()["variables"];
+    assert_eq!(reqs[0].json.as_ref().unwrap()["operationName"], "BookTags");
+    assert_eq!(first["ids"].as_array().unwrap().len(), BOOK_TAGS_BATCH);
+    assert_eq!(first["ids"][0], 3, "sorted, without repeats");
+    assert_eq!(first["limit"], BOOK_TAGS_BATCH);
+    let moods: Vec<i64> = MOOD_IDS.iter().map(|t| t.get()).collect();
+    assert_eq!(first["tags"], json!(moods));
+    let second = &reqs[1].json.as_ref().unwrap()["variables"];
+    assert_eq!(second["ids"], json!([303]));
+    assert_eq!(second["limit"], 1);
+
+    let b = &load.books[0];
+    assert_eq!(b.book, BookId::new(3));
+    let genres: Vec<(&str, &str, u32)> = b
+        .genres
+        .iter()
+        .map(|g| (g.key.as_str(), g.name.as_str(), g.votes))
+        .collect();
+    assert_eq!(genres, [("science fiction", "Science Fiction", 12)]);
+    assert_eq!(b.moods.mood_votes(), 60);
+    assert!(has_mood(&b.moods, Mood::Relaxing));
+    // Only the moods are kept: the line names no pace, whatever comes back.
+    assert_eq!(b.moods.pace(crate::tags::Pace::Fast), 0);
+    assert_eq!(crate::tags::mood_line(&b.moods).unwrap().pace, None);
+    assert!(load.books[1].genres.is_empty() && load.books[1].moods.is_empty());
+    assert!(load.books[2].genres.has("horror"));
+}
+
+/// One failed batch doesn't throw away the books the others loaded; a
+/// failure that would repeat stops the rest.
+#[test]
+fn a_failed_book_tags_batch_keeps_the_others() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(200, r#"{"errors":[{"message":"bad row"}]}"#);
+    http.push(
+        200,
+        &data(json!({ "books": [tag_row(
+            150,
+            json!([{"tag": "Fantasy", "count": 5}]),
+            json!([]),
+        )]})),
+    );
+    let ids: Vec<BookId> = (1..=150).map(BookId::new).collect();
+    let load = c.book_tags(&ids);
+    assert_eq!(load.books.len(), 1);
+    assert_eq!(load.books[0].book, BookId::new(150));
+    assert_eq!(load.missing, ids[..100]);
+    assert!(matches!(load.error, Some(Error::Api(_))));
+    assert_eq!(http.requests().len(), 2, "the second batch was sent too");
+
+    let (c, http) = client(TestTokens::new(false));
+    http.push_err(Error::Timeout);
+    let load = c.book_tags(&ids);
+    assert_eq!(http.requests().len(), 1);
+    assert!(load.books.is_empty());
+    assert_eq!(load.missing, ids);
+    assert_eq!(load.error, Some(Error::Timeout));
+}

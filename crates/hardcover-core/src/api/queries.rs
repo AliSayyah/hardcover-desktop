@@ -161,8 +161,12 @@ pub(crate) const BOOKS_TRENDING: &str =
 }
 ";
 
+/// A book page's facts, with the exact votes for the tags in `$tags` (the
+/// moods, paces and character tags of [`crate::tags::VOTE_TAG_IDS`]): the
+/// exact counts behind the mood line, which `cached_tags` only rounds off
+/// to the top few. `cached_tags` stays for the genres, warnings and tags.
 pub(crate) const BOOK_DETAILS: &str = concat!(
-    "query BookDetails($id: Int!) {
+    "query BookDetails($id: Int!, $tags: [Int!]!) {
   books_by_pk(id: $id) {
     ...BookSummaryFields
     description release_date editions_count ratings_count cached_tags
@@ -170,11 +174,75 @@ pub(crate) const BOOK_DETAILS: &str = concat!(
     book_series(order_by: [{featured: desc}, {position: asc_nulls_last}]) {
       position featured series { id name slug }
     }
+    taggable_counts(where: {tag_id: {_in: $tags}}) { tag_id count }
   }
 }
 ",
     book_summary_fields!()
 );
+
+/// A tag's books, the most voted for it first (`count`; never `users_count`,
+/// which puts the same blockbusters first whatever the tag). Merged
+/// duplicates are filtered here. Paged by offset; the book id breaks ties, so
+/// pages over equal counts neither repeat nor skip a book.
+pub(crate) const BOOKS_BY_TAG: &str = concat!(
+    "query BooksByTag($tag: Int!, $limit: Int!, $offset: Int!) {
+  taggable_counts(
+    where: {
+      tag_id: {_eq: $tag}
+      taggable_type: {_eq: \"Book\"}
+      book: {canonical_id: {_is_null: true}}
+    }
+    order_by: [{count: desc}, {taggable_id: asc}]
+    limit: $limit
+    offset: $offset
+  ) {
+    count
+    book { ...BookSummaryFields }
+  }
+}
+",
+    book_summary_fields!()
+);
+
+/// [`BOOKS_BY_TAG`] narrowed to the books with at least `$min` votes for a
+/// second tag `$other` (a genre within a mood, a mood within a genre). A
+/// separate document rather than a `where` passed whole as a variable, which
+/// would hide the filtered fields from the scope check.
+pub(crate) const BOOKS_BY_TAG_WITH: &str = concat!(
+    "query BooksByTagWith($tag: Int!, $other: Int!, $min: Int!, $limit: Int!, $offset: Int!) {
+  taggable_counts(
+    where: {
+      tag_id: {_eq: $tag}
+      taggable_type: {_eq: \"Book\"}
+      book: {
+        canonical_id: {_is_null: true}
+        taggable_counts: {tag_id: {_eq: $other}, count: {_gte: $min}}
+      }
+    }
+    order_by: [{count: desc}, {taggable_id: asc}]
+    limit: $limit
+    offset: $offset
+  ) {
+    count
+    book { ...BookSummaryFields }
+  }
+}
+",
+    book_summary_fields!()
+);
+
+/// A batch of books' genres (`cached_tags`' Genre list) and their votes for
+/// the tags in `$tags` (the 14 moods): what a shelf's genre and mood filter
+/// needs.
+pub(crate) const BOOK_TAGS: &str = "query BookTags($ids: [Int!]!, $limit: Int!, $tags: [Int!]!) {
+  books(where: {id: {_in: $ids}}, limit: $limit) {
+    id
+    cached_tags(path: \"Genre\")
+    taggable_counts(where: {tag_id: {_in: $tags}}) { tag_id count }
+  }
+}
+";
 
 /// A series and its books. Merged duplicates are filtered here; the client keeps
 /// the most-read book per position and drops partial books and compilations,
@@ -701,6 +769,9 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("SEARCH_SERIES", SEARCH_SERIES),
     ("BOOKS_TRENDING", BOOKS_TRENDING),
     ("BOOK_DETAILS", BOOK_DETAILS),
+    ("BOOKS_BY_TAG", BOOKS_BY_TAG),
+    ("BOOKS_BY_TAG_WITH", BOOKS_BY_TAG_WITH),
+    ("BOOK_TAGS", BOOK_TAGS),
     ("SERIES_PAGE", SERIES_PAGE),
     ("AUTHOR_PAGE", AUTHOR_PAGE),
     ("BOOKS_BY_IDS", BOOKS_BY_IDS),
