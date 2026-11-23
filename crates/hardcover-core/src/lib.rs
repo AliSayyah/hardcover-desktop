@@ -44,6 +44,7 @@ pub use api::{CommunityReview, REVIEWS_PER_PAGE, Reviewer, ReviewsPage};
 pub use api::{
     Coverage, LibrarySync, ListEdit, OffsetPage, Priority, ProgressChange, TrackedSeriesLoad,
 };
+pub use api::{FEATURED_VIBES_LIMIT, VIBE_BOOKS_PER_PAGE, Vibe, VibeId, VibeKind};
 pub use error::{Error, Result};
 
 /// `User-Agent` sent with every request (API, OAuth and cover downloads).

@@ -16,7 +16,8 @@ use super::model::{
     ListBookId, ListId, ListMembership, Measure, Privacy, Rating, RatingBucket, ReadId,
     ReadSession, ReadingStatus, Review, Reviewer, SearchHits, SearchPage, SeriesBook,
     SeriesDetails, SeriesHit, SeriesId, SeriesRef, Timestamp, TrackedBook, TrackedSeries,
-    UpcomingBook, User, UserBookId, UserId, UserList, measure_of, read_order,
+    UpcomingBook, User, UserBookId, UserId, UserList, Vibe, VibeId, VibeKind, measure_of,
+    read_order,
 };
 
 // ---------- scalar helpers ----------
@@ -1417,6 +1418,151 @@ fn hex_color(s: &str) -> Option<[u8; 3]> {
         ]),
         3 => Some([digit(0)? * 17, digit(1)? * 17, digit(2)? * 17]),
         _ => None,
+    }
+}
+
+// ---------- vibes ----------
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawVibeUser {
+    pub username: Option<String>,
+}
+
+/// `VibeFields`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawVibe {
+    pub id: i64,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub slug: Option<String>,
+    pub vibe_type: Option<i64>,
+    pub books_generated_at: Option<String>,
+    #[serde(default)]
+    pub cached_book_ids: Value,
+    pub featured: Option<bool>,
+    pub privacy_setting_id: Option<i64>,
+    pub user_id: Option<i64>,
+    pub likes_count: Option<i64>,
+    pub user: Option<RawVibeUser>,
+}
+
+impl RawVibe {
+    pub fn into_vibe(self) -> Vibe {
+        let kind = VibeKind::from_id(self.vibe_type.unwrap_or(0));
+        let mut v = Vibe::new(
+            VibeId::new(self.id),
+            kind,
+            non_empty(self.title).unwrap_or_else(|| "Untitled vibe".to_owned()),
+        );
+        v.description = catalogue_text(self.description);
+        v.slug = non_empty(self.slug);
+        v.built_at = self.books_generated_at.as_deref().and_then(parse_timestamp);
+        v.book_ids = vibe_book_ids(&self.cached_book_ids);
+        v.user_id = self.user_id.map(UserId::new);
+        v.username = self.user.and_then(|u| non_empty(u.username));
+        v.featured = self.featured.unwrap_or(false);
+        v.likes_count = opt_u32(self.likes_count).unwrap_or(0);
+        v.privacy_id = self.privacy_setting_id;
+        v
+    }
+}
+
+/// `cached_book_ids`, a JSON array of book ids in Hardcover's order: each
+/// once, at its first place; anything that isn't an id is dropped.
+pub(crate) fn vibe_book_ids(value: &Value) -> Vec<BookId> {
+    let mut seen = std::collections::HashSet::new();
+    value
+        .as_array()
+        .map(|ids| {
+            ids.iter()
+                .filter_map(as_i64)
+                .filter(|id| *id > 0 && seen.insert(*id))
+                .map(BookId::new)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `VibeIdType`: `update_vibe`'s payload.
+#[derive(Debug, Deserialize)]
+pub(crate) struct VibePayload {
+    pub errors: Option<Vec<Option<String>>>,
+    pub vibe: Option<RawVibe>,
+}
+
+impl VibePayload {
+    pub fn error(&self) -> Option<String> {
+        joined_errors(self.errors.as_deref())
+    }
+}
+
+/// `SystemVibesType`: `ensure_system_vibes`'s payload.
+#[derive(Debug, Deserialize)]
+pub(crate) struct SystemVibesPayload {
+    #[serde(default)]
+    pub ids: Vec<i64>,
+}
+
+#[cfg(test)]
+mod vibe_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn a_vibe_decodes_leniently() {
+        let raw: RawVibe = serde_json::from_value(json!({
+            "id": 41,
+            "title": "Recommendations",
+            "description": "Books picked for you.",
+            "slug": "recommendations",
+            "vibe_type": 1,
+            "books_generated_at": "2026-11-22T08:30:00.123456",
+            "cached_book_ids": [7, "9", 7, null, -1, 3.0, {"id": 5}],
+            "featured": false,
+            "privacy_setting_id": 3,
+            "user_id": 12,
+            "likes_count": 0,
+            "user": {"username": "reader"}
+        }))
+        .unwrap();
+        let v = raw.into_vibe();
+        assert_eq!(v.kind, VibeKind::Recommendations);
+        assert!(v.kind.is_system());
+        assert_eq!(
+            v.book_ids,
+            [BookId::new(7), BookId::new(9), BookId::new(3)],
+            "in order, each once"
+        );
+        // A timestamp without an offset is UTC.
+        assert_eq!(
+            v.built_at.unwrap().to_rfc3339(),
+            "2026-11-22T08:30:00.123456+00:00"
+        );
+        assert_eq!(v.username.as_deref(), Some("reader"));
+        assert_eq!(v.privacy_id, Some(3));
+        assert!(v.is_built());
+    }
+
+    #[test]
+    fn an_unbuilt_or_unknown_vibe_still_reads() {
+        let raw: RawVibe = serde_json::from_value(json!({
+            "id": 2,
+            "title": "",
+            "vibe_type": 9,
+            "books_generated_at": null,
+            "cached_book_ids": {},
+        }))
+        .unwrap();
+        let v = raw.into_vibe();
+        assert_eq!(v.kind, VibeKind::Other(9));
+        assert!(!v.kind.is_system());
+        assert_eq!(v.title, "Untitled vibe");
+        assert!(v.book_ids.is_empty());
+        assert!(!v.is_built());
+        // Saved and read back, an unknown kind stays.
+        let saved = serde_json::to_string(&v).unwrap();
+        assert_eq!(serde_json::from_str::<Vibe>(&saved).unwrap(), v);
     }
 }
 

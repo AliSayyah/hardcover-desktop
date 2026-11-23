@@ -88,6 +88,10 @@ id_type!(
     /// `list_books.id`: one book on one list.
     ListBookId
 );
+id_type!(
+    /// `vibes.id`: one of Hardcover's lists of recommended books.
+    VibeId
+);
 
 /// A library entry's status (`user_books.status_id`).
 ///
@@ -2339,5 +2343,105 @@ impl TrackedBook {
             release_date: None,
             partial: false,
         }
+    }
+}
+
+/// What a vibe is (`vibes.vibe_type`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum VibeKind {
+    /// Made by a reader (0).
+    Custom,
+    /// The user's Recommendations, "Books picked for you based on your
+    /// reading history" (1). Leaves out books the user has read; keeps
+    /// Want to read ones.
+    Recommendations,
+    /// "Because you read…" (2).
+    Dynamic,
+    /// The user's Top Picks, "The most popular books we think you'll
+    /// love" (3).
+    TopPicks,
+    /// A type this version doesn't know, kept so a saved copy still reads.
+    Other(i64),
+}
+
+impl VibeKind {
+    #[must_use]
+    pub fn from_id(id: i64) -> Self {
+        match id {
+            0 => Self::Custom,
+            1 => Self::Recommendations,
+            2 => Self::Dynamic,
+            3 => Self::TopPicks,
+            other => Self::Other(other),
+        }
+    }
+
+    /// The user's own system vibes, which Hardcover builds from their
+    /// library and where a book can be left out ("Never recommend…").
+    #[must_use]
+    pub fn is_system(self) -> bool {
+        matches!(self, Self::Recommendations | Self::TopPicks)
+    }
+}
+
+/// A vibe (`vibes`): one of Hardcover's lists of recommended books, in its
+/// ranked order. Hardcover rebuilds a user's system vibes only when they
+/// visit the vibe or Discover on hardcover.app, at most once a day; no API
+/// call does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Vibe {
+    pub id: VibeId,
+    pub kind: VibeKind,
+    pub title: String,
+    pub description: Option<String>,
+    pub slug: Option<String>,
+    /// When Hardcover last built the list (`books_generated_at`, UTC);
+    /// `None` until it is built.
+    pub built_at: Option<Timestamp>,
+    /// The books, in Hardcover's order, each once.
+    pub book_ids: Vec<BookId>,
+    /// The vibe's owner.
+    pub user_id: Option<UserId>,
+    /// The owner's username, for a link to the vibe on hardcover.app.
+    pub username: Option<String>,
+    pub featured: bool,
+    pub likes_count: u32,
+    /// `privacy_setting_id` as Hardcover sent it: a write resends it.
+    pub privacy_id: Option<i64>,
+}
+
+impl Vibe {
+    pub fn new(id: VibeId, kind: VibeKind, title: impl Into<String>) -> Self {
+        Self {
+            id,
+            kind,
+            title: title.into(),
+            description: None,
+            slug: None,
+            built_at: None,
+            book_ids: Vec::new(),
+            user_id: None,
+            username: None,
+            featured: false,
+            likes_count: 0,
+            privacy_id: None,
+        }
+    }
+
+    /// Whether Hardcover has built the list: it has a build time and books.
+    #[must_use]
+    pub fn is_built(&self) -> bool {
+        self.built_at.is_some() && !self.book_ids.is_empty()
+    }
+
+    /// Where the vibe is rebuilt: a visit there on hardcover.app is what
+    /// makes Hardcover build it again.
+    #[must_use]
+    pub fn web_url(&self) -> String {
+        // TODO(owner): exact vibe URL. Hardcover's vibe pages aren't
+        // confirmed yet; Discover on hardcover.app rebuilds the user's
+        // system vibes, so it stands in for every vibe until then.
+        "https://hardcover.app/discover".to_owned()
     }
 }

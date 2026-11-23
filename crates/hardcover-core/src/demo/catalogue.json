@@ -1305,5 +1305,102 @@
       "position": 6.0,
       "days": 1900
     }
-  ]
+  ],
+  "vibes": {
+    "recommendations": {
+      "id": 501,
+      "built_days_ago": 1,
+      "books": [
+        427314,
+        377938,
+        383598,
+        266607,
+        427393,
+        89871,
+        714600,
+        139773,
+        428018,
+        490300,
+        427544,
+        479910
+      ]
+    },
+    "top_picks": {
+      "id": 502,
+      "built_days_ago": 1,
+      "books": [
+        377938,
+        292354,
+        427314,
+        714600,
+        379760,
+        428018,
+        1788666,
+        383598
+      ]
+    },
+    "featured": [
+      {
+        "id": 601,
+        "title": "Worlds to get lost in",
+        "description": "Long fantasy to sink a whole season into.",
+        "owner": {
+          "id": 2,
+          "username": "demo_curator"
+        },
+        "likes": 48,
+        "built_days_ago": 3,
+        "featured_days_ago": 2,
+        "books": [
+          386446,
+          369692,
+          139773,
+          377938,
+          2459845,
+          427544,
+          383598
+        ]
+      },
+      {
+        "id": 602,
+        "title": "Stranded among the stars",
+        "description": "Survival, science and a long way from home.",
+        "owner": {
+          "id": 2,
+          "username": "demo_curator"
+        },
+        "likes": 31,
+        "built_days_ago": 6,
+        "featured_days_ago": 9,
+        "books": [
+          427578,
+          292354,
+          312460,
+          266607,
+          427314,
+          427393
+        ]
+      },
+      {
+        "id": 603,
+        "title": "Quiet books about big lives",
+        "description": "Whole lives, told slowly, and the people in them.",
+        "owner": {
+          "id": 3,
+          "username": "demo_bookworm"
+        },
+        "likes": 17,
+        "built_days_ago": 12,
+        "featured_days_ago": 20,
+        "books": [
+          340654,
+          479910,
+          490300,
+          44186,
+          377193,
+          428018
+        ]
+      }
+    ]
+  }
 }

@@ -2946,3 +2946,131 @@ fn tracked_series_batches_ids_and_keeps_every_candidate() {
     assert_eq!(series[1].name, "Untitled series");
     assert_eq!(series[1].books, []);
 }
+
+fn vibe(id: i64, ids: &[i64]) -> Value {
+    json!({
+        "id": id,
+        "title": "Recommendations",
+        "description": "Books picked for you.",
+        "slug": "recommendations",
+        "vibe_type": 1,
+        "books_generated_at": "2026-11-22T08:30:00",
+        "cached_book_ids": ids,
+        "featured": false,
+        "privacy_setting_id": 3,
+        "user_id": 77,
+        "likes_count": 0,
+        "user": {"username": "synthetic"}
+    })
+}
+
+#[test]
+fn vibe_books_page_through_the_ids_in_the_vibes_order() {
+    let (c, http) = client(TestTokens::new(false));
+    let ids: Vec<BookId> = (1..=30).map(BookId::new).collect();
+    // Hardcover answers in its own order, and knows no book 2.
+    http.push(
+        200,
+        &data(json!({ "books": [book(5, "Five"), book(1, "One"), book(3, "Three")] })),
+    );
+    let page = c.vibe_books(&ids, 0).unwrap();
+    let titles: Vec<&str> = page.items.iter().map(|b| b.title.as_str()).collect();
+    assert_eq!(titles, ["One", "Three", "Five"], "reordered by the ids");
+    assert_eq!(page.next_offset, 25, "counts the ids asked about");
+    assert!(page.has_more);
+    let vars = http.requests()[0].json.clone().unwrap()["variables"].clone();
+    assert_eq!(vars["ids"].as_array().unwrap().len(), VIBE_BOOKS_PER_PAGE);
+
+    http.push(200, &data(json!({ "books": [book(30, "Thirty")] })));
+    let page = c.vibe_books(&ids, 25).unwrap();
+    assert_eq!(page.next_offset, 30);
+    assert!(!page.has_more);
+    let vars = http.requests()[1].json.clone().unwrap()["variables"].clone();
+    assert_eq!(vars["ids"], json!([26, 27, 28, 29, 30]));
+
+    // Past the end: nothing to ask.
+    let page = c.vibe_books(&ids, 30).unwrap();
+    assert!(page.items.is_empty() && !page.has_more);
+    assert_eq!(http.requests().len(), 2);
+}
+
+#[test]
+fn system_vibes_are_the_users_own() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({"me": [{"id": 77, "username": "synthetic"}]})),
+    );
+    http.push(200, &data(json!({ "vibes": [vibe(4, &[1, 2])] })));
+    let vibes = c.system_vibes().unwrap();
+    assert_eq!(vibes.len(), 1);
+    assert_eq!(vibes[0].book_ids, [BookId::new(1), BookId::new(2)]);
+    let vars = http.requests()[1].json.clone().unwrap()["variables"].clone();
+    assert_eq!(vars["userId"], 77);
+}
+
+#[test]
+fn excluding_a_book_resends_the_vibe_as_read() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(200, &data(json!({ "vibes_by_pk": vibe(4, &[1, 2]) })));
+    http.push(
+        200,
+        &data(json!({ "update_vibe": {"id": 4, "errors": null, "vibe": vibe(4, &[1, 2])} })),
+    );
+    let written = c.exclude_from_vibe(VibeId::new(4), BookId::new(2)).unwrap();
+    assert_eq!(written.id, VibeId::new(4));
+    let reqs = http.requests();
+    let body = reqs[1].json.clone().unwrap();
+    assert_eq!(body["operationName"], "ExcludeFromVibe");
+    assert_eq!(
+        body["variables"],
+        json!({
+            "id": 4,
+            "object": {
+                "title": "Recommendations",
+                "description": "Books picked for you.",
+                "privacy_setting_id": 3,
+                "vibe_exclusions_attributes": [{"excluded_type": "Book", "excluded_id": 2}],
+            }
+        })
+    );
+    // Both are steps of the user's write.
+    assert_eq!(
+        c.priority_of("VibeById", queries::VIBE_BY_ID),
+        Priority::Interactive
+    );
+    assert_eq!(
+        c.priority_of("SystemVibes", queries::SYSTEM_VIBES),
+        Priority::Background
+    );
+
+    // An error in the payload is the write's failure; a vibe that's gone too.
+    http.push(200, &data(json!({ "vibes_by_pk": vibe(4, &[1]) })));
+    http.push(
+        200,
+        &data(json!({ "update_vibe": {"id": null, "errors": ["Not allowed"], "vibe": null} })),
+    );
+    assert_eq!(
+        c.exclude_from_vibe(VibeId::new(4), BookId::new(1)),
+        Err(Error::Api("Not allowed".into()))
+    );
+    http.push(200, &data(json!({ "vibes_by_pk": null })));
+    assert!(matches!(
+        c.exclude_from_vibe(VibeId::new(5), BookId::new(1)),
+        Err(Error::Api(_))
+    ));
+    assert_eq!(http.remaining(), 0);
+}
+
+#[test]
+fn ensure_system_vibes_returns_the_ids() {
+    let (c, http) = client(TestTokens::new(false));
+    http.push(
+        200,
+        &data(json!({ "ensure_system_vibes": {"ids": [4, 5]} })),
+    );
+    assert_eq!(
+        c.ensure_system_vibes().unwrap(),
+        [VibeId::new(4), VibeId::new(5)]
+    );
+}
