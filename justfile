@@ -20,7 +20,7 @@ default:
 run *args:
     cargo run -p {{ app }} "$@"
 
-# Demo build: a sample library, no account. Theme: light or dark (default: Settings)
+# Demo build: a sample library, no account. Theme: light, dark, paper, graphite, hardcover or e.g. hardcover-light (default: Settings)
 [group('run')]
 demo theme="":
     if [[ -n "$1" ]]; then export HARDCOVER_THEME="$1"; fi; cargo run -p {{ app }} --features demo
@@ -30,7 +30,7 @@ demo theme="":
 demo-faults faults theme="":
     if [[ -n "$2" ]]; then export HARDCOVER_THEME="$2"; fi; HARDCOVER_DEMO_FAULTS="$1" cargo run -p {{ app }} --features demo
 
-# The shared components' gallery (demo build). Theme: light or dark (default: Settings)
+# The shared components' gallery (demo build). Theme: light, dark, paper, graphite, hardcover or e.g. hardcover-light (default: Settings)
 [group('run')]
 gallery theme="":
     if [[ -n "$1" ]]; then export HARDCOVER_THEME="$1"; fi; HARDCOVER_GALLERY=1 cargo run -p {{ app }} --features demo

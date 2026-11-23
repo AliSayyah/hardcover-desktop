@@ -167,6 +167,8 @@ pub const DIALOG_NOTES_MAX: Rems = rems(18.);
 pub const DIALOG_CONFIRM: Rems = rems(24.);
 /// A dialog with a form (30 rem).
 pub const DIALOG_FORM: Rems = rems(30.);
+/// A theme tile's miniature of the app (84 high; Settings).
+pub const THEME_ART: Rems = rems(5.25);
 
 /// The Votes popover's width (`hardcover-design`, Frames and sizes).
 pub const VOTES_POPOVER: Rems = rems(22.5);

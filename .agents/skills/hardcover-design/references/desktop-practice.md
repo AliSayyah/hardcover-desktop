@@ -13,7 +13,8 @@ source in the `gpui-component` crate. State the primary task, who owns the
 state, how the parts are composed and the keyboard path before writing code.
 Never infer a GPUI API from React or web examples, and never invent a method
 because its name seems plausible. A screenshot that looks right isn't proof:
-keyboard, focus, dynamic content, both themes, resizing and failure states
+keyboard, focus, dynamic content, every palette (each theme, light and
+dark), resizing and failure states
 are part of the design.
 
 ## Start from the task
@@ -294,7 +295,8 @@ A review judges decisions, not a component inventory. Ask, in order:
 6. **Is the structure exact?** Do peers share spines and equal gaps (to the
    rendered pixel), and are the hairlines and scrollbars where they belong?
 7. **Does it follow the tokens?** No raw colours or sizes? Is every state
-   the system's one treatment, and does it look right in both themes?
+   the system's one treatment, and does it look right in every palette
+   (Paper, Graphite and Hardcover, each light and dark)?
 8. **Does it hold in every state?**
    - keyboard and focus;
    - empty, loading, error and missing-permission states;
@@ -303,4 +305,5 @@ A review judges decisions, not a component inventory. Ask, in order:
    - reduced motion.
 9. **Was it tested in a real window?** Run it with representative content:
    the demo build (`cargo run -p hardcover-desktop --features demo`), in
-   light and dark.
+   every palette (`HARDCOVER_THEME=paper-light`, `paper-dark`,
+   `graphite-light` and so on).

@@ -11,10 +11,13 @@ use std::sync::{Arc, Mutex};
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, AppContext as _, Context, Entity, Global, Window, WindowAppearance};
 use hardcover_core::Vibe;
-use hardcover_core::prefs::{Preferences, ThemePreference, VibeExclusion};
+use hardcover_core::prefs::{Preferences, ThemeFamily, ThemePreference, VibeExclusion};
 
-/// `HARDCOVER_THEME=light|dark` forces a theme (a development aid for
-/// screenshots). Settings shows the theme choice as unavailable while it is set.
+/// `HARDCOVER_THEME` forces the theme, the mode or both (a development aid
+/// for screenshots): `light` or `dark` the mode, in the theme Settings chose;
+/// `paper`, `graphite` or `hardcover` the theme, in the mode Settings chose;
+/// `graphite-light`, `hardcover-dark` and so on both. Settings shows what is
+/// forced as unavailable.
 const THEME_ENV: &str = "HARDCOVER_THEME";
 
 pub struct PreferencesModel {
@@ -69,6 +72,10 @@ impl PreferencesModel {
         self.preferences.theme
     }
 
+    pub fn theme_family(&self) -> ThemeFamily {
+        self.preferences.theme_family
+    }
+
     pub fn automatic_update_checks(&self) -> bool {
         self.preferences.automatic_update_checks
     }
@@ -99,6 +106,10 @@ impl PreferencesModel {
 
     pub fn set_theme(&mut self, theme: ThemePreference, cx: &mut Context<Self>) {
         self.update(cx, |p| p.theme = theme);
+    }
+
+    pub fn set_theme_family(&mut self, family: ThemeFamily, cx: &mut Context<Self>) {
+        self.update(cx, |p| p.theme_family = family);
     }
 
     pub fn set_automatic_update_checks(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -135,13 +146,65 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The theme forced by `HARDCOVER_THEME`, if any.
+/// What `HARDCOVER_THEME` forces: a mode, a theme, or both.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Forced {
+    mode: Option<ThemePreference>,
+    family: Option<ThemeFamily>,
+}
+
+fn forced() -> Forced {
+    parse_override(std::env::var(THEME_ENV).ok().as_deref()).unwrap_or_default()
+}
+
+/// The mode forced by `HARDCOVER_THEME`, if any.
 pub fn theme_override() -> Option<ThemePreference> {
-    match std::env::var(THEME_ENV).ok().as_deref() {
-        Some("light") => Some(ThemePreference::Light),
-        Some("dark") => Some(ThemePreference::Dark),
+    forced().mode
+}
+
+/// The theme forced by `HARDCOVER_THEME`, if any.
+pub fn theme_family_override() -> Option<ThemeFamily> {
+    forced().family
+}
+
+/// `HARDCOVER_THEME`'s value: `[<theme>-]<mode>` or `<theme>`. Anything else
+/// forces nothing.
+fn parse_override(value: Option<&str>) -> Option<Forced> {
+    let mode = |m: &str| match m {
+        "light" => Some(ThemePreference::Light),
+        "dark" => Some(ThemePreference::Dark),
         _ => None,
+    };
+    let family = |f: &str| match f {
+        "paper" => Some(ThemeFamily::Paper),
+        "graphite" => Some(ThemeFamily::Graphite),
+        "hardcover" => Some(ThemeFamily::Hardcover),
+        _ => None,
+    };
+    let value = value?;
+    if let Some((f, m)) = value.split_once('-') {
+        return Some(Forced {
+            mode: Some(mode(m)?),
+            family: Some(family(f)?),
+        });
     }
+    mode(value)
+        .map(|mode| Forced {
+            mode: Some(mode),
+            family: None,
+        })
+        .or_else(|| {
+            family(value).map(|family| Forced {
+                mode: None,
+                family: Some(family),
+            })
+        })
+}
+
+/// The theme to use: `HARDCOVER_THEME`'s, else the preference's. `main`
+/// reads it from the preferences it loaded, before the model exists.
+pub fn theme_family_for(preferences: &Preferences) -> ThemeFamily {
+    theme_family_override().unwrap_or(preferences.theme_family)
 }
 
 /// The light or dark mode for `preference` when the desktop looks like `system`.
@@ -158,8 +221,11 @@ pub fn theme_mode(preference: ThemePreference, system: WindowAppearance) -> Them
 
 /// Applies the theme to every window: `HARDCOVER_THEME`, else the preference.
 pub fn apply_theme(window: &mut Window, cx: &mut App) {
-    let preference =
-        theme_override().unwrap_or_else(|| AppPreferences::global(cx).read(cx).theme());
+    let preferences = AppPreferences::global(cx).read(cx);
+    let preference = theme_override().unwrap_or_else(|| preferences.theme());
+    let family = theme_family_override().unwrap_or_else(|| preferences.theme_family());
+    // Redraws only when it changes the theme.
+    crate::design::theme::set_theme_family(family, Some(window), cx);
     let mode = theme_mode(preference, window.appearance());
     // Theme::change refreshes every window even when nothing changes.
     if cx.try_global::<Theme>().map(|theme| theme.mode) != Some(mode) {
@@ -188,6 +254,35 @@ mod tests {
             assert_eq!(theme_mode(ThemePreference::Light, system), ThemeMode::Light);
             assert_eq!(theme_mode(ThemePreference::Dark, system), ThemeMode::Dark);
         }
+    }
+
+    #[test]
+    fn the_override_names_a_mode_a_theme_or_both() {
+        let forced = |mode, family| Some(Forced { mode, family });
+        assert_eq!(parse_override(None), None);
+        for nothing in ["sepia", "lamplight", "paper-sepia", "oled-dark", "-dark"] {
+            assert_eq!(parse_override(Some(nothing)), None, "{nothing}");
+        }
+        assert_eq!(
+            parse_override(Some("light")),
+            forced(Some(ThemePreference::Light), None)
+        );
+        assert_eq!(
+            parse_override(Some("dark")),
+            forced(Some(ThemePreference::Dark), None)
+        );
+        assert_eq!(
+            parse_override(Some("graphite")),
+            forced(None, Some(ThemeFamily::Graphite))
+        );
+        assert_eq!(
+            parse_override(Some("hardcover-light")),
+            forced(Some(ThemePreference::Light), Some(ThemeFamily::Hardcover))
+        );
+        assert_eq!(
+            parse_override(Some("paper-dark")),
+            forced(Some(ThemePreference::Dark), Some(ThemeFamily::Paper))
+        );
     }
 
     #[test]

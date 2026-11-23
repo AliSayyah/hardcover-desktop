@@ -1,5 +1,6 @@
 //! Every shared component in its states, on one scrolling page: for checking
-//! them by eye in both themes, and by keyboard (Tab walks every control;
+//! them by eye in every palette (`HARDCOVER_THEME=paper-light`,
+//! `graphite-dark`, `hardcover-light` and so on), and by keyboard (Tab walks every control;
 //! Page Up, Page Down, Home and End scroll). Only in the demo build, opened instead of the app with
 //! `HARDCOVER_GALLERY=1`:
 //!
@@ -62,6 +63,8 @@ pub struct Gallery {
     scroll: ScrollHandle,
     /// The page chips' row keys.
     chip_keys: Entity<super::chip_keys::ChipKeys>,
+    /// The theme tiles' choice (only here: the app's theme stays).
+    theme: hardcover_core::prefs::ThemeFamily,
 }
 
 impl Gallery {
@@ -100,6 +103,7 @@ impl Gallery {
             focus,
             scroll: ScrollHandle::new(),
             chip_keys: cx.new(|cx| super::chip_keys::ChipKeys::new(window, cx)),
+            theme: hardcover_core::prefs::ThemeFamily::default(),
         }
     }
 
@@ -123,6 +127,26 @@ impl Gallery {
 }
 
 /// A titled specimen.
+impl Gallery {
+    /// Settings' theme tiles, at Settings' width.
+    fn theme_tiles(&self, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity().downgrade();
+        specimen(
+            "Theme tiles (Settings): chosen, hovered under the pointer, focused from the keyboard",
+            div().w(size::DIALOG_FORM).child(super::ThemeTiles::new(
+                "g-theme",
+                self.theme,
+                move |family, _, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        this.theme = family;
+                        cx.notify();
+                    });
+                },
+            )),
+        )
+    }
+}
+
 fn specimen(title: &'static str, body: impl IntoElement) -> AnyElement {
     v_flex()
         .gap_3()
@@ -166,6 +190,7 @@ impl Render for Gallery {
             .child(kit_fixes(&self.input, cx))
             .child(release_notes(cx))
             .child(self.controls(cx))
+            .child(self.theme_tiles(cx))
             // A cover asked for before the pipeline opens is missing for
             // the run, so these wait for it.
             .when(cx.has_global::<CoverService>(), |this| {

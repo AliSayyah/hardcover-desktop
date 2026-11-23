@@ -1,11 +1,12 @@
-//! The Settings dialog: theme, update checks and the signed-in account.
+//! The Settings dialog: the theme and its mode, update checks and the
+//! signed-in account.
 //!
 //! Every change applies at once and is saved; there is nothing to confirm, so
 //! the dialog only has its close button.
 
 use gpui_kit::component::button::Button;
-use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
+use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, Context, Entity, EventEmitter, IntoElement, ParentElement as _, Render,
@@ -15,16 +16,39 @@ use hardcover_core::prefs::ThemePreference;
 
 use crate::design::TypeRoles as _;
 use crate::library::model::LibraryModel;
-use crate::preferences::{AppPreferences, PreferencesModel, theme_override};
+use crate::preferences::{AppPreferences, PreferencesModel, theme_family_override, theme_override};
 use crate::ui::Avatar;
+use crate::ui::ThemeTiles;
 use crate::ui::kit::SmallControl as _;
+use crate::ui::kit::small_tab;
+use crate::ui::theme_tiles::family_name;
 use crate::update::{UpdateModel, UpdateState, Updates, automatic_checks_unavailable};
 
-const THEMES: [(ThemePreference, &str); 3] = [
-    (ThemePreference::System, "System"),
-    (ThemePreference::Light, "Light"),
-    (ThemePreference::Dark, "Dark"),
+/// The modes, in the segmented control's order.
+const MODES: [ThemePreference; 3] = [
+    ThemePreference::System,
+    ThemePreference::Light,
+    ThemePreference::Dark,
 ];
+
+fn mode_name(mode: ThemePreference) -> &'static str {
+    match mode {
+        ThemePreference::System => "System",
+        ThemePreference::Light => "Light",
+        ThemePreference::Dark => "Dark",
+    }
+}
+
+/// What a mode does, under its row's name.
+fn mode_description(mode: ThemePreference) -> &'static str {
+    match mode {
+        ThemePreference::System => "Light or dark as your desktop is.",
+        ThemePreference::Light => "Always light.",
+        ThemePreference::Dark => "Always dark.",
+    }
+}
+
+const FORCED: &str = "Set by HARDCOVER_THEME.";
 
 /// Asks the workspace to sign out (after its own confirmation).
 pub struct SignOutRequested;
@@ -56,40 +80,50 @@ impl SettingsView {
     }
 
     fn render_appearance(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let forced = theme_override();
-        let current = forced.unwrap_or_else(|| self.preferences.read(cx).theme());
-        // A theme fixed by `HARDCOVER_THEME` can't be changed here: it shows
-        // as a value, not as radios the user can't press.
-        let control = if forced.is_some() {
-            let label = THEMES
-                .iter()
-                .find(|(theme, _)| *theme == current)
-                .map_or("System", |(_, label)| *label);
-            div().body().child(label).into_any_element()
-        } else {
-            let selected = THEMES.iter().position(|(theme, _)| *theme == current);
-            let preferences = self.preferences.clone();
-            RadioGroup::horizontal("theme")
-                .children(
-                    THEMES.map(|(_, label)| Radio::new(SharedString::from(label)).label(label)),
-                )
-                .selected_index(selected)
-                .on_change(move |ix, _, cx| {
-                    if let Some((theme, _)) = THEMES.get(*ix) {
-                        preferences.update(cx, |p, cx| p.set_theme(*theme, cx));
-                    }
-                })
-                .into_any_element()
-        };
-        section(
-            "Appearance",
-            setting_row(
+        let preferences = self.preferences.read(cx);
+        let family = preferences.theme_family();
+        let mode = preferences.theme();
+        let model = self.preferences.clone();
+        // The theme: tiles, or the forced one's name with why.
+        let theme = match theme_family_override() {
+            Some(forced) => setting_row(
                 "Theme",
-                forced.map(|_| "Set by HARDCOVER_THEME.".into()),
-                control,
+                Some(FORCED.into()),
+                div().body().child(family_name(forced)),
                 cx,
             ),
-        )
+            None => v_flex()
+                .gap_2()
+                .child(div().body().child("Theme"))
+                .child(ThemeTiles::new("theme", family, move |family, _, cx| {
+                    model.update(cx, |p, cx| p.set_theme_family(family, cx));
+                }))
+                .into_any_element(),
+        };
+        let model = self.preferences.clone();
+        let mode = match theme_override() {
+            Some(forced) => setting_row(
+                "Mode",
+                Some(FORCED.into()),
+                div().body().child(mode_name(forced)),
+                cx,
+            ),
+            None => setting_row(
+                "Mode",
+                Some(mode_description(mode).into()),
+                TabBar::new("theme-mode")
+                    .segmented()
+                    .small_control()
+                    .selected_index(MODES.iter().position(|m| *m == mode).unwrap_or(0))
+                    .children(MODES.map(|m| small_tab(mode_name(m))))
+                    .on_click(move |ix, _, cx| {
+                        let mode = MODES[*ix];
+                        model.update(cx, |p, cx| p.set_theme(mode, cx));
+                    }),
+                cx,
+            ),
+        };
+        section("Appearance", v_flex().gap_4().child(theme).child(mode))
     }
 
     fn render_updates(&self, cx: &mut Context<Self>) -> impl IntoElement {
