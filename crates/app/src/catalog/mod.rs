@@ -1,6 +1,6 @@
 //! Catalogue pages opened from a book: its series, its authors and its
-//! tags (a mood, a genre), and the books on them. Also Discover, the books
-//! trending on Hardcover.
+//! tags (a mood, a genre), and the books on them. Also Discover, the hub
+//! for books the reader doesn't know yet, and Trending under it.
 
 pub mod author_view;
 pub mod book_list;

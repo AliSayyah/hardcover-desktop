@@ -715,6 +715,7 @@ mod tests {
     const FOR_YOU: VibeId = VibeId::new(501);
 
     fn settle(cx: &mut VisualTestContext) {
+        redraw(cx);
         cx.executor().advance_clock(Duration::from_secs(1));
         cx.run_until_parked();
         redraw(cx);
@@ -758,6 +759,8 @@ mod tests {
         cx.run_until_parked();
         let (view, cx) = cx.add_window_view(|window, cx| DiscoverView::new(&library, window, cx));
         cx.simulate_resize(gsize(px(900.), px(700.)));
+        // Focus events (a chip row's memory of its chip) need it active.
+        cx.update(|window, _| window.activate_window());
         cx.update(|window, cx| {
             view.update(cx, |v, cx| {
                 v.show(window, cx);
@@ -855,7 +858,8 @@ mod tests {
 
     /// From the page: Tab reaches For you's "See all 12", which opens the
     /// vibe; then past its six titles, the moods (one Tab stop, the arrows
-    /// moving along it) and the genres, each chip opening its tag's page.
+    /// moving along it) and the genres, each chip opening its tag's page,
+    /// and the featured vibes, each opening the vibe's.
     #[gpui_kit::test]
     fn see_all_and_the_browse_chips_open_their_pages(cx: &mut TestAppContext) {
         let (_, opened, _vibes, cx) = discover("", cx);
@@ -874,7 +878,18 @@ mod tests {
         press(cx, "end");
         redraw(cx);
         press(cx, "enter");
-        tab(cx);
+        // Tab leaves the row for the genres', on its first chip.
+        press(cx, "tab");
+        settle(cx);
+        press(cx, "enter");
+        // The featured vibes' row: its first opens the vibe's page.
+        press(cx, "tab");
+        settle(cx);
+        press(cx, "enter");
+        assert_eq!(opened.borrow().last(), Some(&Page::Vibe(VibeId::new(601))));
+        // Shift+Tab comes back to the genre it left from.
+        press(cx, "shift-tab");
+        settle(cx);
         press(cx, "enter");
         let tags: Vec<Tag> = opened
             .borrow()
@@ -890,6 +905,7 @@ mod tests {
                 Tag::Mood(Mood::Adventurous),
                 Tag::Mood(Mood::Emotional),
                 Tag::Mood(Mood::Relaxing),
+                Tag::Genre(browse_genre("Fantasy").unwrap()),
                 Tag::Genre(browse_genre("Fantasy").unwrap()),
             ]
         );

@@ -65,7 +65,7 @@ pub enum CoverSize {
     // The gallery and the tests draw it.
     #[cfg_attr(not(any(test, feature = "demo")), allow(dead_code))]
     Xs,
-    /// 32 × 48: list rows (shelves, search, Discover, lists, series and
+    /// 32 × 48: list rows (shelves, search, Trending, lists, series and
     /// author pages), upcoming rows.
     Sm,
     /// 64 × 96: Home rows, Up next, a rail's shelf.

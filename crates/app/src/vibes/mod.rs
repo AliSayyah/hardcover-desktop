@@ -1,8 +1,9 @@
 //! Vibes: Hardcover's lists of recommended books (`hardcover-design`,
 //! Discover and A vibe's page). The user's Recommendations ("For you") and
-//! Top Picks lead Discover ([`shelves`]); each, and any vibe Hardcover
-//! features, has its page ([`vibe_view`]), where "Never recommend…" leaves a
-//! book out of the user's own ones.
+//! Top Picks are shelves on Discover (`catalog::discover_view`), whose
+//! Browse also lists the vibes Hardcover features; each has its page
+//! ([`vibe_view`]), where "Never recommend…" leaves a book out of the
+//! user's own ones.
 //!
 //! Hardcover builds a user's vibes only when they open them (or Discover) on
 //! hardcover.app, at most once a day; no API call does. So the page says how
