@@ -168,6 +168,12 @@ impl VibesModel {
         self.system.status(&())
     }
 
+    /// The vibes Hardcover features, once read (this run or the last):
+    /// Discover's "Featured on Hardcover".
+    pub fn featured_vibes(&self) -> Option<&[Vibe]> {
+        self.featured.value(&()).map(|v| v.as_slice())
+    }
+
     /// Vibe `id`, wherever it was loaded.
     pub fn vibe(&self, id: VibeId) -> Option<&Vibe> {
         let in_list = |list: Option<&std::sync::Arc<Vec<Vibe>>>| -> Option<usize> {
@@ -207,10 +213,11 @@ impl VibesModel {
 
     // ----- loading -----
 
-    /// Asks for the user's system vibes where they are stale or failed
-    /// (launch, Refresh, a new grant).
+    /// Asks for the user's system vibes and the featured ones where they
+    /// are stale or failed (launch, Refresh, a new grant).
     pub fn load(&mut self, cx: &mut Context<Self>) {
         self.request_system(Demand::Shown, cx);
+        self.request_featured(Demand::Shown, cx);
     }
 
     /// Asks for the system vibes as `demand` calls for.

@@ -32,6 +32,7 @@ use crate::catalog::discover_view::DiscoverView;
 use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
 use crate::catalog::series_view::SeriesView;
 use crate::catalog::tag_view::TagView;
+use crate::catalog::trending_view::TrendingView;
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{SIDEBAR_SHELVES, count_text, relative_time, status_label};
@@ -266,6 +267,7 @@ pub struct Workspace {
     vibes: Entity<VibesModel>,
     vibe_page: Entity<VibeView>,
     tag_page: Entity<TagView>,
+    trending_page: Entity<TrendingView>,
     series: Entity<SeriesModel>,
     shelf_tags: Entity<ShelfTagsModel>,
     series_view: Entity<SeriesTrackerView>,
@@ -302,6 +304,7 @@ impl Workspace {
         let vibes = VibesModel::init(session.clone(), &model, cx);
         let vibe_page = cx.new(|cx| VibeView::new(model.clone(), window, cx));
         let tag_page = cx.new(|cx| TagView::new(model.clone(), window, cx));
+        let trending_page = cx.new(|cx| TrendingView::new(&model, window, cx));
         let list_page = cx.new(|cx| ListView::new(lists.clone(), model.clone(), window, cx));
         let shelf_tags = cx.new(|cx| ShelfTagsModel::new(session.clone(), model.clone(), cx));
         let library = cx.new(|cx| LibraryView::new(model.clone(), shelf_tags.clone(), window, cx));
@@ -385,6 +388,7 @@ impl Workspace {
             vibes,
             vibe_page,
             tag_page,
+            trending_page,
             series,
             shelf_tags,
             series_view,
@@ -557,6 +561,9 @@ impl Workspace {
             Some(Page::Tag { .. }) => self
                 .tag_page
                 .update(cx, |p, cx| p.revalidate(shown_again, cx)),
+            Some(Page::Trending(_)) => self
+                .trending_page
+                .update(cx, |p, cx| p.revalidate(shown_again, cx)),
             None => match self.destination {
                 Destination::Search => self
                     .search
@@ -588,10 +595,7 @@ impl Workspace {
     /// The page shown changed in place (a tag's page narrowed): it stays
     /// in the history as it is now, for Back, and nothing else moves.
     fn replace_page(&mut self, page: Page, cx: &mut Context<Self>) {
-        let same = matches!(
-            (self.pages.current(), &page),
-            (Some(Page::Tag { tag: a, .. }), Page::Tag { tag: b, .. }) if a == b
-        );
+        let same = self.pages.current().is_some_and(|p| p.same_target(&page));
         if same && self.pages.replace_current(page) {
             cx.notify();
         }
@@ -637,6 +641,9 @@ impl Workspace {
             Some(Page::Tag { tag, within }) => self
                 .tag_page
                 .update(cx, |p, cx| p.show(tag, within, window, cx)),
+            Some(Page::Trending(period)) => self
+                .trending_page
+                .update(cx, |p, cx| p.show(period, window, cx)),
             None => return,
         }
         self.revalidate_visible(true, cx);
@@ -663,6 +670,11 @@ impl Workspace {
                 self.tag_page
                     .update(cx, |p, cx| p.focus(&fallback, window, cx));
             }
+            Some(Page::Trending(_)) => {
+                let fallback = self.page_focus.clone();
+                self.trending_page
+                    .update(cx, |p, cx| p.focus(&fallback, window, cx));
+            }
             Some(Page::Book(_) | Page::Upcoming) => window.focus(&self.page_focus, cx),
             None => {}
         }
@@ -683,6 +695,7 @@ impl Workspace {
             Page::Upcoming => self.upcoming_page.clone().into_any_element(),
             Page::Vibe(_) => self.vibe_page.clone().into_any_element(),
             Page::Tag { .. } => self.tag_page.clone().into_any_element(),
+            Page::Trending(_) => self.trending_page.clone().into_any_element(),
         };
         let tools = match page {
             Page::Book(_) => tools_of(&self.book_page, window, cx),
@@ -738,6 +751,7 @@ impl Workspace {
                 .map_or(BackTo::Unnamed, BackTo::Named),
             Page::Vibe(_) => vibe_name.as_deref().map_or(BackTo::Unnamed, BackTo::Named),
             Page::Tag { tag, .. } => BackTo::Named(tag.name()),
+            Page::Trending(_) => BackTo::Named("Trending"),
         });
         back_label(previous, &destination)
     }

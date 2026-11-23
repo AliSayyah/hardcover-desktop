@@ -46,6 +46,7 @@ use crate::design::{TypeRoles as _, colors, size};
 use crate::format::status_label;
 use crate::ui::chip_keys::ChipKeys;
 use crate::ui::focus::{FocusTreatment as _, focus_visible, keyed_focus};
+use crate::ui::reveal::probe;
 
 /// The pill every chip is drawn on.
 fn pill(cx: &App) -> Div {
@@ -128,6 +129,8 @@ pub struct TagChip {
     kind: TagKind,
     /// A page chip's page.
     page: Option<Page>,
+    /// The chip's element id, when its text may not be unique in its row.
+    key: Option<ElementId>,
 }
 
 impl TagChip {
@@ -137,6 +140,7 @@ impl TagChip {
             text: text.into(),
             kind: TagKind::Plain,
             page: None,
+            key: None,
         }
     }
 
@@ -151,6 +155,13 @@ impl TagChip {
             }),
             None => chip,
         }
+    }
+
+    /// Names the chip `key` rather than after its text: for chips whose
+    /// text may repeat in a row (Discover's featured vibes, by name).
+    pub fn key(mut self, key: impl Into<ElementId>) -> Self {
+        self.key = Some(key.into());
+        self
     }
 
     /// A page chip: pressing it (a click, Enter, Space) opens `page`.
@@ -204,7 +215,10 @@ impl RenderOnce for TagChip {
         };
         // Whether the last frame cut the text short, measured as it was laid
         // out: only a cut tag needs the tooltip with its whole text.
-        let id = ElementId::Name(format!("tag-{}", self.text).into());
+        let id = self
+            .key
+            .clone()
+            .unwrap_or_else(|| ElementId::Name(format!("tag-{}", self.text).into()));
         let cut = window.use_keyed_state(id.clone(), cx, |_, _| false);
         let text = self.text.clone();
         let measure = canvas(
@@ -255,7 +269,8 @@ impl RenderOnce for TagChip {
                 .child(label)
                 .into_any_element();
         };
-        // A page chip: the same pill, pressed.
+        // A page chip: the same pill, pressed. A probe, so a scrolling
+        // page keeps it in view when it takes focus (`ui::reveal`).
         let focus = keyed_focus(id.clone(), window, cx);
         let focused = focus_visible(&focus, window);
         // The hover overlay over the chip's own: both are ink, so the two
@@ -263,7 +278,7 @@ impl RenderOnce for TagChip {
         let hovered = colors
             .fg
             .opacity(1. - (1. - colors.chip.a) * (1. - colors.hover.a));
-        pill_style(gpui_kit::base::Button::new(id), cx)
+        let chip = pill_style(gpui_kit::base::Button::new(id), cx)
             .track_focus(&focus)
             .accessibility_label(full.clone())
             .relative()
@@ -280,8 +295,8 @@ impl RenderOnce for TagChip {
                 this.focus_ring(size::CHIP.to_pixels(window.rem_size()), cx)
             })
             .children(icon)
-            .child(label)
-            .into_any_element()
+            .child(label);
+        probe(chip).into_any_element()
     }
 }
 

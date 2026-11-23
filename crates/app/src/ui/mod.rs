@@ -17,6 +17,7 @@
 //! | [`Rail`], [`RailSection`] | The 272 column beside Home's or the book page's main column, sections between hairlines |
 //! | [`Columns`], [`folds`], [`tier`], [`Tier`] | A page's main column and its rail, the rail folding under it when the region is narrow; a second content column when it is wide (Home) |
 //! | [`CoverShelf`] | A few books in a row, each a cover over a two-line title: "Newest on Want to read", Similar books |
+//! | [`ShelfSection`] | A section of one cover shelf, its title, "See all" and muted line, or its skeleton, failure or note in the shelf's place: Discover's shelves |
 //! | [`Block`], [`blocks`] | A pane's blocks ("About this book", "Details"): a heading, an optional small action, 24 apart |
 //! | [`PageHeader`] | A destination's title, with its count or a muted line |
 //! | [`Greeting`], [`greeting`], [`date_line`] | Home's header: the date over "Good morning" |
@@ -43,6 +44,7 @@
 //! | [`Avatar`] | A person: their picture, else initials on their colour or `accent-soft` |
 //! | [`chip_keys`] | A row of pressed chips as one Tab stop, the arrows moving along it (a book's genres, a shelf's filter chips) |
 //! | [`focus`] | The focus ring, edge and row treatment, for a component that tracks its own focus; giving focus back after a page |
+//! | [`page_scroll`] | A page with no list scrolling from the keys: Page Up and Page Down, Home, End, the arrows |
 //! | [`reveal`] | Keeping the focused element in view: the opt-in on a scrolling region, and [`reveal::probe`] |
 //! | [`kit`] | Fixes for the kit's own components: raised fields, small controls, dialogs and their keys, quiet buttons on the text spine |
 //!
@@ -66,10 +68,12 @@ mod meter;
 mod month_bars;
 mod nav_row;
 mod object_bar;
+pub mod page_scroll;
 pub mod reveal;
 mod row_focus;
 mod rows;
 mod series_strip;
+mod shelf_section;
 mod sidebar;
 mod skeleton;
 mod stars;
@@ -95,6 +99,7 @@ pub use self::{
     row_focus::{RowFocus, enter_list, on_keyboard_entry, select_first_row},
     rows::{Lane, ListRow, PropertyList, RowSpacing, Sequence},
     series_strip::{MISSING_OPACITY, SeriesStrip, StripItem, Toggle, strip_layout},
+    shelf_section::ShelfSection,
     sidebar::{AccountRow, GoalRow, brand_row, sidebar_label},
     skeleton::{Skeleton, SkeletonRow, SkeletonText},
     stars::Stars,

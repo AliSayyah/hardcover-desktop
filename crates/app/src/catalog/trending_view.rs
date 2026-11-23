@@ -1,10 +1,16 @@
-//! Discover: "For you" and "Top picks" (`vibes::shelves`, with
-//! `read:vibes`), then the books the most readers finished on Hardcover in
-//! a period, each with its shelf. Each period is kept in the session's
-//! catalogue (`resource::Catalog`) and fetched again when stale; the
-//! Refresh button fetches the shown one now. In a short window the title and
-//! the vibes' rows scroll away on their own; Trending's heading, its period
-//! switch and the list stay.
+//! Trending (`hardcover-design`, Discover → Trending): the books the most
+//! readers finished on Hardcover in a period, over Discover, opened from
+//! "Trending this month"'s "See all" (`Page::Trending`).
+//!
+//! - **Header:** the page title "Trending", a muted line saying what the
+//!   period's list is, then the period segments (Week, Month, 3 months,
+//!   Year, All time) and Refresh. The period is kept with the page in the
+//!   page stack (`navigation::replace`), so Back finds it.
+//! - **Rows:** catalogue rows with each book's StatusChip, in the shared
+//!   frame of `book_list`: the book pane beside the list in a wide window.
+//! - Each period is kept in the session's catalogue (`resource::Catalog`)
+//!   and fetched again when stale; Refresh fetches the shown one now, and
+//!   says so if that fails.
 
 use std::sync::Arc;
 
@@ -14,27 +20,25 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::{Disableable as _, IconName, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, ScrollHandle, Styled as _,
-    Subscription, Window, div,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, ScrollHandle, Styled as _, Subscription, Window,
 };
-use hardcover_core::{BookSummary, TrendingPeriod};
+use hardcover_core::{TrendingBook, TrendingPeriod};
 
 use super::book_list::{
-    CatalogBooks, CatalogRow, ListPane, PageRows, demand, follow_list, new_list, page_body,
-    page_header, page_header_scrolling, page_list, page_loading, row_details,
+    CatalogBooks, CatalogRow, ListPane, PageRows, demand, focus_list_if_fallback_is_focused,
+    follow_list, new_list, page_body, page_header_scrolling, page_list, page_loading, row_details,
 };
-use crate::design::{TypeRoles as _, colors};
+use super::navigation::{self, Page};
 use crate::format::authors_text;
 use crate::library::model::LibraryModel;
 use crate::resource::{Catalog, Demand, SharedChanged};
 use crate::ui::kit::SmallControl as _;
 use crate::ui::kit::small_tab;
-use crate::ui::{LoadFailed, PageHeader, SectionHeader};
-use crate::vibes::shelves::VibeShelves;
+use crate::ui::{LoadFailed, PageHeader};
 
 /// The periods offered, in order.
-const PERIODS: [TrendingPeriod; 5] = [
+pub const PERIODS: [TrendingPeriod; 5] = [
     TrendingPeriod::Week,
     TrendingPeriod::Month,
     TrendingPeriod::ThreeMonths,
@@ -71,7 +75,7 @@ fn period_description(period: TrendingPeriod) -> &'static str {
     }
 }
 
-pub struct DiscoverView {
+pub struct TrendingView {
     period: TrendingPeriod,
     /// The session's catalogue, which holds the periods; `None` once signed
     /// out.
@@ -83,23 +87,15 @@ pub struct DiscoverView {
     /// The selected book, beside the list when the window is wide.
     pane: ListPane,
     /// The period whose books the list holds, and each period's selection.
-    rows: PageRows<TrendingPeriod, Vec<BookSummary>>,
-    /// "For you" and "Top picks", above the trending books.
-    vibes: Entity<VibeShelves>,
+    rows: PageRows<TrendingPeriod, Vec<TrendingBook>>,
     /// The header's scroll, when it gives way in a short window.
     header_scroll: ScrollHandle,
-    /// Holds focus while the books load, so shortcuts keep working.
-    focus_handle: FocusHandle,
+    /// Holds focus while the books load; see [`Self::focus`].
+    focus_when_ready: Option<FocusHandle>,
     _subscriptions: Vec<Subscription>,
 }
 
-impl Focusable for DiscoverView {
-    fn focus_handle(&self, _: &gpui_kit::App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
-impl DiscoverView {
+impl TrendingView {
     pub fn new(model: &Entity<LibraryModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let pane = ListPane::new(model.clone(), window, cx);
         let list = new_list(
@@ -129,33 +125,37 @@ impl DiscoverView {
             list,
             pane,
             rows: PageRows::default(),
-            vibes: cx.new(VibeShelves::new),
             header_scroll: ScrollHandle::new(),
-            focus_handle: cx.focus_handle(),
+            focus_when_ready: None,
             _subscriptions: subscriptions,
         }
     }
 
-    /// Asks for the shown period if this session has not yet, or again if
-    /// it is stale or failed.
-    pub fn show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Shows `period`'s books: what the catalogue has at once, asking for
+    /// them if this session has not yet, or again if stale or failed.
+    pub fn show(&mut self, period: TrendingPeriod, window: &mut Window, cx: &mut Context<Self>) {
+        self.period = period;
         self.request(Demand::Shown, cx);
-        self.vibes.update(cx, |v, cx| v.request(Demand::Shown, cx));
         self.fill_list(window, cx);
         cx.notify();
     }
 
-    /// Focuses the book list once it has books, or the view until then.
-    pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Focuses the book list, which renders only once the books are in.
+    /// Until then `fallback` holds focus, so Escape and Back keep working,
+    /// and the list takes over when the books arrive if `fallback` still
+    /// has it.
+    pub fn focus(&mut self, fallback: &FocusHandle, window: &mut Window, cx: &mut Context<Self>) {
         if self.books(cx).is_some() {
+            self.focus_when_ready = None;
             crate::ui::enter_list(&self.list, window, cx);
         } else {
-            window.focus(&self.focus_handle, cx);
+            self.focus_when_ready = Some(fallback.clone());
+            window.focus(fallback, cx);
         }
     }
 
     /// The shown period's books, once fetched.
-    fn books(&self, cx: &App) -> Option<Arc<Vec<BookSummary>>> {
+    fn books(&self, cx: &App) -> Option<Arc<Vec<TrendingBook>>> {
         self.catalog
             .as_ref()?
             .trending
@@ -177,15 +177,17 @@ impl DiscoverView {
         }
     }
 
+    /// A period segment chose `period`: the page changes in place, and the
+    /// page stack keeps the choice for Back.
     fn set_period(&mut self, period: TrendingPeriod, window: &mut Window, cx: &mut Context<Self>) {
         if self.period == period {
             return;
         }
         let list_focused = self.list.read(cx).focus_handle(cx).is_focused(window);
-        self.period = period;
-        self.show(window, cx);
-        if list_focused {
-            self.focus(window, cx);
+        self.show(period, window, cx);
+        navigation::replace(Page::Trending(period), cx);
+        if list_focused && self.books(cx).is_some() {
+            crate::ui::enter_list(&self.list, window, cx);
         }
     }
 
@@ -209,15 +211,14 @@ impl DiscoverView {
             });
             if let Some(message) = failed {
                 window.push_notification(
-                    Notification::error(message).title("Couldn't refresh Discover"),
+                    Notification::error(message).title("Couldn't refresh Trending"),
                     cx,
                 );
             }
         }
-        let had_focus = self.focus_handle.is_focused(window);
         self.fill_list(window, cx);
-        if had_focus && self.books(cx).is_some() {
-            crate::ui::enter_list(&self.list, window, cx);
+        if self.books(cx).is_some() {
+            focus_list_if_fallback_is_focused(&self.list, self.focus_when_ready.take(), window, cx);
         }
         cx.notify();
     }
@@ -236,12 +237,12 @@ impl DiscoverView {
     }
 
     /// The list's rows for a period's books.
-    fn rows(books: &[BookSummary]) -> Vec<CatalogRow> {
+    fn rows(books: &[TrendingBook]) -> Vec<CatalogRow> {
         books
             .iter()
-            .map(|book| CatalogRow {
-                details: row_details(&[authors_text(&book.authors)], book),
-                book: book.clone(),
+            .map(|t| CatalogRow {
+                details: row_details(&[authors_text(&t.book.authors)], &t.book),
+                book: t.book.clone(),
             })
             .collect()
     }
@@ -251,72 +252,46 @@ impl DiscoverView {
     /// the list.
     pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
         self.request(demand(shown_again), cx);
-        self.vibes
-            .update(cx, |v, cx| v.request(demand(shown_again), cx));
         self.pane.revalidate(shown_again, cx);
     }
 
-    /// The title and the vibes' rows: they scroll away in a short window.
-    fn render_header(&self) -> impl IntoElement {
-        // The rows keep their own space above and below them, so Trending
-        // sits where the first section would without them.
-        v_flex()
-            .child(PageHeader::new("Discover"))
-            .child(self.vibes.clone())
-    }
-
-    /// Trending's heading, its period switch and Refresh, between the
-    /// header and the list: they stay when a short window scrolls the
-    /// header away.
-    fn render_trending_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The title, the period's line, the period segments and Refresh.
+    fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity().downgrade();
         let loading = self.is_loading(cx);
         let refreshing =
             self.refreshing == Some(self.period) && loading && self.books(cx).is_some();
         let selected = PERIODS.iter().position(|p| *p == self.period).unwrap_or(0);
-        // 24 under the title, the header's 16 and 8 more.
-        page_header().pt_2().child(
-            v_flex()
-                .gap_4()
-                .child(
-                    v_flex()
-                        .gap_1()
-                        .child(SectionHeader::new("Trending"))
-                        .child(
-                            div()
-                                .body()
-                                .text_color(colors(cx).fg_muted)
-                                .child(period_description(self.period)),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .justify_between()
-                        .child(
-                            TabBar::new("trending-period")
-                                .segmented()
-                                .small_control()
-                                .selected_index(selected)
-                                .children(PERIODS.map(|p| small_tab(period_label(p))))
-                                .on_click(move |ix, window, cx| {
-                                    let period = PERIODS[*ix];
-                                    let _ = view
-                                        .update(cx, |this, cx| this.set_period(period, window, cx));
-                                }),
-                        )
-                        .child(
-                            Button::new("refresh-trending")
-                                .ghost()
-                                .small_control()
-                                .icon(IconName::RefreshCw)
-                                .label("Refresh")
-                                .loading(refreshing)
-                                .disabled(loading)
-                                .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                        ),
-                ),
-        )
+        v_flex()
+            .gap_4()
+            .child(PageHeader::new("Trending").line(period_description(self.period)))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .justify_between()
+                    .child(
+                        TabBar::new("trending-period")
+                            .segmented()
+                            .small_control()
+                            .selected_index(selected)
+                            .children(PERIODS.map(|p| small_tab(period_label(p))))
+                            .on_click(move |ix, window, cx| {
+                                let period = PERIODS[*ix];
+                                let _ =
+                                    view.update(cx, |this, cx| this.set_period(period, window, cx));
+                            }),
+                    )
+                    .child(
+                        Button::new("refresh-trending")
+                            .ghost()
+                            .small_control()
+                            .icon(IconName::RefreshCw)
+                            .label("Refresh")
+                            .loading(refreshing)
+                            .disabled(loading)
+                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                    ),
+            )
     }
 
     fn render_body(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -329,31 +304,26 @@ impl DiscoverView {
         });
         match (self.books(cx), error) {
             (Some(_), _) => page_list(&self.list).into_any_element(),
-            (None, Some(message)) => page_header()
-                .pt_0()
-                .child(
-                    LoadFailed::new("retry-trending", message)
-                        .on_retry(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                )
+            (None, Some(message)) => LoadFailed::new("retry-trending", message)
+                .region("Couldn't load Trending")
+                .on_retry(cx.listener(|this, _, _, cx| this.refresh(cx)))
                 .into_any_element(),
             (None, None) => page_loading().into_any_element(),
         }
     }
 }
 
-impl Render for DiscoverView {
+impl Render for TrendingView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let column = v_flex()
-            .id("discover")
-            .track_focus(&self.focus_handle)
+            .id("trending-page")
             .size_full()
             .min_w_0()
             .child(page_header_scrolling(
-                "discover-header",
+                "trending-header",
                 &self.header_scroll,
-                self.render_header(),
+                self.render_header(cx),
             ))
-            .child(self.render_trending_bar(cx))
             .child(page_body().child(self.render_body(cx)));
         self.pane
             .layout(&self.list, CatalogBooks::book_at, column, window, cx)

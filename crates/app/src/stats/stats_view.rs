@@ -19,7 +19,7 @@
 //! two per row, each on the same spine as the one above.
 //!
 //! **Keyboard:** the page takes focus when shown and has no controls, so it
-//! scrolls from the keys itself ([`scrolled_to`]): Page Up and Page Down
+//! scrolls from the keys itself (`ui::page_scroll`): Page Up and Page Down
 //! (and Space) by most of a screen, Home and End to the ends, the arrows by a
 //! line.
 //!
@@ -42,8 +42,8 @@ use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, InteractiveElement as _,
     IntoElement, KeyDownEvent, ParentElement as _, Pixels, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, point,
-    prelude::FluentBuilder as _, px, rems,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
+    prelude::FluentBuilder as _, rems,
 };
 use hardcover_core::Date;
 
@@ -52,6 +52,7 @@ use crate::chip::status_icon;
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{books_count_text, count_text, status_label};
 use crate::library::model::LibraryModel;
+use crate::ui::page_scroll::scroll_page;
 use crate::ui::{Lane, PageHeader, SectionHeader, Skeleton, empty_state, region_width};
 
 pub struct StatsView {
@@ -90,27 +91,10 @@ impl StatsView {
         if !self.focus_handle.is_focused(window) {
             return;
         }
-        let keystroke = &event.keystroke;
-        let mods = keystroke.modifiers;
-        if mods.control || mods.alt || mods.platform || mods.function {
+        if !scroll_page(&self.scroll, event, true, window) {
             return;
         }
-        let rem = window.rem_size();
-        let offset = self.scroll.offset();
-        let Some(y) = scrolled_to(
-            &keystroke.key,
-            mods.shift,
-            offset.y,
-            self.scroll.bounds().size.height,
-            rems(SCROLL_LINE).to_pixels(rem),
-            self.scroll.max_offset().y,
-        ) else {
-            return;
-        };
-        if y != offset.y {
-            self.scroll.set_offset(point(offset.x, y));
-            cx.notify();
-        }
+        cx.notify();
         cx.stop_propagation();
     }
 
@@ -205,36 +189,6 @@ impl Render for StatsView {
             .vertical_scrollbar(&self.scroll)
             .into_any_element()
     }
-}
-
-/// An arrow key's step, in rem: a few lines of body text.
-const SCROLL_LINE: f32 = 3.;
-
-/// Where a page scrolled to `offset` (0 at the top, down to `-max` at the
-/// bottom, as GPUI counts) goes for `key`: Page Down, Page Up and Space
-/// (Shift+Space up) by 90% of the `viewport`, Home and End to the ends, Down
-/// and Up by `line`. `None` for any other key.
-fn scrolled_to(
-    key: &str,
-    shift: bool,
-    offset: Pixels,
-    viewport: Pixels,
-    line: Pixels,
-    max: Pixels,
-) -> Option<Pixels> {
-    let page = viewport * 0.9;
-    let y = match key {
-        "pagedown" => offset - page,
-        "space" if !shift => offset - page,
-        "pageup" => offset + page,
-        "space" => offset + page,
-        "down" if !shift => offset - line,
-        "up" if !shift => offset + line,
-        "home" if !shift => px(0.),
-        "end" if !shift => -max,
-        _ => return None,
-    };
-    Some(y.clamp(-max.max(px(0.)), px(0.)))
 }
 
 /// The page while the library loads: its title, skeleton figures and the
@@ -540,35 +494,8 @@ mod tests {
     use super::*;
     use crate::session::SessionScope;
     use crate::ui::test_support::{press, redraw};
-    use gpui_kit::{AppContext as _, TestAppContext, size as gsize};
+    use gpui_kit::{AppContext as _, TestAppContext, px, size as gsize};
     use hardcover_core::store::LibraryCache;
-
-    #[test]
-    fn keys_scroll_the_page_within_its_ends() {
-        let (viewport, line, max) = (px(500.), px(48.), px(1000.));
-        let at = |key: &str, shift: bool, offset: f32| {
-            scrolled_to(key, shift, px(offset), viewport, line, max)
-        };
-        assert_eq!(at("pagedown", false, 0.), Some(px(-450.)));
-        assert_eq!(at("space", false, 0.), Some(px(-450.)));
-        assert_eq!(at("space", true, -450.), Some(px(0.)));
-        assert_eq!(at("pageup", false, -900.), Some(px(-450.)));
-        assert_eq!(at("down", false, 0.), Some(px(-48.)));
-        assert_eq!(at("up", false, -48.), Some(px(0.)));
-        assert_eq!(at("end", false, 0.), Some(px(-1000.)));
-        assert_eq!(at("home", false, -700.), Some(px(0.)));
-        // Clamped at both ends.
-        assert_eq!(at("pagedown", false, -900.), Some(px(-1000.)));
-        assert_eq!(at("up", false, 0.), Some(px(0.)));
-        // Other keys are left alone.
-        assert_eq!(at("left", false, 0.), None);
-        assert_eq!(at("a", false, 0.), None);
-        // Nothing to scroll: stays at the top.
-        assert_eq!(
-            scrolled_to("end", false, px(0.), viewport, line, px(0.)),
-            Some(px(0.))
-        );
-    }
 
     #[gpui_kit::test]
     fn page_down_scrolls_stats_while_it_has_focus(cx: &mut TestAppContext) {
