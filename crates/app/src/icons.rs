@@ -27,6 +27,10 @@ gpui_kit::assets::icon_assets!(
         BookmarkPlus,
         BookmarkCheck,
         BookmarkMinus,
+        // The account menu: Check for updates, Sign in again…, Sign out….
+        CircleFadingArrowUp,
+        LogIn,
+        LogOut,
         // The genre icons (`chip::genre`); search, heart and palette are
         // among the kit's defaults.
         Backpack,
@@ -126,6 +130,21 @@ pub fn unfollow() -> IconName {
     IconName::BookmarkMinus
 }
 
+/// "Check for updates", in the account menu.
+pub fn check_for_updates() -> IconName {
+    IconName::CircleFadingArrowUp
+}
+
+/// "Sign in again…", in the account menu.
+pub fn sign_in() -> IconName {
+    IconName::LogIn
+}
+
+/// "Sign out…", in the account menu.
+pub fn sign_out() -> IconName {
+    IconName::LogOut
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +159,9 @@ mod tests {
             follow(),
             following(),
             unfollow(),
+            check_for_updates(),
+            sign_in(),
+            sign_out(),
         ] {
             let bytes = AppAssets.load(&icon.path()).unwrap().unwrap();
             assert!(bytes.starts_with(b"<svg"));

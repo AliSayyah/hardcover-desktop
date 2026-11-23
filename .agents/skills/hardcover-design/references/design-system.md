@@ -1479,6 +1479,8 @@ commit that fixes it.
   the kit's own shadow, not `shadow-popover`.
 - Menu items are 26 high (one every 28), not 32, with 12 px icons, not 16:
   the menu sets both itself.
+- A menu's separator is a 2 px rule, not a hairline, and runs to the
+  menu's edges, so menus keep to as few groups as they can.
 - Menu items hover at 10% in dark mode: the kit's `accent` serves both menu
   items and ghost buttons, and ghost buttons take half of it there.
 - The segmented tab bar's sliding indicator is always paper, and casts the
