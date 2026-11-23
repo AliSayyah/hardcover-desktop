@@ -46,6 +46,8 @@
 //!   their icons are 12, not 16: the menu sets both itself. An element item
 //!   only gets a minimum height, and rebuilding every item as one would lose
 //!   the kit's icon slot, check marks and key hints, and mix two heights.
+//! - **A menu's separator** is a 2 px rule, not a hairline, and runs to the
+//!   menu's edges. Menus keep to as few groups as they can.
 //! - **Menu hover in dark mode** stays at 10%: the kit reads one colour
 //!   (`accent`) for menu items and ghost buttons, and halves it for ghost
 //!   buttons in dark mode. The theme picks 10% so ghost buttons get the

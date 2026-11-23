@@ -1290,19 +1290,39 @@ impl Workspace {
             .focus(&self.account_focus)
             .status_tooltip(sync_tooltip)
             // Above the row, so the row shows that its menu is open.
-            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, window, _| {
                 let view = view.clone();
                 let focus = focus.clone();
+                // As wide as the row it opens from (the sidebar less its
+                // insets and hairline), so both edges line up with it.
+                let row_width = gpui_kit::rems(size::SIDEBAR.0 - 1.).to_pixels(window.rem_size())
+                    - size::HAIRLINE;
+                // The app's commands, then the account's, next to the row.
                 // Menu commands run from the row, so the dialogs they open
                 // give focus back to it.
-                let menu = menu.action_context(focus.clone()).menu_with_icon(
-                    "Refresh library",
-                    IconName::RefreshCw,
-                    Box::new(Refresh),
-                );
+                let updates_view = view.clone();
+                let menu = menu
+                    .min_w(row_width)
+                    .action_context(focus.clone())
+                    .menu_with_icon("Refresh library", IconName::RefreshCw, Box::new(Refresh))
+                    .item(
+                        PopupMenuItem::new("Check for updates")
+                            .icon(crate::icons::check_for_updates())
+                            .on_click(move |_, _, cx| {
+                                let _ = updates_view
+                                    .update(cx, |_, cx| Workspace::check_for_updates(cx));
+                            }),
+                    )
+                    .menu_with_icon("Settings…", IconName::Settings, Box::new(OpenSettings))
+                    .menu_with_icon(
+                        "About Hardcover Desktop…",
+                        IconName::Info,
+                        Box::new(ShowAbout),
+                    )
+                    .separator();
                 let menu = match &profile_url {
                     Some(url) => menu.link_with_icon(
-                        "Open profile on Hardcover",
+                        "Profile on Hardcover",
                         IconName::CircleUser,
                         url.clone(),
                     ),
@@ -1310,35 +1330,24 @@ impl Workspace {
                 };
                 let menu = if offer_permissions {
                     let reauthorize = reauthorize.clone();
-                    menu.item(PopupMenuItem::new("Sign in again…").on_click(
-                        move |_, window, cx| {
-                            reauthorize.update(cx, |r, cx| r.sign_in_again(window, cx));
-                        },
-                    ))
+                    menu.item(
+                        PopupMenuItem::new("Sign in again…")
+                            .icon(crate::icons::sign_in())
+                            .on_click(move |_, window, cx| {
+                                reauthorize.update(cx, |r, cx| r.sign_in_again(window, cx));
+                            }),
+                    )
                 } else {
                     menu
                 };
-                let updates_view = view.clone();
-                menu.separator()
-                    .menu_with_icon("Settings…", IconName::Settings, Box::new(OpenSettings))
-                    .item(
-                        PopupMenuItem::new("Check for updates").on_click(move |_, _, cx| {
-                            let _ =
-                                updates_view.update(cx, |_, cx| Workspace::check_for_updates(cx));
-                        }),
-                    )
-                    .menu_with_icon(
-                        "About Hardcover Desktop…",
-                        IconName::Info,
-                        Box::new(ShowAbout),
-                    )
-                    .separator()
-                    .item(
-                        PopupMenuItem::new("Sign out…").on_click(move |_, window, cx| {
+                menu.item(
+                    PopupMenuItem::new("Sign out…")
+                        .icon(crate::icons::sign_out())
+                        .on_click(move |_, window, cx| {
                             window.focus(&focus, cx);
                             let _ = view.update(cx, |_, cx| Self::confirm_sign_out(window, cx));
                         }),
-                    )
+                )
             })
     }
 }
