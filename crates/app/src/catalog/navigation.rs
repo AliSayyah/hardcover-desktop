@@ -1,5 +1,6 @@
-//! Catalogue pages (a series, an author, a book, the books coming soon) and the history of the ones
-//! opened since the last sidebar destination.
+//! Catalogue pages (a series, an author, a book, the books coming soon, a
+//! vibe, a tag) and the history of the ones opened since the last sidebar
+//! destination.
 //!
 //! Any view can open a page through the [`Navigator`] global; the workspace
 //! owns the stack, shows its top page over the destination and handles
@@ -8,6 +9,7 @@
 use gpui_kit::{App, AppContext as _, Entity, EventEmitter, Global};
 use hardcover_core::{AuthorId, BookSummary, SeriesId, VibeId};
 
+use super::tag::Tag;
 use crate::ui::focus::FocusReturn;
 
 /// A catalogue page.
@@ -22,12 +24,21 @@ pub enum Page {
     Upcoming,
     /// A vibe's books ("For you", "Top picks"), opened from Discover.
     Vibe(VibeId),
+    /// A mood's or a genre's books, opened from a book's mood line, its
+    /// Votes popover or a genre chip; `within` is the page's select, the
+    /// other kind narrowing it, kept with the page so Back finds it.
+    Tag {
+        tag: Tag,
+        within: Option<Tag>,
+    },
 }
 
 impl Page {
     fn same_target(&self, other: &Page) -> bool {
         match (self, other) {
             (Page::Book(a), Page::Book(b)) => a.id == b.id,
+            // However it is narrowed: the tag's page is shown.
+            (Page::Tag { tag: a, .. }, Page::Tag { tag: b, .. }) => a == b,
             _ => self == other,
         }
     }
@@ -67,6 +78,19 @@ impl PageStack {
         true
     }
 
+    /// Puts `page` in the current page's place, keeping where focus was
+    /// when it opened: the same page, changed in place (a tag's page
+    /// narrowed). Returns whether there was a page to replace.
+    pub fn replace_current(&mut self, page: Page) -> bool {
+        match self.pages.last_mut() {
+            Some((current, _)) => {
+                *current = page;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Leaves the current page: `None` if there was none, else where focus was
     /// when it opened.
     #[expect(
@@ -86,6 +110,8 @@ impl PageStack {
 #[derive(Debug, Clone)]
 pub enum NavigationEvent {
     Open(Page),
+    /// The page shown changed in place: keep it in its stead, for Back.
+    Replace(Page),
 }
 
 /// Carries [`NavigationEvent`]s from any view to the workspace.
@@ -115,6 +141,12 @@ impl Navigator {
 /// Opens a catalogue page.
 pub fn open(page: Page, cx: &mut App) {
     Navigator::emit(NavigationEvent::Open(page), cx);
+}
+
+/// Records that the page shown is now `page` (a tag's page narrowed by its
+/// select), without showing it again or moving focus.
+pub fn replace(page: Page, cx: &mut App) {
+    Navigator::emit(NavigationEvent::Replace(page), cx);
 }
 
 #[cfg(test)]
@@ -152,6 +184,48 @@ mod tests {
         assert!(stack.pop().is_some());
         assert!(stack.pop().is_none());
         assert!(stack.current().is_none());
+    }
+
+    #[test]
+    fn a_tag_page_narrowed_in_place_keeps_its_opener_and_its_choice() {
+        use super::super::tag::Tag;
+        use hardcover_core::tags::{Mood, browse_genre};
+        let relaxing = Tag::Mood(Mood::Relaxing);
+        let mystery = Tag::Genre(browse_genre("Mystery").unwrap());
+        let mut stack = PageStack::default();
+        assert!(!stack.replace_current(Page::Upcoming), "no page to replace");
+        stack.push(Page::Author(AuthorId::new(1)), None);
+        stack.push(
+            Page::Tag {
+                tag: relaxing,
+                within: None,
+            },
+            None,
+        );
+        assert!(stack.replace_current(Page::Tag {
+            tag: relaxing,
+            within: Some(mystery),
+        }));
+        assert!(
+            !stack.push(
+                Page::Tag {
+                    tag: relaxing,
+                    within: None
+                },
+                None
+            ),
+            "the tag's page is already shown"
+        );
+        stack.push(Page::Book(BookSummary::new(BookId::new(3), "A")), None);
+        stack.pop();
+        assert_eq!(
+            stack.current(),
+            Some(&Page::Tag {
+                tag: relaxing,
+                within: Some(mystery)
+            }),
+            "Back finds the choice"
+        );
     }
 
     #[test]

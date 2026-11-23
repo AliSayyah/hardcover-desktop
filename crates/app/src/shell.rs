@@ -31,6 +31,7 @@ use crate::catalog::author_view::AuthorView;
 use crate::catalog::discover_view::DiscoverView;
 use crate::catalog::navigation::{NavigationEvent, Navigator, Page, PageStack};
 use crate::catalog::series_view::SeriesView;
+use crate::catalog::tag_view::TagView;
 use crate::design::type_roles::Family;
 use crate::design::{TypeRoles as _, colors, size};
 use crate::format::{SIDEBAR_SHELVES, count_text, relative_time, status_label};
@@ -263,6 +264,7 @@ pub struct Workspace {
     upcoming_page: Entity<UpcomingView>,
     vibes: Entity<VibesModel>,
     vibe_page: Entity<VibeView>,
+    tag_page: Entity<TagView>,
     series: Entity<SeriesModel>,
     series_view: Entity<SeriesTrackerView>,
     signing_out: bool,
@@ -297,6 +299,7 @@ impl Workspace {
         let lists = ListsModel::init(session.clone(), &model, cx);
         let vibes = VibesModel::init(session.clone(), &model, cx);
         let vibe_page = cx.new(|cx| VibeView::new(model.clone(), window, cx));
+        let tag_page = cx.new(|cx| TagView::new(model.clone(), window, cx));
         let list_page = cx.new(|cx| ListView::new(lists.clone(), model.clone(), window, cx));
         let library = cx.new(|cx| LibraryView::new(model.clone(), window, cx));
         let search = cx.new(|cx| SearchView::new(&model, window, cx));
@@ -378,6 +381,7 @@ impl Workspace {
             upcoming_page,
             vibes,
             vibe_page,
+            tag_page,
             series,
             series_view,
             signing_out: false,
@@ -462,6 +466,7 @@ impl Workspace {
                 window,
                 |this, _, event: &NavigationEvent, window, cx| match event {
                     NavigationEvent::Open(page) => this.open_page(page.clone(), window, cx),
+                    NavigationEvent::Replace(page) => this.replace_page(page.clone(), cx),
                 },
             ),
         ];
@@ -545,6 +550,9 @@ impl Workspace {
             Some(Page::Vibe(_)) => self
                 .vibe_page
                 .update(cx, |p, cx| p.revalidate(shown_again, cx)),
+            Some(Page::Tag { .. }) => self
+                .tag_page
+                .update(cx, |p, cx| p.revalidate(shown_again, cx)),
             None => match self.destination {
                 Destination::Search => self
                     .search
@@ -570,6 +578,18 @@ impl Workspace {
         let from = remember_focus(window, cx);
         if self.pages.push(page, from) {
             self.show_page(window, cx);
+        }
+    }
+
+    /// The page shown changed in place (a tag's page narrowed): it stays
+    /// in the history as it is now, for Back, and nothing else moves.
+    fn replace_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        let same = matches!(
+            (self.pages.current(), &page),
+            (Some(Page::Tag { tag: a, .. }), Page::Tag { tag: b, .. }) if a == b
+        );
+        if same && self.pages.replace_current(page) {
+            cx.notify();
         }
     }
 
@@ -610,6 +630,9 @@ impl Workspace {
             }
             Some(Page::Upcoming) => {}
             Some(Page::Vibe(id)) => self.vibe_page.update(cx, |p, cx| p.show(id, window, cx)),
+            Some(Page::Tag { tag, within }) => self
+                .tag_page
+                .update(cx, |p, cx| p.show(tag, within, window, cx)),
             None => return,
         }
         self.revalidate_visible(true, cx);
@@ -631,6 +654,11 @@ impl Workspace {
                     .update(cx, |p, cx| p.focus(&fallback, window, cx));
             }
             Some(Page::Vibe(_)) => self.vibe_page.update(cx, |p, cx| p.focus(window, cx)),
+            Some(Page::Tag { .. }) => {
+                let fallback = self.page_focus.clone();
+                self.tag_page
+                    .update(cx, |p, cx| p.focus(&fallback, window, cx));
+            }
             Some(Page::Book(_) | Page::Upcoming) => window.focus(&self.page_focus, cx),
             None => {}
         }
@@ -650,6 +678,7 @@ impl Workspace {
             Page::Book(_) => BookDetailView::embedded(&self.book_page),
             Page::Upcoming => self.upcoming_page.clone().into_any_element(),
             Page::Vibe(_) => self.vibe_page.clone().into_any_element(),
+            Page::Tag { .. } => self.tag_page.clone().into_any_element(),
         };
         let tools = match page {
             Page::Book(_) => tools_of(&self.book_page, window, cx),
@@ -704,6 +733,7 @@ impl Workspace {
                 .name(*id, cx)
                 .map_or(BackTo::Unnamed, BackTo::Named),
             Page::Vibe(_) => vibe_name.as_deref().map_or(BackTo::Unnamed, BackTo::Named),
+            Page::Tag { tag, .. } => BackTo::Named(tag.name()),
         });
         back_label(previous, &destination)
     }

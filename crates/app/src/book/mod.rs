@@ -2,6 +2,7 @@
 
 pub mod detail_view;
 pub mod edition_picker;
+pub mod moods;
 pub mod progress_dialog;
 pub mod progress_input;
 pub mod read_dialog;

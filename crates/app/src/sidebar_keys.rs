@@ -136,14 +136,14 @@ impl SidebarKeys {
     }
 }
 
-type Advance = fn(&mut Window, &mut App);
+pub(crate) type Advance = fn(&mut Window, &mut App);
 
 /// How many stops a walk takes at most: more than the sidebar can hold, so
 /// a tab order that cycles short of leaving it can't hang the app.
 const WALK_LIMIT: usize = 500;
 
 /// Moves focus out of `sidebar`, past its other rows.
-fn leave(sidebar: &FocusHandle, advance: Advance, window: &mut Window, cx: &mut App) {
+pub(crate) fn leave(sidebar: &FocusHandle, advance: Advance, window: &mut Window, cx: &mut App) {
     for _ in 0..WALK_LIMIT {
         advance(window, cx);
         if !sidebar.contains_focused(window, cx) {
@@ -153,7 +153,7 @@ fn leave(sidebar: &FocusHandle, advance: Advance, window: &mut Window, cx: &mut 
 }
 
 /// Moves focus one row along, staying put at the end.
-fn step(sidebar: &FocusHandle, advance: Advance, window: &mut Window, cx: &mut App) {
+pub(crate) fn step(sidebar: &FocusHandle, advance: Advance, window: &mut Window, cx: &mut App) {
     let Some(from) = window.focused(cx) else {
         return;
     };
@@ -165,7 +165,13 @@ fn step(sidebar: &FocusHandle, advance: Advance, window: &mut Window, cx: &mut A
 
 /// Moves focus to the row at one end: out past it with `out`, then one
 /// stop back in with `back`.
-fn to_end(sidebar: &FocusHandle, out: Advance, back: Advance, window: &mut Window, cx: &mut App) {
+pub(crate) fn to_end(
+    sidebar: &FocusHandle,
+    out: Advance,
+    back: Advance,
+    window: &mut Window,
+    cx: &mut App,
+) {
     leave(sidebar, out, window, cx);
     back(window, cx);
 }

@@ -25,8 +25,9 @@ use std::rc::Rc;
 use gpui_kit::base::Button as BaseButton;
 use gpui_kit::component::StyledExt as _;
 use gpui_kit::{
-    App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
+    App, ClickEvent, ElementId, FocusHandle, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, RenderOnce, SharedString, StyleRefinement, Styled, Window, div,
+    prelude::FluentBuilder as _,
 };
 
 use super::focus::{FocusTreatment as _, control_radius, focus_visible, keyed_focus};
@@ -49,6 +50,7 @@ pub struct TextButton {
     line_clamp: Option<usize>,
     width: Option<Pixels>,
     on_click: Option<ClickHandler>,
+    focus: Option<FocusHandle>,
 }
 
 impl TextButton {
@@ -62,6 +64,7 @@ impl TextButton {
             line_clamp: None,
             width: None,
             on_click: None,
+            focus: None,
         }
     }
 
@@ -82,6 +85,14 @@ impl TextButton {
     /// Opens `page` (a book, a series, an author) when pressed.
     pub fn opens(self, page: Page) -> Self {
         self.on_click(move |_, _, cx| navigation::open(page.clone(), cx))
+    }
+
+    /// Takes its focus from `handle`, a handle the caller keeps, so the
+    /// caller can focus it (the Votes popover's first mood, when it opens).
+    /// Otherwise the button keeps its own, by its id.
+    pub fn track_focus(mut self, handle: &FocusHandle) -> Self {
+        self.focus = Some(handle.clone());
+        self
     }
 
     /// Lets the label wrap onto more lines instead of truncating it (Up next,
@@ -121,7 +132,10 @@ impl Styled for TextButton {
 
 impl RenderOnce for TextButton {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let focus = keyed_focus(self.id.clone(), window, cx);
+        let focus = match self.focus {
+            Some(focus) => focus,
+            None => keyed_focus(self.id.clone(), window, cx),
+        };
         let focused = focus_visible(&focus, window);
         let radius = control_radius(cx);
         // GPUI on Linux draws a right-to-left line's underline beside it, so

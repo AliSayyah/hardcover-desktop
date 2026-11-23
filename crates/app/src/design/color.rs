@@ -141,6 +141,7 @@ struct Tokens {
     cover_edge: Rgba,
     cover_hinge: Rgba,
     shadow_cover: [ShadowLayer; 2],
+    shadow_popover: [ShadowLayer; 2],
 }
 
 const LIGHT: Tokens = Tokens {
@@ -175,6 +176,10 @@ const LIGHT: Tokens = Tokens {
         ShadowLayer::new(1., 2., 0., hexa(0x28_1C_10, 0.18)),
         ShadowLayer::new(8., 20., 0., hexa(0x28_1C_10, 0.14)),
     ],
+    shadow_popover: [
+        ShadowLayer::new(0., 0., 1., hexa(0x1E_14_0A, 0.10)),
+        ShadowLayer::new(4., 12., 0., hexa(0x28_1C_10, 0.12)),
+    ],
 };
 
 const DARK: Tokens = Tokens {
@@ -207,6 +212,10 @@ const DARK: Tokens = Tokens {
     shadow_cover: [
         ShadowLayer::new(1., 2., 0., hexa(0x00_00_00, 0.55)),
         ShadowLayer::new(10., 24., 0., hexa(0x00_00_00, 0.45)),
+    ],
+    shadow_popover: [
+        ShadowLayer::new(0., 0., 1., hexa(0xFF_FF_FF, 0.08)),
+        ShadowLayer::new(4., 12., 0., hexa(0x00_00_00, 0.5)),
     ],
 };
 
@@ -277,6 +286,7 @@ pub struct Palette {
     /// The eight cloth colours; [`Palette::cloth_for`] picks one.
     pub cloth: [Hsla; 8],
     shadow_cover: [ShadowLayer; 2],
+    shadow_popover: [ShadowLayer; 2],
 }
 
 impl Palette {
@@ -313,6 +323,7 @@ impl Palette {
             cloth_ink: CLOTH_INK.into(),
             cloth: CLOTH.map(Hsla::from),
             shadow_cover: t.shadow_cover,
+            shadow_popover: t.shadow_popover,
         }
     }
 
@@ -331,6 +342,12 @@ impl Palette {
     /// `shadow-cover`: on a cover that leads its row or block.
     pub fn shadow_cover(&self) -> Vec<BoxShadow> {
         self.shadow_cover.map(ShadowLayer::box_shadow).to_vec()
+    }
+
+    /// `shadow-popover`: a content popover's (the Votes popover's) hairline
+    /// ring and its lift. The kit's menus keep their own (Kit limits).
+    pub fn shadow_popover(&self) -> Vec<BoxShadow> {
+        self.shadow_popover.map(ShadowLayer::box_shadow).to_vec()
     }
 
     /// The cloth colour of the book titled `title`.

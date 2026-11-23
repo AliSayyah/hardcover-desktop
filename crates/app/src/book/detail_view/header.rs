@@ -5,7 +5,8 @@
 //! `display-30` on the page), the subtitle, the authors (text buttons at
 //! 16), other contributors with their roles, the series (a text button),
 //! the facts (muted, tabular), Hardcover's average (unless the page's rail
-//! shows it), the genres as tag chips, and at the cover's foot the
+//! shows it), the mood line (`book::moods`, when readers' votes give one),
+//! the genres as page chips, and at the cover's foot the
 //! action row: the status menu button and the rating control, 16 apart. A
 //! book not in the library gets "Add to library" there instead.
 //!
@@ -27,6 +28,7 @@ use std::fmt::Write as _;
 use super::BookDetailView;
 use crate::app_state::release_cover_image;
 use crate::bidi::{WrappingText, is_rtl};
+use crate::book::moods::MoodLine;
 use crate::book::star_rating::StarRating;
 use crate::catalog::navigation::Page;
 use crate::chip::{TagChip, TagRow, status_icon};
@@ -142,11 +144,15 @@ impl BookDetailView {
                         .child(average),
                 )
             })
+            // What readers say it is like: on the pane and the page alike,
+            // whether or not the rail holds the average.
+            .children(details.and_then(|d| MoodLine::new(book.id, &d.votes)))
             .when(!genres.is_empty(), |this| {
                 this.child(
-                    div()
-                        .pt_2()
-                        .child(TagRow::new(genres.into_iter().map(TagChip::genre))),
+                    div().pt_2().child(
+                        TagRow::new(genres.into_iter().map(TagChip::genre_page))
+                            .keys("header-genres", &self.header_genre_keys),
+                    ),
                 )
             });
         // The action row sits at the cover's foot, or 16 under the info

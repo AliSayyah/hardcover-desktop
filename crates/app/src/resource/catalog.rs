@@ -1,7 +1,7 @@
 //! The catalogue as this session has fetched it, shared by every view: a
 //! book's details, similar books, other readers' reviews and editions,
-//! series and author pages, Discover's periods, a list's books and a
-//! vibe's books.
+//! series and author pages, Discover's periods, a list's books, a vibe's
+//! books and a tag's books.
 //!
 //! Each is a [`Shared`] store, one entity per kind, holding a [`Resource`]
 //! per id. Views ask for what they show ([`Catalog`]'s `request_*`) and
@@ -23,7 +23,7 @@ use hardcover_core::auth::scopes::{READ_CATALOG, READ_LISTS, READ_SOCIAL};
 use hardcover_core::{
     AuthorDetails, AuthorId, BookDetails, BookId, BookSummary, Client, CommunityReview,
     EditionSummary, ListBook, ListBookId, ListId, OffsetPage, ReviewsPage, SeriesDetails, SeriesId,
-    Timestamp, TrendingPeriod, UserBookId, UserId, VibeId,
+    TagBook, TagId, Timestamp, TrendingPeriod, UserBookId, UserId, VibeId,
 };
 
 use super::{Binding, Demand, Resource};
@@ -236,6 +236,14 @@ pub struct VibeBooks {
     pub books: Paged<BookSummary>,
 }
 
+/// Which books a tag's page shows: the tag the order goes by, and the tag
+/// that narrows it (`catalog::tag::request_key`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TagBooksKey {
+    pub tag: TagId,
+    pub within: Option<TagId>,
+}
+
 /// Similar books fetched: two rows of lg covers in the side column of a wide
 /// window. One `books` field, so one request whatever the count.
 pub const SIMILAR_FETCHED: usize = 16;
@@ -252,6 +260,7 @@ pub struct Catalog {
     pub trending: Entity<Shared<TrendingPeriod, Vec<BookSummary>>>,
     pub list_books: Entity<Shared<ListId, Paged<ListBook>>>,
     pub vibe_books: Entity<Shared<VibeBooksKey, VibeBooks>>,
+    pub tag_books: Entity<Shared<TagBooksKey, Paged<TagBook>>>,
 }
 
 struct CatalogGlobal(Catalog);
@@ -272,6 +281,7 @@ impl Catalog {
             trending: cx.new(|_| Shared::new(s(), READ_CATALOG, Priority::Interactive)),
             list_books: cx.new(|_| Shared::new(s(), READ_LISTS, Priority::Interactive)),
             vibe_books: cx.new(|_| Shared::new(s(), READ_CATALOG, Priority::Interactive)),
+            tag_books: cx.new(|_| Shared::new(s(), READ_CATALOG, Priority::Interactive)),
         };
         cx.set_global(CatalogGlobal(catalog.clone()));
         catalog
@@ -494,6 +504,42 @@ impl Catalog {
                     ids: v.ids.clone(),
                     books: v.books.then(page, |a, b| a.id == b.id),
                 },
+                cx,
+            );
+        });
+    }
+
+    /// Asks for the first page of a tag's books.
+    pub fn request_tag_books(&self, key: TagBooksKey, demand: Demand, cx: &mut App) {
+        self.tag_books.update(cx, |s, cx| {
+            s.request(
+                key,
+                demand,
+                move |c| c.books_by_tag(key.tag, key.within, 0).map(Paged::first),
+                cx,
+            );
+        });
+    }
+
+    /// Asks for the next page of a tag's books.
+    pub fn more_tag_books(&self, key: TagBooksKey, cx: &mut App) {
+        let Some(offset) = self
+            .tag_books
+            .read(cx)
+            .resource()
+            .value(&key)
+            .filter(|p| p.has_more)
+            .map(|p| p.next_offset)
+        else {
+            return;
+        };
+        self.tag_books.update(cx, |s, cx| {
+            s.extend(
+                key,
+                move |c| c.books_by_tag(key.tag, key.within, offset),
+                // Votes change between requests: a book that moved into
+                // the next page shows once.
+                |paged, page| paged.then(page, |a, b| a.book.id == b.book.id),
                 cx,
             );
         });

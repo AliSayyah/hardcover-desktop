@@ -17,7 +17,7 @@ use super::BookDetailView;
 use super::header::HEADER_GENRES;
 use super::your_book::paragraphs;
 use crate::bidi::WrappingText;
-use crate::chip::{TagChip, TagGroup, tag_groups};
+use crate::chip::{TagChip, TagGroup, TagRow, tag_groups};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
 use crate::format::{average_rating_text, count_text};
 use crate::ui::kit::SmallControl as _;
@@ -71,9 +71,11 @@ impl BookDetailView {
         Block::new("About this book").child(body).into_any_element()
     }
 
-    /// Tags: the moods, content warnings and other tags, a few per group
-    /// until "Show N more". Genres are in the header, and here only when
-    /// there are more than it shows.
+    /// Tags: the genres past the header's first six, the content warnings
+    /// and the other tags, a few per group until "Show N more". Moods are
+    /// never chips here: they are the header's mood line and its votes. A
+    /// block left with one group takes the group's name as its heading
+    /// ("Content warnings") and drops the label.
     pub(super) fn render_tags(
         &self,
         details: Option<&BookDetails>,
@@ -87,10 +89,10 @@ impl BookDetailView {
             Warnings,
             Plain,
         }
+        let more_genres = details.genres.get(HEADER_GENRES..).unwrap_or_default();
         // The label, the tags, and which chips they get.
         let groups: Vec<(&'static str, &[String], Group)> = [
-            ("Genres", details.genres.as_slice(), Group::Genres),
-            ("Moods", details.moods.as_slice(), Group::Plain),
+            ("Genres", more_genres, Group::Genres),
             (
                 "Content warnings",
                 details.content_warnings.as_slice(),
@@ -99,20 +101,48 @@ impl BookDetailView {
             ("Other tags", details.tags.as_slice(), Group::Plain),
         ]
         .into_iter()
-        .filter(|(_, tags, group)| {
-            !tags.is_empty() && (*group != Group::Genres || tags.len() > HEADER_GENRES)
-        })
+        .filter(|(_, tags, _)| !tags.is_empty())
         .collect();
-        if groups.is_empty() {
-            return None;
-        }
+        let heading = match groups.as_slice() {
+            [] => return None,
+            [(only, _, _)] => *only,
+            _ => "Tags",
+        };
+        let labelled = groups.len() > 1;
         let hidden: usize = groups
             .iter()
             .map(|(_, tags, _)| tags.len().saturating_sub(TAGS_SHOWN))
             .sum();
         let expanded = self.tags_expanded;
+        let rows = groups.into_iter().map(|(label, tags, kind)| {
+            let shown = if expanded {
+                tags.len()
+            } else {
+                tags.len().min(TAGS_SHOWN)
+            };
+            let chips = tags[..shown].iter().map(|t| match kind {
+                Group::Genres => TagChip::genre_page(t.clone()),
+                Group::Warnings => TagChip::new(t.clone()).warning(true),
+                Group::Plain => TagChip::new(t.clone()),
+            });
+            let row = TagRow::new(chips);
+            let row = if kind == Group::Genres {
+                row.keys("tags-genres", &self.tags_genre_keys)
+            } else {
+                row
+            };
+            (label, row)
+        });
+        let body = if labelled {
+            tag_groups(rows.map(|(label, row)| TagGroup::row(label, row))).into_any_element()
+        } else {
+            v_flex()
+                .w_full()
+                .children(rows.map(|(_, row)| row))
+                .into_any_element()
+        };
         Some(
-            Block::new("Tags")
+            Block::new(heading)
                 .when(hidden > 0, |this| {
                     this.action(
                         Button::new("toggle-tags")
@@ -129,21 +159,7 @@ impl BookDetailView {
                             })),
                     )
                 })
-                .child(tag_groups(groups.into_iter().map(|(label, tags, kind)| {
-                    let shown = if expanded {
-                        tags.len()
-                    } else {
-                        tags.len().min(TAGS_SHOWN)
-                    };
-                    TagGroup::new(
-                        label,
-                        tags[..shown].iter().map(|t| match kind {
-                            Group::Genres => TagChip::genre(t.clone()),
-                            Group::Warnings => TagChip::new(t.clone()).warning(true),
-                            Group::Plain => TagChip::new(t.clone()),
-                        }),
-                    )
-                })))
+                .child(body)
                 .into_any_element(),
         )
     }

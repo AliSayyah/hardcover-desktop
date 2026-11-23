@@ -1,4 +1,4 @@
-//! The book list on Discover, the series and author pages and a list's page:
+//! The book list on Discover, the series, author and tag pages and a list's page:
 //! catalogue rows (`hardcover-design`, Rows → Catalogue row) with each
 //! book's library status, keyboard-navigable. Enter or a click opens the
 //! book. Escape reaches the page's Back binding: the list's own Cancel lets
@@ -442,17 +442,43 @@ pub struct CatalogRow {
     pub details: SharedString,
 }
 
+/// Asks for a paged list's next page ([`CatalogBooks::set_more`]).
+pub type LoadMore = Rc<dyn Fn(&mut App)>;
+
 pub struct CatalogBooks {
     rows: Vec<CatalogRow>,
     model: Entity<LibraryModel>,
+    empty_title: SharedString,
     empty: SharedString,
     focus: RowFocus,
     beside: Rc<Cell<bool>>,
+    /// A paged list's next page, while Hardcover has more.
+    more: Option<LoadMore>,
 }
 
 impl CatalogBooks {
     pub fn set_rows(&mut self, rows: Vec<CatalogRow>) {
         self.rows = rows;
+    }
+
+    /// What an empty list says: its title ("No books" until set) and
+    /// sentence.
+    pub fn set_empty(&mut self, title: impl Into<SharedString>, text: impl Into<SharedString>) {
+        self.empty_title = title.into();
+        self.empty = text.into();
+    }
+
+    /// What an empty list says, for tests.
+    #[cfg(test)]
+    pub fn empty_text(&self) -> &SharedString {
+        &self.empty
+    }
+
+    /// For a list fetched a page at a time (a tag's page): `load` asks for
+    /// the next page as the rows near their end; `None` once there is no
+    /// more, or while a page that failed waits for "Try again".
+    pub fn set_more(&mut self, load: Option<LoadMore>) {
+        self.more = load;
     }
 
     /// The book in row `ix`, for the [`ListPane`].
@@ -503,7 +529,25 @@ impl ListDelegate for CatalogBooks {
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
-        empty_state(IconName::BookOpen, "No books".into(), self.empty.clone())
+        empty_state(
+            IconName::BookOpen,
+            self.empty_title.clone(),
+            self.empty.clone(),
+        )
+    }
+
+    fn has_more(&self, _: &App) -> bool {
+        self.more.is_some()
+    }
+
+    fn load_more_threshold(&self) -> usize {
+        10
+    }
+
+    fn load_more(&mut self, _: &mut Window, cx: &mut Context<ListState<Self>>) {
+        if let Some(load) = self.more.clone() {
+            load(cx);
+        }
     }
 }
 
@@ -522,9 +566,11 @@ pub fn new_list(
             CatalogBooks {
                 rows: Vec::new(),
                 model,
+                empty_title: "No books".into(),
                 empty,
                 focus: RowFocus::default(),
                 beside: pane.beside.clone(),
+                more: None,
             },
             window,
             cx,
