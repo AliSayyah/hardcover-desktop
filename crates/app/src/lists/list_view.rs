@@ -445,13 +445,20 @@ impl ListView {
         if let Some(catalog) = &catalog {
             subscriptions.push(cx.subscribe(&catalog.list_books, {
                 let list = list.clone();
-                move |_, _, SharedChanged(id): &SharedChanged<ListId>, cx| {
+                let lists = lists.clone();
+                move |_, store, SharedChanged(id): &SharedChanged<ListId>, cx| {
                     list.update(cx, |state, cx| {
                         if state.delegate().current == Some(*id) {
                             state.delegate_mut().follow_store(cx);
                             cx.notify();
                         }
                     });
+                    // Books that landed say how many the list holds now.
+                    let store = store.read(cx).resource();
+                    if let Some(page) = store.value(id).filter(|_| !store.is_loading(id)) {
+                        let (sent, complete) = (page.next_offset, !page.has_more);
+                        lists.update(cx, |m, cx| m.check_count(*id, sent, complete, cx));
+                    }
                 }
             }));
         }
@@ -802,6 +809,43 @@ mod tests {
         press(cx, "delete");
         settle(cx);
         assert_eq!(notifications(cx), 1);
+    }
+
+    #[gpui_kit::test]
+    fn books_that_disagree_with_the_count_load_the_lists_again(cx: &mut TestAppContext) {
+        let client = hardcover_core::demo::client();
+        // The same demo account, as the website: it shares the client's
+        // state.
+        let website = client.clone();
+        let session = SessionScope::for_tests(client, None);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            session.install(cx);
+            Catalog::init(&session, cx);
+        });
+        let library = cx.new(|_| LibraryModel::new(session.clone()));
+        let lists = cx.update(|cx| ListsModel::init(session, &library, cx));
+        lists.update(cx, ListsModel::load);
+        cx.run_until_parked();
+        let (id, count) = lists.read_with(cx, |m, _| {
+            let list = m.user_lists().next().unwrap();
+            (list.id, list.books_count)
+        });
+        // A book leaves the list on the website after the lists loaded.
+        let row = website.list_books(id, 0).unwrap().items[0].id;
+        website.remove_from_list(row).unwrap();
+
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| ListView::new(lists.clone(), library.clone(), window, cx));
+            Root::new(view, window, cx)
+        });
+        let view = view.read_with(cx, |root, _| {
+            root.view().clone().downcast::<ListView>().unwrap()
+        });
+        cx.update(|window, cx| view.update(cx, |v, cx| v.show(id, window, cx)));
+        settle(cx);
+        let shown = lists.read_with(cx, |m, _| m.list(id).map(|l| l.books_count));
+        assert_eq!(shown, Some(count - 1), "the count is Hardcover's again");
     }
 
     #[test]
