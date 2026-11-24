@@ -341,6 +341,23 @@ impl ListsModel {
         }
     }
 
+    /// Loads the lists again when list `list`'s books, just fetched,
+    /// disagree with its count: they changed elsewhere (on the website, in
+    /// another copy of the app) since the lists loaded. `sent` is the rows
+    /// Hardcover sent, all of them once `complete`. Not while a write is
+    /// under way: its own result is about to change the count.
+    pub fn check_count(&mut self, list: ListId, sent: u32, complete: bool, cx: &mut Context<Self>) {
+        if self.writing || !self.session.allows(READ_LISTS) {
+            return;
+        }
+        let Some(count) = self.list(list).map(|l| l.books_count) else {
+            return;
+        };
+        if count_disagrees(count, sent, complete) {
+            self.request_lists(Demand::Now, cx);
+        }
+    }
+
     fn request_index(&mut self, demand: Demand, cx: &mut Context<Self>) {
         let call = |client: &Client| client.list_memberships();
         if self.index.request((), demand, call, Self::bind_index(), cx) {
@@ -829,6 +846,16 @@ impl ListsModel {
     }
 }
 
+/// Whether a list's count can't be right, given its books as fetched:
+/// `sent` rows, all of them when `complete`, else at least that many.
+fn count_disagrees(count: u32, sent: u32, complete: bool) -> bool {
+    if complete {
+        sent != count
+    } else {
+        sent > count
+    }
+}
+
 /// Whether a list's page has nothing left to show ([`ListsModel::is_gone`]).
 fn is_gone(status: &LoadStatus, listed: bool, readable: bool) -> bool {
     match status {
@@ -943,6 +970,17 @@ mod tests {
         assert_eq!(m.is_on(ListId::new(2), book), None);
         m.book_rows.hydrate(book, vec![row(103, 2, 10)]);
         assert_eq!(m.is_on(ListId::new(2), book), Some(true));
+    }
+
+    #[test]
+    fn a_count_disagrees_with_books_that_differ() {
+        // All the books loaded: the count must match them.
+        assert!(count_disagrees(144, 26, true));
+        assert!(count_disagrees(3, 4, true));
+        assert!(!count_disagrees(26, 26, true));
+        // More to come: only more than the count can't be right.
+        assert!(!count_disagrees(144, 100, false));
+        assert!(count_disagrees(80, 100, false));
     }
 
     #[test]
