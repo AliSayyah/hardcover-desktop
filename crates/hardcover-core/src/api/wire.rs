@@ -284,6 +284,7 @@ pub(crate) struct RawBook {
     pub pages: Option<i64>,
     pub release_year: Option<i64>,
     pub rating: Option<Value>,
+    pub ratings_count: Option<i64>,
     pub users_count: Option<i64>,
     #[serde(default)]
     pub cached_image: Value,
@@ -304,6 +305,7 @@ impl RawBook {
         b.release_year = self.release_year.and_then(|y| i32::try_from(y).ok());
         b.slug = non_empty(self.slug);
         b.average_rating = self.rating.as_ref().and_then(as_f64).map(model_float);
+        b.ratings_count = opt_u32(self.ratings_count);
         b.users_count = opt_u32(self.users_count);
         b
     }
@@ -316,7 +318,6 @@ pub(crate) struct RawBookDetails {
     pub description: Option<String>,
     pub release_date: Option<String>,
     pub editions_count: Option<i64>,
-    pub ratings_count: Option<i64>,
     #[serde(default)]
     pub cached_tags: Value,
     #[serde(default)]
@@ -382,7 +383,7 @@ impl RawBookDetails {
         d.tags = crate::tags::other_tags(tags_in(tags, "Tag"), &d.genres);
         d.content_warnings = tags_in(tags, "Content Warning");
         d.editions_count = opt_u32(self.editions_count);
-        d.ratings_count = opt_u32(self.ratings_count);
+        d.ratings_count = d.summary.ratings_count;
         d.series = series_refs(self.book_series);
         d.votes = book_votes(&self.taggable_counts);
         d
@@ -997,6 +998,7 @@ fn book_from_search_document(doc: &Value) -> Option<BookSummary> {
         .and_then(|y| i32::try_from(y).ok());
     b.slug = doc.get("slug").and_then(as_string);
     b.average_rating = doc.get("rating").and_then(as_f64).map(model_float);
+    b.ratings_count = doc.get("ratings_count").and_then(as_u32);
     b.users_count = doc.get("users_count").and_then(as_u32);
     Some(b)
 }

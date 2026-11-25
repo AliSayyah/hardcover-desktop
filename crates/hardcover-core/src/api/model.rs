@@ -362,6 +362,9 @@ pub struct BookSummary {
     pub slug: Option<String>,
     /// Hardcover average rating (0..=5).
     pub average_rating: Option<f32>,
+    /// How many readers rated it: what `average_rating` rests on.
+    #[serde(default)]
+    pub ratings_count: Option<u32>,
     /// Number of users who have the book in their library.
     pub users_count: Option<u32>,
 }
@@ -378,6 +381,7 @@ impl BookSummary {
             release_year: None,
             slug: None,
             average_rating: None,
+            ratings_count: None,
             users_count: None,
         }
     }

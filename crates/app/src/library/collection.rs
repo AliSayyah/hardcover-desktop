@@ -17,7 +17,8 @@ pub enum SortOrder {
     DateAdded,
     /// Most Hardcover readers first (`users_count`, synced with the library).
     Popularity,
-    /// Hardcover's average rating, highest first (not the reader's own).
+    /// Hardcover's average rating, highest first (not the reader's own),
+    /// weighed by how many rated it ([`weighted_rating`]).
     HighestRated,
 }
 
@@ -39,6 +40,30 @@ impl SortOrder {
             SortOrder::DateAdded => "Date added",
             SortOrder::Popularity => "Popularity",
             SortOrder::HighestRated => "Highest rated",
+        }
+    }
+}
+
+/// The rating a book's average is pulled towards while few readers rated it:
+/// below most books' averages, so a handful of 5s doesn't top a shelf.
+const PRIOR_RATING: f64 = 3.5;
+
+/// How many ratings the prior counts as: a book rated by this many readers
+/// sits halfway between its own average and [`PRIOR_RATING`].
+const PRIOR_RATINGS: f64 = 10.0;
+
+/// Hardcover's average rating weighed by how many rated it (a Bayesian
+/// average): 5.0 from 3 readers sorts at 3.85, 4.5 from 2,000 at 4.5. `None`
+/// for a book nobody rated (no rating, 0, or a count of 0). When the count is
+/// unknown (a cache from before it was synced) the average stands as it is.
+fn weighted_rating(entry: &LibraryEntry) -> Option<f64> {
+    let average = f64::from(entry.book.average_rating.filter(|r| *r > 0.0)?);
+    match entry.book.ratings_count {
+        None => Some(average),
+        Some(0) => None,
+        Some(n) => {
+            let n = f64::from(n);
+            Some((average * n + PRIOR_RATING * PRIOR_RATINGS) / (n + PRIOR_RATINGS))
         }
     }
 }
@@ -122,19 +147,15 @@ fn compare(a: &LibraryEntry, b: &LibraryEntry, order: SortOrder) -> Ordering {
             .users_count
             .cmp(&a.book.users_count)
             .then_with(by_title),
-        // Unrated books (no rating, or 0: none yet) go last; ties go to the
-        // more popular book, whose average rests on more readers.
-        SortOrder::HighestRated => {
-            let rating = |e: &LibraryEntry| e.book.average_rating.filter(|r| *r > 0.0);
-            match (rating(a), rating(b)) {
-                (Some(x), Some(y)) => y.total_cmp(&x),
-                (Some(_), None) => Ordering::Less,
-                (None, Some(_)) => Ordering::Greater,
-                (None, None) => Ordering::Equal,
-            }
-            .then_with(|| b.book.users_count.cmp(&a.book.users_count))
-            .then_with(by_title)
+        // Unrated books go last; ties go to the more popular book.
+        SortOrder::HighestRated => match (weighted_rating(a), weighted_rating(b)) {
+            (Some(x), Some(y)) => y.total_cmp(&x),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
         }
+        .then_with(|| b.book.users_count.cmp(&a.book.users_count))
+        .then_with(by_title),
     };
     // Ids keep the order total and stable across syncs.
     primary.then_with(|| b.user_book_id.cmp(&a.user_book_id))
@@ -396,24 +417,38 @@ mod tests {
     }
 
     #[test]
-    fn highest_rated_sorts_by_average_with_unrated_last() {
-        let rated = |id, title, rating, users| {
+    fn highest_rated_weighs_the_average_by_its_ratings_with_unrated_last() {
+        let rated = |id, title, rating, ratings, users| {
             let mut e = entry(id, title, "", ReadingStatus::Read);
             e.book.average_rating = rating;
+            e.book.ratings_count = ratings;
             e.book.users_count = Some(users);
             e
         };
         let entries = vec![
-            rated(1, "Good", Some(4.1), 10),
-            rated(2, "Unrated", None, 900),
-            rated(3, "Best", Some(4.6), 10),
-            rated(4, "Zero", Some(0.0), 900),
-            rated(5, "Good and popular", Some(4.1), 500),
+            rated(1, "Good", Some(4.1), Some(400), 10),
+            rated(2, "Unrated", None, None, 900),
+            rated(3, "Best", Some(4.6), Some(2_000), 10),
+            rated(4, "Zero", Some(0.0), Some(0), 900),
+            rated(5, "Good and popular", Some(4.1), Some(400), 500),
+            rated(6, "Three fives", Some(5.0), Some(3), 5),
+            rated(7, "Count not synced", Some(4.3), None, 5),
+            rated(8, "No ratings counted", Some(4.9), Some(0), 5),
         ];
         let rows = shelf_rows(&entries, ReadingStatus::Read, "", SortOrder::HighestRated);
         assert_eq!(
             titles(&entries, &rows),
-            ["Best", "Good and popular", "Good", "Unrated", "Zero"]
+            [
+                "Best",
+                "Count not synced",
+                "Good and popular",
+                "Good",
+                "Three fives",
+                // Unrated: by readers, then title.
+                "Unrated",
+                "Zero",
+                "No ratings counted",
+            ]
         );
     }
 
