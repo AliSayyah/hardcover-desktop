@@ -16,7 +16,7 @@ use hardcover_core::tags::Mood;
 use hardcover_core::{BookSummary, ReadingStatus};
 
 use super::reading_stats::{
-    BookFigure, LENGTH_BUCKETS, OverTime, Period, ReadingStats, YearTotals,
+    BookFigure, FEW, LENGTH_BUCKETS, OverTime, Period, ReadingStats, YearTotals,
 };
 use super::tag_stats::TagStats;
 use crate::catalog::navigation::{self, Page};
@@ -99,6 +99,16 @@ pub fn note(text: impl Into<SharedString>, cx: &App) -> AnyElement {
     div()
         .body()
         .text_color(colors(cx).fg_muted)
+        .child(text.into())
+        .into_any_element()
+}
+
+/// A property's value as text that wraps in a narrow column.
+fn wrapping(text: impl Into<SharedString>) -> AnyElement {
+    div()
+        .flex_1()
+        .min_w_0()
+        .tabular()
         .child(text.into())
         .into_any_element()
 }
@@ -366,7 +376,7 @@ pub fn pace(c: &Ctx, goal: Option<GoalPace>, cx: &App) -> Option<AnyElement> {
             h_flex()
                 .flex_wrap()
                 .child(div().body_strong().child(books_count_text(forecast)))
-                .child(div().whitespace_nowrap().child(format!(
+                .child(div().flex_1().min_w_0().child(format!(
                     " by Dec 31 at this pace{}",
                     goal.unwrap_or_default()
                 ))),
@@ -395,13 +405,11 @@ pub fn pace(c: &Ctx, goal: Option<GoalPace>, cx: &App) -> Option<AnyElement> {
     if per_day > 0 {
         overall.push_str(&format!(" · {} pages a day", count_text(per_day)));
     }
-    list = list.row("Overall", div().tabular().child(overall));
+    list = list.row("Overall", wrapping(overall));
     if let Some(days) = pace.to_finish {
         list = list.row(
             "To finish",
-            div()
-                .tabular()
-                .child(format!("{days:.0} days on average, from starting a book")),
+            wrapping(format!("{days:.0} days on average, from starting a book")),
         );
     }
     if let Some(q) = &pace.quickest {
@@ -747,29 +755,35 @@ pub fn formats(c: &Ctx, cx: &App) -> Option<AnyElement> {
     if c.stats.is_few() || known == 0 {
         return None;
     }
-    let books = c.stats.distinct_books();
-    let rows = [
+    let rows: Vec<(&str, &str, u32)> = [
         ("Physical", "physical books", f.physical),
         ("Ebook", "ebooks", f.ebook),
         ("Audiobook", "audiobooks", f.audiobook),
-    ];
-    let (_, lead, most) = rows
-        .iter()
-        .copied()
-        .max_by_key(|(_, _, n)| *n)
-        .unwrap_or(rows[0]);
-    let line = format!(
-        "Mostly {lead}: {}% of the {} you finished{}.",
-        percent_of(most, books),
-        books_count_text(books),
-        c.in_period()
-    );
+    ]
+    .into_iter()
+    .filter(|(_, _, n)| *n > 0)
+    .collect();
+    let with_format = match known {
+        1 => "1 book with a format".to_owned(),
+        n => format!("{} books with a format", count_text(n)),
+    };
+    let most = rows.iter().map(|(_, _, n)| *n).max().unwrap_or(0);
+    let leaders: Vec<_> = rows.iter().filter(|(_, _, n)| *n == most).collect();
+    // "Mostly" only when one format holds most of them, and of enough.
+    let line = match leaders.as_slice() {
+        [(_, lead, _)] if known >= FEW && most * 2 > known => format!(
+            "Mostly {lead}: {}% of the {with_format}{}.",
+            percent_of(most, known),
+            c.in_period()
+        ),
+        _ => format!("Of the {with_format}{}:", c.in_period()),
+    };
     Some(
         section("Formats")
             .child(note(line, cx))
             .child(
                 BarRows::new(c.id("formats"))
-                    .share_of(books)
+                    .share_of(known)
                     .rows(rows.iter().map(|(name, _, n)| {
                         BarRow::new(*name, *n, format!("{name}: {}", books_count_text(*n)))
                     })),
@@ -1061,7 +1075,12 @@ pub fn authors(c: &Ctx, cx: &App) -> Option<AnyElement> {
         section("Authors")
             .child(note(line, cx))
             .when(!c.stats.top_authors.is_empty(), |this| {
-                this.child(Sequence::new().children(rows))
+                this.child(
+                    div()
+                        .w_full()
+                        .max_w(size::BAR_ROWS)
+                        .child(Sequence::new().children(rows)),
+                )
             })
             .into_any_element(),
     )
@@ -1261,7 +1280,7 @@ pub fn wait(c: &Ctx, cx: &App) -> Option<AnyElement> {
     )]
     let average = w.average_days.round() as u32;
     let mut list = PropertyList::new()
-        .row("On average", div().tabular().child(duration_text(average)))
+        .row("On average", wrapping(duration_text(average)))
         .row(
             "Quickest",
             book_and(
@@ -1287,7 +1306,7 @@ pub fn wait(c: &Ctx, cx: &App) -> Option<AnyElement> {
     if let Some(backlog) = backlog_text(waiting, per_day) {
         list = list.row(
             "Still waiting",
-            div().tabular().child(format!(
+            wrapping(format!(
                 "{} on Want to read: {backlog} at this past year's pace",
                 books_count_text(waiting)
             )),

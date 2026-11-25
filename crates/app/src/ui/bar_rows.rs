@@ -4,7 +4,7 @@
 //!   (text, or a [`super::TextButton`] that opens what it names), a 6 px
 //!   meter as long as the row's count against the first row's (at most
 //!   400), the count in a 48 lane and, with [`BarRows::share_of`], its share
-//!   of a total in a 32 lane; rows 4 apart, at most 600 wide. A `label` line
+//!   of a total in a 40 lane; rows 4 apart, at most 600 wide. A `label` line
 //!   over them names the list and the count lane ("Genres" … "Books"). The
 //!   reader's own counts, in accent (Stats' genres, moods, formats).
 //! - [`SplitCells`]: a whole split a few ways (the Votes popover's pace and

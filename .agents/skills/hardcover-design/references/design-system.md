@@ -273,7 +273,7 @@ selection fill or a nested surface its own radius.
 | Content column beside another (Home, wide) | at least 448 wide; the two share the width beside the rail | `size::WIDE_COLUMN_MIN` |
 | Stats, two columns | each column at least 544, filling its half | `size::CHART_COLUMN_MIN` |
 | Two lists in a Stats section (genres and moods) | side by side when each gets 320, 32 apart | `size::STATS_PAIR_MIN` |
-| Bar rows | 600 wide max: the name 152, the meter (400 max), the count 48, the share 32, 12 apart | `size::BAR_ROWS`, `BAR_NAME`, `TRAILING_LANE`, `SHARE_LANE` |
+| Bar rows | 600 wide max: the name 152, the meter (400 max), the count 48, the share 40, 12 apart | `size::BAR_ROWS`, `BAR_NAME`, `TRAILING_LANE`, `SHARE_LANE` |
 | Chart | bars at most 48 wide; a year in Finished per year at least 64 | `size::CHART_BAR_MAX`, `CHART_YEAR_MIN` |
 | Votes popover | 360 wide, padding 16; its mood names 96, its counts 48 | |
 | Empty-state text | 288 wide max | `w_72` |
@@ -532,7 +532,7 @@ Counts as meters, for a list of names or a whole split a few ways.
   the name in a 152 lane (`body`; a text button when it opens something),
   a 6 px meter as long as the row's count against the first row's (400
   max), the count in a 48 lane and, for a share of a total, the share in a
-  32 lane (both `caption`, tabular, right-aligned). A `label` line over the
+  40 lane (both `caption`, tabular, right-aligned). A `label` line over the
   rows names the list and the count lane ("Genres" … "Books"). The
   reader's own counts (Stats) are `accent`.
 - **Splits** (`SplitCells`): a whole split a few ways, in a fixed order:
@@ -1401,8 +1401,10 @@ books' tags).
   months for a year), Pace (a property list: the year's forecast against
   the goal, overall, to finish, the quickest and longest), Genres and
   moods (a fiction split, then bar rows of genres and moods, eight each
-  until "Show N more"; each name opens the Read shelf filtered by it),
-  Formats, Book length, Your ratings (a half-star chart, then "Higher" and
+  until "Show N more", which hands focus to the page; each name opens
+  the Read shelf filtered by it, every Read book in it whatever the
+  period), Formats (shares of the books with a format; "Mostly …" only
+  when one holds more than half of at least 3), Book length, Your ratings (a half-star chart, then "Higher" and
   "Lower than most readers": the reader's stars in gold beside Hardcover's
   average in muted), Authors (two books or more), Series, Rereads (md
   covers with "Twice" under the title), From adding to finishing and

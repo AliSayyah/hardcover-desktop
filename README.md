@@ -38,7 +38,7 @@ Hardcover Desktop is a native app built with Rust and [GPUI](https://gpui-kit.co
 - **Your review:** write a review of a book in your library, in Markdown, mark it as containing spoilers and date it; change or delete it later. A review written on the website is shown here and edited there.
 - **Reading goals:** see this year's goal and your pace in the sidebar, and set, change or delete a goal of books, pages or hours.
 - **Lists:** open your lists from the sidebar to see their books in order, create, edit or delete a list, and put a book on your lists or take it off from its page.
-- **Stats:** books and pages you finished each year, re-reads included, how long a book takes you, how you rate and what is on each shelf, worked out from your library without going online.
+- **Stats:** for all time or one year: books and pages finished, re-reads included, your pace, genres and moods, formats, book lengths, how you rate against other readers, your authors and series, how long books wait on your shelves, and when they were published, worked out from your library (only the genres and moods ask Hardcover).
 - **Offline access:** your library and covers are cached on your computer, so they open instantly and stay readable without a connection.
 - **Secure sign-in:** you sign in through Hardcover in your browser (OAuth with PKCE). The app never sees your password, and the session is stored in your system keyring.
 - **Self-updating:** the app tells you about each new release and installs it in one click, after verifying its signature, whether you installed it with the installer or run the AppImage.

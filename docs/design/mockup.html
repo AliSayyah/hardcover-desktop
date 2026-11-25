@@ -528,6 +528,25 @@ svg.i.xs { width: var(--icon-s); height: var(--icon-s); }
 .chart .b i { width: 60%; max-width: 48px; background: var(--accent); border-radius: 2px 2px 0 0; display: block; }
 .chart-x { display: flex; gap: var(--s-8); margin-top: var(--s-4); }
 .chart-x span { flex: 1; text-align: center; font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); }
+.stats-head { display: flex; align-items: flex-start; gap: var(--s-16); }
+.stats-head .select { width: var(--w-select); margin-left: auto; }
+/* Bar rows (ui::BarRows): a 152 name lane, a 6 px meter (400 max), the count in a 48 lane, the share in a 40 lane; at most 600 wide. */
+.brows { display: flex; flex-direction: column; gap: var(--s-4); max-width: 600px; }
+.brows-h, .brow { display: flex; align-items: center; gap: var(--s-12); }
+.brow { min-height: var(--h-control-s); }
+.brows-h .label:first-child { flex: 1; }
+.brow .nm { width: 152px; flex: none; }
+.brow .bar { flex: 1; max-width: 400px; }
+.brow .ct, .brow .pc, .brows-h .ct { flex: none; text-align: right; font-size: var(--t-12); line-height: var(--l-12); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.brow .ct, .brows-h .ct { width: 48px; } .brow .pc, .brows-h .pc { width: 40px; }
+/* A split (ui::SplitCells): equal cells 12 apart, the share on the trailing edge, a 6 px meter under each; the leading answer in ink at 500. */
+.split3 { display: flex; gap: var(--s-12); max-width: 600px; }
+.split3 > div { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: var(--s-4); }
+.split3 .top { display: flex; align-items: baseline; gap: var(--s-8); color: var(--fg-muted); }
+.split3 .top.lead { color: var(--fg); font-weight: 500; }
+.split3 .top .pc { margin-left: auto; font-size: var(--t-12); line-height: var(--l-12); font-weight: 400; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.stats-pair { display: flex; gap: var(--s-32); align-items: flex-start; }
+.stats-pair > * { flex: 1 1 0; min-width: 0; }
 .shelfrow { display: flex; align-items: center; gap: var(--s-8); height: var(--h-control); max-width: var(--w-list); }
 .shelfrow svg { color: var(--fg-muted); }
 .shelfrow .n { width: 48px; text-align: right; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
@@ -950,22 +969,39 @@ function statsWide(wide = true) {
     return `<div class="chart ${cls}">${data.map(([, n]) => `<div class="b">${n ? `<span class="num">${n.toLocaleString("en")}</span><i style="height:${Math.round(n / max * 80)}%"></i>` : ""}</div>`).join("")}</div>
       <div class="chart-x">${data.map(([k]) => `<span>${k}</span>`).join("")}</div>`;
   };
-  const years = [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026];
-  const books = [3, 7, 11, 9, 14, 12, 16, 9], pages = [960, 2410, 3880, 3020, 4870, 4150, 5390, 3511];
+  const sec = (title, body) => `<div class="col g-12"><div class="section">${title}</div>${body}</div>`;
+  const foot = t => `<div class="small muted">${t}</div>`;
+  const prop = (k, v) => `<div class="p"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const brows = (list, rows, total) => {
+    const max = rows[0][1];
+    return `<div class="brows"><div class="brows-h"><span class="label">${list}</span><span class="label ct">Books</span><span class="pc"></span></div>
+      ${rows.map(([n, c]) => `<div class="brow"><span class="nm one-line"><span class="textbtn">${n}</span></span><div class="bar"><i style="width:${c / max * 100}%"></i></div><span class="ct">${c}</span><span class="pc">${Math.round(c / total * 100)}%</span></div>`).join("")}
+      <div><span class="btn sm ghost">Show 14 more</span></div></div>`;
+  };
+  const cell = (n, c, pc, lead) => `<div><div class="top${lead ? " lead" : ""}">${n}<span class="small muted num">${c}</span><span class="pc">${pc}%</span></div><div class="bar"><i style="width:${pc}%"></i></div></div>`;
+  const years = ["Earlier", 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026];
+  const books = [5, 3, 7, 11, 9, 14, 12, 16, 9], pages = [1610, 960, 2410, 3880, 3020, 4870, 4150, 5390, 3511];
   const ratings = ["½", "1", "1½", "2", "2½", "3", "3½", "4", "4½", "5"].map((k, i) => [k, [0, 0, 0, 1, 2, 4, 9, 14, 11, 6][i]]);
   const shelves = [["book", "Currently reading", 3], ["inbox", "Want to read", 8], ["check", "Read", 81], ["pause", "Paused", 1], ["ban", "Did not finish", 2], ["eyeoff", "Ignored", 1]];
-  const perYear = `<div class="col g-12"><div class="section">Finished per year</div>
-      <div class="label">Books</div>${bars(years.map((y, i) => [y, books[i]]))}
+  const overTime = sec("Reading over time", `<div class="label">Books</div>${bars(years.map((y, i) => [y, books[i]]))}
       <div class="label mt-12">Pages</div>${bars(years.map((y, i) => [y, pages[i]]))}
-      <div class="muted">Plus 2 books finished before 2019.</div></div>`;
-  const yours = `<div class="col g-12"><div class="section">Your ratings</div>
-      <div class="muted">4.1 on average from 47 ratings</div>${bars(ratings, "short")}</div>`;
-  const shelf = `<div class="col g-12"><div class="section">Shelves</div>
-      <div class="col">${shelves.map(([i, l, n]) => `<div class="shelfrow">${ic(i)}<span class="fill">${l}</span><span class="n">${n}</span></div>`).join("")}</div></div>`;
-  const body = wide ? `<div class="cols2"><div class="fill">${perYear}</div><div class="fill">${yours}${shelf}</div></div>` : `${perYear}${yours}${shelf}`;
+      ${foot("1 book on your Read shelf has no finish date, so no year counts it.")}`);
+  const pace = sec("Pace", `<div class="props">
+      ${prop("Overall", "A book every 30 days · 1.0 a month · 11 pages a day")}
+      ${prop("To finish", "17 days on average, from starting a book")}
+      ${prop("Quickest", `<span class="textbtn">The Martian</span><span class="muted">· 3 days</span>`)}
+      ${prop("Longest", `<span class="textbtn">Infinite Jest</span><span class="muted">· 250 days</span>`)}</div>`);
+  const genres = brows("Genres", [["Fantasy", 41], ["Science Fiction", 23], ["Classics", 12], ["Historical Fiction", 9], ["Romance", 7]], 81);
+  const moods = brows("Moods", [["Adventurous", 44], ["Reflective", 30], ["Emotional", 21], ["Funny", 15], ["Dark", 12]], 81);
+  const tags = sec("Genres and moods", `<div class="split3">${cell("Fiction", 72, 89, true)}${cell("Non-fiction", 9, 11, false)}</div>
+      <div class="stats-pair mt-8">${genres}${moods}</div>
+      ${foot("Shares are of the 81 books you finished; a book counts in each of its genres.")}`);
+  const yours = sec("Your ratings", `<div class="muted">4.1 on average from 47 ratings.</div>${bars(ratings, "short")}`);
+  const shelf = sec("Shelves", `<div class="col">${shelves.map(([i, l, n]) => `<div class="shelfrow">${ic(i)}<span class="fill">${l}</span><span class="n">${n}</span></div>`).join("")}</div>`);
+  const body = wide ? `<div class="cols2"><div class="fill">${overTime}${tags}</div><div class="fill">${pace}${yours}${shelf}</div></div>` : `${overTime}${pace}${tags}${yours}${shelf}`;
   return sidebar("stats") + `<div class="main"><div class="scroll page"><div class="stats${wide ? " wide" : ""} col" style="gap:var(--s-32)">
-    <div><div class="page-title">Stats</div><div class="muted mt-4">From your library on this computer.</div></div>
-    <div class="figs">${fig("9", "books finished in 2026")}${fig("3,511", "pages read in 2026")}${fig("16", "days to finish, on average")}${fig("4.1", "average rating")}</div>
+    <div class="stats-head"><div><div class="page-title">Stats</div><div class="muted mt-4">From your library on this computer.</div></div><span class="select">All time${ic("down", "xs")}</span></div>
+    <div class="figs">${fig("81", "books finished")}${fig("26,412", "pages read")}${fig("16", "hours listened")}${fig("4.1", "average rating")}</div>
     ${body}
   </div></div></div>`;
 }
@@ -1652,7 +1688,7 @@ const shots = [
   ["Home, wide (2560)", "light · a 4K monitor at 1.5, full height · the two content columns share the width and their rows fill them · Newest on Want to read leaves the rail for the second column, under Rate what you finished: one row of md covers, as many as fit", "light", 1400, homeFluid(), 2560],
   ["Library, wide (2560)", "light · the pane fills the window · the header, progress and rail as now · reading text keeps its 640 measure (About, Your review, Reviews); the width beside it holds Tags and Similar books, which add covers as it grows", "light", 1400, libraryFluid(), 2560],
   ["Series, wide (2560)", "light · the column fills the region; the strip takes the width (here all 17 books; up to 25 fit on its line), the next lanes stay 240 and lined up on the trailing edge", "light", 1130, seriesWide(), 2560],
-  ["Stats, wide (2560)", "dark · two columns, each filling its half: Finished per year; Your ratings, then Shelves · charts fill their column, bars at most 48 · the figures one row across both, 32 apart, so the third starts on the second column's spine", "dark", 860, statsWide(), 2560],
+  ["Stats, wide (2560)", "dark · the period select on the title's trailing edge · two columns, each filling its half: Reading over time (an Earlier bar first), Genres and moods (a split, then bar rows side by side), …; Pace, Your ratings, Shelves, … · footnotes are one caption line at a section's foot · charts fill their column, bars at most 48 · the figures one row across both, 32 apart", "dark", 1200, statsWide(), 2560],
   ["Discover, wide (2560)", "light · a catalogue page's list is 704 beside the pane (the prose measure and its inset); the selected book shows in the pane, which takes the rest, with its rail; a click selects, Enter or a double click opens the full page", "light", 1000, discoverWide(), 2560],
   ["Home", "light · one lead book; the goal and Up next sit in an unboxed rail; Coming soon closes the main column (scrolled content shown in full)", "light", 1020, home()],
   ["Home", "dark", "dark", 1020, home()],

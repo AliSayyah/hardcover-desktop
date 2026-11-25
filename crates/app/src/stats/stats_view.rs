@@ -316,7 +316,7 @@ impl StatsView {
         };
         let expand = |genres: bool| {
             let this = this.clone();
-            Some(Rc::new(move |_: &mut Window, cx: &mut App| {
+            Some(Rc::new(move |window: &mut Window, cx: &mut App| {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
                         if genres {
@@ -324,6 +324,9 @@ impl StatsView {
                         } else {
                             this.expanded.1 = true;
                         }
+                        // The button goes: focus stays on the page, which
+                        // keeps scrolling from the keys.
+                        window.focus(&this.focus_handle, cx);
                         cx.notify();
                     });
                 }

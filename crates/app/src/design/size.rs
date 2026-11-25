@@ -128,8 +128,8 @@ pub const CHART_YEAR_MIN: Rems = rems(4.);
 pub const BAR_ROWS: Rems = rems(37.5);
 /// A bar row's name, before its meter (152).
 pub const BAR_NAME: Rems = rems(9.5);
-/// A bar row's share, after its count (32): "51%".
-pub const SHARE_LANE: Rems = rems(2.);
+/// A bar row's share, after its count (40): "100%".
+pub const SHARE_LANE: Rems = rems(2.5);
 /// Two lists of a Stats section (genres and moods) sit side by side when
 /// each gets this (320), 32 apart; narrower, one under the other.
 pub const STATS_PAIR_MIN: Rems = SIDE_MIN;
