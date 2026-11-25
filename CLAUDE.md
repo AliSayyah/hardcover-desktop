@@ -294,7 +294,7 @@ The workspace has two crates, in `crates/*`.
 
 ## Screenshots
 
-`docs/screenshots/` holds the README's screenshots, in light and dark. Take them from the demo build (`--features demo`, with `HARDCOVER_THEME=paper-light` or `paper-dark`: the default theme, Paper, whose dark palette is Lamplight), never from a real account:
+`docs/screenshots/` holds the README's screenshots, in light and dark. Take them from the demo build (`--features demo`, with `HARDCOVER_THEME=paper-light` for light, the default theme, and `hardcover-dark` for dark, the Hardcover theme's navy), never from a real account:
 - Use a 1200×800 floating window and capture just the window, at its scale factor. Run with `HARDCOVER_UI_SCALE=1`, so a large monitor doesn't scale the interface (`ui_scale`).
 - The demo downloads its covers, so it needs the network. Wait until every visible cover has loaded before capturing.
 - Resizing the window after launch squeezes the library's list toward its minimum width. Drag the divider back to its default of 24rem before capturing.
