@@ -591,6 +591,7 @@ fn book_summary(book: &Book) -> Value {
         "pages": book.pages,
         "release_year": release_year(book),
         "rating": book.rating,
+        "ratings_count": book.ratings_count,
         "users_count": book.users_count,
         "cached_image": image(&book.cover),
         "cached_contributors": [{
@@ -622,6 +623,7 @@ fn upcoming_summary(catalogue: &Catalogue, book: &Upcoming) -> Value {
         "release_year": chrono::Datelike::year(&date),
         "release_date": date.format("%Y-%m-%d").to_string(),
         "rating": null,
+        "ratings_count": null,
         "users_count": null,
         "cached_image": {},
         "cached_contributors": contributors,
@@ -679,7 +681,6 @@ fn upcoming_details(catalogue: &Catalogue, book: &Upcoming) -> Value {
     let extra = json!({
         "description": null,
         "editions_count": null,
-        "ratings_count": null,
         "cached_tags": {},
         "ratings_distribution": [],
         "alternative_titles": [],
@@ -807,7 +808,6 @@ fn book_details(book: &Book, vars: &Value) -> Value {
         "description": book.description,
         "release_date": book.release_date,
         "editions_count": book.editions_count,
-        "ratings_count": book.ratings_count,
         "cached_tags": { "Genre": genres },
         "ratings_distribution": [],
         "alternative_titles": [],
@@ -1002,6 +1002,7 @@ fn search_document(book: &Book) -> Value {
         "release_year": release_year(book),
         "slug": slug(&book.title),
         "rating": book.rating,
+        "ratings_count": book.ratings_count,
         "users_count": book.users_count,
     })
 }

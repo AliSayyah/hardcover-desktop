@@ -7,7 +7,7 @@
 macro_rules! book_summary_fields {
     () => {
         "fragment BookSummaryFields on books {
-  id title subtitle slug pages release_year rating users_count cached_image cached_contributors
+  id title subtitle slug pages release_year rating ratings_count users_count cached_image cached_contributors
 }
 "
     };
@@ -168,7 +168,7 @@ pub(crate) const BOOK_DETAILS: &str = concat!(
     "query BookDetails($id: Int!, $tags: [Int!]!) {
   books_by_pk(id: $id) {
     ...BookSummaryFields
-    description release_date editions_count ratings_count cached_tags
+    description release_date editions_count cached_tags
     ratings_distribution alternative_titles cached_similar_book_ids
     book_series(order_by: [{featured: desc}, {position: asc_nulls_last}]) {
       position featured series { id name slug }
