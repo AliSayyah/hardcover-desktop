@@ -29,8 +29,8 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::api::TagId;
 pub use genre::{
-    BROWSE_GENRES, BookGenres, BrowseGenre, Genre, MIN_GENRE_VOTES, browse_genre, genre_key,
-    genre_words,
+    BROWSE_GENRES, BookGenres, BrowseGenre, Genre, Kind, MIN_GENRE_VOTES, browse_genre, genre_key,
+    genre_words, kind_of,
 };
 
 // ----- thresholds -----

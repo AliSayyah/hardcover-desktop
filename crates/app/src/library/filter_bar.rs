@@ -147,6 +147,20 @@ impl FilterBar {
         self.picks.get(&self.status).cloned().unwrap_or_default()
     }
 
+    /// Picks `pick` on the shelf shown (Stats opens a shelf so).
+    pub fn set_pick(&mut self, pick: TagPick, cx: &mut Context<Self>) {
+        if pick.is_empty() {
+            self.clear(cx);
+            return;
+        }
+        if self.picks.get(&self.status) != Some(&pick) {
+            self.picks.insert(self.status, pick);
+            self.pressed = None;
+            cx.emit(PickChanged);
+            cx.notify();
+        }
+    }
+
     /// Clears the shelf's picks ("Clear filters").
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         if self.picks.remove(&self.status).is_some() {

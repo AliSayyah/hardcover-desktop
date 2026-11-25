@@ -179,6 +179,7 @@ impl Render for Gallery {
             .gap_8()
             .child(headers())
             .child(meters(cx))
+            .child(bar_rows())
             .child(sequence(cx))
             .child(series_strips(cx))
             .child(list_rows(cx))
@@ -277,6 +278,53 @@ fn headers() -> AnyElement {
                 Some(5),
                 |_, _, _| {},
             ))),
+    )
+}
+
+fn bar_rows() -> AnyElement {
+    use super::{BarRow, BarRows, SplitCells, TextButton};
+    let genres = [
+        ("Fantasy", 177),
+        ("Science Fiction", 92),
+        ("Adventure", 64),
+        ("فانتزی", 12),
+    ];
+    specimen(
+        "Bar rows and splits",
+        v_flex()
+            .gap_6()
+            .child(
+                SplitCells::new("g-kind")
+                    .cell("Fiction", 315, "Fiction: 315 books")
+                    .cell("Non-fiction", 26, "Non-fiction: 26 books")
+                    .cell("Unknown", 8, "Unknown: 8 books")
+                    .with_counts(),
+            )
+            .child(
+                SplitCells::new("g-pace")
+                    .muted()
+                    .leader(2)
+                    .cell("Slow", 14, "Slow: 14 votes")
+                    .cell("Medium", 31, "Medium: 31 votes")
+                    .cell("Fast", 48, "Fast: 48 votes"),
+            )
+            .child(
+                BarRows::new("g-genres")
+                    .heading("Genres", "Books")
+                    .share_of(349)
+                    .rows(genres.iter().enumerate().map(|(ix, (name, n))| {
+                        BarRow::new(
+                            TextButton::new(("g-genre", ix), *name).body(),
+                            *n,
+                            format!("{name}: {n} books"),
+                        )
+                    })),
+            )
+            .child(BarRows::new("g-formats").rows([
+                BarRow::new("Physical", 120, "Physical: 120 books"),
+                BarRow::new("Ebook", 40, "Ebook: 40 books"),
+                BarRow::new("Audiobook", 0, "Audiobook: 0 books"),
+            ])),
     )
 }
 

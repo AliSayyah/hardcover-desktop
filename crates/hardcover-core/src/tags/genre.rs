@@ -200,3 +200,137 @@ pub fn browse_genre(name: &str) -> Option<BrowseGenre> {
     let key = genre_key(name);
     BROWSE_GENRES.into_iter().find(|g| genre_key(g.name) == key)
 }
+
+/// Whether a book is fiction or not, as its genres say (Stats' split).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Kind {
+    Fiction,
+    NonFiction,
+}
+
+/// Genres that are only ever non-fiction, by [`genre_key`].
+const NON_FICTION_KEYS: [&str; 26] = [
+    "nonfiction",
+    "biography",
+    "autobiography",
+    "memoir",
+    "memoirs",
+    "history",
+    "self help",
+    "psychology",
+    "business",
+    "philosophy",
+    "science",
+    "popular science",
+    "true crime",
+    "essays",
+    "religion",
+    "politics",
+    "economics",
+    "travel",
+    "health",
+    "education",
+    "cooking",
+    "reference",
+    "parenting",
+    "spirituality",
+    "sociology",
+    "personal development",
+];
+
+/// Genres that are only ever fiction, by [`genre_key`]. Any key ending in
+/// "fiction" (science fiction, literary fiction) or naming fantasy counts
+/// too.
+const FICTION_KEYS: [&str; 16] = [
+    "fiction",
+    "romance",
+    "romantasy",
+    "mystery",
+    "thriller",
+    "horror",
+    "dystopian",
+    "dystopia",
+    "litrpg",
+    "space opera",
+    "cyberpunk",
+    "magical realism",
+    "crime",
+    "suspense",
+    "short stories",
+    "novels",
+];
+
+fn is_fiction_key(key: &str) -> bool {
+    FICTION_KEYS.contains(&key)
+        || key.ends_with(" fiction")
+        || key.split(' ').any(|w| w == "fantasy")
+}
+
+/// Fiction or non-fiction, from the votes of the book's genres that say
+/// which: the side with more votes wins. `None` when no genre says, or the
+/// two sides tie. Genres such as Classics, Adventure or Young Adult say
+/// nothing either way.
+#[must_use]
+pub fn kind_of(genres: &BookGenres) -> Option<Kind> {
+    let (mut fiction, mut non_fiction) = (0u32, 0u32);
+    for genre in genres {
+        if NON_FICTION_KEYS.contains(&genre.key.as_str()) {
+            non_fiction = non_fiction.saturating_add(genre.votes);
+        } else if is_fiction_key(&genre.key) {
+            fiction = fiction.saturating_add(genre.votes);
+        }
+    }
+    match fiction.cmp(&non_fiction) {
+        std::cmp::Ordering::Greater => Some(Kind::Fiction),
+        std::cmp::Ordering::Less => Some(Kind::NonFiction),
+        std::cmp::Ordering::Equal => None,
+    }
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::*;
+
+    fn kind(tags: &[(&str, u32)]) -> Option<Kind> {
+        kind_of(&BookGenres::from_tags(tags.iter().copied()))
+    }
+
+    #[test]
+    fn the_side_with_more_votes_decides() {
+        assert_eq!(
+            kind(&[("Fantasy", 29), ("Adventure", 4)]),
+            Some(Kind::Fiction)
+        );
+        assert_eq!(
+            kind(&[("Science Fiction", 67), ("Space", 15)]),
+            Some(Kind::Fiction)
+        );
+        assert_eq!(kind(&[("Sci-fi", 5)]), Some(Kind::Fiction));
+        assert_eq!(
+            kind(&[("Self-Help", 40), ("Psychology", 12)]),
+            Some(Kind::NonFiction)
+        );
+        assert_eq!(
+            kind(&[("Non-Fiction", 9), ("Memoir", 8)]),
+            Some(Kind::NonFiction)
+        );
+        // A novel about history is still a novel.
+        assert_eq!(
+            kind(&[("Historical Fiction", 30), ("History", 6)]),
+            Some(Kind::Fiction)
+        );
+        assert_eq!(
+            kind(&[("Fiction", 10), ("Nonfiction", 20)]),
+            Some(Kind::NonFiction)
+        );
+    }
+
+    #[test]
+    fn genres_that_say_neither_leave_it_unknown() {
+        assert_eq!(kind(&[("Classics", 40), ("Adventure", 12)]), None);
+        assert_eq!(kind(&[]), None);
+        assert_eq!(kind(&[("Fiction", 10), ("Nonfiction", 10)]), None);
+        // "Science" alone is non-fiction; "Science Fiction" is not.
+        assert_eq!(kind(&[("Science", 10)]), Some(Kind::NonFiction));
+    }
+}

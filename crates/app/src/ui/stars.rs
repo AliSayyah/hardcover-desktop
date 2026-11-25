@@ -3,8 +3,9 @@
 //! a half star split cleanly down the middle. Hardcover's figures (the
 //! average on the book page's rail) and another reader's rating on a review.
 //!
-//! Never gold: gold is only the user's own rating, which is the rating
-//! control (`book::star_rating::StarRating`), not this.
+//! Gold only with [`Stars::own`]: the reader's own rating, shown where it
+//! can't be set (Stats' "Higher than most readers"). Everywhere it can be
+//! set, it is the rating control (`book::star_rating::StarRating`).
 //!
 //! - [`Stars::new`]: 16 px, beside a figure ("4.63").
 //! - [`Stars::small`]: 12 px, inline (a review's byline).
@@ -96,6 +97,7 @@ pub(crate) fn render_star(
 pub struct Stars {
     value: f32,
     small: bool,
+    own: bool,
     label: Option<(ElementId, SharedString)>,
 }
 
@@ -106,6 +108,7 @@ impl Stars {
         Self {
             value,
             small: false,
+            own: false,
             label: None,
         }
     }
@@ -113,6 +116,12 @@ impl Stars {
     /// The 12 px stars that sit inline.
     pub fn small(mut self) -> Self {
         self.small = true;
+        self
+    }
+
+    /// The reader's own rating, in gold.
+    pub fn own(mut self) -> Self {
+        self.own = true;
         self
     }
 
@@ -130,7 +139,11 @@ impl Stars {
 
 impl RenderOnce for Stars {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let filled = colors(cx).fg_muted;
+        let filled = if self.own {
+            colors(cx).gold
+        } else {
+            colors(cx).fg_muted
+        };
         let empty = colors(cx).star_empty;
         let value = self.value;
         let small = self.small;

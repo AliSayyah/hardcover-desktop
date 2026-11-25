@@ -14,6 +14,9 @@
 //! - A batch that fails keeps its books' previous copies; the bar says so,
 //!   with "Try again" ([`ShelfTagsModel::retry`]).
 //!
+//! Stats asks for the books finished in its period the same way
+//! ([`ShelfTagsModel::show_books`]), whatever shelf they are on now.
+//!
 //! What the filter knows of each book ([`BookFacts`]) is worked out once,
 //! when its tags land.
 
@@ -67,6 +70,8 @@ pub struct ShelfTagsModel {
     books: LibraryFollow<Vec<BookId>>,
     /// Bumped whenever a book's facts change.
     revision: u64,
+    /// The books Stats asked for before the library loaded.
+    stats_books: Vec<BookId>,
     reload: Debounce,
     _hydrating: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -87,7 +92,11 @@ impl ShelfTagsModel {
                 match found {
                     // The library loaded: the shelves already shown are asked
                     // for now.
-                    Some(Followed::First) => this.load(cx),
+                    Some(Followed::First) => {
+                        this.load(cx);
+                        let books = std::mem::take(&mut this.stats_books);
+                        this.request(books, Demand::Shown, cx);
+                    }
                     Some(Followed::Changed) => {
                         this.reload.schedule(RELOAD_DELAY, Self::follow_books, cx);
                     }
@@ -119,6 +128,7 @@ impl ShelfTagsModel {
             shelves: Vec::new(),
             books: LibraryFollow::default(),
             revision: 0,
+            stats_books: Vec::new(),
             reload: Debounce::default(),
             _hydrating: hydrating,
             _subscriptions: subscriptions,
@@ -221,6 +231,29 @@ impl ShelfTagsModel {
     pub fn retry(&mut self, status: ReadingStatus, cx: &mut Context<Self>) {
         let books: Vec<BookId> = books_on(self.library.read(cx), &[status])
             .into_iter()
+            .filter(|b| self.tags.failure(b).is_some() || !self.tags.has_settled(b))
+            .collect();
+        self.request(books, Demand::Now, cx);
+    }
+
+    /// Stats shows `books` (those finished in its period, on any shelf):
+    /// asks for those never asked for, stale or failed, as a shown shelf's
+    /// (`Demand::Shown`), or only the stale ones when the window became
+    /// active (`Demand::Active`).
+    pub fn show_books(&mut self, books: Vec<BookId>, demand: Demand, cx: &mut Context<Self>) {
+        if self.books.seen().is_some() {
+            self.request(books, demand, cx);
+        } else {
+            // The library's first load asks for them.
+            self.stats_books = books;
+        }
+    }
+
+    /// "Try again" for `books`: those whose tags failed or never came, now.
+    pub fn retry_books(&mut self, books: &[BookId], cx: &mut Context<Self>) {
+        let books: Vec<BookId> = books
+            .iter()
+            .copied()
             .filter(|b| self.tags.failure(b).is_some() || !self.tags.has_settled(b))
             .collect();
         self.request(books, Demand::Now, cx);

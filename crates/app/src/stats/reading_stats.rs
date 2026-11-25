@@ -1,30 +1,101 @@
-//! Reading stats computed from the local library alone: no requests.
+//! Reading stats computed from the local library alone: no requests. The
+//! genres and moods, which need the books' tags, are `tag_stats`.
+//!
+//! Everything is about a [`Period`]: all time, or one calendar year.
 //!
 //! The rules, each pinned by a test below:
-//! - Every finished read counts, so a re-read counts again, in the year of its
-//!   finish date. A read with no finish date is not finished, and one dated
-//!   in a later year is a mistake that counts nowhere: every total agrees
-//!   with the years.
-//! - On a Did Not Finish book, the latest read is the abandoned one and does
-//!   not count, even if it has a finish date; earlier finished reads do.
-//! - A read's pages come from its own edition, then the entry's edition, then
-//!   the book. An audiobook edition adds no pages.
-//! - Days to finish need both dates, finish on or after start. A book started
-//!   and finished on the same day took one day.
+//! - **Reads.** Every finished read counts, so a re-read counts again, in
+//!   the period of its finish date: the over-time charts, the pages and
+//!   the pace count reads. A read with no finish date is not finished, and
+//!   one dated after today is a mistake that counts nowhere: every total
+//!   agrees with the years. On a Did Not Finish book, the latest read is the
+//!   abandoned one and does not count, even if it has a finish date;
+//!   earlier finished reads do.
+//! - **Books.** What the reader read (formats, lengths, authors, series,
+//!   publication years, the genres) counts each book finished in the period
+//!   once, as its latest read there.
+//! - A read's pages come from its own edition, then the entry's edition,
+//!   then the book. An audiobook edition adds no pages; its running time is
+//!   time listened.
+//! - Days to finish need both dates, finish on or after start. A book
+//!   started and finished on the same day took one day.
+//! - **Ratings** have no date: all time counts every rating in the library;
+//!   a year counts the ratings of the books finished in it.
+//! - **Shelves** are today's; a year adds how many books joined each shelf
+//!   in it (the date added).
+//! - **The backlog** (how long Want to read would take) goes at the past
+//!   365 days' pace, whatever the period: an all-time pace is dragged down
+//!   by years of old reads.
+//! - **Authors** listed are those with at least two books finished.
+//! - With fewer than [`FEW`] books in a period, the sections that describe a
+//!   mix (pace, formats, lengths, the genres) have too little to say.
 
-use std::collections::BTreeMap;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use chrono::Datelike;
-use hardcover_core::{Date, EditionSummary, Length, LibraryEntry, ReadSession, ReadingStatus};
+use chrono::{Datelike, NaiveDate};
+use hardcover_core::{
+    BookId, BookSummary, Date, EditionSummary, Length, LibraryEntry, ReadSession, ReadingStatus,
+    SeriesId,
+};
 
 use crate::format::SIDEBAR_SHELVES;
 
 /// The most years the stats keep for the per-year chart, ending with the
 /// latest. The chart shows the latest of them that fit its width
-/// ([`ReadingStats::recent_years`]).
+/// ([`OverTime::recent_years`]).
 pub const MAX_YEARS: i32 = 40;
 
-/// Books and pages finished in one year.
+/// A period needs this many books finished for the sections that describe
+/// a mix (pace, formats, lengths, genres and moods) to say anything.
+pub const FEW: u32 = 3;
+
+/// How many authors, series and compared books each list shows.
+pub const TOP: usize = 5;
+/// How many books each side of "against Hardcover" shows.
+pub const COMPARED: usize = 3;
+/// A book's Hardcover average counts against the reader's rating only when
+/// this many readers rated it.
+pub const MIN_HARDCOVER_RATINGS: u32 = 20;
+/// The least difference, in stars, that puts a book on either side.
+pub const MIN_DIFFERENCE: f32 = 0.5;
+/// Covers shown beside an author.
+pub const AUTHOR_COVERS: usize = 5;
+/// The first decade with a bar of its own; earlier years share "Earlier".
+pub const FIRST_DECADE: i32 = 1950;
+/// A release year before this is taken for another calendar (a Persian
+/// book's 1388, say) and counts as no year.
+pub const EARLIEST_YEAR: i32 = 1450;
+
+/// The page-count buckets: 1–100 … 601–1,000, 1,000+ (the last bucket's
+/// lower bound is exclusive).
+pub const LENGTH_BUCKETS: [u32; 7] = [100, 200, 300, 400, 500, 600, 1000];
+
+/// What the stats are about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Period {
+    #[default]
+    All,
+    Year(i32),
+}
+
+impl Period {
+    pub fn contains(self, day: Date) -> bool {
+        match self {
+            Self::All => true,
+            Self::Year(year) => day.year() == year,
+        }
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            Self::All => "All time".to_owned(),
+            Self::Year(year) => year.to_string(),
+        }
+    }
+}
+
+/// Books and pages finished in one year or month.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct YearTotals {
     pub year: i32,
@@ -32,118 +103,767 @@ pub struct YearTotals {
     pub pages: u32,
 }
 
-impl ReadingStats {
-    /// The latest `count` of [`Self::years`] (all of them when there are
-    /// fewer), and the books finished before the first of those.
-    pub fn recent_years(&self, count: usize) -> (&[YearTotals], u32) {
-        let cut = self.years.len().saturating_sub(count);
-        let (dropped, shown) = self.years.split_at(cut);
-        let earlier = self.earlier_books + dropped.iter().map(|y| y.books).sum::<u32>();
-        (shown, earlier)
+/// Reading over time: per year for all time, per month for a year.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OverTime {
+    /// Consecutive years, oldest first, from the first finish (at most
+    /// [`MAX_YEARS`] back) to this year, and the finished reads before the
+    /// first (`year` is the first's). Empty without a finished read.
+    Years {
+        years: Vec<YearTotals>,
+        earlier: YearTotals,
+    },
+    /// January to December; `year` is the period's.
+    Months { year: i32, months: [YearTotals; 12] },
+}
+
+impl OverTime {
+    /// The latest `count` years (all of them when there are fewer), and the
+    /// books and pages finished before the first of those (its `year` is
+    /// the first's). Empty for a year.
+    pub fn recent_years(&self, count: usize) -> (&[YearTotals], YearTotals) {
+        match self {
+            Self::Years { years, earlier } => {
+                let cut = years.len().saturating_sub(count);
+                let (dropped, shown) = years.split_at(cut);
+                let earlier = YearTotals {
+                    year: shown.first().map_or(earlier.year, |y| y.year),
+                    books: earlier.books + dropped.iter().map(|y| y.books).sum::<u32>(),
+                    pages: earlier.pages + dropped.iter().map(|y| y.pages).sum::<u32>(),
+                };
+                (shown, earlier)
+            }
+            Self::Months { year, .. } => (
+                &[],
+                YearTotals {
+                    year: *year,
+                    ..Default::default()
+                },
+            ),
+        }
     }
+}
+
+/// A book and a figure about it: days, pages, a year.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BookFigure {
+    pub book: BookSummary,
+    pub value: u32,
+}
+
+/// The pace of a period.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pace {
+    /// Days the period has run: from the first finished read (all time) or
+    /// January 1 (a year) to today, or to December 31 of a past year.
+    pub days: u32,
+    pub reads: u32,
+    pub pages: u32,
+    /// Average days from starting a book to finishing it, over the reads
+    /// with both dates.
+    pub to_finish: Option<f64>,
+    pub quickest: Option<BookFigure>,
+    pub longest: Option<BookFigure>,
+    /// This year only: the books finished by December 31 at this pace.
+    pub forecast: Option<u32>,
+}
+
+impl Pace {
+    /// Days per book finished.
+    pub fn days_per_book(&self) -> f64 {
+        f64::from(self.days) / f64::from(self.reads.max(1))
+    }
+
+    /// Books finished per month (30.44 days).
+    pub fn books_per_month(&self) -> f64 {
+        f64::from(self.reads) * 30.44 / f64::from(self.days.max(1))
+    }
+
+    /// Pages read per day.
+    pub fn pages_per_day(&self) -> f64 {
+        f64::from(self.pages) / f64::from(self.days.max(1))
+    }
+}
+
+/// The ratings counted for the period.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Ratings {
+    pub count: u32,
+    pub average: Option<f64>,
+    /// Ratings per half star: index 0 is ½, index 9 is 5.
+    pub counts: [u32; 10],
+}
+
+/// The books finished in the period by the format of their latest read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Formats {
+    pub physical: u32,
+    pub ebook: u32,
+    pub audiobook: u32,
+    /// No edition chosen, or one that doesn't say.
+    pub unknown: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Lengths {
+    /// Books per [`LENGTH_BUCKETS`] bucket, then 1,000+.
+    pub buckets: [u32; 8],
+    /// Average pages over the books with a page count.
+    pub average: Option<u32>,
+    pub longest: Option<BookFigure>,
+    /// Books with no page count: audiobooks, and books with no length.
+    pub without: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuthorStats {
+    pub name: String,
+    pub books: u32,
+    /// The reader's own ratings of their books, on average.
+    pub average: Option<f64>,
+    /// Up to [`AUTHOR_COVERS`] of their books, the most recently finished
+    /// first.
+    pub books_shown: Vec<BookSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeriesStats {
+    pub id: Option<SeriesId>,
+    pub name: String,
+    pub books: u32,
+    pub pages: u32,
+    pub average: Option<f64>,
+    /// The book of the series with the lowest position: its cover.
+    pub lead: BookSummary,
+}
+
+/// A book the reader rated well away from Hardcover's average.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Compared {
+    pub book: BookSummary,
+    pub yours: f32,
+    pub hardcover: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reread {
+    pub book: BookSummary,
+    /// Finished reads up to the end of the period.
+    pub times: u32,
+}
+
+/// From adding a book to the library to finishing it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Wait {
+    /// The books measured: added before their first finish since.
+    pub measured: u32,
+    pub average_days: f64,
+    pub quickest: BookFigure,
+    pub longest: BookFigure,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Decades {
+    /// Books before [`FIRST_DECADE`].
+    pub earlier: u32,
+    /// Each decade from the first with a book (at least [`FIRST_DECADE`])
+    /// to the last, gaps included: (1990, 31) is the 1990s.
+    pub decades: Vec<(i32, u32)>,
+    /// No release year, or one taken for another calendar.
+    pub no_year: u32,
+    pub oldest: Option<BookFigure>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReadingStats {
+    pub period: Period,
     /// Books in the library, Ignored included.
-    pub books: usize,
-    /// Consecutive years, oldest first, from the first finish (at most
-    /// [`MAX_YEARS`] back) to this year. Empty without a finished read.
-    pub years: Vec<YearTotals>,
-    /// Finished reads before the first year in `years`.
-    pub earlier_books: u32,
-    pub this_year: YearTotals,
-    pub finished_reads: u32,
+    pub library_books: usize,
+    /// Finished reads in the period.
+    pub reads: u32,
+    /// The books finished in the period, each once, the latest finish first.
+    pub books: Vec<BookId>,
+    pub pages: u32,
+    pub seconds_listened: u64,
+    pub over_time: OverTime,
     /// Books on the Read shelf with no finished read, which no year can count.
     pub read_without_date: u32,
-    /// Ratings given, one per book.
-    pub ratings: u32,
-    pub average_rating: Option<f64>,
-    /// Ratings per half star: index 0 is ½, index 9 is 5.
-    pub rating_counts: [u32; 10],
-    /// Books per shelf, in sidebar order.
-    pub shelves: Vec<(ReadingStatus, usize)>,
-    /// Reads with both dates, which the average below covers.
-    pub timed_reads: u32,
-    pub average_days: Option<f64>,
+    pub ratings: Ratings,
+    /// `None` with fewer than [`FEW`] books.
+    pub pace: Option<Pace>,
+    pub formats: Formats,
+    pub lengths: Lengths,
+    /// Distinct authors of the books finished.
+    pub authors: usize,
+    pub top_authors: Vec<AuthorStats>,
+    /// The series with at least two books finished, most first.
+    pub series: Vec<SeriesStats>,
+    pub higher: Vec<Compared>,
+    pub lower: Vec<Compared>,
+    pub rereads: Vec<Reread>,
+    pub wait: Option<Wait>,
+    /// Reads finished in the 365 days to today, whatever the period: the
+    /// pace a backlog is measured at.
+    pub past_year_reads: u32,
+    pub decades: Decades,
+    /// Books per shelf today, in sidebar order, and for a year how many of
+    /// them were added in it.
+    pub shelves: Vec<(ReadingStatus, usize, Option<usize>)>,
 }
 
 impl ReadingStats {
     pub fn is_empty(&self) -> bool {
-        self.books == 0
+        self.library_books == 0
+    }
+
+    /// Fewer than [`FEW`] books finished in the period.
+    pub fn is_few(&self) -> bool {
+        self.distinct_books() < FEW
+    }
+
+    pub fn distinct_books(&self) -> u32 {
+        u32::try_from(self.books.len()).unwrap_or(u32::MAX)
+    }
+
+    pub fn hours_listened(&self) -> u64 {
+        (self.seconds_listened + 1800) / 3600
+    }
+
+    pub fn shelf(&self, status: ReadingStatus) -> usize {
+        self.shelves
+            .iter()
+            .find(|(s, _, _)| *s == status)
+            .map_or(0, |(_, n, _)| *n)
     }
 }
 
-pub fn compute(entries: &[LibraryEntry], today: Date) -> ReadingStats {
-    let mut per_year: BTreeMap<i32, YearTotals> = BTreeMap::new();
-    let mut finished_reads = 0;
-    let mut read_without_date = 0;
-    let mut days_total = 0.0;
-    let mut timed_reads = 0;
-    for entry in entries {
-        if entry.status == ReadingStatus::Read && counted_reads(entry).next().is_none() {
-            read_without_date += 1;
-        }
-        let finished = counted_reads(entry)
-            .filter(|r| r.finished_at.is_some_and(|d| d.year() <= today.year()));
-        for read in finished {
-            let Some(done) = read.finished_at else {
-                continue;
-            };
-            finished_reads += 1;
-            let year = per_year.entry(done.year()).or_insert(YearTotals {
-                year: done.year(),
-                ..Default::default()
-            });
-            year.books += 1;
-            year.pages += read_pages(entry, read).unwrap_or(0);
-            if let Some(started) = read.started_at
-                && done >= started
-            {
-                days_total += f64::from(done.num_days_from_ce() - started.num_days_from_ce() + 1);
-                timed_reads += 1;
-            }
+/// The years with a finished read, newest first: the period select's years.
+pub fn finish_years(entries: &[LibraryEntry], today: Date) -> Vec<i32> {
+    let mut years: Vec<i32> = entries
+        .iter()
+        .flat_map(counted_reads)
+        .filter_map(|r| r.finished_at)
+        .filter(|d| *d <= today)
+        .map(|d| d.year())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    years.sort_unstable_by_key(|y| Reverse(*y));
+    years
+}
+
+/// One finished read in the period, with its entry.
+struct Finish<'a> {
+    entry: &'a LibraryEntry,
+    read: &'a ReadSession,
+    done: Date,
+}
+
+pub fn compute(entries: &[LibraryEntry], today: Date, period: Period) -> ReadingStats {
+    // Every counted finished read up to today, in any period.
+    let all: Vec<Finish> = entries
+        .iter()
+        .flat_map(|entry| {
+            counted_reads(entry).filter_map(move |read| {
+                read.finished_at
+                    .filter(|d| *d <= today)
+                    .map(|done| Finish { entry, read, done })
+            })
+        })
+        .collect();
+    let finishes: Vec<&Finish> = all.iter().filter(|f| period.contains(f.done)).collect();
+
+    // Each book once, as its latest finish in the period, the latest first.
+    let mut latest: HashMap<BookId, &Finish> = HashMap::new();
+    for f in &finishes {
+        let slot = latest.entry(f.entry.book.id).or_insert(f);
+        if (f.done, f.read.id) > (slot.done, slot.read.id) {
+            *slot = f;
         }
     }
-
-    let this_year = per_year.get(&today.year()).copied().unwrap_or(YearTotals {
-        year: today.year(),
-        ..Default::default()
+    let mut books: Vec<&Finish> = latest.into_values().collect();
+    books.sort_by(|a, b| {
+        (b.done, b.read.id)
+            .cmp(&(a.done, a.read.id))
+            .then(a.entry.book.id.get().cmp(&b.entry.book.id.get()))
     });
-    let (years, earlier_books) = year_range(&per_year, today.year());
 
-    let mut rating_counts = [0; 10];
-    let mut rating_sum = 0.0;
-    let mut ratings = 0;
-    for rating in entries.iter().filter_map(|e| e.rating) {
+    let reads = u32::try_from(finishes.len()).unwrap_or(u32::MAX);
+    let pages = finishes
+        .iter()
+        .map(|f| read_pages(f.entry, f.read).unwrap_or(0))
+        .sum();
+    let seconds_listened = finishes
+        .iter()
+        .filter_map(|f| read_seconds(f.entry, f.read))
+        .map(u64::from)
+        .sum();
+    let read_without_date = u32::try_from(
+        entries
+            .iter()
+            .filter(|e| e.status == ReadingStatus::Read && counted_reads(e).next().is_none())
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+
+    let few = books.len() < FEW as usize;
+    ReadingStats {
+        period,
+        library_books: entries.len(),
+        reads,
+        books: books.iter().map(|f| f.entry.book.id).collect(),
+        pages,
+        seconds_listened,
+        over_time: over_time(&all, today, period),
+        read_without_date,
+        ratings: ratings(entries, &books, period),
+        pace: (!few).then(|| pace(&all, &finishes, today, period, pages)),
+        formats: formats(&books),
+        lengths: lengths(&books),
+        authors: books
+            .iter()
+            .flat_map(|f| f.entry.book.authors.iter())
+            .collect::<HashSet<_>>()
+            .len(),
+        top_authors: top_authors(&books),
+        series: series(&books),
+        higher: compared(&books, true),
+        lower: compared(&books, false),
+        rereads: rereads(&all, &books),
+        wait: wait(&all, &books, period),
+        past_year_reads: u32::try_from(
+            all.iter()
+                .filter(|f| days_between(f.done, today) < 365)
+                .count(),
+        )
+        .unwrap_or(u32::MAX),
+        decades: decades(&books, today),
+        shelves: SIDEBAR_SHELVES
+            .iter()
+            .map(|&s| {
+                let on = entries.iter().filter(|e| e.status == s);
+                let added = match period {
+                    Period::All => None,
+                    Period::Year(_) => Some(
+                        on.clone()
+                            .filter(|e| e.date_added.is_some_and(|d| period.contains(d)))
+                            .count(),
+                    ),
+                };
+                (s, on.count(), added)
+            })
+            .collect(),
+    }
+}
+
+fn over_time(all: &[Finish], today: Date, period: Period) -> OverTime {
+    match period {
+        Period::All => {
+            let mut per_year: BTreeMap<i32, YearTotals> = BTreeMap::new();
+            for f in all {
+                let year = per_year.entry(f.done.year()).or_insert(YearTotals {
+                    year: f.done.year(),
+                    ..Default::default()
+                });
+                year.books += 1;
+                year.pages += read_pages(f.entry, f.read).unwrap_or(0);
+            }
+            let (years, earlier) = year_range(&per_year, today.year());
+            OverTime::Years { years, earlier }
+        }
+        Period::Year(year) => {
+            let mut months = [YearTotals {
+                year,
+                ..Default::default()
+            }; 12];
+            for f in all.iter().filter(|f| f.done.year() == year) {
+                let month = &mut months[f.done.month0() as usize];
+                month.books += 1;
+                month.pages += read_pages(f.entry, f.read).unwrap_or(0);
+            }
+            OverTime::Months { year, months }
+        }
+    }
+}
+
+fn ratings(entries: &[LibraryEntry], books: &[&Finish], period: Period) -> Ratings {
+    let rated: Vec<f32> = match period {
+        Period::All => entries
+            .iter()
+            .filter_map(|e| e.rating)
+            .map(|r| r.value())
+            .collect(),
+        Period::Year(_) => books
+            .iter()
+            .filter_map(|f| f.entry.rating)
+            .map(|r| r.value())
+            .collect(),
+    };
+    let mut counts = [0; 10];
+    for value in &rated {
         #[expect(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
             reason = "Rating permits exactly ten half-star values; doubling gives the bin number in 1..=10"
         )]
-        let half_stars = (rating.value() * 2.0).round() as usize;
-        rating_counts[half_stars.clamp(1, 10) - 1] += 1;
-        rating_sum += f64::from(rating.value());
-        ratings += 1;
+        let half_stars = (value * 2.0).round() as usize;
+        counts[half_stars.clamp(1, 10) - 1] += 1;
     }
+    let count = u32::try_from(rated.len()).unwrap_or(u32::MAX);
+    Ratings {
+        count,
+        average: (count > 0)
+            .then(|| rated.iter().map(|v| f64::from(*v)).sum::<f64>() / f64::from(count)),
+        counts,
+    }
+}
 
-    ReadingStats {
-        books: entries.len(),
-        years,
-        earlier_books,
-        this_year,
-        finished_reads,
-        read_without_date,
-        ratings,
-        average_rating: (ratings > 0).then(|| rating_sum / f64::from(ratings)),
-        rating_counts,
-        shelves: SIDEBAR_SHELVES
-            .iter()
-            .map(|&s| (s, entries.iter().filter(|e| e.status == s).count()))
-            .collect(),
-        timed_reads,
-        average_days: (timed_reads > 0).then(|| days_total / f64::from(timed_reads)),
+fn days_between(from: Date, to: Date) -> i32 {
+    to.num_days_from_ce() - from.num_days_from_ce()
+}
+
+fn pace(all: &[Finish], finishes: &[&Finish], today: Date, period: Period, pages: u32) -> Pace {
+    let (from, to) = match period {
+        Period::All => {
+            let first = all
+                .iter()
+                .map(|f| f.read.started_at.filter(|s| *s <= f.done).unwrap_or(f.done))
+                .min()
+                .unwrap_or(today);
+            (first, today)
+        }
+        Period::Year(year) => {
+            let jan1 = NaiveDate::from_ymd_opt(year, 1, 1).unwrap_or(today);
+            let dec31 = NaiveDate::from_ymd_opt(year, 12, 31).unwrap_or(today);
+            (jan1, dec31.min(today))
+        }
+    };
+    let days = u32::try_from(days_between(from, to) + 1)
+        .unwrap_or(1)
+        .max(1);
+    let reads = u32::try_from(finishes.len()).unwrap_or(u32::MAX);
+
+    let mut timed: Vec<(&Finish, u32)> = finishes
+        .iter()
+        .filter_map(|f| {
+            let started = f.read.started_at?;
+            let took = days_between(started, f.done);
+            (took >= 0).then(|| (*f, u32::try_from(took + 1).unwrap_or(1)))
+        })
+        .collect();
+    let to_finish = (!timed.is_empty())
+        .then(|| timed.iter().map(|(_, d)| f64::from(*d)).sum::<f64>() / timed.len() as f64);
+    // Ties go to the latest finish.
+    timed.sort_by_key(|(f, d)| (*d, Reverse(f.done), Reverse(f.read.id)));
+    let figure = |(f, d): &(&Finish, u32)| BookFigure {
+        book: f.entry.book.clone(),
+        value: *d,
+    };
+    let quickest = timed.first().map(figure);
+    let longest = timed
+        .iter()
+        .max_by_key(|(f, d)| (*d, f.done, f.read.id))
+        .map(figure);
+    let forecast = match period {
+        Period::Year(year) if year == today.year() => {
+            let dec31 = NaiveDate::from_ymd_opt(year, 12, 31).unwrap_or(today);
+            let in_year = f64::from(dec31.ordinal());
+            (today < dec31).then(|| {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "a small non-negative count of books"
+                )]
+                let books = (f64::from(reads) * in_year / f64::from(days)).round() as u32;
+                books
+            })
+        }
+        _ => None,
+    };
+    Pace {
+        days,
+        reads,
+        pages,
+        to_finish,
+        quickest,
+        longest,
+        forecast,
     }
+}
+
+fn formats(books: &[&Finish]) -> Formats {
+    let mut formats = Formats::default();
+    for f in books {
+        let edition = f.read.edition.as_ref().or(f.entry.edition.as_ref());
+        match edition {
+            Some(e) if e.is_audiobook() => formats.audiobook += 1,
+            Some(e) => match e.reading_format_id {
+                Some(1) => formats.physical += 1,
+                Some(4) => formats.ebook += 1,
+                _ => formats.unknown += 1,
+            },
+            None => formats.unknown += 1,
+        }
+    }
+    formats
+}
+
+fn lengths(books: &[&Finish]) -> Lengths {
+    let mut lengths = Lengths::default();
+    let mut total = 0u64;
+    let mut counted = 0u64;
+    let mut longest: Option<(&Finish, u32)> = None;
+    for f in books {
+        let Some(pages) = read_pages(f.entry, f.read) else {
+            lengths.without += 1;
+            continue;
+        };
+        let bucket = LENGTH_BUCKETS
+            .iter()
+            .position(|top| pages <= *top)
+            .unwrap_or(LENGTH_BUCKETS.len());
+        lengths.buckets[bucket] += 1;
+        total += u64::from(pages);
+        counted += 1;
+        if longest.is_none_or(|(_, p)| pages > p) {
+            longest = Some((f, pages));
+        }
+    }
+    lengths.average =
+        (counted > 0).then(|| u32::try_from((total + counted / 2) / counted).unwrap_or(u32::MAX));
+    lengths.longest = longest.map(|(f, pages)| BookFigure {
+        book: f.entry.book.clone(),
+        value: pages,
+    });
+    lengths
+}
+
+fn average(ratings: impl Iterator<Item = f32>) -> Option<f64> {
+    let (sum, n) = ratings.fold((0.0, 0u32), |(s, n), r| (s + f64::from(r), n + 1));
+    (n > 0).then(|| sum / f64::from(n))
+}
+
+/// The authors with the most books finished, at least two each; ties by
+/// the reader's average rating, then by name.
+fn top_authors(books: &[&Finish]) -> Vec<AuthorStats> {
+    let mut by_author: HashMap<&str, Vec<&Finish>> = HashMap::new();
+    for f in books {
+        for author in &f.entry.book.authors {
+            by_author.entry(author.as_str()).or_default().push(f);
+        }
+    }
+    let mut authors: Vec<AuthorStats> = by_author
+        .into_iter()
+        .map(|(name, books)| AuthorStats {
+            name: name.to_owned(),
+            books: u32::try_from(books.len()).unwrap_or(u32::MAX),
+            average: average(
+                books
+                    .iter()
+                    .filter_map(|f| f.entry.rating)
+                    .map(|r| r.value()),
+            ),
+            books_shown: books
+                .iter()
+                .take(AUTHOR_COVERS)
+                .map(|f| f.entry.book.clone())
+                .collect(),
+        })
+        .filter(|a| a.books >= 2)
+        .collect();
+    authors.sort_by(|a, b| {
+        b.books
+            .cmp(&a.books)
+            .then(
+                b.average
+                    .unwrap_or(0.0)
+                    .total_cmp(&a.average.unwrap_or(0.0)),
+            )
+            .then(a.name.cmp(&b.name))
+    });
+    authors.truncate(TOP);
+    authors
+}
+
+/// The series with at least two books finished, the most books first, then
+/// the most pages, then by name. A compilation counts for none.
+fn series(books: &[&Finish]) -> Vec<SeriesStats> {
+    type Books<'a> = Vec<(&'a Finish<'a>, Option<f32>)>;
+    let mut by_series: HashMap<(Option<SeriesId>, &str), Books> = HashMap::new();
+    for f in books {
+        for s in f.entry.series.iter().filter(|s| s.counts_in_series()) {
+            by_series
+                .entry((s.id, s.name.as_str()))
+                .or_default()
+                .push((f, s.position));
+        }
+    }
+    let mut series: Vec<SeriesStats> = by_series
+        .into_iter()
+        .filter(|(_, books)| books.len() >= 2)
+        .map(|((id, name), books)| {
+            let lead = books
+                .iter()
+                .min_by(|(_, a), (_, b)| a.unwrap_or(f32::MAX).total_cmp(&b.unwrap_or(f32::MAX)))
+                .map(|(f, _)| f.entry.book.clone())
+                .unwrap_or_else(|| books[0].0.entry.book.clone());
+            SeriesStats {
+                id,
+                name: name.to_owned(),
+                books: u32::try_from(books.len()).unwrap_or(u32::MAX),
+                pages: books
+                    .iter()
+                    .map(|(f, _)| read_pages(f.entry, f.read).unwrap_or(0))
+                    .sum(),
+                average: average(
+                    books
+                        .iter()
+                        .filter_map(|(f, _)| f.entry.rating)
+                        .map(|r| r.value()),
+                ),
+                lead,
+            }
+        })
+        .collect();
+    series.sort_by(|a, b| {
+        b.books
+            .cmp(&a.books)
+            .then(b.pages.cmp(&a.pages))
+            .then(a.name.cmp(&b.name))
+    });
+    series.truncate(TOP);
+    series
+}
+
+/// The books the reader rated at least [`MIN_DIFFERENCE`] above (`higher`)
+/// or below Hardcover's average, among those at least
+/// [`MIN_HARDCOVER_RATINGS`] readers rated; the widest gap first.
+fn compared(books: &[&Finish], higher: bool) -> Vec<Compared> {
+    let mut found: Vec<Compared> = books
+        .iter()
+        .filter_map(|f| {
+            let yours = f.entry.rating?.value();
+            let book = &f.entry.book;
+            let hardcover = book.average_rating.filter(|r| *r > 0.0)?;
+            if book.ratings_count.unwrap_or(0) < MIN_HARDCOVER_RATINGS {
+                return None;
+            }
+            let gap = yours - hardcover;
+            let side = if higher { gap } else { -gap };
+            (side >= MIN_DIFFERENCE).then(|| Compared {
+                book: book.clone(),
+                yours,
+                hardcover,
+            })
+        })
+        .collect();
+    found.sort_by(|a, b| {
+        let gap = |c: &Compared| (c.yours - c.hardcover).abs();
+        gap(b).total_cmp(&gap(a))
+    });
+    found.truncate(COMPARED);
+    found
+}
+
+/// The books finished in the period that were finished before too; how many
+/// times, up to the period's end. The most times first, then the latest.
+fn rereads(all: &[Finish], books: &[&Finish]) -> Vec<Reread> {
+    let mut found: Vec<Reread> = books
+        .iter()
+        .filter_map(|f| {
+            let times = all
+                .iter()
+                .filter(|o| o.entry.book.id == f.entry.book.id && o.done <= f.done)
+                .count();
+            (times >= 2).then(|| Reread {
+                book: f.entry.book.clone(),
+                times: u32::try_from(times).unwrap_or(u32::MAX),
+            })
+        })
+        .collect();
+    // `books` is the latest first already: a stable sort keeps that.
+    found.sort_by_key(|r| Reverse(r.times));
+    found
+}
+
+/// From the day each book finished in the period joined the library to its
+/// first finish since, when that finish is in the period. A book added only
+/// once it had been read doesn't count.
+fn wait(all: &[Finish], books: &[&Finish], period: Period) -> Option<Wait> {
+    let mut waits: Vec<(&Finish, u32)> = books
+        .iter()
+        .filter_map(|f| {
+            let added = f.entry.date_added?;
+            let first = all
+                .iter()
+                .filter(|o| o.entry.book.id == f.entry.book.id && o.done >= added)
+                .min_by_key(|o| (o.done, o.read.id))?;
+            period.contains(first.done).then(|| {
+                (
+                    first,
+                    u32::try_from(days_between(added, first.done)).unwrap_or(0),
+                )
+            })
+        })
+        .collect();
+    if waits.is_empty() {
+        return None;
+    }
+    let measured = u32::try_from(waits.len()).unwrap_or(u32::MAX);
+    let average_days = waits.iter().map(|(_, d)| f64::from(*d)).sum::<f64>() / f64::from(measured);
+    waits.sort_by_key(|(f, d)| (*d, Reverse(f.done)));
+    let figure = |(f, d): &(&Finish, u32)| BookFigure {
+        book: f.entry.book.clone(),
+        value: *d,
+    };
+    let quickest = figure(&waits[0]);
+    let longest = waits
+        .iter()
+        .max_by_key(|(f, d)| (*d, f.done))
+        .map(figure)
+        .unwrap_or_else(|| quickest.clone());
+    Some(Wait {
+        measured,
+        average_days,
+        quickest,
+        longest,
+    })
+}
+
+fn decades(books: &[&Finish], today: Date) -> Decades {
+    let mut decades = Decades::default();
+    let mut per: BTreeMap<i32, u32> = BTreeMap::new();
+    let mut oldest: Option<(&Finish, i32)> = None;
+    for f in books {
+        let Some(year) = f
+            .entry
+            .book
+            .release_year
+            .filter(|y| (EARLIEST_YEAR..=today.year() + 1).contains(y))
+        else {
+            decades.no_year += 1;
+            continue;
+        };
+        if year < FIRST_DECADE {
+            decades.earlier += 1;
+        } else {
+            *per.entry(year - year.rem_euclid(10)).or_default() += 1;
+        }
+        if oldest.is_none_or(|(_, y)| year < y) {
+            oldest = Some((f, year));
+        }
+    }
+    if let (Some(first), Some(last)) = (per.keys().next().copied(), per.keys().last().copied()) {
+        decades.decades = (first..=last)
+            .step_by(10)
+            .map(|d| (d, per.get(&d).copied().unwrap_or(0)))
+            .collect();
+    }
+    decades.oldest = oldest.map(|(f, year)| BookFigure {
+        book: f.entry.book.clone(),
+        value: u32::try_from(year).unwrap_or(0),
+    });
+    decades
 }
 
 /// The entry's finished reads that count: all of them, except the latest read
@@ -166,26 +886,47 @@ fn counted_reads(entry: &LibraryEntry) -> impl Iterator<Item = &ReadSession> {
         .filter(move |r| r.is_finished() && Some(r.id) != abandoned)
 }
 
-/// The read's page count, from the first of its edition, the entry's edition
-/// and the book that has a length. `None` for an audiobook or no length.
-fn read_pages(entry: &LibraryEntry, read: &ReadSession) -> Option<u32> {
-    let length = read
-        .edition
+/// The read's length, from the first of its edition, the entry's edition
+/// and the book that has one.
+fn read_length(entry: &LibraryEntry, read: &ReadSession) -> Option<Length> {
+    read.edition
         .as_ref()
         .and_then(EditionSummary::length)
         .or_else(|| entry.edition.as_ref().and_then(EditionSummary::length))
-        .or_else(|| entry.book.pages.filter(|p| *p > 0).map(Length::Pages));
-    match length {
+        .or_else(|| entry.book.pages.filter(|p| *p > 0).map(Length::Pages))
+}
+
+/// The read's page count. `None` for an audiobook or no length.
+fn read_pages(entry: &LibraryEntry, read: &ReadSession) -> Option<u32> {
+    match read_length(entry, read) {
         Some(Length::Pages(pages)) => Some(pages),
         _ => None,
     }
 }
 
+/// An audiobook read's running time.
+fn read_seconds(entry: &LibraryEntry, read: &ReadSession) -> Option<u32> {
+    match read_length(entry, read) {
+        Some(Length::Seconds(seconds)) => Some(seconds),
+        _ => None,
+    }
+}
+
 /// Consecutive years ending this year, at most [`MAX_YEARS`] of them, and the
-/// books finished before the first one. `per_year` holds no later year.
-fn year_range(per_year: &BTreeMap<i32, YearTotals>, this_year: i32) -> (Vec<YearTotals>, u32) {
+/// books and pages finished before the first one. `per_year` holds no later
+/// year.
+fn year_range(
+    per_year: &BTreeMap<i32, YearTotals>,
+    this_year: i32,
+) -> (Vec<YearTotals>, YearTotals) {
     let Some(&first) = per_year.keys().next() else {
-        return (Vec::new(), 0);
+        return (
+            Vec::new(),
+            YearTotals {
+                year: this_year,
+                ..Default::default()
+            },
+        );
     };
     let last = this_year;
     let first = first.max(last - MAX_YEARS + 1);
@@ -197,271 +938,19 @@ fn year_range(per_year: &BTreeMap<i32, YearTotals>, this_year: i32) -> (Vec<Year
             })
         })
         .collect();
-    let earlier = per_year.range(..first).map(|(_, y)| y.books).sum();
+    let earlier = per_year.range(..first).fold(
+        YearTotals {
+            year: first,
+            ..Default::default()
+        },
+        |acc, (_, y)| YearTotals {
+            books: acc.books + y.books,
+            pages: acc.pages + y.pages,
+            ..acc
+        },
+    );
     (years, earlier)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use hardcover_core::{BookId, BookSummary, EditionId, Rating, ReadId, UserBookId, UserId};
-
-    fn date(s: &str) -> Date {
-        Date::parse_from_str(s, "%Y-%m-%d").unwrap()
-    }
-
-    const TODAY: &str = "2026-11-19";
-
-    fn entry(id: i64, status: ReadingStatus, pages: Option<u32>) -> LibraryEntry {
-        let mut book = BookSummary::new(BookId::new(100 + id), format!("Book {id}"));
-        book.pages = pages;
-        LibraryEntry::new(UserBookId::new(id), UserId::new(1), book, status)
-    }
-
-    fn read(id: i64, started: Option<&str>, finished: Option<&str>) -> ReadSession {
-        let mut r = ReadSession::new(ReadId::new(id));
-        r.started_at = started.map(date);
-        r.finished_at = finished.map(date);
-        r
-    }
-
-    fn edition(pages: Option<u32>, seconds: Option<u32>) -> EditionSummary {
-        let mut e = EditionSummary::new(EditionId::new(7));
-        e.pages = pages;
-        e.audio_seconds = seconds;
-        e
-    }
-
-    #[test]
-    fn an_empty_library_has_no_stats() {
-        let stats = compute(&[], date(TODAY));
-        assert!(stats.is_empty());
-        assert_eq!(stats.years, []);
-        assert_eq!(
-            stats.this_year,
-            YearTotals {
-                year: 2026,
-                books: 0,
-                pages: 0
-            }
-        );
-        assert_eq!(stats.average_rating, None);
-        assert_eq!(stats.average_days, None);
-        assert!(stats.shelves.iter().all(|(_, n)| *n == 0));
-    }
-
-    #[test]
-    fn rereads_count_in_the_year_they_finished() {
-        let mut dune = entry(1, ReadingStatus::Read, Some(600));
-        dune.reads = vec![
-            read(10, Some("2026-01-01"), Some("2026-01-10")),
-            read(11, Some("2024-03-01"), Some("2024-03-03")),
-            read(12, Some("2026-05-01"), None),
-        ];
-        let stats = compute(&[dune], date(TODAY));
-        assert_eq!(stats.finished_reads, 2);
-        assert_eq!(
-            stats.this_year,
-            YearTotals {
-                year: 2026,
-                books: 1,
-                pages: 600
-            }
-        );
-        let years: Vec<(i32, u32)> = stats.years.iter().map(|y| (y.year, y.books)).collect();
-        assert_eq!(years, vec![(2024, 1), (2025, 0), (2026, 1)], "gaps filled");
-    }
-
-    #[test]
-    fn an_open_read_is_the_abandoned_one_for_a_dnf_book() {
-        let mut e = entry(1, ReadingStatus::DidNotFinish, Some(100));
-        e.reads = vec![
-            read(2, None, None),
-            read(1, Some("2020-01-01"), Some("2020-01-20")),
-        ];
-        let stats = compute(&[e], date(TODAY));
-        assert_eq!(stats.finished_reads, 1);
-    }
-
-    #[test]
-    fn a_finish_dated_in_a_later_year_does_not_move_the_chart() {
-        let mut e = entry(1, ReadingStatus::Read, None);
-        e.reads = vec![
-            read(1, None, Some("2025-03-01")),
-            read(2, None, Some("2062-03-01")),
-        ];
-        let stats = compute(&[e], date(TODAY));
-        assert_eq!(stats.years.last().map(|y| y.year), Some(2026));
-        assert_eq!(
-            stats.years.first().map(|y| (y.year, y.books)),
-            Some((2025, 1))
-        );
-        // Nor any total: they all agree with the years.
-        assert_eq!(stats.finished_reads, 1);
-        assert_eq!(stats.timed_reads, 0);
-        assert_eq!(stats.read_without_date, 0);
-
-        // A Read book finished only in a later year counts nowhere, and it
-        // has a finish date, so it isn't one without.
-        let mut later = entry(2, ReadingStatus::Read, Some(300));
-        later.reads = vec![read(3, Some("2062-02-01"), Some("2062-03-01"))];
-        let stats = compute(&[later], date(TODAY));
-        assert_eq!(stats.finished_reads, 0);
-        assert_eq!(stats.timed_reads, 0);
-        assert_eq!(stats.read_without_date, 0);
-        assert!(stats.years.is_empty());
-    }
-
-    #[test]
-    fn a_finished_reread_on_another_shelf_still_counts() {
-        let mut e = entry(1, ReadingStatus::CurrentlyReading, Some(100));
-        e.reads = vec![
-            read(2, Some("2026-10-01"), None),
-            read(1, None, Some("2025-02-01")),
-        ];
-        let stats = compute(&[e], date(TODAY));
-        assert_eq!(stats.finished_reads, 1);
-        assert_eq!(stats.read_without_date, 0);
-    }
-
-    #[test]
-    fn pages_come_from_the_read_then_the_entry_then_the_book() {
-        let mut a = entry(1, ReadingStatus::Read, Some(300));
-        let mut from_read = read(1, None, Some("2026-02-01"));
-        from_read.edition = Some(edition(Some(250), None));
-        a.edition = Some(edition(Some(400), None));
-        a.reads = vec![from_read, read(2, None, Some("2026-03-01"))];
-
-        let mut b = entry(2, ReadingStatus::Read, Some(320));
-        b.reads = vec![read(3, None, Some("2026-04-01"))];
-
-        // An audiobook read adds no pages, even though the book has some.
-        let mut c = entry(3, ReadingStatus::Read, Some(500));
-        let mut listened = read(4, None, Some("2026-05-01"));
-        listened.edition = Some(edition(None, Some(36_000)));
-        c.reads = vec![listened];
-
-        let stats = compute(&[a, b, c], date(TODAY));
-        assert_eq!(stats.this_year.books, 4);
-        assert_eq!(stats.this_year.pages, 250 + 400 + 320);
-    }
-
-    #[test]
-    fn days_to_finish_needs_both_dates_in_order() {
-        let mut e = entry(1, ReadingStatus::Read, None);
-        e.reads = vec![
-            // 10 days, counting the first and the last.
-            read(1, Some("2026-01-01"), Some("2026-01-10")),
-            // The same day: one day.
-            read(2, Some("2026-02-01"), Some("2026-02-01")),
-            // Counted for its year, not for the average.
-            read(3, None, Some("2001-06-01")),
-            read(4, Some("2026-03-05"), Some("2026-03-01")),
-        ];
-        let stats = compute(&[e], date(TODAY));
-        assert_eq!(stats.finished_reads, 4);
-        assert_eq!(stats.timed_reads, 2);
-        assert_eq!(stats.average_days, Some(5.5));
-    }
-
-    #[test]
-    fn the_abandoned_read_of_a_did_not_finish_book_does_not_count() {
-        let mut e = entry(1, ReadingStatus::DidNotFinish, Some(200));
-        e.reads = vec![
-            read(1, Some("2020-01-01"), Some("2020-01-20")),
-            // Hardcover may date the day the reader gave up.
-            read(2, Some("2026-04-01"), Some("2026-04-25")),
-        ];
-        let stats = compute(&[e], date(TODAY));
-        assert_eq!(stats.finished_reads, 1);
-        assert_eq!(stats.this_year.books, 0);
-    }
-
-    #[test]
-    fn read_books_without_a_finish_date_are_reported() {
-        let mut dated = entry(1, ReadingStatus::Read, None);
-        dated.reads = vec![read(1, None, Some("2026-01-01"))];
-        let mut undated = entry(2, ReadingStatus::Read, None);
-        undated.reads = vec![read(2, Some("2026-01-01"), None)];
-        let bare = entry(3, ReadingStatus::Read, None);
-        let stats = compute(&[dated, undated, bare], date(TODAY));
-        assert_eq!(stats.read_without_date, 2);
-        assert_eq!(stats.finished_reads, 1);
-        assert_eq!(stats.shelves[2], (ReadingStatus::Read, 3));
-    }
-
-    #[test]
-    fn the_chart_keeps_the_latest_years() {
-        let mut e = entry(1, ReadingStatus::Read, None);
-        e.reads = vec![
-            read(1, None, Some("2001-06-01")),
-            read(2, None, Some("2012-12-20")),
-            read(3, None, Some("2019-02-10")),
-            read(4, None, Some("2026-10-12")),
-        ];
-        let stats = compute(&[e], date(TODAY));
-        // Every year from the first finish is kept, 2001 to 2026.
-        assert_eq!(stats.years.len(), 26);
-        assert_eq!(stats.earlier_books, 0);
-        // A chart with room for 12 shows 2015 to 2026, and counts the rest.
-        let (years, earlier) = stats.recent_years(12);
-        assert_eq!(years.len(), 12);
-        assert_eq!(years.first().unwrap().year, 2015);
-        assert_eq!(years.last().unwrap().year, 2026);
-        assert_eq!(earlier, 2);
-        let charted: u32 = years.iter().map(|y| y.books).sum();
-        assert_eq!(charted + earlier, stats.finished_reads);
-        // A wider one reaches back to 2010; one wider than the data, all.
-        let (years, earlier) = stats.recent_years(17);
-        assert_eq!((years.first().unwrap().year, earlier), (2010, 1));
-        let (years, earlier) = stats.recent_years(40);
-        assert_eq!((years.len(), earlier), (26, 0));
-    }
-
-    #[test]
-    fn the_years_kept_stop_at_the_maximum() {
-        let mut e = entry(1, ReadingStatus::Read, None);
-        e.reads = vec![
-            read(1, None, Some("1970-06-01")),
-            read(2, None, Some("2026-10-12")),
-        ];
-        let stats = compute(&[e], date(TODAY));
-        assert_eq!(stats.years.len(), usize::try_from(MAX_YEARS).unwrap());
-        assert_eq!(stats.years.first().unwrap().year, 1987);
-        assert_eq!(stats.earlier_books, 1);
-        assert_eq!(stats.recent_years(100).1, 1);
-    }
-
-    #[test]
-    fn the_range_reaches_this_year_without_a_finish_in_it() {
-        let mut e = entry(1, ReadingStatus::Read, None);
-        e.reads = vec![read(1, None, Some("2024-06-01"))];
-        let stats = compute(&[e], date(TODAY));
-        let years: Vec<i32> = stats.years.iter().map(|y| y.year).collect();
-        assert_eq!(years, vec![2024, 2025, 2026]);
-    }
-
-    #[test]
-    fn ratings_average_and_spread_by_half_star() {
-        let rated = |id, value| {
-            let mut e = entry(id, ReadingStatus::Read, None);
-            e.rating = Rating::new(value);
-            e
-        };
-        let stats = compute(
-            &[
-                rated(1, 5.0),
-                rated(2, 4.5),
-                rated(3, 4.5),
-                rated(4, 0.5),
-                entry(5, ReadingStatus::WantToRead, None),
-            ],
-            date(TODAY),
-        );
-        assert_eq!(stats.ratings, 4);
-        assert_eq!(stats.average_rating, Some(3.625));
-        assert_eq!(stats.rating_counts, [1, 0, 0, 0, 0, 0, 0, 0, 2, 1]);
-        assert_eq!(stats.shelves[1], (ReadingStatus::WantToRead, 1));
-        assert_eq!(stats.books, 5);
-    }
-}
+mod tests;

@@ -415,6 +415,14 @@ impl LibraryView {
         cx.notify();
     }
 
+    /// Filters the shelf shown by `pick` alone: the text filter clears, so
+    /// the chips are all that narrow it.
+    pub fn set_pick(&mut self, pick: TagPick, window: &mut Window, cx: &mut Context<Self>) {
+        self.filter.update(cx, |f, cx| f.set_value("", window, cx));
+        // Its `PickChanged` works the rows out again.
+        self.bar.update(cx, |bar, cx| bar.set_pick(pick, cx));
+    }
+
     /// Fetches the pane's book again where it is stale ([`crate::resource`]).
     pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
         self.detail

@@ -272,6 +272,8 @@ selection fill or a nested surface its own radius.
 | Home | fills the region | |
 | Content column beside another (Home, wide) | at least 448 wide; the two share the width beside the rail | `size::WIDE_COLUMN_MIN` |
 | Stats, two columns | each column at least 544, filling its half | `size::CHART_COLUMN_MIN` |
+| Two lists in a Stats section (genres and moods) | side by side when each gets 320, 32 apart | `size::STATS_PAIR_MIN` |
+| Bar rows | 600 wide max: the name 152, the meter (400 max), the count 48, the share 40, 12 apart | `size::BAR_ROWS`, `BAR_NAME`, `TRAILING_LANE`, `SHARE_LANE` |
 | Chart | bars at most 48 wide; a year in Finished per year at least 64 | `size::CHART_BAR_MAX`, `CHART_YEAR_MIN` |
 | Votes popover | 360 wide, padding 16; its mood names 96, its counts 48 | |
 | Empty-state text | 288 wide max | `w_72` |
@@ -503,7 +505,8 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   equal slices, no dead space.
 - In code: the rating control is `book::star_rating::StarRating` (20;
   `.small()` 16 in a row); a rating only shown is `ui::Stars` (16;
-  `.small()` 12 inline).
+  `.small()` 12 inline), muted, or `.own()` in `gold` when it is the
+  reader's own (Stats' "Higher than most readers").
 
 ### Meters
 
@@ -521,6 +524,26 @@ Never colour-code chips, and never use a badge for ordinary metadata.
   popover) are muted meters: the fill is `fg-muted` on `track`, never
   `accent`, which is the reader's own progress. They never move. Each is
   named with its figure ("Adventurous: 422 votes", "Medium pace: 58%").
+
+### Bar rows and splits (`ui::bar_rows`)
+
+Counts as meters, for a list of names or a whole split a few ways.
+- **Bar rows** (`BarRows`): one row per name, 4 apart, at most 600 wide:
+  the name in a 152 lane (`body`; a text button when it opens something),
+  a 6 px meter as long as the row's count against the first row's (400
+  max), the count in a 48 lane and, for a share of a total, the share in a
+  40 lane (both `caption`, tabular, right-aligned). A `label` line over the
+  rows names the list and the count lane ("Genres" … "Books"). The
+  reader's own counts (Stats) are `accent`.
+- **Splits** (`SplitCells`): a whole split a few ways, in a fixed order:
+  equal cells 12 apart, each its answer (`body`), optionally its count
+  (`caption`), its share on the trailing edge and a 6 px meter under them;
+  the leading answer's name is ink at weight 500, the others muted. The
+  shares add up to 100. Hardcover's figures (the Votes popover's pace and
+  drive) are muted; the reader's (Stats' fiction and non-fiction) accent.
+  A cell with nothing (an "Unknown" at 0) is left out.
+- Words come with every meter; each meter's accessible name says what it
+  counts ("Fantasy: 177 books").
 
 ### Panels, rails and hairlines
 
@@ -832,13 +855,15 @@ every width below (the tiers' thresholds included) is in design px too.
     to one line with "Show the other N books"; the next lanes stay 240 and
     lined up on the trailing edge.
   - **Stats:** one column filling the region; two columns of at least 544,
-    32 apart (a 1424 window), each filling its half: Finished per year;
-    Your ratings, then Shelves. The figures fill one row across both, 32
-    apart, so the third starts on the second column's spine. A chart fills
-    its column, its bars widening up to 48; Finished per year gives a year
-    at least 64, so a wider chart reaches further back when the library has
-    the years (never fewer than 12). Shelves keeps the shelf list's 384,
-    so its counts stay by their names.
+    32 apart (a 1424 window), each filling its half: Reading over time,
+    Genres and moods, Authors, Series and Publication years on the left;
+    Pace, Formats, Book length, Your ratings, Rereads, From adding to
+    finishing and Shelves on the right. The figures fill one row across
+    both, 32 apart. A chart fills its column, its bars widening up to 48;
+    Reading over time gives a year at least 64, so a wider chart reaches
+    further back when the library has the years (never fewer than 12).
+    Genres and moods sit side by side when each gets 320. Shelves keeps
+    the shelf list's 384, so its counts stay by their names.
   - **The book pane and the full book page:** fill their region. When the
     main column holds the 640 text and a side column of at least 320, 32
     apart (`book::detail_view::side_width`; the full page in a 1592
@@ -1358,9 +1383,41 @@ features ("Hidden Gem Fantasy"), over Discover, with Back.
   sentence with "Try again". Without `read:vibes` no vibe's page can be
   reached: Discover hides what opens them.
 
+### Stats (a destination)
+
+What the reader finished, how, what it was and how they rated it, from the
+library on this computer; only the genres and moods ask Hardcover (the
+books' tags).
+- **Header:** the page title, a muted line ("From your library on this
+  computer."), and the period select on the trailing edge: "All time",
+  then each year with a finished read, newest first.
+- **Figures:** books finished, pages read, hours listened (when any) and
+  the average rating, in `display-30` over muted words ("books finished in
+  2026").
+- **Sections**, 32 apart, each a `section` title and, where it helps, one
+  muted `body` summary line under it ("Most run 301–400 pages; 416 on
+  average."): Reading over time (Books and Pages charts: years for all
+  time, led by an "Earlier" bar for the years before the first shown;
+  months for a year), Pace (a property list: the year's forecast against
+  the goal, overall, to finish, the quickest and longest), Genres and
+  moods (a fiction split, then bar rows of genres and moods, eight each
+  until "Show N more", which hands focus to the page; each name opens
+  the Read shelf filtered by it, every Read book in it whatever the
+  period), Formats (shares of the books with a format; "Mostly …" only
+  when one holds more than half of at least 3), Book length, Your ratings (a half-star chart, then "Higher" and
+  "Lower than most readers": the reader's stars in gold beside Hardcover's
+  average in muted), Authors (two books or more), Series, Rereads (md
+  covers with "Twice" under the title), From adding to finishing and
+  Publication years (charts by decade), Shelves (a year adds "+N added").
+- **Footnotes:** what a section leaves out or how it counts is one
+  `caption` line at the section's foot, never between its parts.
+- A section with nothing to say for the period isn't drawn; one about a
+  mix says when the period has too few books (under 3).
+- The reader's figures are `accent`; Hardcover's are muted.
+
 ### Screens not in the mockup
 
-Search, Stats, list pages, series and author pages, Settings,
+Search, list pages, series and author pages, Settings,
 About, sign-in and the dialogs use the same parts:
 - a page title;
 - catalogue rows with sm covers and StatusChips;
@@ -1375,9 +1432,6 @@ trailing edge on Books only. Series lists every series, the most read first,
 as sequence rows in the list's place, their covers on the book rows' spine:
 an sm cover (their most-read book in it), the name as a text button that
 opens the series page, and a muted line ("7 books · Complete · 3 read").
-Stats charts use `accent` for the
-series, `track` for the grid and muted labels. Stats is one column, and two
-on a wide region, filling it (see "Wide windows").
 
 ## Right-to-left text
 

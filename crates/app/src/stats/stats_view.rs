@@ -1,66 +1,120 @@
-//! The Stats destination: what the reader finished, rated and shelved,
-//! computed from the library on this computer. Recomputed only when the
-//! library or the date changes.
+//! The Stats destination: what the reader finished, how, what it was, and
+//! how they rated it, computed from the library on this computer
+//! (`reading_stats`), and the genres and moods of the books from their tags
+//! (`tag_stats`). Recomputed only when the library, the date, the period
+//! or the tags change.
 //!
-//! A page (inset 32, filling the region): the page title, the headline
-//! figures in `display-30` over muted words, then sections ("Finished per
-//! year", "Your ratings", "Shelves") 32 apart. Charts draw their bars in
-//! `accent` on a `track` grid with muted labels (the theme's chart colours);
-//! each bar carries its count, so no figure is only in the hover tooltip.
-//! Counts are tabular.
+//! A page (inset 32, filling the region): the page title with the period
+//! select on its trailing edge ("All time", then each year with a finished
+//! read, newest first; kept for the session), the headline figures in
+//! `display-30` over muted words, then the sections 32 apart (`sections`):
+//! Reading over time, Pace, Genres and moods, Formats, Book length, Your
+//! ratings, Authors, Series, Rereads, From adding to finishing, Publication
+//! years, Shelves. A section with nothing to say for the period isn't
+//! drawn; one about a mix says when the period has too few books.
 //!
-//! A chart fills its column, its axis and grid across it; its bars widen
-//! with it up to `size::CHART_BAR_MAX`, then the paper between them grows.
-//! Finished per year gives each year at least `size::CHART_YEAR_MIN`, so a
-//! wider chart reaches further back when the library has the years
-//! ([`years_shown`]), never fewer than [`YEARS_AT_LEAST`].
+//! Charts draw their bars in `accent` on a `track` grid with muted labels;
+//! each bar carries its count. Counts are tabular. A chart fills its
+//! column, its bars widening up to `size::CHART_BAR_MAX`; Reading over time
+//! for all time gives each year at least `size::CHART_YEAR_MIN`, so a wider
+//! chart reaches further back ([`years_shown`]), never fewer than
+//! [`YEARS_AT_LEAST`]; the books finished before the first year shown
+//! lead both charts as one "Earlier" bar. A year shows its twelve months.
+//! What a section leaves out is a footnote in `caption` under it, never
+//! between its parts.
 //!
-//! The figures sit in equal columns that wrap together: in a narrow window
-//! two per row, each on the same spine as the one above.
+//! **Genres and moods** need the tags of the books finished in the period
+//! (`ShelfTagsModel::show_books`: one background request per 100 books,
+//! saved in the library cache): skeleton rows until they land, "Try again"
+//! when they fail. A genre or mood opens the Read shelf filtered by it.
+//! Without `read:catalog` the section hides.
 //!
-//! **Keyboard:** the page takes focus when shown and has no controls, so it
-//! scrolls from the keys itself (`ui::page_scroll`): Page Up and Page Down
-//! (and Space) by most of a screen, Home and End to the ends, the arrows by a
-//! line.
+//! **Keyboard:** the page takes focus when shown; while it has focus itself
+//! it scrolls from the keys (`ui::page_scroll`): Page Up and Page Down (and
+//! Space) by most of a screen, Home and End to the ends, the arrows by a
+//! line. Tab goes through the select and the page's buttons, kept in view.
 //!
 //! **Loading:** until the library has loaded once, the title and skeleton
 //! figures and a chart's place.
 //!
 //! **Wide region** ([`two_columns`], from the window less the sidebar and
 //! the insets): when two columns of at least 544 fit (a 1424 window), the
-//! sections sit in two columns 32 apart, each filling its half: "Finished
-//! per year" on the leading one, "Your ratings" and "Shelves" on the other.
-//! The figures stay one row across both, 32 apart, so the third starts on
-//! the second column's spine.
+//! sections sit in two columns 32 apart, each filling its half. The figures
+//! stay one row across both, 32 apart, so the third starts on the second
+//! column's spine. Two lists of a section (genres and moods) sit side by
+//! side when each gets `size::STATS_PAIR_MIN`.
 
 use std::rc::Rc;
 
 use crate::ui::reveal::RevealScroll as _;
-use gpui_kit::component::chart::BarChart;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
+use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
+use gpui_kit::component::{IconName, IndexPath, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, KeyDownEvent, ParentElement as _, Pixels, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
-    prelude::FluentBuilder as _, rems,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Pixels, Render,
+    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
+    div, prelude::FluentBuilder as _, rems,
 };
-use hardcover_core::Date;
+use hardcover_core::auth::scopes::READ_CATALOG;
+use hardcover_core::{Date, GoalMetric};
 
-use super::reading_stats::{ReadingStats, YearTotals, compute};
-use crate::chip::status_icon;
+use super::reading_stats::{Period, ReadingStats, compute, finish_years};
+use super::sections::{self, Ctx, GoalPace, TagActions, TagState};
+use super::tag_stats::{self, TagStats};
 use crate::design::{TypeRole, TypeRoles as _, colors, size};
-use crate::format::{books_count_text, count_text, status_label};
+use crate::format::count_text;
+use crate::goals::model::GoalsModel;
 use crate::library::model::LibraryModel;
+use crate::library::shelf_tags::{ShelfTags, ShelfTagsModel};
+use crate::resource::Demand;
+use crate::session;
+use crate::ui::kit::RaisedField as _;
 use crate::ui::page_scroll::scroll_page;
-use crate::ui::{Lane, PageHeader, SectionHeader, Skeleton, empty_state, region_width};
+use crate::ui::{PageHeader, Skeleton, empty_state, region_width};
+
+/// One choice of the period select.
+#[derive(Clone)]
+struct PeriodOption(Period);
+
+impl SelectItem for PeriodOption {
+    type Value = Period;
+
+    fn title(&self) -> SharedString {
+        self.0.label().into()
+    }
+
+    fn value(&self) -> &Period {
+        &self.0
+    }
+}
+
+fn options(years: &[i32]) -> Vec<PeriodOption> {
+    std::iter::once(Period::All)
+        .chain(years.iter().map(|y| Period::Year(*y)))
+        .map(PeriodOption)
+        .collect()
+}
 
 pub struct StatsView {
     model: Entity<LibraryModel>,
+    goals: Entity<GoalsModel>,
+    tags: Entity<ShelfTagsModel>,
     focus_handle: FocusHandle,
     scroll: ScrollHandle,
-    /// The stats and the library revision and date they were computed for.
-    computed: Option<(u64, Date, Rc<ReadingStats>)>,
+    period: Period,
+    select: Entity<SelectState<Vec<PeriodOption>>>,
+    /// The years the select offers, and the library revision and day they
+    /// were worked out for.
+    years: Vec<i32>,
+    years_for: Option<(u64, Date)>,
+    /// The stats and the library revision, date and period they were
+    /// computed for.
+    computed: Option<(u64, Date, Period, Rc<ReadingStats>)>,
+    /// The genres and moods, for the stats above and the tags' revision.
+    tag_stats: Option<(u64, usize, Rc<TagStats>)>,
+    /// "Show N more" pressed on the genres, the moods.
+    expanded: (bool, bool),
     _subscriptions: Vec<Subscription>,
 }
 
@@ -71,19 +125,109 @@ impl Focusable for StatsView {
 }
 
 impl StatsView {
-    pub fn new(model: Entity<LibraryModel>, cx: &mut Context<Self>) -> Self {
-        let subscriptions = vec![cx.observe(&model, |_, _, cx| cx.notify())];
+    pub fn new(
+        model: Entity<LibraryModel>,
+        goals: Entity<GoalsModel>,
+        tags: Entity<ShelfTagsModel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let select =
+            cx.new(|cx| SelectState::new(options(&[]), Some(IndexPath::new(0)), window, cx));
+        let subscriptions = vec![
+            cx.observe(&model, |_, _, cx| cx.notify()),
+            cx.observe(&goals, |_, _, cx| cx.notify()),
+            cx.observe(&tags, |_, _, cx| cx.notify()),
+            // "Sign in again…" may grant the tags.
+            session::observe_grant(cx, |_, cx| cx.notify()),
+            cx.subscribe_in(
+                &select,
+                window,
+                |this, _, event: &SelectEvent<Vec<PeriodOption>>, _, cx| {
+                    if let SelectEvent::Confirm(Some(period)) = event {
+                        this.set_period(*period, cx);
+                    }
+                },
+            ),
+        ];
         Self {
             model,
+            goals,
+            tags,
             focus_handle: cx.focus_handle(),
             scroll: ScrollHandle::new(),
+            period: Period::All,
+            select,
+            years: Vec::new(),
+            years_for: None,
             computed: None,
+            tag_stats: None,
+            expanded: (false, false),
             _subscriptions: subscriptions,
         }
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         window.focus(&self.focus_handle, cx);
+    }
+
+    /// Stats is shown: asks for the tags of the period's books.
+    pub fn show(&mut self, cx: &mut Context<Self>) {
+        self.request_tags(Demand::Shown, cx);
+    }
+
+    /// Asks again for what is stale (`Workspace::revalidate_visible`).
+    pub fn revalidate(&mut self, shown_again: bool, cx: &mut Context<Self>) {
+        self.request_tags(crate::catalog::book_list::demand(shown_again), cx);
+    }
+
+    fn request_tags(&mut self, demand: Demand, cx: &mut Context<Self>) {
+        if !session::has_scope(cx, READ_CATALOG) {
+            return;
+        }
+        let books = self.stats(cx).books.clone();
+        self.tags
+            .update(cx, |tags, cx| tags.show_books(books, demand, cx));
+    }
+
+    fn set_period(&mut self, period: Period, cx: &mut Context<Self>) {
+        if self.period == period {
+            return;
+        }
+        self.period = period;
+        self.expanded = (false, false);
+        self.scroll
+            .set_offset(gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)));
+        self.request_tags(Demand::Shown, cx);
+        cx.notify();
+    }
+
+    /// The library or the day changed: the select offers the years it now
+    /// has (worked out as the page is drawn, once per revision and day). A year
+    /// that no longer has a finished read goes back to all time.
+    fn follow_years(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let model = self.model.read(cx);
+        let key = (model.revision(), crate::dates::today());
+        if !model.is_loaded() || self.years_for == Some(key) {
+            return;
+        }
+        self.years_for = Some(key);
+        let years = finish_years(model.entries(), key.1);
+        if years == self.years {
+            return;
+        }
+        self.years = years;
+        if let Period::Year(year) = self.period
+            && !self.years.contains(&year)
+        {
+            self.period = Period::All;
+        }
+        let period = self.period;
+        let items = options(&self.years);
+        self.select.update(cx, |s, cx| {
+            s.set_items(items, window, cx);
+            s.set_selected_value(&period, window, cx);
+        });
     }
 
     /// Scrolls the page from the keyboard while it has focus itself.
@@ -102,16 +246,101 @@ impl StatsView {
         let model = self.model.read(cx);
         let revision = model.revision();
         let today = crate::dates::today();
+        let period = self.period;
         match &self.computed {
-            Some((r, d, stats)) if *r == revision && *d == today => stats.clone(),
+            Some((r, d, p, stats)) if *r == revision && *d == today && *p == period => {
+                stats.clone()
+            }
             _ => {
-                let stats = Rc::new(compute(model.entries(), today));
-                self.computed = Some((revision, today, stats.clone()));
+                let stats = Rc::new(compute(model.entries(), today, period));
+                self.computed = Some((revision, today, period, stats.clone()));
                 stats
             }
         }
     }
+
+    /// Where the genres and moods stand for `stats`' books.
+    fn tag_state(&mut self, stats: &Rc<ReadingStats>, cx: &App) -> TagState {
+        let tags = self.tags.read(cx);
+        match tags.shelf(&stats.books) {
+            ShelfTags::Unavailable => TagState::Hidden,
+            ShelfTags::Loading => TagState::Loading,
+            ShelfTags::Failed(message) => TagState::Failed(message),
+            ShelfTags::Ready { failure } => {
+                let revision = tags.revision();
+                // Keyed by the stats' address: the stats are recomputed only
+                // when their key changes, and kept while shown.
+                let key = Rc::as_ptr(stats) as usize;
+                let tag_stats = match &self.tag_stats {
+                    Some((r, k, t)) if *r == revision && *k == key => t.clone(),
+                    _ => {
+                        let t = Rc::new(tag_stats::compute(&stats.books, |id| tags.facts(id)));
+                        self.tag_stats = Some((revision, key, t.clone()));
+                        t
+                    }
+                };
+                TagState::Ready {
+                    stats: tag_stats,
+                    failure,
+                }
+            }
+        }
+    }
+
+    /// The books goal for the period's year, if it runs today.
+    fn goal_pace(&self, today: Date, cx: &App) -> Option<GoalPace> {
+        let Period::Year(year) = self.period else {
+            return None;
+        };
+        self.goals
+            .read(cx)
+            .current(today)
+            .find(|g| g.metric == GoalMetric::Books && g.last_day().year() == year)
+            .map(|g| GoalPace {
+                ahead: g.pace(today),
+            })
+    }
+
+    fn tag_actions(&self, cx: &mut Context<Self>) -> TagActions {
+        let this = cx.entity().downgrade();
+        let retry = {
+            let this = this.clone();
+            Rc::new(move |_: &mut Window, cx: &mut App| {
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |this, cx| {
+                        let books = this.stats(cx).books.clone();
+                        this.tags.update(cx, |t, cx| t.retry_books(&books, cx));
+                    });
+                }
+            }) as Rc<dyn Fn(&mut Window, &mut App)>
+        };
+        let expand = |genres: bool| {
+            let this = this.clone();
+            Some(Rc::new(move |window: &mut Window, cx: &mut App| {
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |this, cx| {
+                        if genres {
+                            this.expanded.0 = true;
+                        } else {
+                            this.expanded.1 = true;
+                        }
+                        // The button goes: focus stays on the page, which
+                        // keeps scrolling from the keys.
+                        window.focus(&this.focus_handle, cx);
+                        cx.notify();
+                    });
+                }
+            }) as Rc<dyn Fn(&mut Window, &mut App)>)
+        };
+        TagActions {
+            retry,
+            more_genres: expand(true),
+            more_moods: expand(false),
+        }
+    }
 }
+
+use chrono::Datelike as _;
 
 impl Render for StatsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -133,6 +362,7 @@ impl Render for StatsView {
         if !loaded {
             return root.child(loading_page()).into_any_element();
         }
+        self.follow_years(window, cx);
         let stats = self.stats(cx);
         if stats.is_empty() {
             return root
@@ -144,34 +374,74 @@ impl Render for StatsView {
                 ))
                 .into_any_element();
         }
+        let today = crate::dates::today();
         let rem = window.rem_size();
         let width = region_width(window, size::PAGE_INSET);
         let wide = two_columns(width, rem);
-        let years = years_shown(chart_column(width, rem), rem);
-        let bar = size::CHART_BAR_MAX.to_pixels(rem);
+        let column = chart_column(width, rem);
+        let ctx = Ctx {
+            stats: &stats,
+            bar: size::CHART_BAR_MAX.to_pixels(rem),
+            years: years_shown(column, rem),
+            pair: column >= size::STATS_PAIR_MIN.to_pixels(rem) * 2. + rems(2.).to_pixels(rem),
+        };
+        let tag_state = self.tag_state(&stats, cx);
+        let actions = self.tag_actions(cx);
+        let goal = self.goal_pace(today, cx);
+        let expanded = self.expanded;
+
+        let over_time = sections::over_time(&ctx, cx);
+        let pace = sections::pace(&ctx, goal, cx);
+        let tags = sections::genres_and_moods(&ctx, tag_state, expanded, actions, cx);
+        let formats = sections::formats(&ctx, cx);
+        let lengths = sections::lengths(&ctx, cx);
+        let ratings = sections::ratings(&ctx, cx);
+        let authors = sections::authors(&ctx, cx);
+        let series = sections::series(&ctx, cx);
+        let rereads = sections::rereads(&ctx, cx);
+        let wait = sections::wait(&ctx, cx);
+        let decades = sections::decades(&ctx, cx);
+        let shelves = Some(sections::shelves(&ctx, cx));
+
+        let header = PageHeader::new("Stats")
+            .line("From your library on this computer.")
+            .actions(
+                div()
+                    .w(size::SELECT)
+                    .child(Select::new(&self.select).raised_field(false, cx)),
+            );
         let page = v_flex()
             .w_full()
             .p_8()
             .gap_8()
-            .child(PageHeader::new("Stats").line("From your library on this computer."))
+            .child(header)
             .child(render_figures(&stats, wide, cx));
         let page = if wide {
-            let column = || v_flex().flex_1().min_w_0().gap_8();
+            let column = |parts: Vec<Option<AnyElement>>| {
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_8()
+                    .children(parts.into_iter().flatten())
+            };
             page.child(
                 h_flex()
                     .items_start()
                     .gap_8()
-                    .child(column().child(render_years(&stats, years, bar, cx)))
-                    .child(
-                        column()
-                            .child(render_ratings(&stats, bar, cx))
-                            .child(render_shelves(&stats, cx)),
-                    ),
+                    .child(column(vec![over_time, tags, authors, series, decades]))
+                    .child(column(vec![
+                        pace, formats, lengths, ratings, rereads, wait, shelves,
+                    ])),
             )
         } else {
-            page.child(render_years(&stats, years, bar, cx))
-                .child(render_ratings(&stats, bar, cx))
-                .child(render_shelves(&stats, cx))
+            page.children(
+                [
+                    over_time, pace, tags, formats, lengths, ratings, authors, series, rereads,
+                    wait, decades, shelves,
+                ]
+                .into_iter()
+                .flatten(),
+            )
         };
         // The scrollbar overlays a wrapper: inside the scroller it would
         // scroll away with the page.
@@ -241,12 +511,12 @@ fn chart_column(width: Pixels, rem: Pixels) -> Pixels {
     }
 }
 
-/// The fewest years Finished per year shows, when the library has them.
+/// The fewest years Reading over time shows, when the library has them.
 const YEARS_AT_LEAST: usize = 12;
 
-/// How many years Finished per year shows in a column `column` wide: one
+/// How many years Reading over time shows in a column `column` wide: one
 /// per `size::CHART_YEAR_MIN`, at least [`YEARS_AT_LEAST`]. Fewer when the
-/// library has fewer ([`ReadingStats::recent_years`]).
+/// library has fewer.
 fn years_shown(column: Pixels, rem: Pixels) -> usize {
     let fits = (column / size::CHART_YEAR_MIN.to_pixels(rem)).floor();
     #[expect(
@@ -280,34 +550,42 @@ fn figure(value: impl Into<SharedString>, label: impl Into<SharedString>, cx: &A
         .into_any_element()
 }
 
-/// The headline figures; `wide`, 32 apart (the columns' gap), so they line
-/// up with the two columns under them.
+/// The headline figures: books finished, pages read, hours listened (when
+/// any) and the average rating; `wide`, 32 apart (the columns' gap), so
+/// they line up with the two columns under them.
 fn render_figures(stats: &ReadingStats, wide: bool, cx: &App) -> impl IntoElement {
-    let year = stats.this_year.year;
+    let within = match stats.period {
+        Period::All => String::new(),
+        Period::Year(year) => format!(" in {year}"),
+    };
     let mut figures = vec![
         figure(
-            count_text(stats.this_year.books),
-            match stats.this_year.books {
-                1 => format!("book finished in {year}"),
-                _ => format!("books finished in {year}"),
+            count_text(stats.reads),
+            match stats.reads {
+                1 => format!("book finished{within}"),
+                _ => format!("books finished{within}"),
             },
             cx,
         ),
-        figure(
-            count_text(stats.this_year.pages),
-            format!("pages read in {year}"),
-            cx,
-        ),
+        figure(count_text(stats.pages), format!("pages read{within}"), cx),
     ];
-    if let Some(days) = stats.average_days {
+    let hours = stats.hours_listened();
+    if hours > 0 {
         figures.push(figure(
-            format!("{days:.0}"),
-            "days to finish, on average",
+            count_text(hours),
+            match hours {
+                1 => format!("hour listened{within}"),
+                _ => format!("hours listened{within}"),
+            },
             cx,
         ));
     }
-    if let Some(avg) = stats.average_rating {
-        figures.push(figure(format!("{avg:.1}"), "average rating", cx));
+    if let Some(avg) = stats.ratings.average {
+        figures.push(figure(
+            format!("{avg:.2}"),
+            format!("average rating{within}"),
+            cx,
+        ));
     }
     h_flex()
         .flex_wrap()
@@ -317,176 +595,6 @@ fn render_figures(stats: &ReadingStats, wide: bool, cx: &App) -> impl IntoElemen
         .children(figures)
 }
 
-/// A section: its `section` title, then its content 12 below.
-fn section(title: &'static str) -> gpui_kit::Div {
-    v_flex().gap_3().child(SectionHeader::new(title))
-}
-
-/// A chart's name over it: "Books", "Pages".
-fn chart_label(text: &'static str, cx: &App) -> AnyElement {
-    div().label(cx).child(text).into_any_element()
-}
-
-fn note(text: impl Into<SharedString>, cx: &App) -> AnyElement {
-    div()
-        .body()
-        .text_color(colors(cx).fg_muted)
-        .child(text.into())
-        .into_any_element()
-}
-
-/// A bar chart of `value` per year, with the count on each bar.
-fn year_chart(
-    id: &'static str,
-    years: &[YearTotals],
-    bar: Pixels,
-    value: fn(&YearTotals) -> u32,
-    tooltip: fn(&YearTotals) -> String,
-) -> AnyElement {
-    div()
-        .w_full()
-        .h(size::CHART)
-        .child(
-            BarChart::new(years.to_vec())
-                .id(ElementId::Name(id.into()))
-                .max_band_width(bar)
-                .band(|y: &YearTotals| SharedString::from(y.year.to_string()))
-                .value(move |y| f64::from(value(y)))
-                .label(move |y| match value(y) {
-                    0 => String::new(),
-                    n => count_text(n),
-                })
-                .tooltip_title(|y| y.year.to_string().into())
-                .tooltip_value(move |y, _| tooltip(y).into()),
-        )
-        .into_any_element()
-}
-
-fn year_tooltip(y: &YearTotals) -> String {
-    let pages = match y.pages {
-        1 => "1 page".to_owned(),
-        n => format!("{} pages", count_text(n)),
-    };
-    format!("{} · {pages}", books_count_text(y.books))
-}
-
-/// Finished per year: the latest `count` years (as many as the library
-/// has, if fewer), bars at most `bar` wide.
-fn render_years(stats: &ReadingStats, count: usize, bar: Pixels, cx: &App) -> impl IntoElement {
-    let (years, earlier) = stats.recent_years(count);
-    let mut notes = Vec::new();
-    if let Some(first) = years.first().filter(|_| earlier > 0) {
-        notes.push(note(
-            format!(
-                "Plus {} finished before {}.",
-                books_count_text(earlier),
-                first.year
-            ),
-            cx,
-        ));
-    }
-    if stats.read_without_date > 0 {
-        let books = match stats.read_without_date {
-            1 => "1 book on your Read shelf has no finish date, so no year counts it.".to_owned(),
-            n => {
-                format!(
-                    "{} books on your Read shelf have no finish date, so no year counts them.",
-                    count_text(n)
-                )
-            }
-        };
-        notes.push(note(books, cx));
-    }
-    let body: Vec<AnyElement> = if years.is_empty() {
-        vec![note(
-            "Set a finish date on a book you've read and it's counted here.",
-            cx,
-        )]
-    } else {
-        vec![
-            chart_label("Books", cx),
-            year_chart("books-per-year", years, bar, |y| y.books, year_tooltip),
-            div()
-                .pt_3()
-                .child(chart_label("Pages", cx))
-                .into_any_element(),
-            year_chart("pages-per-year", years, bar, |y| y.pages, year_tooltip),
-        ]
-    };
-    section("Finished per year").children(body).children(notes)
-}
-
-/// "½", "1", "1½" … "5".
-fn half_stars(index: usize) -> SharedString {
-    let half_stars = index + 1;
-    match (half_stars / 2, half_stars % 2) {
-        (0, _) => "½".into(),
-        (whole, 0) => whole.to_string().into(),
-        (whole, _) => format!("{whole}½").into(),
-    }
-}
-
-fn render_ratings(stats: &ReadingStats, bar: Pixels, cx: &App) -> impl IntoElement {
-    let section = section("Your ratings");
-    let Some(avg) = stats.average_rating else {
-        return section.child(note("Rate a book and it's counted here.", cx));
-    };
-    let buckets: Vec<(usize, u32)> = stats.rating_counts.iter().copied().enumerate().collect();
-    let summary = match stats.ratings {
-        1 => format!("{avg:.1} from 1 rating"),
-        n => format!("{avg:.1} on average from {n} ratings"),
-    };
-    section.child(note(summary, cx)).child(
-        div().w_full().h(size::CHART_SHORT).child(
-            BarChart::new(buckets)
-                .id("rating-spread")
-                .max_band_width(bar)
-                .band(|(ix, _): &(usize, u32)| half_stars(*ix))
-                .value(|(_, n)| f64::from(*n))
-                .label(|(_, n)| match n {
-                    0 => String::new(),
-                    n => n.to_string(),
-                })
-                .tooltip_title(|(ix, _)| {
-                    let label = half_stars(*ix);
-                    let unit = if matches!(label.as_ref(), "1" | "½") {
-                        "star"
-                    } else {
-                        "stars"
-                    };
-                    format!("{label} {unit}").into()
-                })
-                .tooltip_value(|(_, n), _| books_count_text(*n).into()),
-        ),
-    )
-}
-
-/// Each shelf as the sidebar draws it: its icon, its name and its count on
-/// a trailing lane, tabular, so the counts line up. Unlike other rows, they
-/// keep the shelf list's width (`size::LIST`), not their column's: six short
-/// names whose counts would otherwise sit a column's width away from them.
-fn render_shelves(stats: &ReadingStats, cx: &App) -> impl IntoElement {
-    let muted = colors(cx).fg_muted;
-    let rows = stats.shelves.iter().map(|(status, count)| {
-        h_flex()
-            .h(size::CONTROL)
-            .gap_2()
-            .body()
-            .child(Icon::new(status_icon(*status)).text_color(muted))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(status_label(*status)),
-            )
-            .child(
-                Lane::trailing().child(div().tabular().text_color(muted).child(count_text(*count))),
-            )
-    });
-    section("Shelves").child(v_flex().max_w(size::LIST).children(rows))
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -494,21 +602,29 @@ mod tests {
     use super::*;
     use crate::session::SessionScope;
     use crate::ui::test_support::{press, redraw};
-    use gpui_kit::{AppContext as _, TestAppContext, px, size as gsize};
+    use gpui_kit::{TestAppContext, px, size as gsize};
     use hardcover_core::store::LibraryCache;
 
-    #[gpui_kit::test]
-    fn page_down_scrolls_stats_while_it_has_focus(cx: &mut TestAppContext) {
+    fn stats_window(
+        cx: &mut TestAppContext,
+    ) -> (Entity<StatsView>, &mut gpui_kit::VisualTestContext) {
         let cache = LibraryCache::open_in_memory().ok().map(Arc::new);
         let session = SessionScope::for_tests(hardcover_core::demo::client(), cache);
         cx.update(|cx| {
             gpui_kit::init(cx);
             session.install(cx);
         });
-        let model = cx.new(|_| LibraryModel::new(session));
+        let model = cx.new(|_| LibraryModel::new(session.clone()));
+        let goals = cx.new(|cx| GoalsModel::new(session.clone(), &model, cx));
+        let tags = cx.new(|cx| ShelfTagsModel::new(session.clone(), model.clone(), cx));
         model.update(cx, LibraryModel::start);
         cx.run_until_parked();
-        let (view, cx) = cx.add_window_view(|_, cx| StatsView::new(model, cx));
+        cx.add_window_view(|window, cx| StatsView::new(model, goals, tags, window, cx))
+    }
+
+    #[gpui_kit::test]
+    fn page_down_scrolls_stats_while_it_has_focus(cx: &mut TestAppContext) {
+        let (view, cx) = stats_window(cx);
         cx.simulate_resize(gsize(px(900.), px(400.)));
         cx.update(|window, cx| view.update(cx, |v, cx| v.focus(window, cx)));
         redraw(cx);
@@ -523,13 +639,19 @@ mod tests {
         assert_eq!(offset(cx), px(0.));
     }
 
-    #[test]
-    fn half_star_labels() {
-        let labels: Vec<SharedString> = (0..10).map(half_stars).collect();
-        assert_eq!(
-            labels,
-            ["½", "1", "1½", "2", "2½", "3", "3½", "4", "4½", "5"].map(SharedString::from)
-        );
+    #[gpui_kit::test]
+    fn the_select_offers_each_year_with_a_finished_read(cx: &mut TestAppContext) {
+        let (view, cx) = stats_window(cx);
+        redraw(cx);
+        let years = view.read_with(cx, |v, _| v.years.clone());
+        assert!(!years.is_empty(), "the demo has finished reads");
+        assert!(years.windows(2).all(|w| w[0] > w[1]), "newest first");
+        let year = years[0];
+        view.update(cx, |v, cx| v.set_period(Period::Year(year), cx));
+        redraw(cx);
+        let stats = view.update(cx, |v, cx| v.stats(cx));
+        assert_eq!(stats.period, Period::Year(year));
+        assert!(stats.reads > 0);
     }
 
     #[test]
