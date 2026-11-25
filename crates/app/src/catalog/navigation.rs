@@ -7,9 +7,10 @@
 //! `GoBack`.
 
 use gpui_kit::{App, AppContext as _, Entity, EventEmitter, Global};
-use hardcover_core::{AuthorId, BookSummary, SeriesId, TrendingPeriod, VibeId};
+use hardcover_core::{AuthorId, BookSummary, ReadingStatus, SeriesId, TrendingPeriod, VibeId};
 
 use super::tag::Tag;
+use crate::library::tag_filter::TagPick;
 use crate::ui::focus::FocusReturn;
 
 /// A catalogue page.
@@ -120,6 +121,9 @@ impl PageStack {
 #[derive(Debug, Clone)]
 pub enum NavigationEvent {
     Open(Page),
+    /// A shelf, filtered by its genre and mood chips (Stats' genres and
+    /// moods open the Read shelf so).
+    Shelf(ReadingStatus, TagPick),
     /// The page shown changed in place: keep it in its stead, for Back.
     Replace(Page),
 }
@@ -151,6 +155,11 @@ impl Navigator {
 /// Opens a catalogue page.
 pub fn open(page: Page, cx: &mut App) {
     Navigator::emit(NavigationEvent::Open(page), cx);
+}
+
+/// Shows the shelf `status`, filtered by `pick`.
+pub fn open_shelf(status: ReadingStatus, pick: TagPick, cx: &mut App) {
+    Navigator::emit(NavigationEvent::Shelf(status, pick), cx);
 }
 
 /// Records that the page shown is now `page` (a tag's page narrowed by its

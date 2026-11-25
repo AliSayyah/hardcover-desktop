@@ -316,7 +316,6 @@ impl Workspace {
         let library = cx.new(|cx| LibraryView::new(model.clone(), shelf_tags.clone(), window, cx));
         let search = cx.new(|cx| SearchView::new(&model, window, cx));
         let discover = cx.new(|cx| DiscoverView::new(&model, window, cx));
-        let stats = cx.new(|cx| StatsView::new(model.clone(), cx));
         let author_page = cx.new(|cx| AuthorView::new(model.clone(), window, cx));
         let book_page = cx.new(|cx| {
             let mut page = BookDetailView::new(model.clone(), window, cx);
@@ -326,6 +325,8 @@ impl Workspace {
         let navigator = Navigator::init(cx);
         let reauthorize = cx.new(|_| Reauthorize::new(session.clone(), model.clone()));
         let goals = cx.new(|cx| GoalsModel::new(session.clone(), &model, cx));
+        let stats = cx
+            .new(|cx| StatsView::new(model.clone(), goals.clone(), shelf_tags.clone(), window, cx));
         let sidebar_scroll = ScrollHandle::new();
         let sidebar_keys = cx.new(|cx| SidebarKeys::new(window, cx));
         let goals_section = cx.new(|cx| GoalsSection::new(goals.clone(), model.clone(), cx));
@@ -511,6 +512,11 @@ impl Workspace {
                 |this, _, event: &NavigationEvent, window, cx| match event {
                     NavigationEvent::Open(page) => this.open_page(page.clone(), window, cx),
                     NavigationEvent::Replace(page) => this.replace_page(page.clone(), cx),
+                    NavigationEvent::Shelf(status, pick) => {
+                        this.show(Destination::Shelf(*status), window, cx);
+                        this.library
+                            .update(cx, |l, cx| l.set_pick(pick.clone(), window, cx));
+                    }
                 },
             ),
         ];
@@ -555,7 +561,10 @@ impl Workspace {
                 d.focus(window, cx);
             }),
             Destination::Series => self.series_view.update(cx, |s, cx| s.focus(window, cx)),
-            Destination::Stats => self.stats.update(cx, |s, cx| s.focus(window, cx)),
+            Destination::Stats => self.stats.update(cx, |s, cx| {
+                s.show(cx);
+                s.focus(window, cx);
+            }),
             Destination::Shelf(status) => {
                 self.library
                     .update(cx, |l, cx| l.show_shelf(status, window, cx));
@@ -623,8 +632,8 @@ impl Workspace {
                 Destination::Series => self
                     .series
                     .update(cx, |s, cx| s.revalidate(shown_again, cx)),
-                // Worked out from the library.
-                Destination::Stats => {}
+                // Worked out from the library, but for the genres and moods.
+                Destination::Stats => self.stats.update(cx, |s, cx| s.revalidate(shown_again, cx)),
             },
         }
     }

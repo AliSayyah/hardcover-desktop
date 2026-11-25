@@ -24,7 +24,7 @@
 use std::collections::HashMap;
 
 use hardcover_core::BookTags;
-use hardcover_core::tags::{Mood, has_mood};
+use hardcover_core::tags::{Kind, Mood, has_mood, kind_of};
 
 /// One of a book's genres: its key ([`hardcover_core::tags::genre_key`])
 /// and the name it is tagged with.
@@ -40,6 +40,8 @@ pub struct BookFacts {
     pub genres: Vec<GenreName>,
     /// The moods on its mood line, in [`Mood::ALL`]'s order.
     pub moods: Vec<Mood>,
+    /// Fiction or not, as its genres say (Stats).
+    pub kind: Option<Kind>,
 }
 
 impl BookFacts {
@@ -57,6 +59,7 @@ impl BookFacts {
                 .into_iter()
                 .filter(|m| has_mood(&tags.moods, *m))
                 .collect(),
+            kind: kind_of(&tags.genres),
         }
     }
 
@@ -373,6 +376,7 @@ mod tests {
                 })
                 .collect(),
             moods: moods.to_vec(),
+            kind: None,
         }
     }
 

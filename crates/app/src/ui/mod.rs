@@ -30,6 +30,7 @@
 //! | [`CoverSlot`] | A dashed place the size of a cover, empty or with an icon (the series strip's book not out yet: a clock) |
 //! | [`PropertyList`] | Key and value rows: Edition, Owned, Privacy, Added |
 //! | [`Meter`] | Progress: 6 px beside words, 2 px in a row, with an optional pace tick |
+//! | [`BarRows`], [`BarRow`], [`SplitCells`], [`shares`] | Counts as bars: a list of names with a meter, the count and a share (Stats' genres, moods, formats); a whole split a few ways (the Votes popover's pace, Stats' fiction) |
 //! | [`MonthBars`] | Books finished in each month of a year, the counts over the bars: Home's reading goal |
 //! | [`EmptyState`], [`empty_state`] | A region with nothing to show: icon, title, one sentence, a button |
 //! | [`LoadFailed`] | A load that failed: one muted sentence and "Try again", or the whole region's empty state when nothing else can show |
@@ -52,6 +53,7 @@
 //! Each component's module doc says when to use it, with an example.
 
 mod avatar;
+mod bar_rows;
 mod byline_link;
 pub mod chip_keys;
 mod columns;
@@ -87,6 +89,7 @@ pub mod theme_tiles;
 pub(crate) use self::stars::{StarInk, StarSize, render_star};
 pub use self::{
     avatar::{Avatar, AvatarSize},
+    bar_rows::{BarRow, BarRows, SplitCells, percent_of, shares},
     byline_link::BylineLink,
     columns::{Columns, Tier, content_column_width, folds, main_column_width, region_width, tier},
     cover_shelf::{CoverShelf, books_that_fit},

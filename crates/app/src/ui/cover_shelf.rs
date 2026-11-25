@@ -15,6 +15,8 @@
 //!   words (the second ends in "…" when the title is longer; a word too
 //!   long for the line ends in "…" too, never split across lines), so the
 //!   cover is never the only keyboard path to the book.
+//! - [`CoverShelf::books_captioned`] adds a `caption` line under each
+//!   title, 4 below it ("3 times": Stats' rereads).
 //! - The covers take a shadow only where they lead their block (Similar
 //!   books), never in a rail; that is the [`Cover`]'s own `shadow`.
 //!
@@ -25,8 +27,8 @@
 //! ```
 
 use gpui_kit::{
-    AnyElement, App, IntoElement, ParentElement as _, Pixels, RenderOnce, Styled as _, Window, div,
-    prelude::FluentBuilder as _,
+    AnyElement, App, IntoElement, ParentElement as _, Pixels, RenderOnce, SharedString,
+    Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 
 use super::TextButton;
@@ -59,7 +61,7 @@ enum Flow {
 #[derive(IntoElement)]
 pub struct CoverShelf {
     size: CoverSize,
-    books: Vec<(Cover, TextButton)>,
+    books: Vec<(Cover, TextButton, Option<SharedString>)>,
     flow: Flow,
 }
 
@@ -87,7 +89,22 @@ impl CoverShelf {
 
     /// The books, each its cover and its title.
     pub fn books(mut self, books: impl IntoIterator<Item = (Cover, TextButton)>) -> Self {
-        self.books.extend(books);
+        self.books
+            .extend(books.into_iter().map(|(cover, title)| (cover, title, None)));
+        self
+    }
+
+    /// The books, each with a `caption` line under its title ("3 times":
+    /// Stats' rereads).
+    pub fn books_captioned(
+        mut self,
+        books: impl IntoIterator<Item = (Cover, TextButton, SharedString)>,
+    ) -> Self {
+        self.books.extend(
+            books
+                .into_iter()
+                .map(|(cover, title, caption)| (cover, title, Some(caption))),
+        );
         self
     }
 }
@@ -113,7 +130,7 @@ impl RenderOnce for CoverShelf {
             .children(
                 self.books
                     .into_iter()
-                    .map(move |(cover, title)| -> AnyElement {
+                    .map(move |(cover, title, caption)| -> AnyElement {
                         div()
                             .flex()
                             .flex_col()
@@ -128,6 +145,9 @@ impl RenderOnce for CoverShelf {
                                     .label(cx)
                                     .text_color(fg),
                             )
+                            .when_some(caption, |this, caption| {
+                                this.child(div().caption(cx).mt_neg_1().child(caption))
+                            })
                             .into_any_element()
                     }),
             )

@@ -122,6 +122,17 @@ pub const CHART_BAR_MAX: Rems = rems(3.);
 /// The least room a year gets in Stats' Finished per year (64): a wider
 /// chart shows more years, when the library has them.
 pub const CHART_YEAR_MIN: Rems = rems(4.);
+/// Bar rows at their widest (600): a name, a meter of at most
+/// [`METER_MAX`], the count and the share (`ui::BarRows`: Stats' genres,
+/// moods and formats).
+pub const BAR_ROWS: Rems = rems(37.5);
+/// A bar row's name, before its meter (152).
+pub const BAR_NAME: Rems = rems(9.5);
+/// A bar row's share, after its count (32): "51%".
+pub const SHARE_LANE: Rems = rems(2.);
+/// Two lists of a Stats section (genres and moods) sit side by side when
+/// each gets this (320), 32 apart; narrower, one under the other.
+pub const STATS_PAIR_MIN: Rems = SIDE_MIN;
 /// A headline figure's column at its narrowest (160): Stats' figures, four
 /// to a row at the page's width and two in a narrow window.
 pub const FIGURE: Rems = rems(10.);

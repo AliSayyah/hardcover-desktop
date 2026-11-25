@@ -28,9 +28,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
-    Anchor, App, ElementId, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Window, div, prelude::FluentBuilder as _,
+    Anchor, App, ElementId, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
+    prelude::FluentBuilder as _,
 };
 use hardcover_core::BookId;
 use hardcover_core::tags::{
@@ -43,7 +43,7 @@ use crate::design::{TypeRoles as _, colors, size};
 use crate::format::count_text;
 use crate::ui::focus::box_radius;
 use crate::ui::kit::{KeyboardRing as _, SmallControl as _};
-use crate::ui::{Meter, TextButton};
+use crate::ui::{Meter, SplitCells, TextButton, shares};
 
 /// The pace as the line names it.
 pub fn pace_line_word(pace: Pace) -> &'static str {
@@ -82,30 +82,6 @@ fn trait_word(side: CharacterTrait) -> &'static str {
         CharacterTrait::Diverse => "Diverse",
         CharacterTrait::NotDiverse => "Not diverse",
     }
-}
-
-/// Each count's share of their total in whole percents, adding up to
-/// exactly 100 (largest remainder: the floors first, then a point each to
-/// the largest remainders, earlier first on a tie). All zeros with no
-/// votes.
-pub fn shares(counts: &[u32]) -> Vec<u32> {
-    let total: u64 = counts.iter().map(|&c| u64::from(c)).sum();
-    if total == 0 {
-        return vec![0; counts.len()];
-    }
-    let mut out: Vec<u32> = Vec::with_capacity(counts.len());
-    let mut remainders: Vec<(u64, usize)> = Vec::with_capacity(counts.len());
-    for (ix, &count) in counts.iter().enumerate() {
-        let scaled = u64::from(count) * 100;
-        out.push(u32::try_from(scaled / total).unwrap_or(100));
-        remainders.push((scaled % total, ix));
-    }
-    let left = 100 - out.iter().sum::<u32>();
-    remainders.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    for &(_, ix) in remainders.iter().take(left as usize) {
-        out[ix] += 1;
-    }
-    out
 }
 
 /// A mood meter's length: its votes against the first (most voted) mood's.
@@ -303,64 +279,24 @@ fn group(label: impl IntoElement, content: impl IntoElement) -> impl IntoElement
 
 /// A three-way answer (pace, drive): three equal cells 12 apart, in scale
 /// order, each its answer, its share and a muted meter; the leading
-/// answer's name in ink at 500.
+/// answer's name in ink at 500 (`ui::SplitCells`).
 fn three_way<T: Copy + PartialEq + 'static>(
     id: &'static str,
     split: &Split<T>,
     word: fn(T) -> &'static str,
     meter_label: fn(T, u32) -> String,
-    cx: &App,
 ) -> impl IntoElement {
-    let palette = colors(cx);
     let counts: Vec<u32> = split.parts.iter().map(|(_, n)| *n).collect();
     let percents = shares(&counts);
-    h_flex()
-        .w_full()
-        .gap_3()
-        .children(
-            split
-                .parts
-                .iter()
-                .zip(percents)
-                .enumerate()
-                .map(|(ix, ((part, _), percent))| {
-                    let lead = *part == split.leader;
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_1()
-                        .child(
-                            h_flex()
-                                .gap_1()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .truncate()
-                                        .text_color(if lead {
-                                            palette.fg
-                                        } else {
-                                            palette.fg_muted
-                                        })
-                                        .when(lead, |this| this.font_weight(FontWeight::MEDIUM))
-                                        .child(word(*part)),
-                                )
-                                .child(div().flex_1())
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .caption(cx)
-                                        .tabular()
-                                        .child(format!("{percent}%")),
-                                ),
-                        )
-                        .child(
-                            #[expect(clippy::cast_precision_loss, reason = "a percentage")]
-                            Meter::new((id, ix), percent as f32, meter_label(*part, percent))
-                                .muted(),
-                        )
-                }),
-        )
+    let leader = split
+        .parts
+        .iter()
+        .position(|(part, _)| *part == split.leader)
+        .unwrap_or(0);
+    split.parts.iter().zip(percents).fold(
+        SplitCells::new(id).muted().leader(leader),
+        |cells, ((part, n), percent)| cells.cell(word(*part), *n, meter_label(*part, percent)),
+    )
 }
 
 impl RenderOnce for VotesPanel {
@@ -438,25 +374,17 @@ impl RenderOnce for VotesPanel {
         let pace = b.pace.as_ref().map(|split| {
             group(
                 div().label(cx).child("Pace"),
-                three_way(
-                    "votes-pace",
-                    split,
-                    pace_word,
-                    |p, percent| format!("{}: {percent}%", pace_line_word(p)),
-                    cx,
-                ),
+                three_way("votes-pace", split, pace_word, |p, percent| {
+                    format!("{}: {percent}%", pace_line_word(p))
+                }),
             )
         });
         let drive = b.drive.as_ref().map(|split| {
             group(
                 div().label(cx).child("Driven by"),
-                three_way(
-                    "votes-drive",
-                    split,
-                    drive_word,
-                    |d, percent| format!("Driven by {}: {percent}%", drive_word(d).to_lowercase()),
-                    cx,
-                ),
+                three_way("votes-drive", split, drive_word, |d, percent| {
+                    format!("Driven by {}: {percent}%", drive_word(d).to_lowercase())
+                }),
             )
         });
         let characters = (!b.characters.is_empty()).then(|| {
