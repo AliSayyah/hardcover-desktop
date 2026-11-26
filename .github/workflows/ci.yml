@@ -128,6 +128,8 @@ jobs:
         run: scripts/release-test.sh
       - name: Test the bounded apt-get
         run: ci/apt-get-test.sh
+      - name: Test the live API run's verdict and issues
+        run: ci/live-api-report-test.sh
       # The release workflow tests the installer on the tarball it just
       # signed; this tests the download path, against the latest release.
       - name: Install the latest release

@@ -16,22 +16,41 @@
 //!    check runs offline against `schema/` in the unit tests.
 //!
 //! Then it writes both files, so `git diff schema/` shows the full change.
-//! Exits non-zero when a document no longer validates or a scope no longer
-//! covers it, which means the released app is broken against the live API.
+//!
+//! Exit codes:
+//! - 0: nothing is broken, and with `--check` `schema/` matches the live API
+//!   (without it, any change has been written to `schema/`).
+//! - 1: broken: a document no longer validates against the live schema, or
+//!   the app's scopes no longer cover it, so the released app is broken
+//!   against the live API. This wins over drift.
+//! - 2: it could not run: a bad argument, no token, a network error or an
+//!   answer it can't read.
+//! - 3 (`--check` only): drift: nothing is broken, but the live schema or
+//!   scope map differs from `schema/`; run it without `--check` (`just
+//!   schema-update`) to update it.
+//!
+//! `--summary <path>` appends a short Markdown report to the file (meant for
+//! `$GITHUB_STEP_SUMMARY`): the outcome, the broken documents and ungranted
+//! uses, and the schema and scope changes. A run that could not finish says
+//! so there too. Failing to write it is only a warning.
 //!
 //! Uses `HARDCOVER_TOKEN` if set, otherwise the app's keyring session (sign
 //! in with the app or the `oauth_login` example first). Two API requests.
 //!
 //! ```sh
 //! cargo run -p hardcover-core --example api_check             # check and update schema/
-//! cargo run -p hardcover-core --example api_check -- --check  # check only; exit 1 on any change
+//! cargo run -p hardcover-core --example api_check -- --check  # check only: exit 1 broken, 3 drift
+//! cargo run -p hardcover-core --example api_check -- --check --summary report.md
 //! ```
 
 #[path = "../src/api/sdl.rs"]
+// Its `schema()` is for the crate's own tests, so unused in this one's.
+#[cfg_attr(test, allow(dead_code))]
 mod sdl;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -50,25 +69,238 @@ const INTROSPECTION: &str = "query IntrospectionQuery { __schema { types { kind 
     fragment T on __Type { kind name ofType { kind name ofType { kind name ofType { kind name \
     ofType { kind name ofType { kind name ofType { kind name } } } } } } }";
 
+const USAGE: &str = "usage: api_check [--check] [--summary <path>]";
+
+/// The summary's one heading.
+const SUMMARY_HEADING: &str = "## Live API: schema and scopes (api_check)";
+
+/// At most this many lines of each list go into the summary; the log has all.
+const SUMMARY_MAX_LINES: usize = 200;
+
 type Error = Box<dyn std::error::Error>;
 
 fn main() -> ExitCode {
-    match run() {
-        Ok(true) => ExitCode::SUCCESS,
-        Ok(false) => ExitCode::FAILURE,
+    let args = match Args::parse(std::env::args().skip(1)) {
+        Ok(args) => args,
+        Err(e) => {
+            eprintln!("error: {e}\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+    match run(args.check) {
+        Ok(report) => {
+            if let Some(path) = &args.summary {
+                append_summary(path, &report.markdown(args.check));
+            }
+            ExitCode::from(report.outcome().exit_code(args.check))
+        }
         Err(e) => {
             eprintln!("error: {e}");
+            if let Some(path) = &args.summary {
+                append_summary(path, &setup_failure_markdown(&e.to_string()));
+            }
             ExitCode::from(2)
         }
     }
 }
 
-fn run() -> Result<bool, Error> {
-    let check_only = std::env::args().skip(1).any(|a| a == "--check");
+struct Args {
+    /// Compare only; write nothing to `schema/`.
+    check: bool,
+    /// Where to append the Markdown summary.
+    summary: Option<PathBuf>,
+}
+
+impl Args {
+    fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
+        let mut parsed = Args {
+            check: false,
+            summary: None,
+        };
+        while let Some(arg) = args.next() {
+            let path = if arg == "--check" {
+                parsed.check = true;
+                continue;
+            } else if arg == "--summary" {
+                args.next().unwrap_or_default()
+            } else if let Some(path) = arg.strip_prefix("--summary=") {
+                path.to_owned()
+            } else {
+                return Err(format!("unknown argument {arg:?}"));
+            };
+            if path.is_empty() {
+                return Err("--summary needs a path".into());
+            }
+            parsed.summary = Some(PathBuf::from(path));
+        }
+        Ok(parsed)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    /// Nothing broken, and `schema/` matches the live API.
+    Ok,
+    /// Nothing broken, but the live schema or scope map differs from `schema/`.
+    Drift,
+    /// A document no longer validates, or a scope no longer covers it.
+    Broken,
+}
+
+impl Outcome {
+    fn exit_code(self, check_only: bool) -> u8 {
+        match self {
+            Outcome::Broken => 1,
+            Outcome::Drift if check_only => 3,
+            Outcome::Drift | Outcome::Ok => 0,
+        }
+    }
+}
+
+/// What one run found: the exit code and the summary are worked out from it.
+#[derive(Default)]
+struct Report {
+    /// Documents that no longer validate: (name, the validator's message).
+    broken_documents: Vec<(String, String)>,
+    /// Uses the app's scopes no longer grant.
+    not_granted: Vec<String>,
+    /// Ungranted fields of input-object variables, which may never be sent.
+    notes: Vec<String>,
+    /// The schema diff's lines, headline first, when the schema changed.
+    schema_diff: Option<Vec<String>>,
+    /// The scope map diff's lines, headline first, when it changed.
+    scope_diff: Option<Vec<String>>,
+}
+
+impl Report {
+    fn drifted(&self) -> bool {
+        self.schema_diff.is_some() || self.scope_diff.is_some()
+    }
+
+    fn outcome(&self) -> Outcome {
+        if !self.broken_documents.is_empty() || !self.not_granted.is_empty() {
+            Outcome::Broken
+        } else if self.drifted() {
+            Outcome::Drift
+        } else {
+            Outcome::Ok
+        }
+    }
+
+    fn markdown(&self, check_only: bool) -> String {
+        let mut md = format!("{SUMMARY_HEADING}\n\n");
+        md.push_str(match (self.outcome(), check_only) {
+            (Outcome::Ok, _) => {
+                "**Outcome: ok.** Every document validates against the live schema, \
+                 the app's scopes cover them, and `schema/` matches the live API."
+            }
+            (Outcome::Drift, true) => {
+                "**Outcome: drift.** Nothing is broken, but the live API differs from \
+                 `schema/`: run `just schema-update` and review `git diff schema/`."
+            }
+            (Outcome::Drift, false) => {
+                "**Outcome: drift.** Nothing is broken; `schema/` was updated to match \
+                 the live API: review `git diff schema/`."
+            }
+            (Outcome::Broken, _) if self.drifted() => {
+                "**Outcome: broken.** The app is broken against the live API. The live \
+                 API also differs from `schema/` (below)."
+            }
+            (Outcome::Broken, _) => "**Outcome: broken.** The app is broken against the live API.",
+        });
+        md.push_str("\n\n");
+
+        if !self.broken_documents.is_empty() {
+            let lines: Vec<String> = self
+                .broken_documents
+                .iter()
+                .flat_map(|(name, error)| {
+                    std::iter::once(format!("{name}:"))
+                        .chain(error.lines().map(|l| format!("  {l}")))
+                })
+                .collect();
+            let label = format!(
+                "Documents that no longer validate ({})",
+                self.broken_documents.len()
+            );
+            md_block(&mut md, &label, "text", &lines);
+        }
+        if !self.not_granted.is_empty() {
+            let label = format!(
+                "Not granted by the app's scopes ({})",
+                self.not_granted.len()
+            );
+            md_block(&mut md, &label, "text", &self.not_granted);
+        }
+        if !self.notes.is_empty() {
+            md_block(&mut md, "Notes", "text", &self.notes);
+        }
+        for (label, diff) in [
+            ("Schema changes", &self.schema_diff),
+            ("Scope map changes", &self.scope_diff),
+        ] {
+            let Some((headline, lines)) = diff.as_deref().and_then(<[String]>::split_first) else {
+                continue;
+            };
+            let label = format!("{label}: {}", headline.trim());
+            let lines: Vec<String> = lines
+                .iter()
+                .map(|l| l.strip_prefix("  ").unwrap_or(l).to_owned())
+                .collect();
+            md_block(&mut md, &label, "diff", &lines);
+        }
+        md
+    }
+}
+
+/// Appends a bold label and, when there are any, the lines in a fenced block,
+/// where Markdown leaves `+`, `_` and `[T!]` alone, cut at
+/// [`SUMMARY_MAX_LINES`].
+fn md_block(md: &mut String, label: &str, lang: &str, lines: &[String]) {
+    let _ = write!(md, "**{label}**\n\n");
+    if lines.is_empty() {
+        return;
+    }
+    let _ = writeln!(md, "```{lang}");
+    for line in lines.iter().take(SUMMARY_MAX_LINES) {
+        // A fence inside would end the block early.
+        let _ = writeln!(md, "{}", line.replace("```", "` ` `"));
+    }
+    if lines.len() > SUMMARY_MAX_LINES {
+        let more = lines.len() - SUMMARY_MAX_LINES;
+        let _ = writeln!(md, "… and {more} more (see the job log)");
+    }
+    md.push_str("```\n\n");
+}
+
+fn setup_failure_markdown(error: &str) -> String {
+    let mut md = format!(
+        "{SUMMARY_HEADING}\n\n**Outcome: could not run.** The check did not finish, \
+         so it says nothing about the API.\n\n"
+    );
+    md_block(&mut md, "Error", "text", &[error.to_owned()]);
+    md
+}
+
+fn append_summary(path: &Path, markdown: &str) {
+    let result = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(markdown.as_bytes()));
+    if let Err(e) = result {
+        eprintln!(
+            "warning: could not write the summary to {}: {e}",
+            path.display()
+        );
+    }
+}
+
+fn run(check_only: bool) -> Result<Report, Error> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let schema_path = root.join("schema/hardcover.graphql");
     let caps_path = root.join("schema/hardcover-capabilities.json");
-    let mut ok = true;
+    let mut report = Report::default();
 
     // ----- schema -----
     let (tokens, source) = token_source()?;
@@ -78,26 +310,25 @@ fn run() -> Result<bool, Error> {
     let old_sdl = std::fs::read_to_string(&schema_path).unwrap_or_default();
     let schema_changed = live_sdl != old_sdl;
     if schema_changed {
-        report_schema_diff(&old_sdl, &live_sdl);
+        let lines = schema_diff(&old_sdl, &live_sdl);
+        print_lines(&lines);
+        report.schema_diff = Some(lines);
     } else {
         println!("  schema unchanged");
     }
 
     let live = sdl::parse(&live_sdl).map_err(|e| format!("live schema does not parse:\n{e}"))?;
-    let mut bad_documents = 0;
     for (name, doc) in hardcover_core::api::DOCUMENTS {
         if let Err(e) = sdl::validate(&live, name, doc) {
             println!("  BROKEN  {name}:\n{}", indent(&e, 10));
-            bad_documents += 1;
+            report.broken_documents.push(((*name).to_owned(), e));
         }
     }
-    if bad_documents == 0 {
+    if report.broken_documents.is_empty() {
         println!(
             "  all {} documents validate against the live schema",
             hardcover_core::api::DOCUMENTS.len()
         );
-    } else {
-        ok = false;
     }
 
     // ----- OAuth scopes -----
@@ -114,7 +345,6 @@ fn run() -> Result<bool, Error> {
             DEFAULT_SCOPES.join(" ")
         );
     } else {
-        ok = false;
         for p in &scopes.problems {
             println!("  NOT GRANTED  {p}");
         }
@@ -122,11 +352,15 @@ fn run() -> Result<bool, Error> {
     for note in &scopes.notes {
         println!("  note: {note}");
     }
+    report.not_granted = scopes.problems;
+    report.notes = scopes.notes;
     let caps_json = serde_json::to_string_pretty(&caps)? + "\n";
     let old_caps = std::fs::read_to_string(&caps_path).unwrap_or_default();
     let caps_changed = caps_json != old_caps;
     if caps_changed {
-        report_scope_diff(&old_caps, &caps);
+        let lines = scope_diff(&old_caps, &caps);
+        print_lines(&lines);
+        report.scope_diff = Some(lines);
     } else {
         println!("  scope map unchanged");
     }
@@ -136,7 +370,6 @@ fn run() -> Result<bool, Error> {
     if schema_changed || caps_changed {
         if check_only {
             println!("The live API differs from schema/. Run without --check to update it.");
-            ok = false;
         } else {
             write(&schema_path, &live_sdl, schema_changed)?;
             write(&caps_path, &caps_json, caps_changed)?;
@@ -145,10 +378,16 @@ fn run() -> Result<bool, Error> {
     } else {
         println!("schema/ matches the live API.");
     }
-    if !ok && (bad_documents > 0 || !scopes.problems.is_empty()) {
+    if report.outcome() == Outcome::Broken {
         println!("The app is BROKEN against the live API: see BROKEN / NOT GRANTED above.");
     }
-    Ok(ok)
+    Ok(report)
+}
+
+fn print_lines(lines: &[String]) {
+    for line in lines {
+        println!("{line}");
+    }
 }
 
 fn token_source() -> Result<(Arc<dyn TokenSource>, &'static str), Error> {
@@ -324,7 +563,9 @@ fn member_name(line: &str) -> &str {
     line.split(['(', ':']).next().unwrap_or(line).trim()
 }
 
-fn report_schema_diff(old: &str, new: &str) {
+/// The schema's changes as printed: a headline, then one line per added,
+/// removed or changed type or field.
+fn schema_diff(old: &str, new: &str) -> Vec<String> {
     let (old, new) = (blocks(old), blocks(new));
     let mut breaking = 0;
     let mut lines = Vec::new();
@@ -369,13 +610,12 @@ fn report_schema_diff(old: &str, new: &str) {
             breaking += 1;
         }
     }
-    println!(
+    let headline = format!(
         "  schema changed: {} differences, {breaking} of them removals or changes",
         lines.len()
     );
-    for line in lines {
-        println!("{line}");
-    }
+    lines.insert(0, headline);
+    lines
 }
 
 fn signature(line: &str) -> &str {
@@ -384,11 +624,12 @@ fn signature(line: &str) -> &str {
         .map_or(line, |s| s.trim_start_matches(':').trim())
 }
 
-fn report_scope_diff(old: &str, new: &Value) {
+/// The scope map's changes as printed: a headline, then one line per scope
+/// added or removed and per operation that moved.
+fn scope_diff(old: &str, new: &Value) -> Vec<String> {
     let old: Value = serde_json::from_str(old).unwrap_or(Value::Null);
     if old.is_null() {
-        println!("  no previous scope map; saving the first snapshot");
-        return;
+        return vec!["  no previous scope map; saving the first snapshot".to_owned()];
     }
     let ops = |caps: &Value| -> BTreeMap<String, BTreeSet<String>> {
         list(&caps["scopes"])
@@ -402,8 +643,7 @@ fn report_scope_diff(old: &str, new: &Value) {
             .collect()
     };
     let (old, new) = (ops(&old), ops(new));
-    println!("  scope map changed:");
-    let mut listed = false;
+    let mut lines = vec!["  scope map changed:".to_owned()];
     for scope in old.keys().chain(new.keys()).collect::<BTreeSet<_>>() {
         let empty = BTreeSet::new();
         let (o, n) = (
@@ -411,24 +651,24 @@ fn report_scope_diff(old: &str, new: &Value) {
             new.get(scope).unwrap_or(&empty),
         );
         if !old.contains_key(scope) {
-            println!("  + scope {scope}");
-            listed = true;
+            lines.push(format!("  + scope {scope}"));
         } else if !new.contains_key(scope) {
-            println!("  - scope {scope}  (removed)");
-            listed = true;
+            lines.push(format!("  - scope {scope}  (removed)"));
         }
         for op in n.difference(o) {
-            println!("  + {scope}: {op}");
-            listed = true;
+            lines.push(format!("  + {scope}: {op}"));
         }
         for op in o.difference(n) {
-            println!("  - {scope}: {op}");
-            listed = true;
+            lines.push(format!("  - {scope}: {op}"));
         }
     }
-    if !listed {
-        println!("  no operations moved between scopes; see `git diff schema/` for the details");
+    if lines.len() == 1 {
+        lines.push(
+            "  no operations moved between scopes; see `git diff schema/` for the details"
+                .to_owned(),
+        );
     }
+    lines
 }
 
 fn write(path: &PathBuf, contents: &str, changed: bool) -> Result<(), Error> {
@@ -444,4 +684,82 @@ fn indent(text: &str, by: usize) -> String {
         .map(|l| format!("{pad}{l}"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+// Offline only: `cargo test -p hardcover-core --example api_check`.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Result<Args, String> {
+        Args::parse(list.iter().map(|s| (*s).to_owned()))
+    }
+
+    #[test]
+    fn arguments() {
+        let a = args(&["--check", "--summary", "out.md"]).unwrap();
+        assert!(a.check);
+        assert_eq!(a.summary, Some(PathBuf::from("out.md")));
+        assert_eq!(
+            args(&["--summary=x.md"]).unwrap().summary,
+            Some(PathBuf::from("x.md"))
+        );
+        assert!(args(&["--summary"]).is_err());
+        assert!(args(&["--summary="]).is_err());
+        assert!(args(&["--write"]).is_err());
+    }
+
+    #[test]
+    fn broken_wins_over_drift_and_drift_fails_only_a_check() {
+        let mut report = Report::default();
+        assert_eq!(report.outcome(), Outcome::Ok);
+        assert_eq!(report.outcome().exit_code(true), 0);
+        report.schema_diff = Some(vec!["  schema changed: 1 differences".into()]);
+        assert_eq!(report.outcome(), Outcome::Drift);
+        assert_eq!(report.outcome().exit_code(true), 3);
+        assert_eq!(report.outcome().exit_code(false), 0);
+        report.not_granted.push("X uses `y`".into());
+        assert_eq!(report.outcome(), Outcome::Broken);
+        assert_eq!(report.outcome().exit_code(true), 1);
+        assert_eq!(report.outcome().exit_code(false), 1);
+    }
+
+    #[test]
+    fn summary_lists_what_broke_and_what_changed() {
+        let report = Report {
+            broken_documents: vec![("BookDetails".into(), "no field `x`\nat 1:2".into())],
+            schema_diff: Some(vec![
+                "  schema changed: 2 differences, 1 of them removals or changes".into(),
+                "  + type books.new_field: [Int!]".into(),
+                "  - type books.x  (removed)".into(),
+            ]),
+            ..Report::default()
+        };
+        let md = report.markdown(true);
+        assert_eq!(
+            md.matches("\n## ").count() + usize::from(md.starts_with("## ")),
+            1
+        );
+        assert!(md.contains("**Outcome: broken.**"));
+        assert!(md.contains("```text\nBookDetails:\n  no field `x`\n  at 1:2\n```"));
+        assert!(md.contains("**Schema changes: schema changed: 2 differences"));
+        assert!(
+            md.contains("```diff\n+ type books.new_field: [Int!]\n- type books.x  (removed)\n```")
+        );
+    }
+
+    #[test]
+    fn summary_cuts_long_lists() {
+        let mut lines = vec!["  scope map changed:".to_owned()];
+        lines.extend((0..SUMMARY_MAX_LINES + 5).map(|i| format!("  + read:x: op_{i}")));
+        let report = Report {
+            scope_diff: Some(lines),
+            ..Report::default()
+        };
+        let md = report.markdown(true);
+        assert!(md.contains("**Outcome: drift.**"));
+        assert!(md.contains("just schema-update"));
+        assert!(md.contains("… and 5 more"));
+        assert!(!md.contains(&format!("op_{SUMMARY_MAX_LINES}\n")));
+    }
 }

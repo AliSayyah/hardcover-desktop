@@ -1,0 +1,96 @@
+name: Live API
+
+# Checks the live Hardcover API against a dedicated test account every week,
+# so an API change that breaks the app is found before its users find it:
+# api_check compares the live schema and scope map with schema/ and validates
+# every document against them; live_suite runs the client's calls against the
+# test account and undoes what it writes. The report job turns their exit
+# codes into the run's verdict and the tracking issues (ci/live-api-report.sh).
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-api
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  live-api:
+    name: Live API checks
+    # Only master of this repository has the test account's token; a fork's
+    # schedule never runs it.
+    if: github.ref == 'refs/heads/master' && github.repository == 'AliSayyah/hardcover-desktop'
+    runs-on: ubuntu-24.04
+    # About 20 minutes to build from a cold cache and 5 to run.
+    timeout-minutes: 45
+    container: ubuntu:22.04
+    environment: hardcover-live
+    outputs:
+      api-check: ${{ steps.api-check.outputs.code }}
+      live-suite: ${{ steps.live-suite.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      # Built before the token is in any step's environment, so no build
+      # script ever sees it; the checks then run the built binaries, never
+      # cargo.
+      - name: Build the checks
+        run: cargo build -p hardcover-core --examples --locked
+      # Each check's exit code goes to the report job, which decides; the
+      # steps themselves always pass.
+      - name: Schema and scopes (api_check)
+        id: api-check
+        env:
+          HARDCOVER_TOKEN: ${{ secrets.HARDCOVER_TEST_TOKEN }}
+        run: |
+          code=0
+          target/debug/examples/api_check --check --summary "$GITHUB_STEP_SUMMARY" || code=$?
+          echo "code=$code" >>"$GITHUB_OUTPUT"
+      - name: The client against the test account (live_suite)
+        id: live-suite
+        env:
+          HARDCOVER_TOKEN: ${{ secrets.HARDCOVER_TEST_TOKEN }}
+          HARDCOVER_LIVE_ACCOUNT: ${{ vars.HARDCOVER_TEST_ACCOUNT }}
+        run: |
+          code=0
+          target/debug/examples/live_suite --summary "$GITHUB_STEP_SUMMARY" || code=$?
+          echo "code=$code" >>"$GITHUB_OUTPUT"
+
+  report:
+    name: Verdict and issues
+    needs: live-api
+    # Also after a failed build (the codes are then empty, and the report says
+    # the checks never ran), but not when the run was cancelled or skipped.
+    if: ${{ !cancelled() && needs.live-api.result != 'skipped' }}
+    # gh is on the runner image.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Decide, and open, update or close the tracking issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          API_CHECK: ${{ needs.live-api.outputs.api-check }}
+          LIVE_SUITE: ${{ needs.live-api.outputs.live-suite }}
+        run: ci/live-api-report.sh "$API_CHECK" "$LIVE_SUITE"
