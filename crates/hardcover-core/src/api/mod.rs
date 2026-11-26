@@ -47,6 +47,9 @@ pub const GRAPHQL_ENDPOINT: &str = "https://api.hardcover.app/v1/graphql";
 /// 3.2 s. Every size returned all 834, so Hardcover doesn't cap the rows
 /// below 1,000.
 const LIBRARY_PAGE_SIZE: u32 = 500;
+
+/// Hardcover's answer to excluding a book a vibe already excludes.
+const ALREADY_EXCLUDED: &str = "has already been taken";
 /// Search results per page.
 pub const SEARCH_PER_PAGE: u32 = 25;
 /// Editions per page in [`Client::book_editions`].
@@ -956,16 +959,16 @@ impl Client {
         })
     }
 
-    /// Sets the entry's private notes; blank text clears them.
+    /// Sets the entry's private notes; blank text clears them. Hardcover
+    /// ignores `null` for `private_notes` (the notes stay), so clearing sends
+    /// `""` (checked live by the weekly suite, `examples/live_suite.rs`).
     ///
     /// # Errors
     ///
     /// Returns an error if the library write fails or the updated entry cannot be
     /// retrieved.
     pub fn set_private_notes(&self, id: UserBookId, notes: &str) -> Result<LibraryEntry> {
-        let notes = notes.trim();
-        let notes = (!notes.is_empty()).then_some(notes);
-        self.update_user_book(id, &json!({ "private_notes": notes }))
+        self.update_user_book(id, &json!({ "private_notes": notes.trim() }))
     }
 
     /// Changes who can see the entry.
@@ -2164,6 +2167,10 @@ impl Client {
     /// then it is still in [`Vibe::book_ids`]. No query reads exclusions
     /// back, so this can't be undone from the app. Needs `write:vibes`.
     ///
+    /// A book already excluded is done, not a failure: Hardcover refuses the
+    /// second exclusion ("Vibe exclusions excluded has already been taken",
+    /// seen live by the weekly suite), and this returns the vibe as read.
+    ///
     /// # Errors
     ///
     /// `Error::Api` if the vibe is gone or the write reports an error.
@@ -2195,6 +2202,9 @@ impl Client {
             .update_vibe
             .ok_or_else(|| Error::Api("`update_vibe` returned null".into()))?;
         if let Some(e) = payload.error() {
+            if e.contains(ALREADY_EXCLUDED) {
+                return Ok(vibe);
+            }
             return Err(Error::Api(e));
         }
         Ok(payload.vibe.map_or(vibe, RawVibe::into_vibe))

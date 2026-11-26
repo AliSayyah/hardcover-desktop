@@ -221,7 +221,8 @@ fn update_user_book(state: &mut State, id: i64, object: &Value) -> Result<Value,
     if let Some(edition) = object.get("edition_id") {
         entry.edition = edition.as_i64();
     }
-    if let Some(notes) = object.get("private_notes") {
+    // Hardcover ignores `null` here; `""` clears the notes.
+    if let Some(notes) = object.get("private_notes").filter(|v| !v.is_null()) {
         entry.private_notes = text(notes);
     }
     if let Some(privacy) = object.get("privacy_setting_id").and_then(Value::as_i64) {

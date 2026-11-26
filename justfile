@@ -115,6 +115,11 @@ release-test:
 apt-test:
     ci/apt-get-test.sh
 
+# Test the weekly live API run's verdict and tracking issues, offline (a fake gh)
+[group('check')]
+live-api-report-test:
+    ci/live-api-report-test.sh
+
 # Lint the GitHub workflows
 [group('check')]
 actionlint:
@@ -125,9 +130,9 @@ actionlint:
 [group('check')]
 check: fmt-check clippy test
 
-# Everything CI runs offline: check, plus cargo deny, packaging, shellcheck, the release script's and apt-get wrapper's tests and actionlint
+# Everything CI runs offline: check, plus cargo deny, packaging, shellcheck, the release script's, apt-get wrapper's and live API report's tests and actionlint
 [group('check')]
-ci: check deny packaging shellcheck release-test apt-test actionlint
+ci: check deny packaging shellcheck release-test apt-test live-api-report-test actionlint
 
 # Live read tests (needs HARDCOVER_TOKEN, from the environment or .env)
 [group('live')]
@@ -139,7 +144,7 @@ live-test:
 smoke:
     {{ load_env }}; cargo run -p {{ core }} --example smoke
 
-# Compare the live API with schema/ and the scopes, writing nothing; fails on any change
+# Compare the live API with schema/ and the scopes, writing nothing. Exit 1: the app is broken; 3: only schema/ is out of date (`just schema-update`)
 [group('live')]
 api-check:
     {{ load_env }}; cargo run -p {{ core }} --example api_check -- --check
@@ -149,6 +154,12 @@ api-check:
 schema-update:
     {{ load_env }}; cargo run -p {{ core }} --example api_check
     git diff --stat schema/
+
+# The live suite against the dedicated test account: the client's reads, then writes it undoes. Needs HARDCOVER_TOKEN (the test account's) and HARDCOVER_LIVE_ACCOUNT
+[confirm("This writes to the Hardcover test account named by HARDCOVER_LIVE_ACCOUNT, then undoes it. Continue?")]
+[group('live')]
+live-suite *args:
+    {{ load_env }}; : "${HARDCOVER_LIVE_ACCOUNT:?set HARDCOVER_LIVE_ACCOUNT to the test account (in the environment or .env)}"; cargo run -p {{ core }} --example live_suite -- "$@"
 
 # Sign in from the command line and store the session in the keyring
 [confirm("Sign in with the browser and store the session in the system keyring?")]

@@ -1611,7 +1611,7 @@ fn notes_and_privacy_update_the_entry() {
         vars(&http, 0)["object"],
         json!({"private_notes": "Lent to Sam"})
     );
-    assert_eq!(vars(&http, 1)["object"], json!({"private_notes": null}));
+    assert_eq!(vars(&http, 1)["object"], json!({"private_notes": ""}));
     assert_eq!(vars(&http, 2)["object"], json!({"privacy_setting_id": 2}));
 }
 
@@ -3064,6 +3064,21 @@ fn excluding_a_book_resends_the_vibe_as_read() {
     assert_eq!(
         c.exclude_from_vibe(VibeId::new(4), BookId::new(1)),
         Err(Error::Api("Not allowed".into()))
+    );
+    // A book already excluded is done.
+    http.push(200, &data(json!({ "vibes_by_pk": vibe(4, &[1]) })));
+    http.push(
+        200,
+        &data(json!({ "update_vibe": {
+            "id": null,
+            "errors": ["Vibe exclusions excluded has already been taken"],
+            "vibe": null,
+        } })),
+    );
+    assert_eq!(
+        c.exclude_from_vibe(VibeId::new(4), BookId::new(1))
+            .map(|v| v.id),
+        Ok(VibeId::new(4))
     );
     http.push(200, &data(json!({ "vibes_by_pk": null })));
     assert!(matches!(

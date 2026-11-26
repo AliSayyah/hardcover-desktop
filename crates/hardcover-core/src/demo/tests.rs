@@ -581,6 +581,10 @@ fn notes_privacy_and_shelving_are_written() {
         noted.private_notes.as_deref(),
         Some("Page 400 is the best.")
     );
+    let cleared = client
+        .set_private_notes(UserBookId::new(502), "  ")
+        .unwrap();
+    assert_eq!(cleared.private_notes, None, "blank text clears the notes");
     let private = client
         .set_privacy(UserBookId::new(502), Privacy::Private)
         .unwrap();
